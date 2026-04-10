@@ -1,0 +1,22 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: infinitum:latest
+    container_name: infinitum
+    restart: unless-stopped
+    env_file:
+      - .env.docker
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+    ports:
+      - "3000:3000"
+    volumes:
+      - infinitum-data:/app/data
+      - ./config:/app/config:ro
+
+volumes:
+  infinitum-data:

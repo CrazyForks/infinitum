@@ -1,0 +1,86 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum ItemStatus {
+  new
+  fetched
+  filtered
+  processed
+  failed
+}
+
+enum FetchRunStatus {
+  running
+  succeeded
+  failed
+  partial
+}
+
+enum IngestionTrigger {
+  scheduled
+  manual
+}
+
+model Source {
+  id                       String   @id @default(cuid())
+  name                     String
+  rssUrl                   String   @unique
+  siteUrl                  String
+  enabled                  Boolean  @default(true)
+  fetchFullTextWhenMissing Boolean  @default(true)
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+  items                    Item[]
+
+  @@map("sources")
+}
+
+model Item {
+  id               String     @id @default(cuid())
+  sourceId         String
+  originalUrl      String
+  canonicalUrl     String
+  urlHash          String     @unique
+  dedupeSignature  String     @unique
+  originalTitle    String
+  translatedTitle  String?
+  author           String?
+  publishedAt      DateTime
+  rssExcerpt       String?
+  rssContent       String?
+  fullText         String?
+  summaryText      String?
+  language         String?
+  status           ItemStatus @default(new)
+  filterReason     String?
+  errorMessage     String?
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+  source           Source     @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@index([sourceId, publishedAt])
+  @@index([status, publishedAt])
+  @@map("items")
+}
+
+model FetchRun {
+  id           String           @id @default(cuid())
+  triggerType  IngestionTrigger
+  status       FetchRunStatus   @default(running)
+  startedAt    DateTime         @default(now())
+  finishedAt   DateTime?
+  sourceCount  Int              @default(0)
+  itemCount    Int              @default(0)
+  successCount Int              @default(0)
+  failureCount Int              @default(0)
+  errorSummary String?
+
+  @@index([startedAt])
+  @@map("fetch_runs")
+}

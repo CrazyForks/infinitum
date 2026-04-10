@@ -1,0 +1,27 @@
+{
+  "rssSources": [
+    {
+      "name": "OpenAI News",
+      "rssUrl": "https://openai.com/news/rss.xml",
+      "siteUrl": "https://openai.com/news",
+      "enabled": true,
+      "fetchFullTextWhenMissing": true
+    },
+    {
+      "name": "Hacker News Frontpage",
+      "rssUrl": "https://hnrss.org/frontpage",
+      "siteUrl": "https://news.ycombinator.com/",
+      "enabled": true,
+      "fetchFullTextWhenMissing": false
+    }
+  ],
+  "blacklistKeywords": [],
+  "ingestion": {
+    "itemConcurrency": 3
+  },
+  "modelApi": {
+    "apiKey": "",
+    "baseURL": "",
+    "model": "gpt-4.1-mini"
+  }
+}

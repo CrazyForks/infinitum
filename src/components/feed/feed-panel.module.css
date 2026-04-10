@@ -1,0 +1,227 @@
+.shell {
+  position: relative;
+  z-index: 1;
+  width: min(1080px, calc(100vw - 32px));
+  margin: 0 auto;
+  padding: 40px 0 80px;
+}
+
+.hero {
+  display: grid;
+  gap: 24px;
+  margin-bottom: 28px;
+}
+
+.masthead {
+  padding: 24px 24px 28px;
+  border: 1px solid var(--line);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.66), rgba(255, 251, 245, 0.9));
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(10px);
+}
+
+.kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  margin-bottom: 14px;
+  border: 1px solid rgba(170, 47, 29, 0.24);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.titleRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: flex-end;
+}
+
+.title {
+  font-size: clamp(52px, 8vw, 92px);
+  line-height: 0.9;
+  font-weight: 600;
+}
+
+.lede {
+  max-width: 520px;
+  font-size: 18px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.controls {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: 1fr auto;
+  align-items: end;
+}
+
+.rangeList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.rangeButton,
+.refreshButton,
+.loadMoreButton {
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--foreground);
+  cursor: pointer;
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease;
+}
+
+.rangeButton {
+  min-width: 76px;
+  padding: 10px 14px;
+  font-family: var(--font-mono), monospace;
+  font-size: 13px;
+}
+
+.rangeButton:hover,
+.refreshButton:hover,
+.loadMoreButton:hover {
+  transform: translateY(-1px);
+  border-color: rgba(170, 47, 29, 0.35);
+}
+
+.rangeButtonActive {
+  background: var(--foreground);
+  color: #fff;
+  border-color: var(--foreground);
+}
+
+.refreshButton,
+.loadMoreButton {
+  padding: 11px 16px;
+  font-family: var(--font-mono), monospace;
+  font-size: 13px;
+}
+
+.refreshButton {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.metaRow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.metaCard {
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  box-shadow: var(--shadow);
+}
+
+.metaLabel {
+  display: block;
+  margin-bottom: 10px;
+  color: var(--muted);
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.metaValue {
+  font-size: 17px;
+  line-height: 1.4;
+}
+
+.stream {
+  display: grid;
+  gap: 14px;
+}
+
+.card {
+  display: grid;
+  gap: 14px;
+  padding: 22px 24px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  box-shadow: var(--shadow);
+  transition: transform 180ms ease;
+}
+
+.card:hover {
+  transform: translateY(-2px);
+}
+
+.cardTitle {
+  font-size: clamp(28px, 3.8vw, 42px);
+  line-height: 1;
+}
+
+.cardTitle a {
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 6px;
+}
+
+.cardTitle a:hover {
+  text-decoration-color: var(--accent);
+}
+
+.cardMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 18px;
+  color: var(--muted);
+  font-family: var(--font-mono), monospace;
+  font-size: 13px;
+}
+
+.cardSummary {
+  max-width: 76ch;
+  font-size: 18px;
+  line-height: 1.6;
+}
+
+.empty {
+  padding: 32px 24px;
+  border: 1px dashed rgba(26, 24, 21, 0.24);
+  background: rgba(255, 255, 255, 0.54);
+  color: var(--muted);
+}
+
+.footerActions {
+  display: flex;
+  justify-content: center;
+  margin-top: 20px;
+}
+
+@media (max-width: 800px) {
+  .shell {
+    width: min(100vw - 20px, 1080px);
+    padding-top: 20px;
+  }
+
+  .titleRow,
+  .controls,
+  .metaRow {
+    grid-template-columns: 1fr;
+  }
+
+  .title {
+    font-size: clamp(42px, 18vw, 72px);
+  }
+
+  .card {
+    padding: 18px;
+  }
+}
