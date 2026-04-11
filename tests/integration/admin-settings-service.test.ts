@@ -46,6 +46,11 @@ describe("admin settings service", () => {
           baseURL: "https://example.com/v1",
           model: "gpt-imported",
         },
+        prompts: {
+          itemAnalysis: "导入的单条分析提示词",
+          clusterSummary: "导入的聚合摘要提示词",
+          clusterMatch: "导入的归组判定提示词",
+        },
       }),
       "utf8",
     );
@@ -58,11 +63,17 @@ describe("admin settings service", () => {
     expect(runtimeConfig.blacklistKeywords).toEqual(["crypto", "layoffs"]);
     expect(runtimeConfig.ingestion.itemConcurrency).toBe(4);
     expect(runtimeConfig.modelApi.apiKey).toBe("sk-imported");
+    expect(runtimeConfig.prompts.itemAnalysis).toBe("导入的单条分析提示词");
+    expect(runtimeConfig.prompts.clusterSummary).toBe("导入的聚合摘要提示词");
+    expect(runtimeConfig.prompts.clusterMatch).toBe("导入的归组判定提示词");
 
     expect(settings.sources).toHaveLength(1);
     expect(settings.blacklistKeywords).toEqual(["crypto", "layoffs"]);
     expect(settings.appConfig.modelApi.baseURL).toBe("https://example.com/v1");
     expect(settings.appConfig.modelApi.apiKeyMasked).toBe("••••••••rted");
+    expect(settings.appConfig.prompts.itemAnalysis).toBe("导入的单条分析提示词");
+    expect(settings.appConfig.prompts.clusterSummary).toBe("导入的聚合摘要提示词");
+    expect(settings.appConfig.prompts.clusterMatch).toBe("导入的归组判定提示词");
 
     rmSync(tempDir, { recursive: true, force: true });
   });

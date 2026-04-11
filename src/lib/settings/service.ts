@@ -14,6 +14,9 @@ type AppConfigInput = {
   modelApiKey: string;
   modelApiBaseUrl: string;
   modelApiModel: string;
+  itemAnalysisPrompt: string;
+  clusterSummaryPrompt: string;
+  clusterMatchPrompt: string;
   ingestionItemConcurrency: number;
 };
 
@@ -58,6 +61,9 @@ async function ensureAppConfigRecord(defaults?: Partial<AppConfigInput>) {
       modelApiKey: defaults?.modelApiKey ?? "",
       modelApiBaseUrl: defaults?.modelApiBaseUrl ?? "",
       modelApiModel: defaults?.modelApiModel ?? "gpt-4.1-mini",
+      itemAnalysisPrompt: defaults?.itemAnalysisPrompt ?? loadRuntimeConfig().prompts.itemAnalysis,
+      clusterSummaryPrompt: defaults?.clusterSummaryPrompt ?? loadRuntimeConfig().prompts.clusterSummary,
+      clusterMatchPrompt: defaults?.clusterMatchPrompt ?? loadRuntimeConfig().prompts.clusterMatch,
       ingestionItemConcurrency: defaults?.ingestionItemConcurrency ?? 3,
     },
   });
@@ -84,6 +90,9 @@ export async function ensureRuntimeConfigSeeded(options?: SettingsOptions) {
           modelApiKey: fileConfig.modelApi.apiKey,
           modelApiBaseUrl: fileConfig.modelApi.baseURL,
           modelApiModel: fileConfig.modelApi.model,
+          itemAnalysisPrompt: fileConfig.prompts.itemAnalysis,
+          clusterSummaryPrompt: fileConfig.prompts.clusterSummary,
+          clusterMatchPrompt: fileConfig.prompts.clusterMatch,
           ingestionItemConcurrency: fileConfig.ingestion.itemConcurrency,
         },
       });
@@ -137,6 +146,11 @@ export async function getIngestionRuntimeConfig(options?: SettingsOptions): Prom
       baseURL: appConfig.modelApiBaseUrl,
       model: appConfig.modelApiModel,
     },
+    prompts: {
+      itemAnalysis: appConfig.itemAnalysisPrompt,
+      clusterSummary: appConfig.clusterSummaryPrompt,
+      clusterMatch: appConfig.clusterMatchPrompt,
+    },
   };
 }
 
@@ -165,6 +179,11 @@ export async function getAdminSettings(options?: SettingsOptions): Promise<Admin
         model: appConfig.modelApiModel,
         apiKeyMasked: maskApiKey(appConfig.modelApiKey),
         hasApiKey: Boolean(appConfig.modelApiKey),
+      },
+      prompts: {
+        itemAnalysis: appConfig.itemAnalysisPrompt,
+        clusterSummary: appConfig.clusterSummaryPrompt,
+        clusterMatch: appConfig.clusterMatchPrompt,
       },
     },
     blacklistKeywords: blacklist.map((entry) => entry.keyword),
@@ -204,6 +223,9 @@ export async function updateAppConfig(
       modelApiKey: nextApiKey,
       modelApiBaseUrl: input.modelApiBaseUrl,
       modelApiModel: input.modelApiModel,
+      itemAnalysisPrompt: input.itemAnalysisPrompt,
+      clusterSummaryPrompt: input.clusterSummaryPrompt,
+      clusterMatchPrompt: input.clusterMatchPrompt,
       ingestionItemConcurrency: input.ingestionItemConcurrency,
     },
   });

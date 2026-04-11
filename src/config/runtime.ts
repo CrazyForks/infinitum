@@ -4,6 +4,11 @@ import path from "node:path";
 import { z } from "zod";
 
 import { DEFAULT_BLACKLIST_KEYWORDS } from "@/config/blacklist";
+import {
+  DEFAULT_CLUSTER_MATCH_PROMPT,
+  DEFAULT_CLUSTER_SUMMARY_PROMPT,
+  DEFAULT_ITEM_ANALYSIS_PROMPT,
+} from "@/config/prompts";
 import { DEFAULT_SOURCE_CONFIGS } from "@/config/sources";
 import type { SourceConfig } from "@/lib/feed/types";
 
@@ -42,6 +47,19 @@ const runtimeConfigSchema = z.object({
       baseURL: "",
       model: "gpt-4.1-mini",
     }),
+  prompts: z
+    .object({
+      itemAnalysis: z
+        .string()
+        .default(DEFAULT_ITEM_ANALYSIS_PROMPT),
+      clusterSummary: z.string().default(DEFAULT_CLUSTER_SUMMARY_PROMPT),
+      clusterMatch: z.string().default(DEFAULT_CLUSTER_MATCH_PROMPT),
+    })
+    .default({
+      itemAnalysis: DEFAULT_ITEM_ANALYSIS_PROMPT,
+      clusterSummary: DEFAULT_CLUSTER_SUMMARY_PROMPT,
+      clusterMatch: DEFAULT_CLUSTER_MATCH_PROMPT,
+    }),
 });
 
 export type RuntimeConfig = {
@@ -54,6 +72,11 @@ export type RuntimeConfig = {
     apiKey: string;
     baseURL: string;
     model: string;
+  };
+  prompts: {
+    itemAnalysis: string;
+    clusterSummary: string;
+    clusterMatch: string;
   };
 };
 

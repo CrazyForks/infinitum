@@ -34,6 +34,11 @@ describe("runtime config parsing", () => {
           baseURL: "https://example.com/v1",
           model: "gpt-test",
         },
+        prompts: {
+          itemAnalysis: "分析提示词",
+          clusterSummary: "聚合提示词",
+          clusterMatch: "归组提示词",
+        },
       }),
     );
 
@@ -51,14 +56,29 @@ describe("runtime config parsing", () => {
     expect(parsed.modelApi.apiKey).toBe("sk-test");
     expect(parsed.modelApi.baseURL).toBe("https://example.com/v1");
     expect(parsed.modelApi.model).toBe("gpt-test");
+    expect(parsed.prompts.itemAnalysis).toBe("分析提示词");
+    expect(parsed.prompts.clusterSummary).toBe("聚合提示词");
+    expect(parsed.prompts.clusterMatch).toBe("归组提示词");
   });
 
   it("falls back to defaults when config content is empty", () => {
-    expect(parseRuntimeConfig(undefined).rssSources).toEqual(DEFAULT_SOURCE_CONFIGS);
+    const defaults = parseRuntimeConfig(undefined);
+
+    expect(defaults.rssSources).toEqual(DEFAULT_SOURCE_CONFIGS);
     expect(parseRuntimeConfig("").rssSources).toEqual(DEFAULT_SOURCE_CONFIGS);
-    expect(parseRuntimeConfig(undefined).blacklistKeywords).toEqual(DEFAULT_BLACKLIST_KEYWORDS);
-    expect(parseRuntimeConfig(undefined).ingestion.itemConcurrency).toBe(3);
-    expect(parseRuntimeConfig(undefined).modelApi.model).toBe("gpt-4.1-mini");
+    expect(defaults.blacklistKeywords).toEqual(DEFAULT_BLACKLIST_KEYWORDS);
+    expect(defaults.ingestion.itemConcurrency).toBe(3);
+    expect(defaults.modelApi.model).toBe("gpt-4.1-mini");
+    expect(defaults.prompts.itemAnalysis.length).toBeGreaterThan(0);
+    expect(defaults.prompts.itemAnalysis).toContain("字段说明");
+    expect(defaults.prompts.itemAnalysis).toContain("translatedTitle");
+    expect(defaults.prompts.itemAnalysis).toContain("moderationReason");
+    expect(defaults.prompts.itemAnalysis).toContain("qualityScore");
+    expect(defaults.prompts.itemAnalysis).toContain("topicLabel");
+    expect(defaults.prompts.itemAnalysis).toContain("clusterHint");
+    expect(defaults.prompts.itemAnalysis).toContain("如果只能概括成主题");
+    expect(defaults.prompts.clusterSummary.length).toBeGreaterThan(0);
+    expect(defaults.prompts.clusterMatch.length).toBeGreaterThan(0);
   });
 
   it("loads runtime config from a concrete file path", () => {

@@ -7,6 +7,11 @@ export type AdminSettingsSnapshot = {
       apiKeyMasked: string;
       hasApiKey: boolean;
     };
+    prompts: {
+      itemAnalysis: string;
+      clusterSummary: string;
+      clusterMatch: string;
+    };
   };
   blacklistKeywords: string[];
   groups: Array<{

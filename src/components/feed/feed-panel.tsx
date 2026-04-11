@@ -4,17 +4,34 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 
 import styles from "@/components/feed/feed-panel.module.css";
-import { RANGE_OPTIONS } from "@/lib/feed/range";
-import type { FeedItemDTO, FeedRange, FetchRunSnapshot } from "@/lib/feed/types";
+import { RANGE_OPTIONS, SORT_OPTIONS } from "@/lib/feed/range";
+import type {
+  FeedClusterPreviewItemDTO,
+  FeedEntryDTO,
+  FeedItemDTO,
+  FeedRange,
+  FeedSort,
+  FetchRunSnapshot,
+} from "@/lib/feed/types";
 
 const STATUS_POLL_INTERVAL_MS = 2_000;
 
 type FeedPanelProps = {
-  initialItems: FeedItemDTO[];
+  initialItems: FeedEntryDTO[];
   initialRange: FeedRange;
+  initialSort: FeedSort;
+  initialStartDate: string | null;
+  initialEndDate: string | null;
   initialNextCursor: string | null;
   initialStatus: FetchRunSnapshot | null;
   isAdmin: boolean;
+};
+
+type FeedQueryState = {
+  range: FeedRange;
+  sort: FeedSort;
+  startDate: string | null;
+  endDate: string | null;
 };
 
 function formatDate(value: string): string {
@@ -38,49 +55,147 @@ function formatRunStatus(status: FetchRunSnapshot | null): string {
   return `${status.status}${progress} · ${timestamp}`;
 }
 
+function formatScore(score: number): string {
+  if (score >= 80) {
+    return `高质量 ${score}`;
+  }
+
+  if (score >= 60) {
+    return `一般 ${score}`;
+  }
+
+  return `较低 ${score}`;
+}
+
+function formatRangeLabel(range: FeedRange, startDate: string | null, endDate: string | null): string {
+  if (startDate || endDate) {
+    return `${startDate ?? "最早"} 至 ${endDate ?? "最新"}`;
+  }
+
+  return RANGE_OPTIONS.find((option) => option.value === range)?.label ?? "7天";
+}
+
+function buildFeedSearch({ range, sort, startDate, endDate }: FeedQueryState, cursor?: string | null): string {
+  const search = new URLSearchParams({
+    range,
+    sort,
+  });
+
+  if (startDate) {
+    search.set("start", startDate);
+  }
+
+  if (endDate) {
+    search.set("end", endDate);
+  }
+
+  if (cursor) {
+    search.set("cursor", cursor);
+  }
+
+  return search.toString();
+}
+
 export function FeedPanel({
   initialItems,
   initialRange,
+  initialSort,
+  initialStartDate,
+  initialEndDate,
   initialNextCursor,
   initialStatus,
   isAdmin,
 }: FeedPanelProps) {
   const [items, setItems] = useState(initialItems);
   const [range, setRange] = useState<FeedRange>(initialRange);
+  const [sort, setSort] = useState<FeedSort>(initialSort);
+  const [startDate, setStartDate] = useState<string | null>(initialStartDate);
+  const [endDate, setEndDate] = useState<string | null>(initialEndDate);
   const [nextCursor, setNextCursor] = useState<string | null>(initialNextCursor);
   const [status, setStatus] = useState<FetchRunSnapshot | null>(initialStatus);
+  const [expandedClusters, setExpandedClusters] = useState<Record<string, FeedClusterPreviewItemDTO[]>>({});
+  const [openClusters, setOpenClusters] = useState<Record<string, boolean>>({});
   const [isPending, startTransition] = useTransition();
   const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
 
   const summary = useMemo(
     () => ({
       count: items.length,
-      rangeLabel: RANGE_OPTIONS.find((option) => option.value === range)?.label ?? "7天",
+      rangeLabel: formatRangeLabel(range, startDate, endDate),
+      sortLabel: SORT_OPTIONS.find((option) => option.value === sort)?.label ?? "按时间倒序",
     }),
-    [items.length, range],
+    [endDate, items.length, range, sort, startDate],
   );
 
-  async function fetchFeed(nextRange: FeedRange, cursor?: string | null) {
-    const search = new URLSearchParams({ range: nextRange });
-
-    if (cursor) {
-      search.set("cursor", cursor);
-    }
-
-    const response = await fetch(`/api/feed?${search.toString()}`);
+  async function fetchFeed(query: FeedQueryState, cursor?: string | null) {
+    const response = await fetch(`/api/feed?${buildFeedSearch(query, cursor)}`);
     return (await response.json()) as {
-      items: FeedItemDTO[];
+      items: FeedEntryDTO[];
       nextCursor: string | null;
+      range: FeedRange;
+      sort: FeedSort;
+      start: string | null;
+      end: string | null;
     };
   }
 
-  const loadRange = (nextRange: FeedRange) => {
+  async function fetchClusterItems(clusterId: string) {
+    const response = await fetch(`/api/feed/clusters/${clusterId}`);
+    const payload = (await response.json()) as {
+      items: FeedClusterPreviewItemDTO[];
+    };
+
+    return payload.items;
+  }
+
+  const loadFeed = (query: FeedQueryState) => {
     startTransition(async () => {
-      const payload = await fetchFeed(nextRange);
-      setRange(nextRange);
+      const payload = await fetchFeed(query);
+      setRange(payload.range);
+      setSort(payload.sort);
+      setStartDate(payload.start);
+      setEndDate(payload.end);
       setItems(payload.items);
       setNextCursor(payload.nextCursor);
+      setExpandedClusters({});
+      setOpenClusters({});
       setRefreshMessage(null);
+    });
+  };
+
+  const loadRange = (nextRange: FeedRange) => {
+    loadFeed({
+      range: nextRange,
+      sort,
+      startDate: null,
+      endDate: null,
+    });
+  };
+
+  const applyCustomRange = () => {
+    loadFeed({
+      range,
+      sort,
+      startDate,
+      endDate,
+    });
+  };
+
+  const clearCustomRange = () => {
+    loadFeed({
+      range,
+      sort,
+      startDate: null,
+      endDate: null,
+    });
+  };
+
+  const changeSort = (nextSort: FeedSort) => {
+    loadFeed({
+      range,
+      sort: nextSort,
+      startDate,
+      endDate,
     });
   };
 
@@ -130,8 +245,52 @@ export function FeedPanel({
         return;
       }
 
-      setItems((current) => current.map((item) => (item.id === itemId ? payload.item! : item)));
+      setItems((current) =>
+        current.map((entry) => {
+          if (entry.type === "single" && entry.id === itemId) {
+            return payload.item!;
+          }
+
+          return entry;
+        }),
+      );
+      setExpandedClusters((current) => {
+        const next = { ...current };
+
+        for (const [clusterId, clusterItems] of Object.entries(current)) {
+          next[clusterId] = clusterItems.map((item) =>
+            item.id === itemId
+              ? {
+                  ...item,
+                  title: payload.item!.title,
+                  summary: payload.item!.summary,
+                }
+              : item,
+          );
+        }
+
+        return next;
+      });
       setRefreshMessage(target === "translation" ? "标题翻译已重新生成。" : "摘要已重新生成。");
+    });
+  };
+
+  const toggleCluster = (clusterId: string) => {
+    startTransition(async () => {
+      const nextOpen = !openClusters[clusterId];
+
+      if (nextOpen && !expandedClusters[clusterId]) {
+        const clusterItems = await fetchClusterItems(clusterId);
+        setExpandedClusters((current) => ({
+          ...current,
+          [clusterId]: clusterItems,
+        }));
+      }
+
+      setOpenClusters((current) => ({
+        ...current,
+        [clusterId]: nextOpen,
+      }));
     });
   };
 
@@ -150,9 +309,16 @@ export function FeedPanel({
         setStatus(payload.run ?? null);
 
         if (payload.run && payload.run.status !== "running") {
-          const feedPayload = await fetchFeed(range);
+          const feedPayload = await fetchFeed({
+            range,
+            sort,
+            startDate,
+            endDate,
+          });
           setItems(feedPayload.items);
           setNextCursor(feedPayload.nextCursor);
+          setExpandedClusters({});
+          setOpenClusters({});
           setRefreshMessage(
             payload.run.status === "succeeded" || payload.run.status === "partial"
               ? "抓取完成，已重新载入当前时间范围。"
@@ -165,7 +331,7 @@ export function FeedPanel({
     return () => {
       window.clearTimeout(timer);
     };
-  }, [range, startTransition, status]);
+  }, [endDate, range, sort, startDate, startTransition, status]);
 
   const loadMore = () => {
     if (!nextCursor) {
@@ -173,7 +339,15 @@ export function FeedPanel({
     }
 
     startTransition(async () => {
-      const payload = await fetchFeed(range, nextCursor);
+      const payload = await fetchFeed(
+        {
+          range,
+          sort,
+          startDate,
+          endDate,
+        },
+        nextCursor,
+      );
 
       setItems((current) => [...current, ...payload.items]);
       setNextCursor(payload.nextCursor);
@@ -189,13 +363,24 @@ export function FeedPanel({
             <div>
               <h1 className={styles.title}>信息流</h1>
               <p className={styles.lede}>
-                聚合 RSS 内容、原文补抓、黑名单过滤、标题翻译与摘要生成，形成一条可快速浏览的编辑部式消息流。
+                用 AI 过滤营销和低质内容，把同主题内容折叠成事件流，再保留可展开的原始条目，形成一条更像编辑精选的消息面板。
               </p>
             </div>
             <div className={styles.adminActions}>
-              <Link className={styles.adminLink} href={isAdmin ? "/admin/settings" : "/admin/login"}>
-                {isAdmin ? "管理设置" : "管理员登录"}
-              </Link>
+              {isAdmin ? (
+                <>
+                  <Link className={styles.adminLink} href="/admin/content">
+                    内容审核
+                  </Link>
+                  <Link className={styles.adminLink} href="/admin/settings">
+                    管理设置
+                  </Link>
+                </>
+              ) : (
+                <Link className={styles.adminLink} href="/admin/login">
+                  管理员登录
+                </Link>
+              )}
               {isAdmin ? (
                 <button className={styles.refreshButton} type="button" onClick={refresh} disabled={isPending}>
                   {isPending ? "处理中..." : "立即刷新"}
@@ -208,7 +393,7 @@ export function FeedPanel({
         <div className={styles.controls}>
           <div className={styles.rangeList} role="tablist" aria-label="时间范围">
             {RANGE_OPTIONS.map((option) => {
-              const active = option.value === range;
+              const active = !startDate && !endDate && option.value === range;
               return (
                 <button
                   key={option.value}
@@ -223,12 +408,62 @@ export function FeedPanel({
               );
             })}
           </div>
+          <div className={styles.filterTools}>
+            <label className={styles.sortField}>
+              <span className={styles.controlLabel}>排序方式</span>
+              <select
+                className={styles.sortSelect}
+                aria-label="排序方式"
+                value={sort}
+                onChange={(event) => changeSort(event.target.value as FeedSort)}
+                disabled={isPending}
+              >
+                {SORT_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className={styles.customRange}>
+              <label className={styles.dateField}>
+                <span className={styles.controlLabel}>开始日期</span>
+                <input
+                  className={styles.dateInput}
+                  aria-label="开始日期"
+                  type="date"
+                  value={startDate ?? ""}
+                  onChange={(event) => setStartDate(event.target.value || null)}
+                  disabled={isPending}
+                />
+              </label>
+              <label className={styles.dateField}>
+                <span className={styles.controlLabel}>结束日期</span>
+                <input
+                  className={styles.dateInput}
+                  aria-label="结束日期"
+                  type="date"
+                  value={endDate ?? ""}
+                  onChange={(event) => setEndDate(event.target.value || null)}
+                  disabled={isPending}
+                />
+              </label>
+              <button className={styles.secondaryButton} type="button" onClick={applyCustomRange} disabled={isPending}>
+                应用时间范围
+              </button>
+              {startDate || endDate ? (
+                <button className={styles.secondaryButton} type="button" onClick={clearCustomRange} disabled={isPending}>
+                  清空自定义
+                </button>
+              ) : null}
+            </div>
+          </div>
         </div>
 
         {isAdmin ? (
           <div className={styles.adminOverview}>
             <span className={styles.metaLabel}>管理概览</span>
-            <p className={styles.adminOverviewText}>已启用管理员模式，可刷新数据并对单条内容重新生成翻译或摘要。</p>
+            <p className={styles.adminOverviewText}>已启用管理员模式，可刷新数据、进入内容审核页，并对单条内容重新生成翻译或摘要。</p>
           </div>
         ) : null}
 
@@ -240,6 +475,10 @@ export function FeedPanel({
           <div className={styles.metaCard}>
             <span className={styles.metaLabel}>当前条数</span>
             <p className={styles.metaValue}>{summary.count} 条</p>
+          </div>
+          <div className={styles.metaCard}>
+            <span className={styles.metaLabel}>当前排序</span>
+            <p className={styles.metaValue}>{summary.sortLabel}</p>
           </div>
           <div className={styles.metaCard}>
             <span className={styles.metaLabel}>最近抓取</span>
@@ -254,43 +493,97 @@ export function FeedPanel({
         {items.length === 0 ? (
           <div className={styles.empty}>当前时间范围内还没有可展示内容，可以先点击“立即刷新”拉取数据。</div>
         ) : (
-          items.map((item) => (
-            <article key={item.id} className={styles.card}>
-              <h2 className={styles.cardTitle}>
-                <a href={item.originalUrl} target="_blank" rel="noreferrer">
-                  {item.title}
-                </a>
-              </h2>
-              <div className={styles.cardMeta}>
-                <span>{formatDate(item.publishedAt)}</span>
-                <span>{item.sourceName}</span>
-                <span>{item.author || "未知作者"}</span>
-              </div>
-              <p className={styles.cardSummary}>{item.summary}</p>
-              {isAdmin ? (
-                <div className={styles.cardAdminActions}>
-                  {item.canRegenerateTranslation ? (
-                    <button
-                      className={styles.secondaryButton}
-                      type="button"
-                      onClick={() => regenerateItem(item.id, "translation")}
-                      disabled={isPending}
-                    >
-                      重新生成翻译
-                    </button>
-                  ) : null}
+          items.map((entry) =>
+            entry.type === "cluster" ? (
+              <article key={entry.id} className={styles.card}>
+                <div className={styles.clusterHeader}>
+                  <div>
+                    <h2 className={styles.cardTitle}>{entry.title}</h2>
+                    <div className={styles.cardMeta}>
+                      <span>{formatDate(entry.latestPublishedAt)}</span>
+                      <span>{entry.sourceCount} 个来源</span>
+                      <span>{entry.itemCount} 条相关内容</span>
+                      <span>{formatScore(entry.score)}</span>
+                    </div>
+                  </div>
                   <button
                     className={styles.secondaryButton}
                     type="button"
-                    onClick={() => regenerateItem(item.id, "summary")}
+                    onClick={() => toggleCluster(entry.id)}
                     disabled={isPending}
                   >
-                    重新生成摘要
+                    {openClusters[entry.id] ? "收起相关内容" : "展开相关内容"}
                   </button>
                 </div>
-              ) : null}
-            </article>
-          ))
+                <p className={styles.cardSummary}>{entry.summary}</p>
+                <div className={styles.previewList}>
+                  {entry.itemsPreview.map((preview) => (
+                    <div key={preview.id} className={styles.previewCard}>
+                      <strong>{preview.title}</strong>
+                      <span>{preview.sourceName}</span>
+                    </div>
+                  ))}
+                </div>
+                {openClusters[entry.id] ? (
+                  <div className={styles.clusterList}>
+                    {(expandedClusters[entry.id] ?? entry.itemsPreview).map((clusterItem) => (
+                      <div key={clusterItem.id} className={styles.clusterItem}>
+                        <div className={styles.clusterItemHeader}>
+                          <a href={clusterItem.originalUrl} target="_blank" rel="noreferrer">
+                            {clusterItem.title}
+                          </a>
+                          <span>{formatScore(clusterItem.score)}</span>
+                        </div>
+                        <div className={styles.cardMeta}>
+                          <span>{formatDate(clusterItem.publishedAt)}</span>
+                          <span>{clusterItem.sourceName}</span>
+                          <span>{clusterItem.author || "未知作者"}</span>
+                        </div>
+                        <p className={styles.clusterItemSummary}>{clusterItem.summary}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </article>
+            ) : (
+              <article key={entry.id} className={styles.card}>
+                <h2 className={styles.cardTitle}>
+                  <a href={entry.originalUrl} target="_blank" rel="noreferrer">
+                    {entry.title}
+                  </a>
+                </h2>
+                <div className={styles.cardMeta}>
+                  <span>{formatDate(entry.publishedAt)}</span>
+                  <span>{entry.sourceName}</span>
+                  <span>{entry.author || "未知作者"}</span>
+                  <span>{formatScore(entry.score)}</span>
+                </div>
+                <p className={styles.cardSummary}>{entry.summary}</p>
+                {isAdmin ? (
+                  <div className={styles.cardAdminActions}>
+                    {entry.canRegenerateTranslation ? (
+                      <button
+                        className={styles.secondaryButton}
+                        type="button"
+                        onClick={() => regenerateItem(entry.id, "translation")}
+                        disabled={isPending}
+                      >
+                        重新生成翻译
+                      </button>
+                    ) : null}
+                    <button
+                      className={styles.secondaryButton}
+                      type="button"
+                      onClick={() => regenerateItem(entry.id, "summary")}
+                      disabled={isPending}
+                    >
+                      重新生成摘要
+                    </button>
+                  </div>
+                ) : null}
+              </article>
+            ),
+          )
         )}
       </div>
 

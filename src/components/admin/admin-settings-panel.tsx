@@ -24,6 +24,9 @@ export function AdminSettingsPanel({ initialSettings }: AdminSettingsPanelProps)
   const [apiKey, setApiKey] = useState("");
   const [apiKeyMode, setApiKeyMode] = useState<"keep" | "replace" | "clear">("keep");
   const [itemConcurrency, setItemConcurrency] = useState(String(initialSettings.appConfig.ingestionItemConcurrency));
+  const [itemAnalysisPrompt, setItemAnalysisPrompt] = useState(initialSettings.appConfig.prompts.itemAnalysis);
+  const [clusterSummaryPrompt, setClusterSummaryPrompt] = useState(initialSettings.appConfig.prompts.clusterSummary);
+  const [clusterMatchPrompt, setClusterMatchPrompt] = useState(initialSettings.appConfig.prompts.clusterMatch);
   const [blacklistText, setBlacklistText] = useState(initialSettings.blacklistKeywords.join("\n"));
   const [newGroupName, setNewGroupName] = useState("");
   const [newSource, setNewSource] = useState({
@@ -70,6 +73,9 @@ export function AdminSettingsPanel({ initialSettings }: AdminSettingsPanelProps)
         <div className={styles.toolbarActions}>
           <Link className={styles.linkButton} href="/">
             返回首页
+          </Link>
+          <Link className={styles.linkButton} href="/admin/content">
+            内容审核
           </Link>
           <button
             className={styles.linkButton}
@@ -118,6 +124,33 @@ export function AdminSettingsPanel({ initialSettings }: AdminSettingsPanelProps)
               }}
             />
           </label>
+          <label className={styles.field}>
+            <span>内容分析提示词</span>
+            <textarea
+              aria-label="内容分析提示词"
+              className={styles.textarea}
+              value={itemAnalysisPrompt}
+              onChange={(event) => setItemAnalysisPrompt(event.target.value)}
+            />
+          </label>
+          <label className={styles.field}>
+            <span>聚合摘要提示词</span>
+            <textarea
+              aria-label="聚合摘要提示词"
+              className={styles.textarea}
+              value={clusterSummaryPrompt}
+              onChange={(event) => setClusterSummaryPrompt(event.target.value)}
+            />
+          </label>
+          <label className={styles.field}>
+            <span>归组判定提示词</span>
+            <textarea
+              aria-label="归组判定提示词"
+              className={styles.textarea}
+              value={clusterMatchPrompt}
+              onChange={(event) => setClusterMatchPrompt(event.target.value)}
+            />
+          </label>
         </div>
 
         <div className={styles.inlineActions}>
@@ -144,6 +177,9 @@ export function AdminSettingsPanel({ initialSettings }: AdminSettingsPanelProps)
                   modelApiModel: model,
                   modelApiKey: apiKey,
                   apiKeyMode,
+                  itemAnalysisPrompt,
+                  clusterSummaryPrompt,
+                  clusterMatchPrompt,
                 },
                 "基础配置已保存。",
               )

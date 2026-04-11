@@ -10,6 +10,9 @@ const appConfigSchema = z.object({
   modelApiModel: z.string().min(1),
   modelApiKey: z.string(),
   apiKeyMode: z.enum(["replace", "clear", "keep"]).default("keep"),
+  itemAnalysisPrompt: z.string().min(1),
+  clusterSummaryPrompt: z.string().min(1),
+  clusterMatchPrompt: z.string().min(1),
 });
 
 export async function PUT(request: Request) {

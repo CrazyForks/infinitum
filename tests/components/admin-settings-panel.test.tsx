@@ -32,6 +32,11 @@ describe("AdminSettingsPanel", () => {
               apiKeyMasked: "••••••••1234",
               hasApiKey: true,
             },
+            prompts: {
+              itemAnalysis: "默认单条分析提示词",
+              clusterSummary: "默认聚合摘要提示词",
+              clusterMatch: "默认归组判定提示词",
+            },
           },
           blacklistKeywords: ["layoffs"],
           groups: [{ id: "group-1", name: "Core" }],
@@ -42,6 +47,12 @@ describe("AdminSettingsPanel", () => {
 
     await user.clear(screen.getByLabelText("并发数"));
     await user.type(screen.getByLabelText("并发数"), "4");
+    await user.clear(screen.getByLabelText("内容分析提示词"));
+    await user.type(screen.getByLabelText("内容分析提示词"), "新的单条分析提示词");
+    await user.clear(screen.getByLabelText("聚合摘要提示词"));
+    await user.type(screen.getByLabelText("聚合摘要提示词"), "新的聚合摘要提示词");
+    await user.clear(screen.getByLabelText("归组判定提示词"));
+    await user.type(screen.getByLabelText("归组判定提示词"), "新的归组判定提示词");
     await user.click(screen.getByRole("button", { name: "保存基础配置" }));
 
     await waitFor(() => {
@@ -56,6 +67,9 @@ describe("AdminSettingsPanel", () => {
           modelApiModel: "gpt-4.1-mini",
           modelApiKey: "",
           apiKeyMode: "keep",
+          itemAnalysisPrompt: "新的单条分析提示词",
+          clusterSummaryPrompt: "新的聚合摘要提示词",
+          clusterMatchPrompt: "新的归组判定提示词",
         }),
       });
     });

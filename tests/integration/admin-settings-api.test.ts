@@ -40,6 +40,11 @@ describe("/api/admin/settings", () => {
           apiKeyMasked: "••••••••1234",
           hasApiKey: true,
         },
+        prompts: {
+          itemAnalysis: "单条提示词",
+          clusterSummary: "聚合提示词",
+          clusterMatch: "归组提示词",
+        },
       },
       blacklistKeywords: ["layoffs"],
       groups: [{ id: "group-1", name: "Core" }],
@@ -53,6 +58,8 @@ describe("/api/admin/settings", () => {
     expect(response.status).toBe(200);
     expect(json.groups[0].name).toBe("Core");
     expect(json.appConfig.modelApi.apiKeyMasked).toBe("••••••••1234");
+    expect(json.appConfig.prompts.itemAnalysis).toBe("单条提示词");
+    expect(json.appConfig.prompts.clusterMatch).toBe("归组提示词");
   });
 
   it("updates basic app config for admins", async () => {
@@ -69,6 +76,9 @@ describe("/api/admin/settings", () => {
           modelApiModel: "gpt-4.1-mini",
           modelApiKey: "sk-updated",
           apiKeyMode: "replace",
+          itemAnalysisPrompt: "新的单条分析提示词",
+          clusterSummaryPrompt: "新的聚合摘要提示词",
+          clusterMatchPrompt: "新的归组判定提示词",
         }),
         headers: {
           "content-type": "application/json",
@@ -83,6 +93,9 @@ describe("/api/admin/settings", () => {
       modelApiModel: "gpt-4.1-mini",
       modelApiKey: "sk-updated",
       apiKeyMode: "replace",
+      itemAnalysisPrompt: "新的单条分析提示词",
+      clusterSummaryPrompt: "新的聚合摘要提示词",
+      clusterMatchPrompt: "新的归组判定提示词",
     });
   });
 });

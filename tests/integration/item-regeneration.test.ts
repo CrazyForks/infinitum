@@ -46,7 +46,16 @@ describe("regenerateItemContent", () => {
         enrichContent: vi.fn().mockResolvedValue({
           translatedTitle: "新的中文标题",
           summary: "不会被使用的摘要",
+          moderationStatus: "allowed",
+          moderationReason: null,
+          moderationDetail: null,
+          qualityScore: 80,
+          qualityRationale: "高质量",
+          topicLabel: "OpenAI Toolkit",
+          clusterHint: "OpenAI toolkit",
         }),
+        summarizeCluster: vi.fn().mockResolvedValue("聚合摘要"),
+        matchClusterCandidate: vi.fn().mockResolvedValue(null),
       },
     });
 
@@ -87,7 +96,16 @@ describe("regenerateItemContent", () => {
         enrichContent: vi.fn().mockResolvedValue({
           translatedTitle: "不应该被采用的新标题",
           summary: "新的摘要内容",
+          moderationStatus: "allowed",
+          moderationReason: null,
+          moderationDetail: null,
+          qualityScore: 80,
+          qualityRationale: "高质量",
+          topicLabel: "Benchmark",
+          clusterHint: "OpenAI benchmark",
         }),
+        summarizeCluster: vi.fn().mockResolvedValue("聚合摘要"),
+        matchClusterCandidate: vi.fn().mockResolvedValue(null),
       },
     });
 
@@ -126,6 +144,8 @@ describe("regenerateItemContent", () => {
     const regenerated = await regenerateItemContent(item.id, "summary", {
       aiProvider: {
         enrichContent: vi.fn().mockRejectedValue(new Error("Upstream regeneration failed")),
+        summarizeCluster: vi.fn().mockResolvedValue("聚合摘要"),
+        matchClusterCandidate: vi.fn().mockResolvedValue(null),
       },
     });
 

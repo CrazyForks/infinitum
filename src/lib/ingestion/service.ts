@@ -1,6 +1,7 @@
 import type { FetchRun, FetchRunStatus } from "@prisma/client";
 
 import { createAiProvider } from "@/lib/ai/provider";
+import { assignItemToCluster, recomputeAllClusters, recomputeCluster } from "@/lib/clusters/service";
 import {
   completeFetchRun,
   createFetchRun,
@@ -97,7 +98,18 @@ async function resolveRunOptions(options?: Partial<RunIngestionOptions>): Promis
     trigger: options?.trigger ?? "manual",
     parser: options?.parser ?? createRssParser(),
     articleFetcher: options?.articleFetcher ?? fetchArticleContent,
-    aiProvider: options?.aiProvider ?? createAiProvider(runtimeConfig?.modelApi ?? { apiKey: "", baseURL: "", model: "gpt-4.1-mini" }),
+    aiProvider:
+      options?.aiProvider ??
+      createAiProvider(
+        runtimeConfig?.modelApi ?? { apiKey: "", baseURL: "", model: "gpt-4.1-mini" },
+        runtimeConfig?.prompts
+          ? {
+              itemAnalysisPrompt: runtimeConfig.prompts.itemAnalysis,
+              clusterSummaryPrompt: runtimeConfig.prompts.clusterSummary,
+              clusterMatchPrompt: runtimeConfig.prompts.clusterMatch,
+            }
+          : undefined,
+      ),
     sourceConfigs: options?.sourceConfigs ?? runtimeConfig?.rssSources ?? [],
     blacklist: options?.blacklist ?? runtimeConfig?.blacklistKeywords ?? [],
     itemConcurrency: options?.itemConcurrency ?? runtimeConfig?.ingestion.itemConcurrency ?? 3,
@@ -167,7 +179,14 @@ async function processFeedItem({
   let translatedTitle = existing?.translatedTitle ?? null;
   let summaryText = existing?.summaryText ?? null;
   let status: ProcessedItemRecord["status"] = existing?.status ?? "new";
-  let filterReason: string | null = null;
+  let filterReason: string | null = existing?.filterReason ?? null;
+  let moderationStatus = existing?.moderationStatus ?? "allowed";
+  let moderationReason = existing?.moderationReason ?? null;
+  let moderationDetail = existing?.moderationDetail ?? null;
+  let qualityScore = existing?.qualityScore ?? 50;
+  let qualityRationale = existing?.qualityRationale ?? "AI analysis unavailable";
+  let topicLabel = existing?.topicLabel ?? null;
+  let clusterHint: string | null = null;
   const issues: string[] = [];
   const contentForFullTextDecision = fullText || rssContent || rssExcerpt || "";
   const initialFilterMatch = findBlacklistMatch({
@@ -200,9 +219,21 @@ async function processFeedItem({
         language: shouldTranslateTitle(originalTitle) ? "en" : "unknown",
         status: "filtered",
         filterReason: initialFilterMatch,
+        moderationStatus: "filtered",
+        moderationReason: "rule_blacklist",
+        moderationDetail: `Matched blacklist keyword: ${initialFilterMatch}`,
+        qualityScore,
+        qualityRationale,
+        topicLabel,
+        aiProcessedAt: new Date(),
+        clusterId: null,
         errorMessage: null,
       },
     );
+
+    if (existing?.clusterId) {
+      await recomputeCluster(existing.clusterId, aiProvider);
+    }
 
     return { id: stored.id, status: stored.status };
   }
@@ -225,36 +256,48 @@ async function processFeedItem({
   if (filterMatch) {
     status = "filtered";
     filterReason = filterMatch;
+    moderationStatus = "filtered";
+    moderationReason = "rule_blacklist";
+    moderationDetail = `Matched blacklist keyword: ${filterMatch}`;
   } else {
-    const translateTitle = !translatedTitle && shouldTranslateTitle(originalTitle);
-    const needsSummary = !summaryText;
+    const translateTitle = shouldTranslateTitle(originalTitle);
     const enrichmentInput = fullText || rssContent || rssExcerpt || originalTitle;
 
-    if (translateTitle || needsSummary) {
-      try {
-        const enrichment = await aiProvider.enrichContent(enrichmentInput, {
-          title: originalTitle,
-          sourceName,
-          translateTitle,
-        });
+    try {
+      const enrichment = await aiProvider.enrichContent(enrichmentInput, {
+        title: originalTitle,
+        sourceName,
+        translateTitle,
+      });
 
-        if (translateTitle) {
-          translatedTitle = enrichment.translatedTitle?.trim() || originalTitle;
-        }
-
-        if (needsSummary) {
-          summaryText = stripHtmlTags(enrichment.summary) || null;
-        }
-      } catch (error) {
-        appendIssue(issues, error, "Unknown ai enrichment error");
+      if (translateTitle) {
+        translatedTitle = enrichment.translatedTitle?.trim() || originalTitle;
       }
+
+      summaryText = stripHtmlTags(enrichment.summary) || summaryText;
+      moderationStatus = enrichment.moderationStatus === "restored" ? "allowed" : enrichment.moderationStatus;
+      moderationReason = enrichment.moderationReason;
+      moderationDetail = enrichment.moderationDetail;
+      qualityScore = enrichment.qualityScore;
+      qualityRationale = enrichment.qualityRationale;
+      topicLabel = enrichment.topicLabel;
+      clusterHint = enrichment.clusterHint;
+    } catch (error) {
+      appendIssue(issues, error, "Unknown ai enrichment error");
+      moderationStatus = "allowed";
+      moderationReason = null;
+      moderationDetail = null;
+      qualityScore = 50;
+      qualityRationale = "AI analysis unavailable";
+      topicLabel = null;
+      clusterHint = null;
     }
 
     if (!summaryText) {
       summaryText = buildFallbackSummary(rssExcerpt, fullText || rssContent);
     }
 
-    status = "processed";
+    status = moderationStatus === "filtered" ? "filtered" : "processed";
   }
 
   const stored = await upsertItem(
@@ -280,9 +323,29 @@ async function processFeedItem({
       language: shouldTranslateTitle(originalTitle) ? "en" : "unknown",
       status,
       filterReason,
+      moderationStatus,
+      moderationReason,
+      moderationDetail,
+      qualityScore,
+      qualityRationale,
+      topicLabel,
+      aiProcessedAt: new Date(),
+      clusterId: moderationStatus === "filtered" ? null : existing?.clusterId ?? null,
       errorMessage: issues.length > 0 ? issues.join(" | ") : null,
     },
   );
+
+  if (moderationStatus === "filtered") {
+    if (existing?.clusterId) {
+      await recomputeCluster(existing.clusterId, aiProvider);
+    }
+  } else {
+    await assignItemToCluster(stored.id, {
+      topicLabel,
+      clusterHint,
+      aiProvider,
+    });
+  }
 
   return { id: stored.id, status: stored.status };
 }
@@ -377,6 +440,7 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
   );
 
   await progressChain;
+  await recomputeAllClusters(aiProvider);
 
   const status: FetchRunStatus =
     errors.length > 0 || failureCount > 0

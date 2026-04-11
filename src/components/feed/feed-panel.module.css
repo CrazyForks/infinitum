@@ -72,7 +72,6 @@
 .controls {
   display: grid;
   gap: 18px;
-  grid-template-columns: 1fr auto;
   align-items: end;
 }
 
@@ -80,6 +79,46 @@
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.filterTools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: end;
+  justify-content: space-between;
+}
+
+.sortField,
+.dateField {
+  display: grid;
+  gap: 6px;
+}
+
+.controlLabel {
+  color: var(--muted);
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.sortSelect,
+.dateInput {
+  min-height: 44px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--foreground);
+  font-family: var(--font-mono), monospace;
+  font-size: 13px;
+}
+
+.customRange {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: end;
 }
 
 .rangeButton,
@@ -133,7 +172,7 @@
 
 .metaRow {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
 }
 
@@ -221,6 +260,53 @@
   line-height: 1.6;
 }
 
+.clusterHeader,
+.clusterItemHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.previewList,
+.clusterList {
+  display: grid;
+  gap: 10px;
+}
+
+.previewList {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.previewCard,
+.clusterItem {
+  padding: 14px 16px;
+  border: 1px solid rgba(26, 24, 21, 0.12);
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.previewCard {
+  display: grid;
+  gap: 6px;
+}
+
+.previewCard span {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.clusterItemHeader a {
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.clusterItemSummary {
+  margin-top: 10px;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
 .cardAdminActions {
   display: flex;
   flex-wrap: wrap;
@@ -247,9 +333,14 @@
   }
 
   .titleRow,
-  .controls,
   .metaRow {
     grid-template-columns: 1fr;
+  }
+
+  .filterTools,
+  .customRange {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .title {

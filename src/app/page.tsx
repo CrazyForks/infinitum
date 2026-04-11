@@ -1,7 +1,7 @@
 import { getAdminSession } from "@/lib/admin/session";
 import { FeedPanel } from "@/components/feed/feed-panel";
 import { getLatestFetchRun, listFeedItems, toFetchRunSnapshot } from "@/lib/feed/repository";
-import { isFeedRange } from "@/lib/feed/range";
+import { isFeedRange, isFeedSort, normalizeFeedDateInput, resolveFeedFilters } from "@/lib/feed/range";
 
 export const dynamic = "force-dynamic";
 
@@ -12,15 +12,31 @@ type PageProps = {
 export default async function Home({ searchParams }: PageProps) {
   const resolvedSearchParams = (await searchParams) ?? {};
   const rangeParam = resolvedSearchParams.range;
+  const sortParam = resolvedSearchParams.sort;
+  const startParam = resolvedSearchParams.start;
+  const endParam = resolvedSearchParams.end;
   const candidateRange = Array.isArray(rangeParam) ? rangeParam[0] : rangeParam;
+  const candidateSort = Array.isArray(sortParam) ? sortParam[0] : sortParam;
+  const candidateStart = Array.isArray(startParam) ? startParam[0] : startParam;
+  const candidateEnd = Array.isArray(endParam) ? endParam[0] : endParam;
   const range = candidateRange && isFeedRange(candidateRange) ? candidateRange : "7d";
-  const [feed, latestRun, adminSession] = await Promise.all([listFeedItems(range), getLatestFetchRun(), getAdminSession()]);
+  const sort = candidateSort && isFeedSort(candidateSort) ? candidateSort : "time_desc";
+  const filters = resolveFeedFilters({
+    range,
+    sort,
+    start: normalizeFeedDateInput(candidateStart),
+    end: normalizeFeedDateInput(candidateEnd),
+  });
+  const [feed, latestRun, adminSession] = await Promise.all([listFeedItems(filters), getLatestFetchRun(), getAdminSession()]);
 
   return (
     <main>
       <FeedPanel
         initialItems={feed.items}
-        initialRange={range}
+        initialRange={filters.range}
+        initialSort={filters.sort}
+        initialStartDate={filters.start}
+        initialEndDate={filters.end}
         initialNextCursor={feed.nextCursor}
         initialStatus={latestRun ? toFetchRunSnapshot(latestRun) : null}
         isAdmin={adminSession.isAdmin}
