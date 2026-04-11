@@ -1,3 +1,4 @@
+import { getAdminSession } from "@/lib/admin/session";
 import { FeedPanel } from "@/components/feed/feed-panel";
 import { getLatestFetchRun, listFeedItems, toFetchRunSnapshot } from "@/lib/feed/repository";
 import { isFeedRange } from "@/lib/feed/range";
@@ -13,7 +14,7 @@ export default async function Home({ searchParams }: PageProps) {
   const rangeParam = resolvedSearchParams.range;
   const candidateRange = Array.isArray(rangeParam) ? rangeParam[0] : rangeParam;
   const range = candidateRange && isFeedRange(candidateRange) ? candidateRange : "7d";
-  const [feed, latestRun] = await Promise.all([listFeedItems(range), getLatestFetchRun()]);
+  const [feed, latestRun, adminSession] = await Promise.all([listFeedItems(range), getLatestFetchRun(), getAdminSession()]);
 
   return (
     <main>
@@ -22,6 +23,7 @@ export default async function Home({ searchParams }: PageProps) {
         initialRange={range}
         initialNextCursor={feed.nextCursor}
         initialStatus={latestRun ? toFetchRunSnapshot(latestRun) : null}
+        isAdmin={adminSession.isAdmin}
       />
     </main>
   );

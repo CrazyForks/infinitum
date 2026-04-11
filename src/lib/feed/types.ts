@@ -8,6 +8,7 @@ export type FeedItemDTO = {
   sourceName: string;
   author?: string | null;
   summary: string;
+  canRegenerateTranslation?: boolean;
 };
 
 export type IngestionTrigger = "scheduled" | "manual";

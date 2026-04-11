@@ -8,6 +8,9 @@ describe("runIngestion", () => {
     await prisma.item.deleteMany();
     await prisma.fetchRun.deleteMany();
     await prisma.source.deleteMany();
+    await prisma.sourceGroup.deleteMany();
+    await prisma.blacklistKeyword.deleteMany();
+    await prisma.appConfig.deleteMany();
   });
 
   it("stores processed items, preserves filtered items, and records the run", async () => {
@@ -229,5 +232,65 @@ describe("runIngestion", () => {
 
     const storedItem = await prisma.item.findFirstOrThrow();
     expect(storedItem.summaryText).toBe("Token economy summary");
+  });
+
+  it("uses database-backed runtime settings when explicit ingestion options are omitted", async () => {
+    await prisma.appConfig.create({
+      data: {
+        id: "default",
+        modelApiKey: "sk-db",
+        modelApiBaseUrl: "https://db.example.com/v1",
+        modelApiModel: "gpt-db",
+        ingestionItemConcurrency: 2,
+      },
+    });
+
+    await prisma.blacklistKeyword.create({
+      data: {
+        keyword: "blocked",
+      },
+    });
+
+    await prisma.source.create({
+      data: {
+        name: "Database Feed",
+        rssUrl: "https://db.example.com/feed.xml",
+        siteUrl: "https://db.example.com",
+        enabled: true,
+        fetchFullTextWhenMissing: false,
+      },
+    });
+
+    const parser = {
+      parseURL: vi.fn().mockResolvedValue({
+        items: [
+          {
+            title: "Database-configured story",
+            link: "https://db.example.com/posts/1",
+            isoDate: "2026-04-10T09:00:00.000Z",
+            content: "Body from database-driven ingestion settings",
+          },
+        ],
+      }),
+    };
+
+    const aiProvider = {
+      enrichContent: vi.fn().mockResolvedValue({
+        translatedTitle: "数据库驱动的标题",
+        summary: "数据库中的运行时配置已生效。",
+      }),
+    };
+
+    const result = await runIngestion({
+      trigger: "manual",
+      parser,
+      articleFetcher: vi.fn(),
+      aiProvider,
+      now: new Date("2026-04-10T10:00:00.000Z"),
+    });
+
+    expect(result.status).toBe("succeeded");
+    expect(parser.parseURL).toHaveBeenCalledWith("https://db.example.com/feed.xml");
+    expect(aiProvider.enrichContent).toHaveBeenCalledOnce();
   });
 });

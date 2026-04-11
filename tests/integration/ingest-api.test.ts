@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const hasActiveFetchRun = vi.fn();
 const getLatestFetchRun = vi.fn();
+const requireAdmin = vi.fn();
 const toFetchRunSnapshot = vi.fn((run) => ({
   id: run.id,
   status: run.status,
@@ -22,6 +23,15 @@ vi.mock("@/lib/feed/repository", () => ({
   toFetchRunSnapshot,
 }));
 
+vi.mock("@/lib/admin/session", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/admin/session")>();
+
+  return {
+    ...actual,
+    requireAdmin,
+  };
+});
+
 vi.mock("@/lib/ingestion/service", () => ({
   startIngestion,
 }));
@@ -33,6 +43,7 @@ afterEach(() => {
 
 describe("/api/ingest", () => {
   it("starts ingestion asynchronously and returns 202 with the running snapshot", async () => {
+    requireAdmin.mockResolvedValue(undefined);
     hasActiveFetchRun.mockResolvedValue(false);
     startIngestion.mockResolvedValue({
       id: "run-1",
@@ -48,13 +59,26 @@ describe("/api/ingest", () => {
     });
 
     const { POST } = await import("@/app/api/ingest/run/route");
-    const response = await POST();
+    const response = await POST(new Request("http://localhost/api/ingest/run", { method: "POST" }));
     const json = await response.json();
 
     expect(response.status).toBe(202);
+    expect(requireAdmin).toHaveBeenCalledOnce();
     expect(startIngestion).toHaveBeenCalledWith({ trigger: "manual" });
     expect(json.run.id).toBe("run-1");
     expect(json.run.status).toBe("running");
+  });
+
+  it("rejects manual ingestion when the requester is not an admin", async () => {
+    requireAdmin.mockRejectedValue(new Error("Unauthorized"));
+
+    const { POST } = await import("@/app/api/ingest/run/route");
+    const response = await POST(new Request("http://localhost/api/ingest/run", { method: "POST" }));
+    const json = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(startIngestion).not.toHaveBeenCalled();
+    expect(json.error).toBe("Unauthorized");
   });
 
   it("returns the latest run status including progress counters", async () => {

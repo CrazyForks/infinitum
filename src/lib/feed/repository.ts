@@ -1,9 +1,10 @@
-import { type FetchRun, FetchRunStatus, type Prisma } from "@prisma/client";
+import { type FetchRun, FetchRunStatus, type Item, type Prisma, type Source } from "@prisma/client";
 
 import { prisma } from "@/lib/db";
 import { getDisplaySummary, getDisplayTitle } from "@/lib/feed/presentation";
 import { getRangeStart } from "@/lib/feed/range";
 import type { FeedItemDTO, FeedRange, FetchRunSnapshot, SourceConfig } from "@/lib/feed/types";
+import { shouldTranslateTitle } from "@/lib/feed/presentation";
 
 export async function syncSources(sourceConfigs: SourceConfig[]) {
   for (const source of sourceConfigs) {
@@ -126,6 +127,19 @@ export async function hasActiveFetchRun() {
   return count > 0;
 }
 
+export function mapItemToFeedItem(item: Item & { source: Source }): FeedItemDTO {
+  return {
+    id: item.id,
+    title: getDisplayTitle(item.originalTitle, item.translatedTitle),
+    originalUrl: item.originalUrl,
+    publishedAt: item.publishedAt.toISOString(),
+    sourceName: item.source.name,
+    author: item.author,
+    summary: getDisplaySummary(item.summaryText, item.rssExcerpt, item.fullText ?? item.rssContent),
+    canRegenerateTranslation: shouldTranslateTitle(item.originalTitle),
+  };
+}
+
 export async function listFeedItems(range: FeedRange, cursor?: string | null) {
   const rangeStart = getRangeStart(range);
   const take = 20;
@@ -156,15 +170,7 @@ export async function listFeedItems(range: FeedRange, cursor?: string | null) {
   const hasMore = items.length > take;
   const slice = hasMore ? items.slice(0, take) : items;
 
-  const mappedItems: FeedItemDTO[] = slice.map((item) => ({
-    id: item.id,
-    title: getDisplayTitle(item.originalTitle, item.translatedTitle),
-    originalUrl: item.originalUrl,
-    publishedAt: item.publishedAt.toISOString(),
-    sourceName: item.source.name,
-    author: item.author,
-    summary: getDisplaySummary(item.summaryText, item.rssExcerpt, item.fullText ?? item.rssContent),
-  }));
+  const mappedItems: FeedItemDTO[] = slice.map(mapItemToFeedItem);
 
   return {
     items: mappedItems,

@@ -7,12 +7,14 @@
 - 基于关键词黑名单过滤
 - 英文标题自动翻译为中文
 - 通过 OpenAI-compatible API 生成中文摘要
+- 管理员登录后触发刷新、重生成翻译与摘要
+- 后台配置页管理信息源、分组、黑名单和模型 API
 - 按时间范围浏览信息流
 - 支持本地运行与 Docker Compose 部署
 
 ## 配置文件
 
-应用默认读取这个文件：
+首次启动时，应用会把这个文件里的配置导入数据库作为初始值：
 
 - [infinitum.config.json](/Users/shawn/Documents/GitHub/infinitum/config/infinitum.config.json)
 
@@ -56,6 +58,29 @@
 - 摘要会回退为 RSS 摘要或正文截断
 
 可以直接编辑 [infinitum.config.json](/Users/shawn/Documents/GitHub/infinitum/config/infinitum.config.json)，也可以从 [infinitum.config.example.json](/Users/shawn/Documents/GitHub/infinitum/config/infinitum.config.example.json) 复制一份新模板再改。
+
+导入完成后：
+
+- 运行时抓取配置以数据库为准
+- 后续请通过后台设置页修改信息源、分组、黑名单和模型 API
+- 原配置文件不再作为运行时唯一来源
+
+## 管理员环境变量
+
+除了 `DATABASE_URL`，还需要配置：
+
+- `ADMIN_PASSWORD`: 管理员登录密码
+- `ADMIN_SESSION_SECRET`: 用于签名管理员会话 cookie 的随机密钥
+
+登录入口：
+
+- `http://localhost:3000/admin/login`
+
+登录成功后：
+
+- 首页会显示管理员概览与“立即刷新”
+- 每条信息会显示“重新生成翻译 / 重新生成摘要”
+- 设置页位于 `http://localhost:3000/admin/settings`
 
 ## 本地启动
 

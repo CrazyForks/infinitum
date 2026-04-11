@@ -1,0 +1,170 @@
+.panel,
+.settingsShell {
+  width: min(1080px, calc(100vw - 32px));
+  margin: 0 auto;
+  padding: 40px 0 80px;
+}
+
+.panel {
+  max-width: 560px;
+}
+
+.panelHeader,
+.section,
+.row,
+.sourceEditor,
+.toolbar {
+  border: 1px solid var(--line);
+  background: var(--card);
+  box-shadow: var(--shadow);
+}
+
+.panelHeader,
+.section,
+.toolbar {
+  padding: 24px;
+}
+
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: flex-end;
+  margin-bottom: 20px;
+}
+
+.toolbarActions,
+.inlineActions,
+.inlineForm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.kicker {
+  display: inline-flex;
+  margin-bottom: 12px;
+  padding: 6px 10px;
+  border: 1px solid rgba(170, 47, 29, 0.24);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.title {
+  font-size: clamp(36px, 6vw, 64px);
+  line-height: 0.95;
+}
+
+.description {
+  margin-top: 10px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.section {
+  margin-top: 18px;
+}
+
+.sectionTitle {
+  margin-bottom: 18px;
+  font-size: 24px;
+}
+
+.formGrid,
+.sourceEditor,
+.list {
+  display: grid;
+  gap: 14px;
+}
+
+.formGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.field {
+  display: grid;
+  gap: 8px;
+}
+
+.input,
+.textarea,
+.select {
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.78);
+  color: var(--foreground);
+}
+
+.textarea {
+  min-height: 140px;
+}
+
+.checkbox {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 14px;
+}
+
+.primaryButton,
+.secondaryButton,
+.linkButton {
+  padding: 11px 16px;
+  border: 1px solid var(--line);
+  cursor: pointer;
+  font-family: var(--font-mono), monospace;
+  font-size: 13px;
+}
+
+.primaryButton {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.secondaryButton {
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.linkButton {
+  background: transparent;
+  color: var(--accent);
+}
+
+.message {
+  margin: 16px 0;
+  padding: 14px 16px;
+  border: 1px solid rgba(170, 47, 29, 0.2);
+  background: rgba(255, 246, 238, 0.9);
+}
+
+.row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 14px;
+}
+
+@media (max-width: 800px) {
+  .panel,
+  .settingsShell {
+    width: min(100vw - 20px, 1080px);
+    padding-top: 20px;
+  }
+
+  .toolbar,
+  .formGrid {
+    grid-template-columns: 1fr;
+    display: grid;
+  }
+
+  .row {
+    display: grid;
+  }
+}

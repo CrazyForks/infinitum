@@ -1,6 +1,5 @@
 import type { FetchRun, FetchRunStatus } from "@prisma/client";
 
-import { getRuntimeConfig } from "@/config/runtime";
 import { createAiProvider } from "@/lib/ai/provider";
 import {
   completeFetchRun,
@@ -20,6 +19,7 @@ import type {
   ProcessedItemRecord,
   RunIngestionOptions,
 } from "@/lib/ingestion/types";
+import { getIngestionRuntimeConfig } from "@/lib/settings/service";
 
 type PreparedFeedItem = {
   item: ParsedFeedItem;
@@ -88,18 +88,19 @@ function buildFallbackSummary(rssExcerpt: string | null, fallbackBody: string | 
   return null;
 }
 
-function resolveRunOptions(options?: Partial<RunIngestionOptions>): ResolvedRunOptions {
+async function resolveRunOptions(options?: Partial<RunIngestionOptions>): Promise<ResolvedRunOptions> {
   const now = options?.now ?? new Date();
-  const runtimeConfig = getRuntimeConfig();
+  const runtimeConfig =
+    !options?.aiProvider || !options?.sourceConfigs || !options?.blacklist ? await getIngestionRuntimeConfig() : null;
 
   return {
     trigger: options?.trigger ?? "manual",
     parser: options?.parser ?? createRssParser(),
     articleFetcher: options?.articleFetcher ?? fetchArticleContent,
-    aiProvider: options?.aiProvider ?? createAiProvider(runtimeConfig.modelApi),
-    sourceConfigs: options?.sourceConfigs ?? runtimeConfig.rssSources,
-    blacklist: options?.blacklist ?? runtimeConfig.blacklistKeywords,
-    itemConcurrency: options?.itemConcurrency ?? runtimeConfig.ingestion.itemConcurrency,
+    aiProvider: options?.aiProvider ?? createAiProvider(runtimeConfig?.modelApi ?? { apiKey: "", baseURL: "", model: "gpt-4.1-mini" }),
+    sourceConfigs: options?.sourceConfigs ?? runtimeConfig?.rssSources ?? [],
+    blacklist: options?.blacklist ?? runtimeConfig?.blacklistKeywords ?? [],
+    itemConcurrency: options?.itemConcurrency ?? runtimeConfig?.ingestion.itemConcurrency ?? 3,
     now,
   };
 }
@@ -412,14 +413,14 @@ async function runExistingFetchRun(run: FetchRun, options: ResolvedRunOptions) {
 }
 
 export async function runIngestion(options?: Partial<RunIngestionOptions>) {
-  const resolvedOptions = resolveRunOptions(options);
+  const resolvedOptions = await resolveRunOptions(options);
   const run = await createFetchRun(resolvedOptions.trigger, resolvedOptions.now);
 
   return runExistingFetchRun(run, resolvedOptions);
 }
 
 export async function startIngestion(options?: Partial<RunIngestionOptions>) {
-  const resolvedOptions = resolveRunOptions(options);
+  const resolvedOptions = await resolveRunOptions(options);
   const run = await createFetchRun(resolvedOptions.trigger, resolvedOptions.now);
   const backgroundRun = runExistingFetchRun(run, resolvedOptions).then(() => undefined);
 

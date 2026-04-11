@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
+import Link from "next/link";
 
 import styles from "@/components/feed/feed-panel.module.css";
 import { RANGE_OPTIONS } from "@/lib/feed/range";
@@ -13,6 +14,7 @@ type FeedPanelProps = {
   initialRange: FeedRange;
   initialNextCursor: string | null;
   initialStatus: FetchRunSnapshot | null;
+  isAdmin: boolean;
 };
 
 function formatDate(value: string): string {
@@ -41,6 +43,7 @@ export function FeedPanel({
   initialRange,
   initialNextCursor,
   initialStatus,
+  isAdmin,
 }: FeedPanelProps) {
   const [items, setItems] = useState(initialItems);
   const [range, setRange] = useState<FeedRange>(initialRange);
@@ -82,6 +85,10 @@ export function FeedPanel({
   };
 
   const refresh = () => {
+    if (!isAdmin) {
+      return;
+    }
+
     startTransition(async () => {
       const response = await fetch("/api/ingest/run", { method: "POST" });
       const payload = (await response.json()) as {
@@ -96,6 +103,35 @@ export function FeedPanel({
 
       setStatus(payload.run ?? null);
       setRefreshMessage("抓取任务已启动，正在后台处理中。");
+    });
+  };
+
+  const regenerateItem = (itemId: string, target: "translation" | "summary") => {
+    startTransition(async () => {
+      const response = await fetch(`/api/admin/items/${itemId}/regenerate`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ target }),
+      });
+      const payload = (await response.json()) as {
+        item?: FeedItemDTO;
+        error?: string;
+      };
+
+      if (payload.error) {
+        setRefreshMessage(payload.error);
+        return;
+      }
+
+      if (!payload.item) {
+        setRefreshMessage("未返回更新后的内容。");
+        return;
+      }
+
+      setItems((current) => current.map((item) => (item.id === itemId ? payload.item! : item)));
+      setRefreshMessage(target === "translation" ? "标题翻译已重新生成。" : "摘要已重新生成。");
     });
   };
 
@@ -156,9 +192,16 @@ export function FeedPanel({
                 聚合 RSS 内容、原文补抓、黑名单过滤、标题翻译与摘要生成，形成一条可快速浏览的编辑部式消息流。
               </p>
             </div>
-            <button className={styles.refreshButton} type="button" onClick={refresh} disabled={isPending}>
-              {isPending ? "处理中..." : "立即刷新"}
-            </button>
+            <div className={styles.adminActions}>
+              <Link className={styles.adminLink} href={isAdmin ? "/admin/settings" : "/admin/login"}>
+                {isAdmin ? "管理设置" : "管理员登录"}
+              </Link>
+              {isAdmin ? (
+                <button className={styles.refreshButton} type="button" onClick={refresh} disabled={isPending}>
+                  {isPending ? "处理中..." : "立即刷新"}
+                </button>
+              ) : null}
+            </div>
           </div>
         </div>
 
@@ -181,6 +224,13 @@ export function FeedPanel({
             })}
           </div>
         </div>
+
+        {isAdmin ? (
+          <div className={styles.adminOverview}>
+            <span className={styles.metaLabel}>管理概览</span>
+            <p className={styles.adminOverviewText}>已启用管理员模式，可刷新数据并对单条内容重新生成翻译或摘要。</p>
+          </div>
+        ) : null}
 
         <div className={styles.metaRow}>
           <div className={styles.metaCard}>
@@ -217,6 +267,28 @@ export function FeedPanel({
                 <span>{item.author || "未知作者"}</span>
               </div>
               <p className={styles.cardSummary}>{item.summary}</p>
+              {isAdmin ? (
+                <div className={styles.cardAdminActions}>
+                  {item.canRegenerateTranslation ? (
+                    <button
+                      className={styles.secondaryButton}
+                      type="button"
+                      onClick={() => regenerateItem(item.id, "translation")}
+                      disabled={isPending}
+                    >
+                      重新生成翻译
+                    </button>
+                  ) : null}
+                  <button
+                    className={styles.secondaryButton}
+                    type="button"
+                    onClick={() => regenerateItem(item.id, "summary")}
+                    disabled={isPending}
+                  >
+                    重新生成摘要
+                  </button>
+                </div>
+              ) : null}
             </article>
           ))
         )}

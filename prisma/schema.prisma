@@ -29,6 +29,7 @@ enum IngestionTrigger {
 
 model Source {
   id                       String   @id @default(cuid())
+  groupId                  String?
   name                     String
   rssUrl                   String   @unique
   siteUrl                  String
@@ -37,7 +38,9 @@ model Source {
   createdAt                DateTime @default(now())
   updatedAt                DateTime @updatedAt
   items                    Item[]
+  group                    SourceGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
 
+  @@index([groupId, name])
   @@map("sources")
 }
 
@@ -83,4 +86,35 @@ model FetchRun {
 
   @@index([startedAt])
   @@map("fetch_runs")
+}
+
+model SourceGroup {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  sources   Source[]
+
+  @@map("source_groups")
+}
+
+model AppConfig {
+  id                       String   @id
+  modelApiKey              String   @default("")
+  modelApiBaseUrl          String   @default("")
+  modelApiModel            String   @default("gpt-4.1-mini")
+  ingestionItemConcurrency Int      @default(3)
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  @@map("app_config")
+}
+
+model BlacklistKeyword {
+  id        String   @id @default(cuid())
+  keyword   String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("blacklist_keywords")
 }

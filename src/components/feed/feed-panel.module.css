@@ -42,6 +42,20 @@
   align-items: flex-end;
 }
 
+.adminActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.adminLink {
+  color: var(--accent);
+  font-family: var(--font-mono), monospace;
+  font-size: 13px;
+}
+
 .title {
   font-size: clamp(52px, 8vw, 92px);
   line-height: 0.9;
@@ -70,7 +84,8 @@
 
 .rangeButton,
 .refreshButton,
-.loadMoreButton {
+.loadMoreButton,
+.secondaryButton {
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.72);
   color: var(--foreground);
@@ -90,7 +105,8 @@
 
 .rangeButton:hover,
 .refreshButton:hover,
-.loadMoreButton:hover {
+.loadMoreButton:hover,
+.secondaryButton:hover {
   transform: translateY(-1px);
   border-color: rgba(170, 47, 29, 0.35);
 }
@@ -102,7 +118,8 @@
 }
 
 .refreshButton,
-.loadMoreButton {
+.loadMoreButton,
+.secondaryButton {
   padding: 11px 16px;
   font-family: var(--font-mono), monospace;
   font-size: 13px;
@@ -118,6 +135,18 @@
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
+}
+
+.adminOverview {
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  background: rgba(255, 246, 238, 0.9);
+  box-shadow: var(--shadow);
+}
+
+.adminOverviewText {
+  font-size: 16px;
+  line-height: 1.5;
 }
 
 .metaCard {
@@ -190,6 +219,12 @@
   max-width: 76ch;
   font-size: 18px;
   line-height: 1.6;
+}
+
+.cardAdminActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .empty {
