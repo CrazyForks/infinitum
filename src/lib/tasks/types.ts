@@ -22,3 +22,37 @@ export type EnqueueTaskRunInput = {
   label: string;
   entityId?: string | null;
 };
+
+export type TaskRunSnapshot = {
+  id: string;
+  kind: BackgroundTaskRunKind;
+  triggerType: BackgroundTaskRunTrigger;
+  status: BackgroundTaskRunStatus;
+  label: string;
+  entityId: string | null;
+  progressCurrent: number;
+  progressTotal: number;
+  progressLabel: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  errorSummary: string | null;
+};
+
+export type TaskScheduleSnapshot = {
+  key: DefaultIngestionScheduleKey;
+  enabled: boolean;
+  intervalMinutes: number;
+  timezone: string;
+  lastHeartbeatAt: string | null;
+  lastRunStartedAt: string | null;
+  lastRunFinishedAt: string | null;
+  lastRunStatus: BackgroundTaskRunStatus | null;
+  nextRunAt: string;
+  isHeartbeatStale: boolean;
+};
+
+export type BackgroundTaskMonitorSnapshot = {
+  schedule: TaskScheduleSnapshot;
+  runningTasks: TaskRunSnapshot[];
+  recentTasks: TaskRunSnapshot[];
+};

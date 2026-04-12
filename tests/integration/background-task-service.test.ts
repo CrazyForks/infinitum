@@ -3,9 +3,11 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
 import {
   claimNextQueuedTaskRun,
+  getBackgroundTaskMonitorSnapshot,
   ensureDefaultIngestionSchedule,
   enqueueTaskRun,
   listRecentTaskRuns,
+  updateDefaultIngestionSchedule,
 } from "@/lib/tasks/service";
 import { recoverStaleTaskRuns, runWorkerCycle } from "@/lib/tasks/worker";
 
@@ -142,5 +144,33 @@ describe("background task persistence", () => {
     expect(ingestionTasks).toHaveLength(1);
     expect(ingestionTasks[0]?.triggerType).toBe("scheduled");
     expect(ingestionTasks[0]?.status).toBe("running");
+  });
+
+  it("updates the default ingestion schedule", async () => {
+    await ensureDefaultIngestionSchedule();
+
+    const updated = await updateDefaultIngestionSchedule({
+      enabled: false,
+      intervalMinutes: 120,
+    });
+
+    expect(updated.enabled).toBe(false);
+    expect(updated.intervalMinutes).toBe(120);
+  });
+
+  it("builds a monitor snapshot with schedule and task lists", async () => {
+    await ensureDefaultIngestionSchedule();
+    await enqueueTaskRun({
+      kind: "ingestion",
+      triggerType: "manual",
+      label: "默认抓取任务",
+    });
+
+    const snapshot = await getBackgroundTaskMonitorSnapshot(new Date("2026-04-12T01:00:00.000Z"));
+
+    expect(snapshot.schedule.key).toBe("ingestion_default");
+    expect(Array.isArray(snapshot.runningTasks)).toBe(true);
+    expect(Array.isArray(snapshot.recentTasks)).toBe(true);
+    expect(snapshot.recentTasks[0]?.label).toBe("默认抓取任务");
   });
 });
