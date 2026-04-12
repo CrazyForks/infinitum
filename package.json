@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "next build --webpack",
     "start": "next start",
+    "worker": "tsx scripts/run-worker.ts",
     "lint": "eslint .",
     "db:setup": "node scripts/setup-sqlite.mjs prisma/dev.db",
     "db:test:setup": "node scripts/setup-sqlite.mjs prisma/test.db --reset",
@@ -25,6 +26,7 @@
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "rss-parser": "^3.13.0",
+    "tsx": "^4.21.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {

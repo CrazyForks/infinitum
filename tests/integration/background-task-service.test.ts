@@ -7,6 +7,7 @@ import {
   enqueueTaskRun,
   listRecentTaskRuns,
 } from "@/lib/tasks/service";
+import { recoverStaleTaskRuns, runWorkerCycle } from "@/lib/tasks/worker";
 
 describe("background task persistence", () => {
   beforeEach(async () => {
@@ -94,5 +95,52 @@ describe("background task persistence", () => {
 
     expect(tasks).toHaveLength(2);
     expect(tasks[0]?.createdAt.getTime()).toBeGreaterThanOrEqual(tasks[1]?.createdAt.getTime() ?? 0);
+  });
+
+  it("marks stale running tasks as failed during recovery", async () => {
+    const taskRun = await prisma.backgroundTaskRun.create({
+      data: {
+        kind: "ingestion",
+        triggerType: "manual",
+        status: "running",
+        label: "默认抓取任务",
+        startedAt: new Date("2026-04-12T00:00:00.000Z"),
+      },
+    });
+
+    const recovered = await recoverStaleTaskRuns(new Date("2026-04-12T00:20:00.000Z"));
+    const updatedTaskRun = await prisma.backgroundTaskRun.findUniqueOrThrow({
+      where: { id: taskRun.id },
+    });
+
+    expect(recovered).toBe(1);
+    expect(updatedTaskRun.status).toBe("failed");
+    expect(updatedTaskRun.errorSummary).toContain("Worker exited");
+  });
+
+  it("enqueues a scheduled ingestion task when due", async () => {
+    await prisma.taskSchedule.create({
+      data: {
+        key: "ingestion_default",
+        enabled: true,
+        intervalMinutes: 60,
+        timezone: "Asia/Shanghai",
+        nextRunAt: new Date("2026-04-12T01:00:00.000Z"),
+      },
+    });
+
+    const result = await runWorkerCycle({
+      now: new Date("2026-04-12T01:00:00.000Z"),
+      executeTaskRun: async () => undefined,
+    });
+    const ingestionTasks = await prisma.backgroundTaskRun.findMany({
+      where: { kind: "ingestion" },
+      orderBy: { createdAt: "asc" },
+    });
+
+    expect(result.enqueuedScheduledRun).toBe(true);
+    expect(ingestionTasks).toHaveLength(1);
+    expect(ingestionTasks[0]?.triggerType).toBe("scheduled");
+    expect(ingestionTasks[0]?.status).toBe("running");
   });
 });

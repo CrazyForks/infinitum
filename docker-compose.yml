@@ -17,6 +17,21 @@ services:
     volumes:
       - infinitum-data:/app/data
       - ./config:/app/config:ro
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: infinitum:latest
+    restart: unless-stopped
+    env_file:
+      - .env.docker
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: file:/app/data/dev.db
+    command: ["sh", "./scripts/worker-entrypoint.sh"]
+    volumes:
+      - infinitum-data:/app/data
+      - ./config:/app/config:ro
 
 volumes:
   infinitum-data:
