@@ -5,6 +5,7 @@ import { assignItemToCluster, recomputeCluster } from "@/lib/clusters/service";
 import { prisma } from "@/lib/db";
 import { shouldTranslateTitle, stripHtmlTags } from "@/lib/feed/presentation";
 import { getIngestionRuntimeConfig } from "@/lib/settings/service";
+import { enqueueTaskRun, updateTaskRun } from "@/lib/tasks/service";
 
 type RegenerationTarget = "translation" | "summary";
 
@@ -30,6 +31,24 @@ async function resolveAiProvider(aiProvider?: AiProvider) {
     itemAnalysisPrompt: runtimeConfig.prompts.itemAnalysis,
     clusterSummaryPrompt: runtimeConfig.prompts.clusterSummary,
     clusterMatchPrompt: runtimeConfig.prompts.clusterMatch,
+  });
+}
+
+export async function enqueueItemRegenerationTask(itemId: string, target: RegenerationTarget) {
+  return enqueueTaskRun({
+    kind: target === "translation" ? "item_regenerate_translation" : "item_regenerate_summary",
+    triggerType: "admin_action",
+    label: target === "translation" ? "重生成翻译标题" : "重生成摘要",
+    entityId: itemId,
+  });
+}
+
+export async function enqueueItemReanalyzeTask(itemId: string) {
+  return enqueueTaskRun({
+    kind: "item_reanalyze",
+    triggerType: "admin_action",
+    label: "重新 AI 判定",
+    entityId: itemId,
   });
 }
 
@@ -87,6 +106,35 @@ export async function regenerateItemContent(
     where: { id: item.id },
     include: { source: true },
   });
+}
+
+export async function executeItemRegenerationTask(
+  taskRun: { id: string; entityId: string | null },
+  target: RegenerationTarget,
+  options?: RegenerationOptions,
+) {
+  if (!taskRun.entityId) {
+    throw new Error("Task entityId is required.");
+  }
+
+  await updateTaskRun(taskRun.id, {
+    status: "running",
+    progressLabel: "正在读取条目",
+  });
+
+  const item = await regenerateItemContent(taskRun.entityId, target, options);
+  const succeeded = !item.errorMessage;
+
+  await updateTaskRun(taskRun.id, {
+    status: succeeded ? "succeeded" : "failed",
+    progressCurrent: 1,
+    progressTotal: 1,
+    progressLabel: succeeded ? "已完成条目更新" : "条目更新失败",
+    finishedAt: new Date(),
+    errorSummary: item.errorMessage ?? null,
+  });
+
+  return item;
 }
 
 export async function restoreFilteredItem(itemId: string, options?: RegenerationOptions) {
@@ -182,4 +230,43 @@ export async function reanalyzeItem(itemId: string, options?: RegenerationOption
     where: { id: updated.id },
     include: { source: true },
   });
+}
+
+export async function executeItemReanalyzeTask(
+  taskRun: { id: string; entityId: string | null },
+  options?: RegenerationOptions,
+) {
+  if (!taskRun.entityId) {
+    throw new Error("Task entityId is required.");
+  }
+
+  await updateTaskRun(taskRun.id, {
+    status: "running",
+    progressLabel: "正在重新 AI 判定",
+  });
+
+  try {
+    const item = await reanalyzeItem(taskRun.entityId, options);
+
+    await updateTaskRun(taskRun.id, {
+      status: "succeeded",
+      progressCurrent: 1,
+      progressTotal: 1,
+      progressLabel: "已完成重新 AI 判定",
+      finishedAt: new Date(),
+      errorSummary: null,
+    });
+
+    return item;
+  } catch (error) {
+    await updateTaskRun(taskRun.id, {
+      status: "failed",
+      progressCurrent: 1,
+      progressTotal: 1,
+      progressLabel: "重新 AI 判定失败",
+      finishedAt: new Date(),
+      errorSummary: error instanceof Error ? error.message : "Unknown item reanalyze error",
+    });
+    throw error;
+  }
 }

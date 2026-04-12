@@ -2,8 +2,7 @@ import { z } from "zod";
 
 import { getAdminErrorStatus } from "@/lib/admin/http";
 import { requireAdmin } from "@/lib/admin/session";
-import { mapItemToFeedItem } from "@/lib/feed/repository";
-import { regenerateItemContent } from "@/lib/items/service";
+import { enqueueItemRegenerationTask } from "@/lib/items/service";
 
 const regenerateSchema = z.object({
   target: z.enum(["translation", "summary"]),
@@ -14,11 +13,11 @@ export async function POST(request: Request, context: RouteContext<"/api/admin/i
     await requireAdmin();
     const body = regenerateSchema.parse(await request.json());
     const { id } = await context.params;
-    const item = await regenerateItemContent(id, body.target);
+    const taskRun = await enqueueItemRegenerationTask(id, body.target);
 
     return Response.json({
-      item: mapItemToFeedItem(item),
-    });
+      taskRun,
+    }, { status: 202 });
   } catch (error) {
     return Response.json(
       {

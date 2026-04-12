@@ -1,6 +1,6 @@
 import type { Item, Source } from "@prisma/client";
 
-import type { AiProvider } from "@/lib/ai/provider";
+import { createAiProvider, type AiProvider } from "@/lib/ai/provider";
 import {
   createContentCluster,
   deleteCluster,
@@ -13,6 +13,8 @@ import {
 } from "@/lib/clusters/repository";
 import { prisma } from "@/lib/db";
 import { getDisplaySummary, getDisplayTitle } from "@/lib/feed/presentation";
+import { getIngestionRuntimeConfig } from "@/lib/settings/service";
+import { enqueueTaskRun, updateTaskRun } from "@/lib/tasks/service";
 
 const CLUSTER_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
 const CLUSTER_CANDIDATE_LIMIT = 5;
@@ -258,5 +260,58 @@ export async function recomputeAllClusters(aiProvider?: AiProvider) {
 
   for (const cluster of clusters) {
     await recomputeCluster(cluster.id, aiProvider);
+  }
+}
+
+export async function enqueueClusterSummaryTask(clusterId: string) {
+  return enqueueTaskRun({
+    kind: "cluster_regenerate_summary",
+    triggerType: "admin_action",
+    label: "重新生成聚合摘要",
+    entityId: clusterId,
+  });
+}
+
+export async function executeClusterSummaryTask(taskRun: { id: string; entityId: string | null }) {
+  if (!taskRun.entityId) {
+    throw new Error("Task entityId is required.");
+  }
+
+  await updateTaskRun(taskRun.id, {
+    status: "running",
+    progressLabel: "正在重新生成聚合摘要",
+  });
+
+  try {
+    const runtimeConfig = await getIngestionRuntimeConfig();
+    const cluster = await recomputeCluster(
+      taskRun.entityId,
+      createAiProvider(runtimeConfig.modelApi, {
+        itemAnalysisPrompt: runtimeConfig.prompts.itemAnalysis,
+        clusterSummaryPrompt: runtimeConfig.prompts.clusterSummary,
+        clusterMatchPrompt: runtimeConfig.prompts.clusterMatch,
+      }),
+    );
+
+    await updateTaskRun(taskRun.id, {
+      status: "succeeded",
+      progressCurrent: 1,
+      progressTotal: 1,
+      progressLabel: "已完成聚合摘要重生成",
+      finishedAt: new Date(),
+      errorSummary: null,
+    });
+
+    return cluster;
+  } catch (error) {
+    await updateTaskRun(taskRun.id, {
+      status: "failed",
+      progressCurrent: 1,
+      progressTotal: 1,
+      progressLabel: "聚合摘要重生成失败",
+      finishedAt: new Date(),
+      errorSummary: error instanceof Error ? error.message : "Unknown cluster summary error",
+    });
+    throw error;
   }
 }

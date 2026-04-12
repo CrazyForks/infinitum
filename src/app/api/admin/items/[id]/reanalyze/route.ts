@@ -1,17 +1,16 @@
 import { getAdminErrorStatus } from "@/lib/admin/http";
 import { requireAdmin } from "@/lib/admin/session";
-import { mapItemToReviewItem } from "@/lib/feed/repository";
-import { reanalyzeItem } from "@/lib/items/service";
+import { enqueueItemReanalyzeTask } from "@/lib/items/service";
 
 export async function POST(_request: Request, context: RouteContext<"/api/admin/items/[id]/reanalyze">) {
   try {
     await requireAdmin();
     const { id } = await context.params;
-    const item = await reanalyzeItem(id);
+    const taskRun = await enqueueItemReanalyzeTask(id);
 
     return Response.json({
-      item: mapItemToReviewItem(item),
-    });
+      taskRun,
+    }, { status: 202 });
   } catch (error) {
     return Response.json(
       {

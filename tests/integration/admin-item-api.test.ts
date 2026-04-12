@@ -1,17 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const requireAdmin = vi.fn();
-const regenerateItemContent = vi.fn();
-const mapItemToFeedItem = vi.fn((item) => ({
-  id: item.id,
-  title: item.translatedTitle || item.originalTitle,
-  originalUrl: item.originalUrl,
-  publishedAt: item.publishedAt.toISOString(),
-  sourceName: item.source.name,
-  author: item.author,
-  summary: item.summaryText,
-  canRegenerateTranslation: true,
-}));
+const enqueueItemReanalyzeTask = vi.fn();
+const enqueueItemRegenerationTask = vi.fn();
 
 vi.mock("@/lib/admin/session", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/admin/session")>();
@@ -23,11 +14,8 @@ vi.mock("@/lib/admin/session", async (importOriginal) => {
 });
 
 vi.mock("@/lib/items/service", () => ({
-  regenerateItemContent,
-}));
-
-vi.mock("@/lib/feed/repository", () => ({
-  mapItemToFeedItem,
+  enqueueItemReanalyzeTask,
+  enqueueItemRegenerationTask,
 }));
 
 afterEach(() => {
@@ -54,22 +42,18 @@ describe("/api/admin/items/[id]/regenerate", () => {
 
     expect(response.status).toBe(401);
     expect(json.error).toBe("Unauthorized");
-    expect(regenerateItemContent).not.toHaveBeenCalled();
+    expect(enqueueItemRegenerationTask).not.toHaveBeenCalled();
   });
 
-  it("returns the updated feed item for admins", async () => {
+  it("returns a queued task run for admins", async () => {
     requireAdmin.mockResolvedValue(undefined);
-    regenerateItemContent.mockResolvedValue({
-      id: "item-1",
-      originalTitle: "OpenAI ships a new toolkit",
-      translatedTitle: "新的中文标题",
-      originalUrl: "https://example.com/posts/1",
-      publishedAt: new Date("2026-04-10T09:00:00.000Z"),
-      summaryText: "新的摘要",
-      author: "Alex",
-      source: {
-        name: "Example Feed",
-      },
+    enqueueItemRegenerationTask.mockResolvedValue({
+      id: "task-1",
+      kind: "item_regenerate_summary",
+      status: "queued",
+      triggerType: "admin_action",
+      label: "重生成摘要",
+      entityId: "item-1",
     });
 
     const { POST } = await import("@/app/api/admin/items/[id]/regenerate/route");
@@ -85,9 +69,35 @@ describe("/api/admin/items/[id]/regenerate", () => {
     );
     const json = await response.json();
 
-    expect(response.status).toBe(200);
-    expect(regenerateItemContent).toHaveBeenCalledWith("item-1", "summary");
-    expect(json.item.id).toBe("item-1");
-    expect(json.item.summary).toBe("新的摘要");
+    expect(response.status).toBe(202);
+    expect(enqueueItemRegenerationTask).toHaveBeenCalledWith("item-1", "summary");
+    expect(json.taskRun.id).toBe("task-1");
+    expect(json.taskRun.kind).toBe("item_regenerate_summary");
+  });
+
+  it("returns a queued reanalyze task for admins", async () => {
+    requireAdmin.mockResolvedValue(undefined);
+    enqueueItemReanalyzeTask.mockResolvedValue({
+      id: "task-2",
+      kind: "item_reanalyze",
+      status: "queued",
+      triggerType: "admin_action",
+      label: "重新 AI 判定",
+      entityId: "item-1",
+    });
+
+    const { POST } = await import("@/app/api/admin/items/[id]/reanalyze/route");
+    const response = await POST(
+      new Request("http://localhost/api/admin/items/item-1/reanalyze", { method: "POST" }),
+      {
+        params: Promise.resolve({ id: "item-1" }),
+      },
+    );
+    const json = await response.json();
+
+    expect(response.status).toBe(202);
+    expect(enqueueItemReanalyzeTask).toHaveBeenCalledWith("item-1");
+    expect(json.taskRun.id).toBe("task-2");
+    expect(json.taskRun.kind).toBe("item_reanalyze");
   });
 });

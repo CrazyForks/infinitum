@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { prisma } from "@/lib/db";
 
 const requireAdmin = vi.fn();
+const enqueueClusterSummaryTask = vi.fn();
 
 vi.mock("@/lib/admin/session", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/admin/session")>();
@@ -10,6 +11,15 @@ vi.mock("@/lib/admin/session", async (importOriginal) => {
   return {
     ...actual,
     requireAdmin,
+  };
+});
+
+vi.mock("@/lib/clusters/service", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/clusters/service")>();
+
+  return {
+    ...actual,
+    enqueueClusterSummaryTask,
   };
 });
 
@@ -121,5 +131,31 @@ describe("/api/admin/clusters", () => {
 
     expect(response.status).toBe(200);
     expect(json.cluster.status).toBe("hidden");
+  });
+
+  it("queues a cluster summary regeneration task for admins", async () => {
+    requireAdmin.mockResolvedValue(undefined);
+    enqueueClusterSummaryTask.mockResolvedValue({
+      id: "task-cluster-1",
+      kind: "cluster_regenerate_summary",
+      status: "queued",
+      triggerType: "admin_action",
+      label: "重新生成聚合摘要",
+      entityId: "cluster-1",
+    });
+
+    const { POST } = await import("@/app/api/admin/clusters/[id]/regenerate-summary/route");
+    const response = await POST(
+      new Request("http://localhost/api/admin/clusters/cluster-1/regenerate-summary", { method: "POST" }),
+      {
+        params: Promise.resolve({ id: "cluster-1" }),
+      },
+    );
+    const json = await response.json();
+
+    expect(response.status).toBe(202);
+    expect(enqueueClusterSummaryTask).toHaveBeenCalledWith("cluster-1");
+    expect(json.taskRun.id).toBe("task-cluster-1");
+    expect(json.taskRun.kind).toBe("cluster_regenerate_summary");
   });
 });

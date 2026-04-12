@@ -1,16 +1,34 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { prisma } from "@/lib/db";
-import { regenerateItemContent } from "@/lib/items/service";
+import { enqueueItemReanalyzeTask, enqueueItemRegenerationTask, regenerateItemContent } from "@/lib/items/service";
 
 describe("regenerateItemContent", () => {
   beforeEach(async () => {
     await prisma.item.deleteMany();
     await prisma.fetchRun.deleteMany();
+    await prisma.backgroundTaskRun.deleteMany();
     await prisma.source.deleteMany();
     await prisma.sourceGroup.deleteMany();
     await prisma.blacklistKeyword.deleteMany();
     await prisma.appConfig.deleteMany();
+    await prisma.taskSchedule.deleteMany();
+  });
+
+  it("queues a summary regeneration task", async () => {
+    const taskRun = await enqueueItemRegenerationTask("item-1", "summary");
+
+    expect(taskRun.kind).toBe("item_regenerate_summary");
+    expect(taskRun.entityId).toBe("item-1");
+    expect(taskRun.status).toBe("queued");
+  });
+
+  it("queues an item reanalyze task", async () => {
+    const taskRun = await enqueueItemReanalyzeTask("item-1");
+
+    expect(taskRun.kind).toBe("item_reanalyze");
+    expect(taskRun.entityId).toBe("item-1");
+    expect(taskRun.status).toBe("queued");
   });
 
   it("regenerates only the translated title when requested", async () => {
