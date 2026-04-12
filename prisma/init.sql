@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS "content_clusters" (
 
 CREATE TABLE IF NOT EXISTS "fetch_runs" (
   "id" TEXT NOT NULL PRIMARY KEY,
+  "taskRunId" TEXT,
   "triggerType" TEXT NOT NULL,
   "status" TEXT NOT NULL DEFAULT 'running',
   "startedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -71,7 +72,40 @@ CREATE TABLE IF NOT EXISTS "fetch_runs" (
   "itemCount" INTEGER NOT NULL DEFAULT 0,
   "successCount" INTEGER NOT NULL DEFAULT 0,
   "failureCount" INTEGER NOT NULL DEFAULT 0,
-  "errorSummary" TEXT
+  "errorSummary" TEXT,
+  CONSTRAINT "fetch_runs_taskRunId_fkey" FOREIGN KEY ("taskRunId") REFERENCES "background_task_runs" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS "task_schedules" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "key" TEXT NOT NULL,
+  "enabled" BOOLEAN NOT NULL DEFAULT true,
+  "intervalMinutes" INTEGER NOT NULL,
+  "timezone" TEXT NOT NULL,
+  "lastHeartbeatAt" DATETIME,
+  "lastRunStartedAt" DATETIME,
+  "lastRunFinishedAt" DATETIME,
+  "lastRunStatus" TEXT,
+  "nextRunAt" DATETIME NOT NULL,
+  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" DATETIME NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS "background_task_runs" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "kind" TEXT NOT NULL,
+  "triggerType" TEXT NOT NULL,
+  "status" TEXT NOT NULL DEFAULT 'queued',
+  "label" TEXT NOT NULL,
+  "entityId" TEXT,
+  "progressCurrent" INTEGER NOT NULL DEFAULT 0,
+  "progressTotal" INTEGER NOT NULL DEFAULT 0,
+  "progressLabel" TEXT,
+  "startedAt" DATETIME,
+  "finishedAt" DATETIME,
+  "errorSummary" TEXT,
+  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" DATETIME NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS "source_groups" (
@@ -112,6 +146,10 @@ CREATE INDEX IF NOT EXISTS "items_clusterId_publishedAt_idx" ON "items"("cluster
 CREATE INDEX IF NOT EXISTS "items_qualityScore_publishedAt_idx" ON "items"("qualityScore", "publishedAt");
 CREATE UNIQUE INDEX IF NOT EXISTS "content_clusters_fingerprint_key" ON "content_clusters"("fingerprint");
 CREATE INDEX IF NOT EXISTS "content_clusters_status_latestPublishedAt_idx" ON "content_clusters"("status", "latestPublishedAt");
+CREATE UNIQUE INDEX IF NOT EXISTS "task_schedules_key_key" ON "task_schedules"("key");
+CREATE INDEX IF NOT EXISTS "background_task_runs_status_createdAt_idx" ON "background_task_runs"("status", "createdAt");
+CREATE INDEX IF NOT EXISTS "background_task_runs_kind_status_createdAt_idx" ON "background_task_runs"("kind", "status", "createdAt");
+CREATE INDEX IF NOT EXISTS "fetch_runs_taskRunId_idx" ON "fetch_runs"("taskRunId");
 CREATE INDEX IF NOT EXISTS "fetch_runs_startedAt_idx" ON "fetch_runs"("startedAt");
 CREATE UNIQUE INDEX IF NOT EXISTS "source_groups_name_key" ON "source_groups"("name");
 CREATE UNIQUE INDEX IF NOT EXISTS "blacklist_keywords_keyword_key" ON "blacklist_keywords"("keyword");

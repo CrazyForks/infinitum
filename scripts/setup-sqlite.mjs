@@ -60,3 +60,5 @@ ensureColumn(
   "clusterMatchPrompt",
   `TEXT NOT NULL DEFAULT '你是内容归组助手。请判断当前内容是否属于给定候选聚合组中的某一个。只返回 JSON，格式为 {"clusterId":"候选组ID"} 或 {"clusterId":null}。只有当候选组与当前内容描述的是同一事件、同一产品发布、同一公告或高度一致的主题时才匹配；如果只是大类相近但并非同一件事，请返回 null。'`,
 );
+
+ensureColumn("fetch_runs", "taskRunId", "TEXT");

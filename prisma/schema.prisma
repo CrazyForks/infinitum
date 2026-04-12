@@ -41,6 +41,28 @@ enum IngestionTrigger {
   manual
 }
 
+enum BackgroundTaskKind {
+  ingestion
+  item_regenerate_translation
+  item_regenerate_summary
+  item_reanalyze
+  cluster_regenerate_summary
+}
+
+enum BackgroundTaskTrigger {
+  scheduled
+  manual
+  admin_action
+}
+
+enum BackgroundTaskStatus {
+  queued
+  running
+  succeeded
+  failed
+  partial
+}
+
 enum ContentClusterKind {
   topic
 }
@@ -127,19 +149,61 @@ model ContentCluster {
 }
 
 model FetchRun {
-  id           String           @id @default(cuid())
+  id           String             @id @default(cuid())
+  taskRunId    String?
   triggerType  IngestionTrigger
-  status       FetchRunStatus   @default(running)
-  startedAt    DateTime         @default(now())
+  status       FetchRunStatus     @default(running)
+  startedAt    DateTime           @default(now())
   finishedAt   DateTime?
-  sourceCount  Int              @default(0)
-  itemCount    Int              @default(0)
-  successCount Int              @default(0)
-  failureCount Int              @default(0)
+  sourceCount  Int                @default(0)
+  itemCount    Int                @default(0)
+  successCount Int                @default(0)
+  failureCount Int                @default(0)
   errorSummary String?
+  taskRun      BackgroundTaskRun? @relation(fields: [taskRunId], references: [id], onDelete: SetNull)
 
+  @@index([taskRunId])
   @@index([startedAt])
   @@map("fetch_runs")
+}
+
+model TaskSchedule {
+  id                String                @id @default(cuid())
+  key               String                @unique
+  enabled           Boolean               @default(true)
+  intervalMinutes   Int
+  timezone          String
+  lastHeartbeatAt   DateTime?
+  lastRunStartedAt  DateTime?
+  lastRunFinishedAt DateTime?
+  lastRunStatus     BackgroundTaskStatus?
+  nextRunAt         DateTime
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
+  @@map("task_schedules")
+}
+
+model BackgroundTaskRun {
+  id              String                @id @default(cuid())
+  kind            BackgroundTaskKind
+  triggerType     BackgroundTaskTrigger
+  status          BackgroundTaskStatus  @default(queued)
+  label           String
+  entityId        String?
+  progressCurrent Int                   @default(0)
+  progressTotal   Int                   @default(0)
+  progressLabel   String?
+  startedAt       DateTime?
+  finishedAt      DateTime?
+  errorSummary    String?
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  fetchRuns       FetchRun[]
+
+  @@index([status, createdAt])
+  @@index([kind, status, createdAt])
+  @@map("background_task_runs")
 }
 
 model SourceGroup {
