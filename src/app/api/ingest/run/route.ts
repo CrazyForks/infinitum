@@ -1,7 +1,5 @@
 import { AdminAuthError, requireAdmin } from "@/lib/admin/session";
-import { hasActiveFetchRun } from "@/lib/feed/repository";
-import { toFetchRunSnapshot } from "@/lib/feed/repository";
-import { startIngestion } from "@/lib/ingestion/service";
+import { startIngestionTask } from "@/lib/ingestion/service";
 
 export async function POST() {
   try {
@@ -17,21 +15,21 @@ export async function POST() {
     }
   }
 
-  if (await hasActiveFetchRun()) {
+  try {
+    const taskRun = await startIngestionTask({ triggerType: "manual" });
+
     return Response.json(
       {
-        error: "An ingestion run is already in progress.",
+        taskRun,
+      },
+      { status: 202 },
+    );
+  } catch (error) {
+    return Response.json(
+      {
+        error: error instanceof Error ? error.message : "Failed to queue ingestion task.",
       },
       { status: 409 },
     );
   }
-
-  const run = await startIngestion({ trigger: "manual" });
-
-  return Response.json(
-    {
-      run: toFetchRunSnapshot(run),
-    },
-    { status: 202 },
-  );
 }

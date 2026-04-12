@@ -11,10 +11,12 @@ import { prisma } from "@/lib/db";
 import { getDisplaySummary, getDisplayTitle, shouldTranslateTitle } from "@/lib/feed/presentation";
 import type {
   ClusterDTO,
+  FeedGroupOption,
   FeedClusterPreviewItemDTO,
   FeedEntryDTO,
   FeedFilters,
   FeedItemDTO,
+  FeedSourceOption,
   FetchRunSnapshot,
   ReviewItemDTO,
   SourceConfig,
@@ -23,13 +25,7 @@ import type {
 const DISPLAYABLE_MODERATION_STATUSES = ["allowed", "restored"] as const;
 
 type ItemWithSource = Item & { source: Source };
-type ClusterWithItems = ContentCluster & { items: ItemWithSource[] };
-
-function isDisplayableModerationStatus(
-  status: Item["moderationStatus"],
-): status is (typeof DISPLAYABLE_MODERATION_STATUSES)[number] {
-  return DISPLAYABLE_MODERATION_STATUSES.includes(status as (typeof DISPLAYABLE_MODERATION_STATUSES)[number]);
-}
+type ItemWithSourceAndCluster = Item & { source: Source; cluster: ContentCluster | null };
 
 export async function syncSources(sourceConfigs: SourceConfig[]) {
   for (const source of sourceConfigs) {
@@ -79,9 +75,10 @@ export async function upsertItem(
   return prisma.item.create({ data });
 }
 
-export async function createFetchRun(triggerType: "scheduled" | "manual", startedAt: Date) {
+export async function createFetchRun(triggerType: "scheduled" | "manual", startedAt: Date, taskRunId?: string) {
   return prisma.fetchRun.create({
     data: {
+      taskRunId: taskRunId ?? null,
       triggerType,
       status: "running",
       startedAt,
@@ -203,76 +200,141 @@ export function mapItemToReviewItem(item: ItemWithSource): ReviewItemDTO {
   };
 }
 
-function mapClusterToFeedEntry(cluster: ClusterWithItems): FeedEntryDTO | null {
-  const displayableItems = cluster.items
-    .filter((item) => item.status === "processed")
-    .filter((item) => isDisplayableModerationStatus(item.moderationStatus))
-    .sort((left, right) => right.publishedAt.getTime() - left.publishedAt.getTime());
+function buildItemWhere(
+  filters: FeedFilters & { rangeStart: Date | null; rangeEnd: Date | null },
+  clusterId?: string,
+): Prisma.ItemWhereInput {
+  return {
+    status: "processed",
+    moderationStatus: {
+      in: [...DISPLAYABLE_MODERATION_STATUSES],
+    },
+    ...(clusterId ? { clusterId } : {}),
+    ...(filters.rangeStart || filters.rangeEnd
+      ? {
+          publishedAt: {
+            ...(filters.rangeStart ? { gte: filters.rangeStart } : {}),
+            ...(filters.rangeEnd ? { lte: filters.rangeEnd } : {}),
+          },
+        }
+      : {}),
+    source: {
+      is: {
+        enabled: true,
+        ...(filters.groupId ? { groupId: filters.groupId } : {}),
+        ...(filters.sourceId ? { id: filters.sourceId } : {}),
+      },
+    },
+    OR: [{ clusterId: null }, { cluster: { is: { status: "active" } } }],
+  };
+}
 
-  if (displayableItems.length === 0) {
-    return null;
+function mapClusterSubsetToEntry(cluster: ContentCluster, items: ItemWithSource[]): FeedEntryDTO {
+  const sortedItems = [...items].sort((left, right) => right.publishedAt.getTime() - left.publishedAt.getTime());
+
+  if (sortedItems.length === 1) {
+    return mapItemToFeedItem(sortedItems[0]!);
   }
 
-  if (displayableItems.length === 1) {
-    return mapItemToFeedItem(displayableItems[0]!);
-  }
-
-  const preview = displayableItems.slice(0, 3).map(mapItemToClusterPreview);
-  const sourceCount = new Set(displayableItems.map((item) => item.sourceId)).size;
+  const preview = sortedItems.slice(0, 3).map(mapItemToClusterPreview);
+  const latestPublishedAt = sortedItems[0]!.publishedAt.toISOString();
+  const score = Math.round(sortedItems.reduce((sum, item) => sum + item.qualityScore, 0) / sortedItems.length);
 
   return {
     id: cluster.id,
     type: "cluster",
     title: cluster.title,
     summary: cluster.summary,
-    publishedAt: cluster.latestPublishedAt.toISOString(),
-    latestPublishedAt: cluster.latestPublishedAt.toISOString(),
-    score: cluster.score,
-    sourceCount,
-    itemCount: displayableItems.length,
+    publishedAt: latestPublishedAt,
+    latestPublishedAt,
+    score,
+    sourceCount: new Set(sortedItems.map((item) => item.sourceId)).size,
+    itemCount: sortedItems.length,
     itemsPreview: preview,
-    hasMoreItems: displayableItems.length > preview.length,
+    hasMoreItems: sortedItems.length > preview.length,
   };
 }
 
-function buildFeedOrder(sort: FeedFilters["sort"]): Prisma.ContentClusterOrderByWithRelationInput[] {
-  if (sort === "score_desc") {
-    return [{ score: "desc" }, { latestPublishedAt: "desc" }, { itemCount: "desc" }, { createdAt: "desc" }];
+function compareFeedEntries(left: FeedEntryDTO, right: FeedEntryDTO, sort: FeedFilters["sort"]) {
+  if (sort === "score_desc" && right.score !== left.score) {
+    return right.score - left.score;
   }
 
-  return [{ latestPublishedAt: "desc" }, { score: "desc" }, { itemCount: "desc" }, { createdAt: "desc" }];
+  const publishedDelta = new Date(right.latestPublishedAt).getTime() - new Date(left.latestPublishedAt).getTime();
+  if (publishedDelta !== 0) {
+    return publishedDelta;
+  }
+
+  if (right.score !== left.score) {
+    return right.score - left.score;
+  }
+
+  if (right.itemCount !== left.itemCount) {
+    return right.itemCount - left.itemCount;
+  }
+
+  return right.id.localeCompare(left.id);
+}
+
+export async function listFeedFilterOptions(): Promise<{
+  groups: FeedGroupOption[];
+  sources: FeedSourceOption[];
+}> {
+  const sources = await prisma.source.findMany({
+    where: { enabled: true },
+    include: { group: true },
+    orderBy: [{ name: "asc" }],
+  });
+
+  const groups = new Map<string, FeedGroupOption>();
+
+  for (const source of sources) {
+    if (source.groupId && source.group) {
+      groups.set(source.groupId, {
+        id: source.groupId,
+        name: source.group.name,
+      });
+    }
+  }
+
+  return {
+    groups: [...groups.values()].sort((left, right) => left.name.localeCompare(right.name)),
+    sources: sources.map((source) => ({
+      id: source.id,
+      name: source.name,
+      groupId: source.groupId,
+    })),
+  };
 }
 
 export async function listFeedItems(filters: FeedFilters & { rangeStart: Date | null; rangeEnd: Date | null }, cursor?: string | null) {
   const take = 20;
-  const clusters = await prisma.contentCluster.findMany({
-    where: {
-      status: "active",
-      ...(filters.rangeStart || filters.rangeEnd
-        ? {
-            latestPublishedAt: {
-              ...(filters.rangeStart ? { gte: filters.rangeStart } : {}),
-              ...(filters.rangeEnd ? { lte: filters.rangeEnd } : {}),
-            },
-          }
-        : {}),
-    },
+  const items = await prisma.item.findMany({
+    where: buildItemWhere(filters),
     include: {
-      items: {
-        where: {
-          status: "processed",
-          moderationStatus: {
-            in: [...DISPLAYABLE_MODERATION_STATUSES],
-          },
-        },
-        include: { source: true },
-        orderBy: [{ publishedAt: "desc" }, { createdAt: "desc" }],
-      },
+      source: true,
+      cluster: true,
     },
-    orderBy: buildFeedOrder(filters.sort),
+    orderBy: [{ publishedAt: "desc" }, { createdAt: "desc" }],
   });
+  const groupedItems = new Map<string, ItemWithSource[]>();
+  const singleEntries: FeedEntryDTO[] = [];
 
-  const entries = clusters.map(mapClusterToFeedEntry).filter((entry): entry is FeedEntryDTO => Boolean(entry));
+  for (const item of items as ItemWithSourceAndCluster[]) {
+    if (!item.clusterId || !item.cluster) {
+      singleEntries.push(mapItemToFeedItem(item));
+      continue;
+    }
+
+    const current = groupedItems.get(item.clusterId) ?? [];
+    current.push(item);
+    groupedItems.set(item.clusterId, current);
+  }
+
+  const clusterEntries = [...groupedItems.entries()].map(([, clusterItems]) =>
+    mapClusterSubsetToEntry((clusterItems[0] as ItemWithSourceAndCluster).cluster!, clusterItems),
+  );
+  const entries = [...singleEntries, ...clusterEntries].sort((left, right) => compareFeedEntries(left, right, filters.sort));
   const startIndex = cursor ? Math.max(0, entries.findIndex((entry) => entry.id === cursor) + 1) : 0;
   const slice = entries.slice(startIndex, startIndex + take);
   const nextCursor = startIndex + take < entries.length ? slice[slice.length - 1]?.id ?? null : null;
@@ -283,15 +345,12 @@ export async function listFeedItems(filters: FeedFilters & { rangeStart: Date | 
   };
 }
 
-export async function listClusterItems(clusterId: string) {
+export async function listClusterItems(
+  clusterId: string,
+  filters: FeedFilters & { rangeStart: Date | null; rangeEnd: Date | null },
+) {
   const items = await prisma.item.findMany({
-    where: {
-      clusterId,
-      status: "processed",
-      moderationStatus: {
-        in: [...DISPLAYABLE_MODERATION_STATUSES],
-      },
-    },
+    where: buildItemWhere(filters, clusterId),
     include: { source: true },
     orderBy: [{ publishedAt: "desc" }, { createdAt: "desc" }],
   });

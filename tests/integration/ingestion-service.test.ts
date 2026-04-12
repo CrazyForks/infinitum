@@ -1,16 +1,26 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { prisma } from "@/lib/db";
-import { runIngestion } from "@/lib/ingestion/service";
+import { runIngestion, startIngestionTask } from "@/lib/ingestion/service";
 
 describe("runIngestion", () => {
   beforeEach(async () => {
     await prisma.item.deleteMany();
     await prisma.fetchRun.deleteMany();
+    await prisma.backgroundTaskRun.deleteMany();
     await prisma.source.deleteMany();
     await prisma.sourceGroup.deleteMany();
     await prisma.blacklistKeyword.deleteMany();
     await prisma.appConfig.deleteMany();
+    await prisma.taskSchedule.deleteMany();
+  });
+
+  it("creates a queued ingestion background task", async () => {
+    const taskRun = await startIngestionTask({ triggerType: "manual" });
+
+    expect(taskRun.kind).toBe("ingestion");
+    expect(taskRun.status).toBe("queued");
+    expect(taskRun.triggerType).toBe("manual");
   });
 
   it("stores processed items, preserves filtered items, and records the run", async () => {

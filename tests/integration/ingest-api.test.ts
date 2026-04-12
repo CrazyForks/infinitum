@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const hasActiveFetchRun = vi.fn();
 const getLatestFetchRun = vi.fn();
 const requireAdmin = vi.fn();
 const toFetchRunSnapshot = vi.fn((run) => ({
@@ -15,10 +14,9 @@ const toFetchRunSnapshot = vi.fn((run) => ({
   failureCount: run.failureCount,
   errorSummary: run.errorSummary,
 }));
-const startIngestion = vi.fn();
+const startIngestionTask = vi.fn();
 
 vi.mock("@/lib/feed/repository", () => ({
-  hasActiveFetchRun,
   getLatestFetchRun,
   toFetchRunSnapshot,
 }));
@@ -33,7 +31,7 @@ vi.mock("@/lib/admin/session", async (importOriginal) => {
 });
 
 vi.mock("@/lib/ingestion/service", () => ({
-  startIngestion,
+  startIngestionTask,
 }));
 
 afterEach(() => {
@@ -42,19 +40,20 @@ afterEach(() => {
 });
 
 describe("/api/ingest", () => {
-  it("starts ingestion asynchronously and returns 202 with the running snapshot", async () => {
+  it("starts ingestion asynchronously and returns 202 with the queued task snapshot", async () => {
     requireAdmin.mockResolvedValue(undefined);
-    hasActiveFetchRun.mockResolvedValue(false);
-    startIngestion.mockResolvedValue({
-      id: "run-1",
-      status: "running",
+    startIngestionTask.mockResolvedValue({
+      id: "task-1",
+      kind: "ingestion",
+      status: "queued",
       triggerType: "manual",
-      startedAt: new Date("2026-04-10T10:00:00.000Z"),
+      label: "默认抓取任务",
+      entityId: null,
+      progressCurrent: 0,
+      progressTotal: 0,
+      progressLabel: null,
+      startedAt: null,
       finishedAt: null,
-      sourceCount: 1,
-      itemCount: 0,
-      successCount: 0,
-      failureCount: 0,
       errorSummary: null,
     });
 
@@ -64,9 +63,9 @@ describe("/api/ingest", () => {
 
     expect(response.status).toBe(202);
     expect(requireAdmin).toHaveBeenCalledOnce();
-    expect(startIngestion).toHaveBeenCalledWith({ trigger: "manual" });
-    expect(json.run.id).toBe("run-1");
-    expect(json.run.status).toBe("running");
+    expect(startIngestionTask).toHaveBeenCalledWith({ triggerType: "manual" });
+    expect(json.taskRun.id).toBe("task-1");
+    expect(json.taskRun.status).toBe("queued");
   });
 
   it("rejects manual ingestion when the requester is not an admin", async () => {
@@ -77,7 +76,7 @@ describe("/api/ingest", () => {
     const json = await response.json();
 
     expect(response.status).toBe(401);
-    expect(startIngestion).not.toHaveBeenCalled();
+    expect(startIngestionTask).not.toHaveBeenCalled();
     expect(json.error).toBe("Unauthorized");
   });
 

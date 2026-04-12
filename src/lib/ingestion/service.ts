@@ -1,7 +1,8 @@
-import type { FetchRun, FetchRunStatus } from "@prisma/client";
+import type { BackgroundTaskRun, FetchRun, FetchRunStatus } from "@prisma/client";
 
 import { createAiProvider } from "@/lib/ai/provider";
 import { assignItemToCluster, recomputeAllClusters, recomputeCluster } from "@/lib/clusters/service";
+import { prisma } from "@/lib/db";
 import {
   completeFetchRun,
   createFetchRun,
@@ -21,6 +22,7 @@ import type {
   RunIngestionOptions,
 } from "@/lib/ingestion/types";
 import { getIngestionRuntimeConfig } from "@/lib/settings/service";
+import { enqueueTaskRun, updateTaskRun } from "@/lib/tasks/service";
 
 type PreparedFeedItem = {
   item: ParsedFeedItem;
@@ -391,6 +393,14 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
     failureCount,
     errorSummary: errors.length > 0 ? errors.join(" | ") : null,
   });
+  await options.onProgress?.({
+    status: "running",
+    sourceCount: sources.length,
+    itemCount: preparedItems.length,
+    successCount,
+    failureCount,
+    errorSummary: errors.length > 0 ? errors.join(" | ") : null,
+  });
 
   let progressChain = Promise.resolve();
   const enqueueProgressUpdate = (result: ProcessedItemRecord | null, issue?: string) => {
@@ -405,6 +415,14 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
       }
 
       await updateFetchRunProgress(run.id, {
+        sourceCount: sources.length,
+        itemCount: preparedItems.length,
+        successCount,
+        failureCount,
+        errorSummary: errors.length > 0 ? errors.join(" | ") : null,
+      });
+      await options.onProgress?.({
+        status: "running",
         sourceCount: sources.length,
         itemCount: preparedItems.length,
         successCount,
@@ -449,7 +467,7 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
         : "failed"
       : "succeeded";
 
-  return completeFetchRun(run.id, {
+  const completedRun = await completeFetchRun(run.id, {
     status,
     finishedAt: new Date(),
     sourceCount: sources.length,
@@ -458,13 +476,24 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
     failureCount,
     errorSummary: errors.length > 0 ? errors.join(" | ") : null,
   });
+
+  await options.onProgress?.({
+    status: completedRun.status,
+    sourceCount: completedRun.sourceCount,
+    itemCount: completedRun.itemCount,
+    successCount: completedRun.successCount,
+    failureCount: completedRun.failureCount,
+    errorSummary: completedRun.errorSummary,
+  });
+
+  return completedRun;
 }
 
 async function runExistingFetchRun(run: FetchRun, options: ResolvedRunOptions) {
   try {
     return await executeIngestion(run, options);
   } catch (error) {
-    return completeFetchRun(run.id, {
+    const failedRun = await completeFetchRun(run.id, {
       status: "failed",
       finishedAt: new Date(),
       sourceCount: 0,
@@ -473,6 +502,17 @@ async function runExistingFetchRun(run: FetchRun, options: ResolvedRunOptions) {
       failureCount: 1,
       errorSummary: error instanceof Error ? error.message : "Unknown ingestion error",
     });
+
+    await options.onProgress?.({
+      status: failedRun.status,
+      sourceCount: failedRun.sourceCount,
+      itemCount: failedRun.itemCount,
+      successCount: failedRun.successCount,
+      failureCount: failedRun.failureCount,
+      errorSummary: failedRun.errorSummary,
+    });
+
+    return failedRun;
   }
 }
 
@@ -481,6 +521,83 @@ export async function runIngestion(options?: Partial<RunIngestionOptions>) {
   const run = await createFetchRun(resolvedOptions.trigger, resolvedOptions.now);
 
   return runExistingFetchRun(run, resolvedOptions);
+}
+
+export async function startIngestionTask(input?: { triggerType?: "scheduled" | "manual" }) {
+  const activeTaskCount = await prisma.backgroundTaskRun.count({
+    where: {
+      kind: "ingestion",
+      status: {
+        in: ["queued", "running"],
+      },
+    },
+  });
+
+  if (activeTaskCount > 0) {
+    throw new Error("An ingestion run is already in progress.");
+  }
+
+  return enqueueTaskRun({
+    kind: "ingestion",
+    triggerType: input?.triggerType ?? "manual",
+    label: "默认抓取任务",
+  });
+}
+
+function buildTaskProgressLabel(snapshot: {
+  sourceCount: number;
+  successCount: number;
+  failureCount: number;
+  itemCount: number;
+}) {
+  if (snapshot.sourceCount === 0) {
+    return "正在同步信息源列表";
+  }
+
+  return `已处理 ${snapshot.successCount + snapshot.failureCount}/${snapshot.sourceCount} 个源，新增 ${snapshot.itemCount} 条，失败 ${snapshot.failureCount} 个源`;
+}
+
+export async function runIngestionTask(taskRun: BackgroundTaskRun, options?: Partial<RunIngestionOptions>) {
+  const triggerType = taskRun.triggerType === "scheduled" ? "scheduled" : "manual";
+  const resolvedOptions = await resolveRunOptions({
+    ...options,
+    trigger: triggerType,
+  });
+  const run = await createFetchRun(triggerType, resolvedOptions.now, taskRun.id);
+
+  await updateTaskRun(taskRun.id, {
+    status: "running",
+    startedAt: run.startedAt,
+    progressLabel: "正在同步信息源列表",
+  });
+
+  const completedRun = await runExistingFetchRun(run, {
+    ...resolvedOptions,
+    onProgress: async (snapshot) => {
+      await updateTaskRun(taskRun.id, {
+        status: snapshot.status,
+        progressCurrent: snapshot.successCount + snapshot.failureCount,
+        progressTotal: snapshot.sourceCount,
+        progressLabel: buildTaskProgressLabel(snapshot),
+        errorSummary: snapshot.errorSummary ?? null,
+        finishedAt:
+          snapshot.status === "running"
+            ? null
+            : new Date(),
+      });
+    },
+  });
+
+  await updateTaskRun(taskRun.id, {
+    status: completedRun.status,
+    progressCurrent: completedRun.successCount + completedRun.failureCount,
+    progressTotal: completedRun.sourceCount,
+    progressLabel: buildTaskProgressLabel(completedRun),
+    errorSummary: completedRun.errorSummary ?? null,
+    finishedAt: completedRun.finishedAt,
+  });
+
+  return completedRun;
 }
 
 export async function startIngestion(options?: Partial<RunIngestionOptions>) {

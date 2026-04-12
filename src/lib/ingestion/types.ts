@@ -14,8 +14,15 @@ export type ParsedFeedItem = {
   contentSnippet?: string | null;
 };
 
+export type ParsedFeed = {
+  title?: string | null;
+  link?: string | null;
+  feedUrl?: string | null;
+  items?: ParsedFeedItem[];
+};
+
 export type RssParserLike = {
-  parseURL(url: string): Promise<{ items?: ParsedFeedItem[] }>;
+  parseURL(url: string): Promise<ParsedFeed>;
 };
 
 export type ArticleFetcher = (url: string) => Promise<string | null>;
@@ -34,4 +41,12 @@ export type RunIngestionOptions = {
   blacklist: string[];
   itemConcurrency: number;
   now?: Date;
+  onProgress?: (snapshot: {
+    status: "running" | "succeeded" | "failed" | "partial";
+    sourceCount: number;
+    itemCount: number;
+    successCount: number;
+    failureCount: number;
+    errorSummary?: string | null;
+  }) => Promise<void> | void;
 };
