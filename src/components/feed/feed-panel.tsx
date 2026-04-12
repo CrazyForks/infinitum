@@ -8,13 +8,16 @@ import { RANGE_OPTIONS, SORT_OPTIONS } from "@/lib/feed/range";
 import type {
   FeedClusterPreviewItemDTO,
   FeedEntryDTO,
+  FeedGroupOption,
   FeedItemDTO,
   FeedRange,
+  FeedSourceOption,
   FeedSort,
   FetchRunSnapshot,
 } from "@/lib/feed/types";
 
 const STATUS_POLL_INTERVAL_MS = 2_000;
+const DISPLAY_TIME_ZONE = "Asia/Shanghai";
 
 type FeedPanelProps = {
   initialItems: FeedEntryDTO[];
@@ -25,6 +28,10 @@ type FeedPanelProps = {
   initialNextCursor: string | null;
   initialStatus: FetchRunSnapshot | null;
   isAdmin: boolean;
+  initialGroupId?: string | null;
+  initialSourceId?: string | null;
+  availableGroups?: FeedGroupOption[];
+  availableSources?: FeedSourceOption[];
 };
 
 type FeedQueryState = {
@@ -32,6 +39,8 @@ type FeedQueryState = {
   sort: FeedSort;
   startDate: string | null;
   endDate: string | null;
+  groupId: string | null;
+  sourceId: string | null;
 };
 
 function formatDate(value: string): string {
@@ -41,6 +50,7 @@ function formatDate(value: string): string {
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: DISPLAY_TIME_ZONE,
   }).format(new Date(value));
 }
 
@@ -75,11 +85,18 @@ function formatRangeLabel(range: FeedRange, startDate: string | null, endDate: s
   return RANGE_OPTIONS.find((option) => option.value === range)?.label ?? "7天";
 }
 
-function buildFeedSearch({ range, sort, startDate, endDate }: FeedQueryState, cursor?: string | null): string {
+function normalizeOptionalId(value: string | null | undefined): string | null {
+  const normalized = value?.trim();
+  return normalized ? normalized : null;
+}
+
+function buildFeedSearch({ range, sort, startDate, endDate, groupId, sourceId }: FeedQueryState, cursor?: string | null): string {
   const search = new URLSearchParams({
     range,
     sort,
   });
+  const normalizedGroupId = normalizeOptionalId(groupId);
+  const normalizedSourceId = normalizeOptionalId(sourceId);
 
   if (startDate) {
     search.set("start", startDate);
@@ -87,6 +104,14 @@ function buildFeedSearch({ range, sort, startDate, endDate }: FeedQueryState, cu
 
   if (endDate) {
     search.set("end", endDate);
+  }
+
+  if (normalizedGroupId) {
+    search.set("groupId", normalizedGroupId);
+  }
+
+  if (normalizedSourceId) {
+    search.set("sourceId", normalizedSourceId);
   }
 
   if (cursor) {
@@ -105,18 +130,29 @@ export function FeedPanel({
   initialNextCursor,
   initialStatus,
   isAdmin,
+  initialGroupId = null,
+  initialSourceId = null,
+  availableGroups = [],
+  availableSources = [],
 }: FeedPanelProps) {
   const [items, setItems] = useState(initialItems);
   const [range, setRange] = useState<FeedRange>(initialRange);
   const [sort, setSort] = useState<FeedSort>(initialSort);
   const [startDate, setStartDate] = useState<string | null>(initialStartDate);
   const [endDate, setEndDate] = useState<string | null>(initialEndDate);
+  const [groupId, setGroupId] = useState<string | null>(normalizeOptionalId(initialGroupId));
+  const [sourceId, setSourceId] = useState<string | null>(normalizeOptionalId(initialSourceId));
   const [nextCursor, setNextCursor] = useState<string | null>(initialNextCursor);
   const [status, setStatus] = useState<FetchRunSnapshot | null>(initialStatus);
+  const [queuedRefreshAt, setQueuedRefreshAt] = useState<string | null>(null);
   const [expandedClusters, setExpandedClusters] = useState<Record<string, FeedClusterPreviewItemDTO[]>>({});
   const [openClusters, setOpenClusters] = useState<Record<string, boolean>>({});
   const [isPending, startTransition] = useTransition();
   const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
+  const visibleSources = useMemo(
+    () => availableSources.filter((source) => (!groupId ? true : source.groupId === groupId)),
+    [availableSources, groupId],
+  );
 
   const summary = useMemo(
     () => ({
@@ -136,11 +172,13 @@ export function FeedPanel({
       sort: FeedSort;
       start: string | null;
       end: string | null;
+      groupId: string | null;
+      sourceId: string | null;
     };
   }
 
-  async function fetchClusterItems(clusterId: string) {
-    const response = await fetch(`/api/feed/clusters/${clusterId}`);
+  async function fetchClusterItems(clusterId: string, query: FeedQueryState) {
+    const response = await fetch(`/api/feed/clusters/${clusterId}?${buildFeedSearch(query)}`);
     const payload = (await response.json()) as {
       items: FeedClusterPreviewItemDTO[];
     };
@@ -155,6 +193,8 @@ export function FeedPanel({
       setSort(payload.sort);
       setStartDate(payload.start);
       setEndDate(payload.end);
+      setGroupId(payload.groupId);
+      setSourceId(payload.sourceId);
       setItems(payload.items);
       setNextCursor(payload.nextCursor);
       setExpandedClusters({});
@@ -169,6 +209,8 @@ export function FeedPanel({
       sort,
       startDate: null,
       endDate: null,
+      groupId,
+      sourceId,
     });
   };
 
@@ -178,6 +220,8 @@ export function FeedPanel({
       sort,
       startDate,
       endDate,
+      groupId,
+      sourceId,
     });
   };
 
@@ -187,6 +231,8 @@ export function FeedPanel({
       sort,
       startDate: null,
       endDate: null,
+      groupId,
+      sourceId,
     });
   };
 
@@ -196,6 +242,36 @@ export function FeedPanel({
       sort: nextSort,
       startDate,
       endDate,
+      groupId,
+      sourceId,
+    });
+  };
+
+  const changeGroup = (nextGroupId: string) => {
+    const normalizedGroupId = normalizeOptionalId(nextGroupId);
+    const nextSourceId =
+      normalizedGroupId && sourceId && !availableSources.some((source) => source.id === sourceId && source.groupId === normalizedGroupId)
+        ? null
+        : sourceId;
+
+    loadFeed({
+      range,
+      sort,
+      startDate,
+      endDate,
+      groupId: normalizedGroupId,
+      sourceId: nextSourceId,
+    });
+  };
+
+  const changeSource = (nextSourceId: string) => {
+    loadFeed({
+      range,
+      sort,
+      startDate,
+      endDate,
+      groupId,
+      sourceId: normalizeOptionalId(nextSourceId),
     });
   };
 
@@ -205,9 +281,12 @@ export function FeedPanel({
     }
 
     startTransition(async () => {
+      const queuedAt = new Date().toISOString();
       const response = await fetch("/api/ingest/run", { method: "POST" });
       const payload = (await response.json()) as {
-        run?: FetchRunSnapshot | null;
+        taskRun?: {
+          id: string;
+        } | null;
         error?: string;
       };
 
@@ -216,8 +295,8 @@ export function FeedPanel({
         return;
       }
 
-      setStatus(payload.run ?? null);
-      setRefreshMessage("抓取任务已启动，正在后台处理中。");
+      setQueuedRefreshAt(payload.taskRun ? queuedAt : null);
+      setRefreshMessage("抓取任务已进入队列，等待后台执行。");
     });
   };
 
@@ -280,7 +359,14 @@ export function FeedPanel({
       const nextOpen = !openClusters[clusterId];
 
       if (nextOpen && !expandedClusters[clusterId]) {
-        const clusterItems = await fetchClusterItems(clusterId);
+        const clusterItems = await fetchClusterItems(clusterId, {
+          range,
+          sort,
+          startDate,
+          endDate,
+          groupId,
+          sourceId,
+        });
         setExpandedClusters((current) => ({
           ...current,
           [clusterId]: clusterItems,
@@ -295,25 +381,47 @@ export function FeedPanel({
   };
 
   useEffect(() => {
-    if (status?.status !== "running") {
+    if (status?.status !== "running" && !queuedRefreshAt) {
       return;
     }
 
-    const timer = window.setTimeout(() => {
+    const timer = window.setInterval(() => {
       startTransition(async () => {
         const response = await fetch("/api/ingest/status");
         const payload = (await response.json()) as {
           run?: FetchRunSnapshot | null;
         };
 
-        setStatus(payload.run ?? null);
+        if (!payload.run) {
+          return;
+        }
 
-        if (payload.run && payload.run.status !== "running") {
+        if (queuedRefreshAt) {
+          const runStartedAt = new Date(payload.run.startedAt).getTime();
+          const queuedAt = new Date(queuedRefreshAt).getTime();
+
+          if (runStartedAt < queuedAt) {
+            return;
+          }
+        }
+
+        setStatus(payload.run);
+
+        if (payload.run.status === "running") {
+          setQueuedRefreshAt(null);
+          return;
+        }
+
+        setQueuedRefreshAt(null);
+
+        if (payload.run.status !== "running") {
           const feedPayload = await fetchFeed({
             range,
             sort,
             startDate,
             endDate,
+            groupId,
+            sourceId,
           });
           setItems(feedPayload.items);
           setNextCursor(feedPayload.nextCursor);
@@ -329,9 +437,9 @@ export function FeedPanel({
     }, STATUS_POLL_INTERVAL_MS);
 
     return () => {
-      window.clearTimeout(timer);
+      window.clearInterval(timer);
     };
-  }, [endDate, range, sort, startDate, startTransition, status]);
+  }, [endDate, groupId, queuedRefreshAt, range, sort, sourceId, startDate, startTransition, status]);
 
   const loadMore = () => {
     if (!nextCursor) {
@@ -345,6 +453,8 @@ export function FeedPanel({
           sort,
           startDate,
           endDate,
+          groupId,
+          sourceId,
         },
         nextCursor,
       );
@@ -421,6 +531,40 @@ export function FeedPanel({
                 {SORT_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className={styles.sortField}>
+              <span className={styles.controlLabel}>分组</span>
+              <select
+                className={styles.sortSelect}
+                aria-label="分组"
+                value={groupId ?? ""}
+                onChange={(event) => changeGroup(event.target.value)}
+                disabled={isPending}
+              >
+                <option value="">全部分组</option>
+                {availableGroups.map((group) => (
+                  <option key={group.id} value={group.id}>
+                    {group.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className={styles.sortField}>
+              <span className={styles.controlLabel}>信息源</span>
+              <select
+                className={styles.sortSelect}
+                aria-label="信息源"
+                value={sourceId ?? ""}
+                onChange={(event) => changeSource(event.target.value)}
+                disabled={isPending}
+              >
+                <option value="">全部信息源</option>
+                {visibleSources.map((source) => (
+                  <option key={source.id} value={source.id}>
+                    {source.name}
                   </option>
                 ))}
               </select>

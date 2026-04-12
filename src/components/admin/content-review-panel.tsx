@@ -42,11 +42,21 @@ export function ContentReviewPanel() {
   const postAction = (
     url: string,
     successMessage: string,
-    onSuccess?: (payload: { item?: ReviewItemDTO; cluster?: ClusterDTO | null; error?: string }) => void,
+    onSuccess?: (payload: {
+      item?: ReviewItemDTO;
+      cluster?: ClusterDTO | null;
+      taskRun?: { id: string; kind?: string };
+      error?: string;
+    }) => void,
   ) => {
     startTransition(async () => {
       const response = await fetch(url, { method: "POST" });
-      const payload = (await response.json()) as { error?: string };
+      const payload = (await response.json()) as {
+        item?: ReviewItemDTO;
+        cluster?: ClusterDTO | null;
+        taskRun?: { id: string; kind?: string };
+        error?: string;
+      };
 
       if (!response.ok || payload.error) {
         setMessage(payload.error ?? "操作失败");
@@ -72,6 +82,9 @@ export function ContentReviewPanel() {
           </Link>
           <Link className={styles.linkButton} href="/admin/settings">
             后台设置
+          </Link>
+          <Link className={styles.linkButton} href="/admin/monitor">
+            任务监控
           </Link>
         </div>
       </div>
@@ -133,7 +146,7 @@ export function ContentReviewPanel() {
                     type="button"
                     disabled={isPending}
                     onClick={() =>
-                      postAction(`/api/admin/items/${item.id}/reanalyze`, "已重新 AI 判定。", (payload) => {
+                      postAction(`/api/admin/items/${item.id}/reanalyze`, "已创建后台任务，正在处理中。", (payload) => {
                         if (payload.item?.moderationStatus !== "filtered") {
                           setFilteredItems((current) => current.filter((entry) => entry.id !== item.id));
                         }
@@ -200,7 +213,7 @@ export function ContentReviewPanel() {
                     type="button"
                     disabled={isPending}
                     onClick={() =>
-                      postAction(`/api/admin/clusters/${cluster.id}/regenerate-summary`, "聚合摘要已重新生成。")
+                      postAction(`/api/admin/clusters/${cluster.id}/regenerate-summary`, "已创建后台任务，正在处理中。")
                     }
                   >
                     重新生成聚合摘要

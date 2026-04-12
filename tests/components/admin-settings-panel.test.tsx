@@ -74,4 +74,95 @@ describe("AdminSettingsPanel", () => {
       });
     });
   });
+
+  it("auto-fills source metadata from an RSS URL", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          source: {
+            name: "Resolved Feed",
+            rssUrl: "https://feeds.example.com/feed.xml",
+            siteUrl: "https://feeds.example.com",
+          },
+        }),
+      ),
+    );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <AdminSettingsPanel
+        initialSettings={{
+          appConfig: {
+            ingestionItemConcurrency: 3,
+            modelApi: {
+              baseURL: "https://example.com/v1",
+              model: "gpt-4.1-mini",
+              apiKeyMasked: "••••••••1234",
+              hasApiKey: true,
+            },
+            prompts: {
+              itemAnalysis: "默认单条分析提示词",
+              clusterSummary: "默认聚合摘要提示词",
+              clusterMatch: "默认归组判定提示词",
+            },
+          },
+          blacklistKeywords: [],
+          groups: [{ id: "group-1", name: "Core" }],
+          sources: [],
+        }}
+      />,
+    );
+
+    const inputs = screen.getAllByPlaceholderText("RSS URL");
+    await user.type(inputs[0]!, "https://feeds.example.com/feed.xml");
+    await user.click(screen.getByRole("button", { name: "根据 RSS 自动填充" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/admin/settings/sources/resolve", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          rssUrl: "https://feeds.example.com/feed.xml",
+        }),
+      });
+    });
+
+    const nameInput = screen.getAllByPlaceholderText("名称")[0] as HTMLInputElement;
+    const siteUrlInput = screen.getAllByPlaceholderText("站点 URL")[0] as HTMLInputElement;
+
+    expect(nameInput.value).toBe("Resolved Feed");
+    expect(siteUrlInput.value).toBe("https://feeds.example.com");
+  });
+
+  it("shows the task monitor navigation link", () => {
+    render(
+      <AdminSettingsPanel
+        initialSettings={{
+          appConfig: {
+            ingestionItemConcurrency: 3,
+            modelApi: {
+              baseURL: "https://example.com/v1",
+              model: "gpt-4.1-mini",
+              apiKeyMasked: "••••••••1234",
+              hasApiKey: true,
+            },
+            prompts: {
+              itemAnalysis: "默认单条分析提示词",
+              clusterSummary: "默认聚合摘要提示词",
+              clusterMatch: "默认归组判定提示词",
+            },
+          },
+          blacklistKeywords: [],
+          groups: [],
+          sources: [],
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("link", { name: "任务监控" })).toHaveAttribute("href", "/admin/monitor");
+  });
 });

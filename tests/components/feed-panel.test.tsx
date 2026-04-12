@@ -54,6 +54,42 @@ afterEach(() => {
 });
 
 describe("FeedPanel", () => {
+  it("formats published timestamps with an explicit timezone to avoid hydration mismatch", () => {
+    function MockDateTimeFormat(locale?: string | string[], options?: Intl.DateTimeFormatOptions) {
+      return {
+        format: () => "2026/04/10 17:00",
+        resolvedOptions: () => ({
+          locale: Array.isArray(locale) ? locale[0] ?? "zh-CN" : locale ?? "zh-CN",
+          calendar: "gregory",
+          numberingSystem: "latn",
+          timeZone: options?.timeZone ?? "UTC",
+        }),
+      } as Intl.DateTimeFormat;
+    }
+
+    const dateTimeFormatSpy = vi.spyOn(Intl, "DateTimeFormat").mockImplementation(MockDateTimeFormat as typeof Intl.DateTimeFormat);
+
+    render(
+      <FeedPanel
+        initialItems={initialEntries}
+        initialRange="7d"
+        initialSort="time_desc"
+        initialStartDate={null}
+        initialEndDate={null}
+        initialNextCursor={null}
+        initialStatus={null}
+        isAdmin={false}
+      />,
+    );
+
+    expect(dateTimeFormatSpy).toHaveBeenCalledWith(
+      "zh-CN",
+      expect.objectContaining({
+        timeZone: "Asia/Shanghai",
+      }),
+    );
+  });
+
   it("renders the mixed feed and refetches when the range changes", async () => {
     const user = userEvent.setup();
     const fetchMock = vi
@@ -156,7 +192,7 @@ describe("FeedPanel", () => {
 
   it("loads cluster items on demand when expanded", async () => {
     const user = userEvent.setup();
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () =>
       new Response(
         JSON.stringify({
           items: [
@@ -194,7 +230,7 @@ describe("FeedPanel", () => {
     await user.click(screen.getByRole("button", { name: "展开相关内容" }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("/api/feed/clusters/cluster-1");
+      expect(fetchMock).toHaveBeenCalledWith("/api/feed/clusters/cluster-1?range=7d&sort=time_desc");
     });
 
     expect(await screen.findByText("详细标题")).toBeInTheDocument();
@@ -278,6 +314,53 @@ describe("FeedPanel", () => {
     expect(screen.getByText("刷新后的标题")).toBeInTheDocument();
   });
 
+  it("queues ingestion from the admin refresh button", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          taskRun: {
+            id: "task-1",
+            kind: "ingestion",
+            status: "queued",
+            triggerType: "manual",
+            label: "默认抓取任务",
+            entityId: null,
+            progressCurrent: 0,
+            progressTotal: 0,
+            progressLabel: null,
+            startedAt: null,
+            finishedAt: null,
+            errorSummary: null,
+          },
+        }),
+      ),
+    );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <FeedPanel
+        initialItems={initialEntries}
+        initialRange="7d"
+        initialSort="time_desc"
+        initialStartDate={null}
+        initialEndDate={null}
+        initialNextCursor={null}
+        initialStatus={null}
+        isAdmin
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "立即刷新" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/ingest/run", { method: "POST" });
+    });
+
+    expect(screen.getByText("抓取任务已进入队列，等待后台执行。")).toBeInTheDocument();
+  });
+
   it("hides admin-only controls for anonymous visitors", () => {
     render(
       <FeedPanel
@@ -348,5 +431,58 @@ describe("FeedPanel", () => {
     });
 
     expect(await screen.findByText("重生成后的摘要")).toBeInTheDocument();
+  });
+
+  it("requests feed data with group and source filters while preserving the current range inputs", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () =>
+      new Response(
+        JSON.stringify({
+          items: initialEntries,
+          nextCursor: null,
+          range: "7d" satisfies FeedRange,
+          sort: "score_desc" satisfies FeedSort,
+          start: "2026-04-01",
+          end: "2026-04-10",
+          groupId: "group-1",
+          sourceId: "source-2",
+        }),
+      ),
+    );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <FeedPanel
+        initialItems={initialEntries}
+        initialRange="7d"
+        initialSort="score_desc"
+        initialStartDate="2026-04-01"
+        initialEndDate="2026-04-10"
+        initialNextCursor={null}
+        initialStatus={null}
+        isAdmin={false}
+        initialGroupId=""
+        initialSourceId=""
+        availableGroups={[
+          { id: "group-1", name: "Core" },
+          { id: "group-2", name: "Research" },
+        ]}
+        availableSources={[
+          { id: "source-1", name: "Feed One", groupId: "group-1" },
+          { id: "source-2", name: "Feed Two", groupId: "group-1" },
+          { id: "source-3", name: "Feed Three", groupId: "group-2" },
+        ]}
+      />,
+    );
+
+    await user.selectOptions(screen.getByLabelText("分组"), "group-1");
+    await user.selectOptions(screen.getByLabelText("信息源"), "source-2");
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/feed?range=7d&sort=score_desc&start=2026-04-01&end=2026-04-10&groupId=group-1&sourceId=source-2",
+      );
+    });
   });
 });

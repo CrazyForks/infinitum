@@ -29,6 +29,7 @@ export function AdminSettingsPanel({ initialSettings }: AdminSettingsPanelProps)
   const [clusterMatchPrompt, setClusterMatchPrompt] = useState(initialSettings.appConfig.prompts.clusterMatch);
   const [blacklistText, setBlacklistText] = useState(initialSettings.blacklistKeywords.join("\n"));
   const [newGroupName, setNewGroupName] = useState("");
+  const [opmlFile, setOpmlFile] = useState<File | null>(null);
   const [newSource, setNewSource] = useState({
     name: "",
     rssUrl: "",
@@ -62,6 +63,83 @@ export function AdminSettingsPanel({ initialSettings }: AdminSettingsPanelProps)
     });
   };
 
+  const resolveSourceFromRss = () => {
+    if (!newSource.rssUrl.trim()) {
+      setMessage("请先输入 RSS URL。");
+      return;
+    }
+
+    startTransition(async () => {
+      const response = await fetch("/api/admin/settings/sources/resolve", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          rssUrl: newSource.rssUrl.trim(),
+        }),
+      });
+      const payload = (await response.json()) as {
+        source?: {
+          name: string;
+          rssUrl: string;
+          siteUrl: string;
+        };
+        error?: string;
+      };
+
+      if (!response.ok || payload.error || !payload.source) {
+        setMessage(payload.error ?? "RSS 解析失败");
+        return;
+      }
+
+      setNewSource((current) => ({
+        ...current,
+        name: payload.source!.name,
+        siteUrl: payload.source!.siteUrl,
+      }));
+      setMessage("已根据 RSS 自动填充信息源基本信息。");
+    });
+  };
+
+  const importOpml = () => {
+    if (!opmlFile) {
+      setMessage("请先选择 OPML 文件。");
+      return;
+    }
+
+    startTransition(async () => {
+      const opmlText = await opmlFile.text();
+      const response = await fetch("/api/admin/settings/sources/import", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ opmlText }),
+      });
+      const payload = (await response.json()) as {
+        summary?: {
+          createdCount: number;
+          updatedCount: number;
+          failedCount: number;
+        };
+        error?: string;
+      };
+
+      if (!response.ok || payload.error || !payload.summary) {
+        setMessage(payload.error ?? "OPML 导入失败");
+        return;
+      }
+
+      setMessage(
+        `OPML 导入完成：新建 ${payload.summary.createdCount} 个，更新 ${payload.summary.updatedCount} 个，失败 ${payload.summary.failedCount} 个。`,
+      );
+      window.setTimeout(() => {
+        refreshPage();
+      }, 600);
+    });
+  };
+
   return (
     <div className={styles.settingsShell}>
       <div className={styles.toolbar}>
@@ -76,6 +154,9 @@ export function AdminSettingsPanel({ initialSettings }: AdminSettingsPanelProps)
           </Link>
           <Link className={styles.linkButton} href="/admin/content">
             内容审核
+          </Link>
+          <Link className={styles.linkButton} href="/admin/monitor">
+            任务监控
           </Link>
           <button
             className={styles.linkButton}
@@ -252,6 +333,18 @@ export function AdminSettingsPanel({ initialSettings }: AdminSettingsPanelProps)
 
       <section className={styles.section}>
         <h2 className={styles.sectionTitle}>信息源管理</h2>
+        <div className={styles.inlineForm}>
+          <input
+            className={styles.input}
+            aria-label="OPML 文件"
+            type="file"
+            accept=".opml,.xml,text/xml,application/xml"
+            onChange={(event) => setOpmlFile(event.target.files?.[0] ?? null)}
+          />
+          <button className={styles.secondaryButton} type="button" onClick={importOpml} disabled={isPending || !opmlFile}>
+            导入 OPML
+          </button>
+        </div>
         <div className={styles.sourceEditor}>
           <input
             className={styles.input}
@@ -294,13 +387,21 @@ export function AdminSettingsPanel({ initialSettings }: AdminSettingsPanelProps)
           <label className={styles.checkbox}>
             <input
               type="checkbox"
-              checked={newSource.fetchFullTextWhenMissing}
-              onChange={(event) =>
-                setNewSource((current) => ({ ...current, fetchFullTextWhenMissing: event.target.checked }))
-              }
-            />
-            缺全文时补抓
+            checked={newSource.fetchFullTextWhenMissing}
+            onChange={(event) =>
+              setNewSource((current) => ({ ...current, fetchFullTextWhenMissing: event.target.checked }))
+            }
+          />
+          缺全文时补抓
           </label>
+          <button
+            className={styles.secondaryButton}
+            type="button"
+            onClick={resolveSourceFromRss}
+            disabled={isPending || !newSource.rssUrl.trim()}
+          >
+            根据 RSS 自动填充
+          </button>
           <button
             className={styles.primaryButton}
             type="button"
