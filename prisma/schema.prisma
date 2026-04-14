@@ -61,6 +61,7 @@ enum BackgroundTaskStatus {
   succeeded
   failed
   partial
+  cancelled
 }
 
 enum ContentClusterKind {
@@ -194,6 +195,9 @@ model BackgroundTaskRun {
   progressCurrent Int                   @default(0)
   progressTotal   Int                   @default(0)
   progressLabel   String?
+  aiCallCountActual Int                 @default(0)
+  aiCallCountEstimated Int              @default(0)
+  cancelRequestedAt DateTime?
   startedAt       DateTime?
   finishedAt      DateTime?
   errorSummary    String?

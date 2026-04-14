@@ -6,6 +6,8 @@ export type FeedFilters = {
   sort: FeedSort;
   start: string | null;
   end: string | null;
+  groupId: string | null;
+  sourceId: string | null;
 };
 
 export type FeedSingleEntryDTO = {
@@ -96,6 +98,17 @@ export type FetchRunSnapshot = {
   successCount: number;
   failureCount: number;
   errorSummary?: string | null;
+};
+
+export type FeedGroupOption = {
+  id: string;
+  name: string;
+};
+
+export type FeedSourceOption = {
+  id: string;
+  name: string;
+  groupId: string | null;
 };
 
 export type SourceConfig = {

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { prisma } from "@/lib/db";
-import { runIngestion, startIngestionTask } from "@/lib/ingestion/service";
+import { runIngestion, runIngestionTask, startIngestionTask } from "@/lib/ingestion/service";
 
 describe("runIngestion", () => {
   beforeEach(async () => {
@@ -21,6 +21,159 @@ describe("runIngestion", () => {
     expect(taskRun.kind).toBe("ingestion");
     expect(taskRun.status).toBe("queued");
     expect(taskRun.triggerType).toBe("manual");
+  });
+
+  it("records ingestion task progress using item counts instead of source counts", async () => {
+    const parser = {
+      parseURL: vi.fn().mockResolvedValue({
+        items: [
+          {
+            title: "OpenAI ships a new agent toolkit",
+            link: "https://example.com/posts/openai-toolkit",
+            isoDate: "2026-04-10T09:00:00.000Z",
+            contentSnippet: "Brief summary",
+            creator: "Alex",
+          },
+          {
+            title: "Another update on the toolkit",
+            link: "https://example.com/posts/openai-toolkit-2",
+            isoDate: "2026-04-10T10:00:00.000Z",
+            contentSnippet: "Another summary",
+            creator: "Jamie",
+          },
+        ],
+      }),
+    };
+    const aiProvider = {
+      enrichContent: vi.fn().mockResolvedValue({
+        translatedTitle: "OpenAI 发布新的 Agent 工具包",
+        summary: "这篇文章介绍了 OpenAI 新发布的 agent 工具能力。",
+        moderationStatus: "allowed",
+        moderationReason: null,
+        moderationDetail: "新闻价值明确",
+        qualityScore: 91,
+        qualityRationale: "多事实点且时效性强",
+        topicLabel: "OpenAI Agent",
+        clusterHint: "OpenAI agent toolkit launch",
+      }),
+      summarizeCluster: vi.fn().mockResolvedValue("两篇报道都聚焦 OpenAI 新发布的 agent 工具能力。"),
+      matchClusterCandidate: vi.fn().mockImplementation(async (_input: string, metadata: { candidates: Array<{ id: string }> }) => {
+        return metadata.candidates[0]?.id ?? null;
+      }),
+    };
+    const taskRun = await startIngestionTask({ triggerType: "manual" });
+
+    await runIngestionTask(taskRun, {
+      parser,
+      articleFetcher: vi.fn(),
+      aiProvider,
+      sourceConfigs: [
+        {
+          name: "Example Feed",
+          rssUrl: "https://example.com/feed.xml",
+          siteUrl: "https://example.com",
+          enabled: true,
+          fetchFullTextWhenMissing: false,
+        },
+      ],
+      blacklist: [],
+      now: new Date("2026-04-10T10:30:00.000Z"),
+    });
+
+    const storedTaskRun = await prisma.backgroundTaskRun.findUniqueOrThrow({
+      where: { id: taskRun.id },
+    });
+
+    expect(storedTaskRun.progressCurrent).toBe(2);
+    expect(storedTaskRun.progressTotal).toBe(2);
+    expect(storedTaskRun.progressLabel).toBe("已处理 2/2 条内容，来自 1 个源，失败 0 项");
+    expect(storedTaskRun.aiCallCountActual).toBe(5);
+    expect(storedTaskRun.aiCallCountEstimated).toBe(5);
+  });
+
+  it("stops ingestion after a cancellation request", async () => {
+    let enrichCallCount = 0;
+    const parser = {
+      parseURL: vi.fn().mockResolvedValue({
+        items: [
+          {
+            title: "OpenAI ships a new agent toolkit",
+            link: "https://example.com/posts/openai-toolkit",
+            isoDate: "2026-04-10T09:00:00.000Z",
+            contentSnippet: "Brief summary",
+            creator: "Alex",
+          },
+          {
+            title: "Another update on the toolkit",
+            link: "https://example.com/posts/openai-toolkit-2",
+            isoDate: "2026-04-10T10:00:00.000Z",
+            contentSnippet: "Another summary",
+            creator: "Jamie",
+          },
+        ],
+      }),
+    };
+    const taskRun = await startIngestionTask({ triggerType: "manual" });
+    const aiProvider = {
+      enrichContent: vi.fn().mockImplementation(async () => {
+        enrichCallCount += 1;
+
+        if (enrichCallCount === 1) {
+          await prisma.backgroundTaskRun.update({
+            where: { id: taskRun.id },
+            data: {
+              cancelRequestedAt: new Date("2026-04-10T10:31:00.000Z"),
+            },
+          });
+        }
+
+        return {
+          translatedTitle: "OpenAI 发布新的 Agent 工具包",
+          summary: "这篇文章介绍了 OpenAI 新发布的 agent 工具能力。",
+          moderationStatus: "allowed",
+          moderationReason: null,
+          moderationDetail: "新闻价值明确",
+          qualityScore: 91,
+          qualityRationale: "多事实点且时效性强",
+          topicLabel: "OpenAI Agent",
+          clusterHint: "OpenAI agent toolkit launch",
+        };
+      }),
+      summarizeCluster: vi.fn().mockResolvedValue("不会执行到这里"),
+      matchClusterCandidate: vi.fn().mockResolvedValue(null),
+    };
+
+    await runIngestionTask(taskRun, {
+      parser,
+      articleFetcher: vi.fn(),
+      aiProvider,
+      sourceConfigs: [
+        {
+          name: "Example Feed",
+          rssUrl: "https://example.com/feed.xml",
+          siteUrl: "https://example.com",
+          enabled: true,
+          fetchFullTextWhenMissing: false,
+        },
+      ],
+      blacklist: [],
+      itemConcurrency: 1,
+      now: new Date("2026-04-10T10:30:00.000Z"),
+    });
+
+    const storedTaskRun = await prisma.backgroundTaskRun.findUniqueOrThrow({
+      where: { id: taskRun.id },
+    });
+    const storedItems = await prisma.item.findMany({
+      orderBy: { publishedAt: "asc" },
+    });
+
+    expect(storedTaskRun.status).toBe("cancelled");
+    expect(storedTaskRun.progressCurrent).toBe(1);
+    expect(storedTaskRun.progressTotal).toBe(2);
+    expect(storedTaskRun.progressLabel).toBe("任务已终止");
+    expect(storedTaskRun.errorSummary).toBe("管理员手动终止任务。");
+    expect(storedItems).toHaveLength(1);
   });
 
   it("stores processed items, preserves filtered items, and records the run", async () => {

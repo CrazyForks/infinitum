@@ -32,9 +32,12 @@ describe("AdminMonitorPanel", () => {
         entityId: null,
         progressCurrent: 3,
         progressTotal: 10,
-        progressLabel: "已处理 3/10 个源",
+        progressLabel: "已处理 3/10 条内容，来自 1 个源，失败 0 项",
+        aiCallCountActual: 2,
+        aiCallCountEstimated: 6,
         startedAt: "2026-04-12T00:30:00.000Z",
         finishedAt: null,
+        cancelRequestedAt: null,
         errorSummary: null,
       },
     ],
@@ -46,7 +49,9 @@ describe("AdminMonitorPanel", () => {
 
     expect(screen.getAllByText("默认抓取任务")[0]).toBeInTheDocument();
     expect(screen.getByLabelText("抓取频率（分钟）")).toHaveValue(60);
-    expect(screen.getByText("已处理 3/10 个源")).toBeInTheDocument();
+    expect(screen.getByText("已处理 3/10 条内容，来自 1 个源，失败 0 项")).toBeInTheDocument();
+    expect(screen.getByText("AI 调用：2 / 6")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "终止任务" })).toBeInTheDocument();
   });
 
   it("submits schedule changes", async () => {
@@ -86,5 +91,35 @@ describe("AdminMonitorPanel", () => {
         }),
       });
     });
+  });
+
+  it("submits a cancel request for a running task", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            task: {
+              ...initialSnapshot.runningTasks[0],
+              cancelRequestedAt: "2026-04-12T00:31:00.000Z",
+            },
+          }),
+        ),
+      );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<AdminMonitorPanel initialSnapshot={initialSnapshot} />);
+
+    await user.click(screen.getByRole("button", { name: "终止任务" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/admin/monitor/tasks/task-1/cancel", {
+        method: "POST",
+      });
+    });
+
+    expect(screen.getByRole("button", { name: "终止中" })).toBeDisabled();
   });
 });

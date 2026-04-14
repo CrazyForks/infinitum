@@ -1,7 +1,7 @@
 import { getAdminSession } from "@/lib/admin/session";
 import { FeedPanel } from "@/components/feed/feed-panel";
-import { getLatestFetchRun, listFeedItems, toFetchRunSnapshot } from "@/lib/feed/repository";
-import { isFeedRange, isFeedSort, normalizeFeedDateInput, resolveFeedFilters } from "@/lib/feed/range";
+import { getLatestFetchRun, listFeedFilterOptions, listFeedItems, toFetchRunSnapshot } from "@/lib/feed/repository";
+import { isFeedRange, isFeedSort, normalizeFeedDateInput, normalizeFeedFilterId, resolveFeedFilters } from "@/lib/feed/range";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +19,9 @@ export default async function Home({ searchParams }: PageProps) {
   const candidateSort = Array.isArray(sortParam) ? sortParam[0] : sortParam;
   const candidateStart = Array.isArray(startParam) ? startParam[0] : startParam;
   const candidateEnd = Array.isArray(endParam) ? endParam[0] : endParam;
+  const candidateGroupId = Array.isArray(resolvedSearchParams.groupId) ? resolvedSearchParams.groupId[0] : resolvedSearchParams.groupId;
+  const candidateSourceId =
+    Array.isArray(resolvedSearchParams.sourceId) ? resolvedSearchParams.sourceId[0] : resolvedSearchParams.sourceId;
   const range = candidateRange && isFeedRange(candidateRange) ? candidateRange : "7d";
   const sort = candidateSort && isFeedSort(candidateSort) ? candidateSort : "time_desc";
   const filters = resolveFeedFilters({
@@ -26,8 +29,15 @@ export default async function Home({ searchParams }: PageProps) {
     sort,
     start: normalizeFeedDateInput(candidateStart),
     end: normalizeFeedDateInput(candidateEnd),
+    groupId: normalizeFeedFilterId(candidateGroupId),
+    sourceId: normalizeFeedFilterId(candidateSourceId),
   });
-  const [feed, latestRun, adminSession] = await Promise.all([listFeedItems(filters), getLatestFetchRun(), getAdminSession()]);
+  const [feed, latestRun, adminSession, feedFilterOptions] = await Promise.all([
+    listFeedItems(filters),
+    getLatestFetchRun(),
+    getAdminSession(),
+    listFeedFilterOptions(),
+  ]);
 
   return (
     <main>
@@ -40,6 +50,10 @@ export default async function Home({ searchParams }: PageProps) {
         initialNextCursor={feed.nextCursor}
         initialStatus={latestRun ? toFetchRunSnapshot(latestRun) : null}
         isAdmin={adminSession.isAdmin}
+        initialGroupId={filters.groupId}
+        initialSourceId={filters.sourceId}
+        availableGroups={feedFilterOptions.groups}
+        availableSources={feedFilterOptions.sources}
       />
     </main>
   );

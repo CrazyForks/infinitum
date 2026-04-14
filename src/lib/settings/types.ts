@@ -29,3 +29,22 @@ export type AdminSettingsSnapshot = {
     groupName: string | null;
   }>;
 };
+
+export type ResolvedSourceMetadata = {
+  name: string;
+  rssUrl: string;
+  siteUrl: string;
+};
+
+export type OpmlImportFailure = {
+  rssUrl: string | null;
+  message: string;
+};
+
+export type OpmlImportSummary = {
+  totalCount: number;
+  createdCount: number;
+  updatedCount: number;
+  failedCount: number;
+  failures: OpmlImportFailure[];
+};

@@ -22,7 +22,14 @@ import type {
   RunIngestionOptions,
 } from "@/lib/ingestion/types";
 import { getIngestionRuntimeConfig } from "@/lib/settings/service";
-import { enqueueTaskRun, updateTaskRun } from "@/lib/tasks/service";
+import {
+  enqueueTaskRun,
+  isTaskRunCancellationRequested,
+  TASK_RUN_CANCELLED_LABEL,
+  TASK_RUN_CANCELLED_MESSAGE,
+  updateTaskRun,
+} from "@/lib/tasks/service";
+import { createTaskAiUsageTracker } from "@/lib/tasks/ai-usage";
 
 type PreparedFeedItem = {
   item: ParsedFeedItem;
@@ -36,6 +43,28 @@ type ResolvedRunOptions = RunIngestionOptions & {
 };
 
 const activeBackgroundRuns = new Map<string, Promise<void>>();
+
+class TaskRunCancellationError extends Error {
+  snapshot: {
+    sourceCount: number;
+    itemCount: number;
+    successCount: number;
+    failureCount: number;
+    errorSummary: string | null;
+  };
+
+  constructor(snapshot: {
+    sourceCount: number;
+    itemCount: number;
+    successCount: number;
+    failureCount: number;
+    errorSummary: string | null;
+  }) {
+    super(TASK_RUN_CANCELLED_MESSAGE);
+    this.name = "TaskRunCancellationError";
+    this.snapshot = snapshot;
+  }
+}
 
 function getBestContent(item: ParsedFeedItem): string {
   return item["content:encoded"] || item.content || item.contentSnippet || "";
@@ -91,6 +120,21 @@ function buildFallbackSummary(rssExcerpt: string | null, fallbackBody: string | 
   return null;
 }
 
+function willRequireAiAnalysis(preparedItem: PreparedFeedItem, blacklist: string[]) {
+  const originalTitle = preparedItem.item.title?.trim();
+  const originalUrl = preparedItem.item.link?.trim();
+
+  if (!originalTitle || !originalUrl) {
+    return false;
+  }
+
+  return !findBlacklistMatch({
+    title: originalTitle,
+    content: [getBestContent(preparedItem.item).trim(), preparedItem.item.contentSnippet?.trim() ?? ""].filter(Boolean).join("\n"),
+    blacklist,
+  });
+}
+
 async function resolveRunOptions(options?: Partial<RunIngestionOptions>): Promise<ResolvedRunOptions> {
   const now = options?.now ?? new Date();
   const runtimeConfig =
@@ -119,11 +163,21 @@ async function resolveRunOptions(options?: Partial<RunIngestionOptions>): Promis
   };
 }
 
-async function runWithConcurrency(tasks: Array<() => Promise<void>>, concurrency: number) {
+async function runWithConcurrency(
+  tasks: Array<() => Promise<void>>,
+  concurrency: number,
+  options?: {
+    shouldStop?: () => Promise<boolean>;
+  },
+) {
   let nextTaskIndex = 0;
 
   async function worker() {
     while (true) {
+      if (await options?.shouldStop?.()) {
+        return;
+      }
+
       const currentIndex = nextTaskIndex;
       nextTaskIndex += 1;
 
@@ -363,12 +417,37 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
     now,
   } = options;
   const sources = await syncSources(sourceConfigs);
+  const aiUsage = createTaskAiUsageTracker();
+  const trackedAiProvider = aiUsage.wrapProvider(aiProvider);
   const preparedItems: PreparedFeedItem[] = [];
   const errors: string[] = [];
   let successCount = 0;
   let failureCount = 0;
+  let cancellationRequested = false;
+  const getProgressSnapshot = () => ({
+    sourceCount: sources.length,
+    itemCount: preparedItems.length,
+    successCount,
+    failureCount,
+    errorSummary: errors.length > 0 ? errors.join(" | ") : null,
+  });
+  const checkCancellation = async () => {
+    if (!run.taskRunId || cancellationRequested) {
+      return cancellationRequested;
+    }
+
+    cancellationRequested = await isTaskRunCancellationRequested(run.taskRunId);
+    return cancellationRequested;
+  };
+  const throwIfCancellationRequested = async () => {
+    if (await checkCancellation()) {
+      throw new TaskRunCancellationError(getProgressSnapshot());
+    }
+  };
 
   for (const source of sources) {
+    await throwIfCancellationRequested();
+
     try {
       const feed = await parser.parseURL(source.rssUrl);
 
@@ -386,6 +465,8 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
     }
   }
 
+  aiUsage.setEstimated(preparedItems.filter((preparedItem) => willRequireAiAnalysis(preparedItem, blacklist)).length);
+
   await updateFetchRunProgress(run.id, {
     sourceCount: sources.length,
     itemCount: preparedItems.length,
@@ -399,8 +480,12 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
     itemCount: preparedItems.length,
     successCount,
     failureCount,
+    aiCallCountActual: aiUsage.snapshot().actual,
+    aiCallCountEstimated: aiUsage.snapshot().estimated,
     errorSummary: errors.length > 0 ? errors.join(" | ") : null,
   });
+
+  await throwIfCancellationRequested();
 
   let progressChain = Promise.resolve();
   const enqueueProgressUpdate = (result: ProcessedItemRecord | null, issue?: string) => {
@@ -427,6 +512,8 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
         itemCount: preparedItems.length,
         successCount,
         failureCount,
+        aiCallCountActual: aiUsage.snapshot().actual,
+        aiCallCountEstimated: aiUsage.snapshot().estimated,
         errorSummary: errors.length > 0 ? errors.join(" | ") : null,
       });
     });
@@ -441,7 +528,7 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
           ...preparedItem,
           blacklist,
           articleFetcher,
-          aiProvider,
+          aiProvider: trackedAiProvider,
           now,
         });
 
@@ -455,10 +542,14 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
       }
     }),
     itemConcurrency,
+    {
+      shouldStop: checkCancellation,
+    },
   );
 
   await progressChain;
-  await recomputeAllClusters(aiProvider);
+  await throwIfCancellationRequested();
+  await recomputeAllClusters(trackedAiProvider);
 
   const status: FetchRunStatus =
     errors.length > 0 || failureCount > 0
@@ -483,6 +574,8 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
     itemCount: completedRun.itemCount,
     successCount: completedRun.successCount,
     failureCount: completedRun.failureCount,
+    aiCallCountActual: aiUsage.snapshot().actual,
+    aiCallCountEstimated: aiUsage.snapshot().estimated,
     errorSummary: completedRun.errorSummary,
   });
 
@@ -493,6 +586,29 @@ async function runExistingFetchRun(run: FetchRun, options: ResolvedRunOptions) {
   try {
     return await executeIngestion(run, options);
   } catch (error) {
+    if (error instanceof TaskRunCancellationError) {
+      const cancelledRun = await completeFetchRun(run.id, {
+        status: "failed",
+        finishedAt: new Date(),
+        sourceCount: error.snapshot.sourceCount,
+        itemCount: error.snapshot.itemCount,
+        successCount: error.snapshot.successCount,
+        failureCount: error.snapshot.failureCount,
+        errorSummary: TASK_RUN_CANCELLED_MESSAGE,
+      });
+
+      await options.onProgress?.({
+        status: cancelledRun.status,
+        sourceCount: cancelledRun.sourceCount,
+        itemCount: cancelledRun.itemCount,
+        successCount: cancelledRun.successCount,
+        failureCount: cancelledRun.failureCount,
+        errorSummary: cancelledRun.errorSummary,
+      });
+
+      return cancelledRun;
+    }
+
     const failedRun = await completeFetchRun(run.id, {
       status: "failed",
       finishedAt: new Date(),
@@ -554,7 +670,11 @@ function buildTaskProgressLabel(snapshot: {
     return "正在同步信息源列表";
   }
 
-  return `已处理 ${snapshot.successCount + snapshot.failureCount}/${snapshot.sourceCount} 个源，新增 ${snapshot.itemCount} 条，失败 ${snapshot.failureCount} 个源`;
+  if (snapshot.itemCount === 0) {
+    return `已同步 ${snapshot.sourceCount} 个源，暂无可处理内容，失败 ${snapshot.failureCount} 项`;
+  }
+
+  return `已处理 ${snapshot.successCount + snapshot.failureCount}/${snapshot.itemCount} 条内容，来自 ${snapshot.sourceCount} 个源，失败 ${snapshot.failureCount} 项`;
 }
 
 export async function runIngestionTask(taskRun: BackgroundTaskRun, options?: Partial<RunIngestionOptions>) {
@@ -564,21 +684,29 @@ export async function runIngestionTask(taskRun: BackgroundTaskRun, options?: Par
     trigger: triggerType,
   });
   const run = await createFetchRun(triggerType, resolvedOptions.now, taskRun.id);
+  let latestAiCallCountActual = 0;
+  let latestAiCallCountEstimated = 0;
 
   await updateTaskRun(taskRun.id, {
     status: "running",
     startedAt: run.startedAt,
     progressLabel: "正在同步信息源列表",
+    aiCallCountActual: 0,
+    aiCallCountEstimated: 0,
   });
 
   const completedRun = await runExistingFetchRun(run, {
     ...resolvedOptions,
     onProgress: async (snapshot) => {
+      latestAiCallCountActual = snapshot.aiCallCountActual ?? latestAiCallCountActual;
+      latestAiCallCountEstimated = snapshot.aiCallCountEstimated ?? latestAiCallCountEstimated;
       await updateTaskRun(taskRun.id, {
         status: snapshot.status,
         progressCurrent: snapshot.successCount + snapshot.failureCount,
-        progressTotal: snapshot.sourceCount,
+        progressTotal: snapshot.itemCount,
         progressLabel: buildTaskProgressLabel(snapshot),
+        aiCallCountActual: latestAiCallCountActual,
+        aiCallCountEstimated: latestAiCallCountEstimated,
         errorSummary: snapshot.errorSummary ?? null,
         finishedAt:
           snapshot.status === "running"
@@ -589,10 +717,13 @@ export async function runIngestionTask(taskRun: BackgroundTaskRun, options?: Par
   });
 
   await updateTaskRun(taskRun.id, {
-    status: completedRun.status,
+    status: completedRun.errorSummary === TASK_RUN_CANCELLED_MESSAGE ? "cancelled" : completedRun.status,
     progressCurrent: completedRun.successCount + completedRun.failureCount,
-    progressTotal: completedRun.sourceCount,
-    progressLabel: buildTaskProgressLabel(completedRun),
+    progressTotal: completedRun.itemCount,
+    progressLabel:
+      completedRun.errorSummary === TASK_RUN_CANCELLED_MESSAGE ? TASK_RUN_CANCELLED_LABEL : buildTaskProgressLabel(completedRun),
+    aiCallCountActual: latestAiCallCountActual,
+    aiCallCountEstimated: latestAiCallCountEstimated,
     errorSummary: completedRun.errorSummary ?? null,
     finishedAt: completedRun.finishedAt,
   });

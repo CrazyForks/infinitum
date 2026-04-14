@@ -10,12 +10,25 @@ type AdminMonitorPanelProps = {
   initialSnapshot: BackgroundTaskMonitorSnapshot;
 };
 
+function getAiCallLabel(task: BackgroundTaskMonitorSnapshot["recentTasks"][number]) {
+  if (task.aiCallCountActual <= 0 && task.aiCallCountEstimated <= 0) {
+    return null;
+  }
+
+  if (task.aiCallCountEstimated > 0) {
+    return `AI 调用：${task.aiCallCountActual} / ${task.aiCallCountEstimated}`;
+  }
+
+  return `AI 调用：${task.aiCallCountActual}`;
+}
+
 export function AdminMonitorPanel({ initialSnapshot }: AdminMonitorPanelProps) {
   const [snapshot, setSnapshot] = useState(initialSnapshot);
   const [enabled, setEnabled] = useState(initialSnapshot.schedule.enabled);
   const [intervalMinutes, setIntervalMinutes] = useState(String(initialSnapshot.schedule.intervalMinutes));
   const [message, setMessage] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [cancellingTaskId, setCancellingTaskId] = useState<string | null>(null);
 
   useEffect(() => {
     const timer = window.setInterval(async () => {
@@ -54,6 +67,31 @@ export function AdminMonitorPanel({ initialSnapshot }: AdminMonitorPanelProps) {
       }));
       setMessage("调度配置已保存。");
     });
+  };
+
+  const cancelTask = async (taskId: string) => {
+    setCancellingTaskId(taskId);
+
+    try {
+      const response = await fetch(`/api/admin/monitor/tasks/${taskId}/cancel`, {
+        method: "POST",
+      });
+      const payload = (await response.json()) as { task?: BackgroundTaskMonitorSnapshot["runningTasks"][number]; error?: string };
+
+      if (!response.ok || payload.error || !payload.task) {
+        setMessage(payload.error ?? "终止任务失败。");
+        return;
+      }
+
+      setSnapshot((current) => ({
+        ...current,
+        runningTasks: current.runningTasks.map((task) => (task.id === payload.task!.id ? payload.task! : task)),
+        recentTasks: current.recentTasks.map((task) => (task.id === payload.task!.id ? payload.task! : task)),
+      }));
+      setMessage("终止请求已提交。");
+    } finally {
+      setCancellingTaskId(null);
+    }
   };
 
   return (
@@ -129,8 +167,19 @@ export function AdminMonitorPanel({ initialSnapshot }: AdminMonitorPanelProps) {
                       {task.triggerType} · {task.status}
                     </p>
                   </div>
+                  {task.kind === "ingestion" ? (
+                    <button
+                      className={styles.secondaryButton}
+                      type="button"
+                      disabled={Boolean(task.cancelRequestedAt) || cancellingTaskId === task.id}
+                      onClick={() => void cancelTask(task.id)}
+                    >
+                      {task.cancelRequestedAt ? "终止中" : "终止任务"}
+                    </button>
+                  ) : null}
                 </div>
                 <p className={styles.reviewSummary}>{task.progressLabel ?? "等待处理"}</p>
+                {getAiCallLabel(task) ? <p className={styles.reviewDetail}>{getAiCallLabel(task)}</p> : null}
                 {task.errorSummary ? <p className={styles.reviewDetail}>{task.errorSummary}</p> : null}
               </article>
             ))
@@ -155,6 +204,7 @@ export function AdminMonitorPanel({ initialSnapshot }: AdminMonitorPanelProps) {
                   </div>
                 </div>
                 <p className={styles.reviewSummary}>{task.progressLabel ?? "暂无进度信息"}</p>
+                {getAiCallLabel(task) ? <p className={styles.reviewDetail}>{getAiCallLabel(task)}</p> : null}
                 {task.errorSummary ? <p className={styles.reviewDetail}>{task.errorSummary}</p> : null}
               </article>
             ))

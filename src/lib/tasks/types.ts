@@ -9,7 +9,7 @@ export type BackgroundTaskRunKind =
 
 export type BackgroundTaskRunTrigger = "scheduled" | "manual" | "admin_action";
 
-export type BackgroundTaskRunStatus = "queued" | "running" | "succeeded" | "failed" | "partial";
+export type BackgroundTaskRunStatus = "queued" | "running" | "succeeded" | "failed" | "partial" | "cancelled";
 
 export type ScheduleUpdateInput = {
   enabled: boolean;
@@ -33,6 +33,9 @@ export type TaskRunSnapshot = {
   progressCurrent: number;
   progressTotal: number;
   progressLabel: string | null;
+  aiCallCountActual: number;
+  aiCallCountEstimated: number;
+  cancelRequestedAt: string | null;
   startedAt: string | null;
   finishedAt: string | null;
   errorSummary: string | null;

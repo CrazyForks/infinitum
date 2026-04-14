@@ -1,8 +1,12 @@
+import { JSDOM } from "jsdom";
+
 import { prisma } from "@/lib/db";
 import { loadRuntimeConfig } from "@/config/runtime";
 import type { RuntimeConfig } from "@/config/runtime";
 import type { SourceConfig } from "@/lib/feed/types";
-import type { AdminSettingsSnapshot } from "@/lib/settings/types";
+import { createRssParser } from "@/lib/ingestion/parser";
+import type { RssParserLike } from "@/lib/ingestion/types";
+import type { AdminSettingsSnapshot, OpmlImportSummary, ResolvedSourceMetadata } from "@/lib/settings/types";
 
 const APP_CONFIG_ID = "default";
 
@@ -24,8 +28,106 @@ type SourceInput = SourceConfig & {
   groupId?: string | null;
 };
 
+type SourceMetadataOptions = {
+  parser?: RssParserLike;
+};
+
+type ImportSourcesFromOpmlOptions = {
+  parser?: RssParserLike;
+  resolveMetadata?: (rssUrl: string) => Promise<ResolvedSourceMetadata>;
+};
+
+type ParsedOpmlSource = {
+  name: string | null;
+  rssUrl: string;
+  siteUrl: string | null;
+  groupName: string | null;
+};
+
 function normalizeKeyword(keyword: string) {
   return keyword.trim();
+}
+
+function normalizeText(value: string | null | undefined) {
+  return value?.trim() || "";
+}
+
+function tryParseUrl(value: string | null | undefined): URL | null {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    return new URL(value.trim());
+  } catch {
+    return null;
+  }
+}
+
+function normalizeUrl(value: string | null | undefined): string | null {
+  return tryParseUrl(value)?.toString() ?? null;
+}
+
+function buildSiteUrlFromRssUrl(rssUrl: string): string {
+  const parsed = new URL(rssUrl);
+  return new URL("/", parsed).toString();
+}
+
+function getFallbackSourceName(rssUrl: string): string {
+  return new URL(rssUrl).hostname;
+}
+
+function getOutlineLabel(node: Element): string | null {
+  const label = normalizeText(node.getAttribute("title")) || normalizeText(node.getAttribute("text"));
+  return label || null;
+}
+
+function parseOpmlSources(opmlText: string): ParsedOpmlSource[] {
+  const trimmed = opmlText.trim();
+
+  if (!trimmed) {
+    throw new Error("OPML content is empty.");
+  }
+
+  const dom = new JSDOM(trimmed, { contentType: "text/xml" });
+  const parserError = dom.window.document.querySelector("parsererror");
+
+  if (parserError) {
+    throw new Error("Invalid OPML document.");
+  }
+
+  const outlines = Array.from(dom.window.document.querySelectorAll("body > outline"));
+  const sources: ParsedOpmlSource[] = [];
+
+  function walk(nodes: Element[], currentGroupName: string | null) {
+    for (const node of nodes) {
+      const rssUrl = normalizeUrl(node.getAttribute("xmlUrl"));
+      const siteUrl = normalizeUrl(node.getAttribute("htmlUrl"));
+      const name = getOutlineLabel(node);
+
+      if (rssUrl) {
+        sources.push({
+          name,
+          rssUrl,
+          siteUrl,
+          groupName: currentGroupName,
+        });
+        continue;
+      }
+
+      const nextGroupName = name ?? currentGroupName;
+      const children = Array.from(node.children).filter((child): child is Element => child.tagName === "outline");
+      walk(children, nextGroupName);
+    }
+  }
+
+  walk(outlines, null);
+
+  if (sources.length === 0) {
+    throw new Error("No valid RSS subscriptions found in OPML.");
+  }
+
+  return sources;
 }
 
 function maskApiKey(apiKey: string): string {
@@ -201,6 +303,123 @@ export async function getAdminSettings(options?: SettingsOptions): Promise<Admin
       groupId: source.groupId,
       groupName: source.group?.name ?? null,
     })),
+  };
+}
+
+export async function resolveSourceMetadata(
+  rssUrl: string,
+  options?: SourceMetadataOptions,
+): Promise<ResolvedSourceMetadata> {
+  const normalizedRssUrl = normalizeUrl(rssUrl);
+
+  if (!normalizedRssUrl) {
+    throw new Error("Invalid RSS URL.");
+  }
+
+  const parser = options?.parser ?? createRssParser();
+
+  let parsedFeed;
+
+  try {
+    parsedFeed = await parser.parseURL(normalizedRssUrl);
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : "Failed to resolve RSS metadata.");
+  }
+
+  const siteUrl = normalizeUrl(parsedFeed.link) ?? buildSiteUrlFromRssUrl(normalizedRssUrl);
+  const name = normalizeText(parsedFeed.title) || getFallbackSourceName(normalizedRssUrl);
+
+  return {
+    name,
+    rssUrl: normalizedRssUrl,
+    siteUrl,
+  };
+}
+
+export async function importSourcesFromOpml(
+  opmlText: string,
+  options?: ImportSourcesFromOpmlOptions,
+): Promise<OpmlImportSummary> {
+  const parsedSources = parseOpmlSources(opmlText);
+  const parser = options?.parser ?? createRssParser();
+  const resolveMetadata =
+    options?.resolveMetadata ??
+    ((rssUrl: string) =>
+      resolveSourceMetadata(rssUrl, {
+        parser,
+      }));
+  const existingGroups = await prisma.sourceGroup.findMany();
+  const groupIdByName = new Map(existingGroups.map((group) => [group.name, group.id]));
+  let createdCount = 0;
+  let updatedCount = 0;
+  const failures: OpmlImportSummary["failures"] = [];
+
+  for (const source of parsedSources) {
+    try {
+      const metadata = await resolveMetadata(source.rssUrl);
+      const groupName = source.groupName ? normalizeText(source.groupName) : "";
+      let groupId: string | null = null;
+
+      if (groupName) {
+        const existingGroupId = groupIdByName.get(groupName);
+
+        if (existingGroupId) {
+          groupId = existingGroupId;
+        } else {
+          const group = await prisma.sourceGroup.create({
+            data: {
+              name: groupName,
+            },
+          });
+          groupIdByName.set(groupName, group.id);
+          groupId = group.id;
+        }
+      }
+
+      const existingSource = await prisma.source.findUnique({
+        where: { rssUrl: source.rssUrl },
+      });
+      const name = source.name || metadata.name;
+      const siteUrl = source.siteUrl || metadata.siteUrl;
+
+      await prisma.source.upsert({
+        where: { rssUrl: source.rssUrl },
+        update: {
+          name,
+          siteUrl,
+          groupId,
+          enabled: true,
+          fetchFullTextWhenMissing: true,
+        },
+        create: {
+          name,
+          rssUrl: source.rssUrl,
+          siteUrl,
+          groupId,
+          enabled: true,
+          fetchFullTextWhenMissing: true,
+        },
+      });
+
+      if (existingSource) {
+        updatedCount += 1;
+      } else {
+        createdCount += 1;
+      }
+    } catch (error) {
+      failures.push({
+        rssUrl: source.rssUrl,
+        message: error instanceof Error ? error.message : "Unknown OPML import error.",
+      });
+    }
+  }
+
+  return {
+    totalCount: parsedSources.length,
+    createdCount,
+    updatedCount,
+    failedCount: failures.length,
+    failures,
   };
 }
 

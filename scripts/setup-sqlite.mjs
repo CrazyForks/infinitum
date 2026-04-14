@@ -62,3 +62,6 @@ ensureColumn(
 );
 
 ensureColumn("fetch_runs", "taskRunId", "TEXT");
+ensureColumn("background_task_runs", "cancelRequestedAt", "DATETIME");
+ensureColumn("background_task_runs", "aiCallCountActual", "INTEGER NOT NULL DEFAULT 0");
+ensureColumn("background_task_runs", "aiCallCountEstimated", "INTEGER NOT NULL DEFAULT 0");

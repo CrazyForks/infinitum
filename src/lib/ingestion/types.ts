@@ -47,6 +47,8 @@ export type RunIngestionOptions = {
     itemCount: number;
     successCount: number;
     failureCount: number;
+    aiCallCountActual?: number;
+    aiCallCountEstimated?: number;
     errorSummary?: string | null;
   }) => Promise<void> | void;
 };

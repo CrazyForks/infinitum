@@ -5,6 +5,7 @@ import path from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { prisma } from "@/lib/db";
+import * as settingsService from "@/lib/settings/service";
 import {
   deleteSourceGroup,
   getAdminSettings,
@@ -97,5 +98,177 @@ describe("admin settings service", () => {
     });
 
     await expect(deleteSourceGroup(group.id)).rejects.toThrow("Please move sources out of this group before deleting it.");
+  });
+
+  it("imports OPML sources into matching groups", async () => {
+    const importSourcesFromOpml = (
+      settingsService as typeof settingsService & {
+        importSourcesFromOpml?: (opmlText: string, options?: unknown) => Promise<unknown>;
+      }
+    ).importSourcesFromOpml;
+
+    expect(importSourcesFromOpml).toBeTypeOf("function");
+
+    await importSourcesFromOpml!(
+      `<?xml version="1.0" encoding="UTF-8"?>
+      <opml version="2.0">
+        <body>
+          <outline text="AI">
+            <outline
+              text="Import Feed One"
+              title="Import Feed One"
+              type="rss"
+              xmlUrl="https://feeds.example.com/one.xml"
+              htmlUrl="https://feeds.example.com/one"
+            />
+          </outline>
+          <outline text="Infra">
+            <outline
+              text="Import Feed Two"
+              title="Import Feed Two"
+              type="rss"
+              xmlUrl="https://feeds.example.com/two.xml"
+              htmlUrl="https://feeds.example.com/two"
+            />
+          </outline>
+        </body>
+      </opml>`,
+      {
+        resolveMetadata: async () => ({
+          name: "Resolved Feed",
+          rssUrl: "https://feeds.example.com/fallback.xml",
+          siteUrl: "https://feeds.example.com",
+        }),
+      },
+    );
+
+    const groups = await prisma.sourceGroup.findMany({
+      orderBy: { name: "asc" },
+    });
+    const sources = await prisma.source.findMany({
+      include: { group: true },
+      orderBy: { rssUrl: "asc" },
+    });
+
+    expect(groups.map((group) => group.name)).toEqual(["AI", "Infra"]);
+    expect(sources).toHaveLength(2);
+    expect(sources[0]).toMatchObject({
+      rssUrl: "https://feeds.example.com/one.xml",
+      name: "Import Feed One",
+      siteUrl: "https://feeds.example.com/one",
+      group: {
+        name: "AI",
+      },
+    });
+    expect(sources[1]).toMatchObject({
+      rssUrl: "https://feeds.example.com/two.xml",
+      name: "Import Feed Two",
+      siteUrl: "https://feeds.example.com/two",
+      group: {
+        name: "Infra",
+      },
+    });
+  });
+
+  it("updates an existing source instead of duplicating it during OPML import", async () => {
+    const importSourcesFromOpml = (
+      settingsService as typeof settingsService & {
+        importSourcesFromOpml?: (opmlText: string, options?: unknown) => Promise<unknown>;
+      }
+    ).importSourcesFromOpml;
+
+    expect(importSourcesFromOpml).toBeTypeOf("function");
+
+    await prisma.source.create({
+      data: {
+        name: "Old Feed Name",
+        rssUrl: "https://feeds.example.com/existing.xml",
+        siteUrl: "https://old.example.com",
+        enabled: false,
+        fetchFullTextWhenMissing: false,
+      },
+    });
+
+    await importSourcesFromOpml!(
+      `<?xml version="1.0" encoding="UTF-8"?>
+      <opml version="2.0">
+        <body>
+          <outline text="Research">
+            <outline
+              text="Updated Feed Name"
+              title="Updated Feed Name"
+              type="rss"
+              xmlUrl="https://feeds.example.com/existing.xml"
+              htmlUrl="https://new.example.com"
+            />
+          </outline>
+        </body>
+      </opml>`,
+      {
+        resolveMetadata: async () => ({
+          name: "Updated Feed Name",
+          rssUrl: "https://feeds.example.com/existing.xml",
+          siteUrl: "https://new.example.com",
+        }),
+      },
+    );
+
+    const sources = await prisma.source.findMany({
+      include: { group: true },
+    });
+
+    expect(sources).toHaveLength(1);
+    expect(sources[0]).toMatchObject({
+      name: "Updated Feed Name",
+      rssUrl: "https://feeds.example.com/existing.xml",
+      siteUrl: "https://new.example.com/",
+      enabled: true,
+      fetchFullTextWhenMissing: true,
+      group: {
+        name: "Research",
+      },
+    });
+  });
+
+  it("resolves RSS metadata and falls back when feed metadata is incomplete", async () => {
+    const resolveSourceMetadata = (
+      settingsService as typeof settingsService & {
+        resolveSourceMetadata?: (rssUrl: string, options?: unknown) => Promise<unknown>;
+      }
+    ).resolveSourceMetadata;
+
+    expect(resolveSourceMetadata).toBeTypeOf("function");
+
+    await expect(
+      resolveSourceMetadata!("https://feeds.example.com/feed.xml", {
+        parser: {
+          parseURL: async () => ({
+            title: "Metadata Feed",
+            link: "https://site.example.com",
+            items: [],
+          }),
+        },
+      }),
+    ).resolves.toMatchObject({
+      name: "Metadata Feed",
+      rssUrl: "https://feeds.example.com/feed.xml",
+      siteUrl: "https://site.example.com/",
+    });
+
+    await expect(
+      resolveSourceMetadata!("https://blog.example.com/rss.xml", {
+        parser: {
+          parseURL: async () => ({
+            title: "",
+            link: "",
+            items: [],
+          }),
+        },
+      }),
+    ).resolves.toMatchObject({
+      name: "blog.example.com",
+      rssUrl: "https://blog.example.com/rss.xml",
+      siteUrl: "https://blog.example.com/",
+    });
   });
 });

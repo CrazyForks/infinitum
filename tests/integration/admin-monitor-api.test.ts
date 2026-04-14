@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const requireAdmin = vi.fn();
 const getBackgroundTaskMonitorSnapshot = vi.fn();
 const updateDefaultIngestionSchedule = vi.fn();
+const requestTaskRunCancellation = vi.fn();
 
 vi.mock("@/lib/admin/session", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/admin/session")>();
@@ -20,6 +21,7 @@ vi.mock("@/lib/tasks/service", async (importOriginal) => {
     ...actual,
     getBackgroundTaskMonitorSnapshot,
     updateDefaultIngestionSchedule,
+    requestTaskRunCancellation,
   };
 });
 
@@ -89,5 +91,35 @@ describe("/api/admin/monitor", () => {
     });
     expect(json.schedule.enabled).toBe(false);
     expect(json.schedule.intervalMinutes).toBe(120);
+  });
+
+  it("requests cancellation for a running task", async () => {
+    requireAdmin.mockResolvedValue(undefined);
+    requestTaskRunCancellation.mockResolvedValue({
+      id: "task-1",
+      kind: "ingestion",
+      triggerType: "manual",
+      status: "running",
+      label: "默认抓取任务",
+      entityId: null,
+      progressCurrent: 3,
+      progressTotal: 10,
+      progressLabel: "已处理 3/10 条内容，来自 1 个源，失败 0 项",
+      startedAt: new Date("2026-04-12T00:30:00.000Z"),
+      finishedAt: null,
+      cancelRequestedAt: new Date("2026-04-12T00:31:00.000Z"),
+      errorSummary: null,
+    });
+
+    const { POST } = await import("@/app/api/admin/monitor/tasks/[id]/cancel/route");
+    const response = await POST(new Request("http://localhost/api/admin/monitor/tasks/task-1/cancel", { method: "POST" }), {
+      params: Promise.resolve({ id: "task-1" }),
+    });
+    const json = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(requestTaskRunCancellation).toHaveBeenCalledWith("task-1");
+    expect(json.task.id).toBe("task-1");
+    expect(json.task.cancelRequestedAt).toBe("2026-04-12T00:31:00.000Z");
   });
 });

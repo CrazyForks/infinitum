@@ -14,6 +14,7 @@ import {
 import { prisma } from "@/lib/db";
 import { getDisplaySummary, getDisplayTitle } from "@/lib/feed/presentation";
 import { getIngestionRuntimeConfig } from "@/lib/settings/service";
+import { createTaskAiUsageTracker } from "@/lib/tasks/ai-usage";
 import { enqueueTaskRun, updateTaskRun } from "@/lib/tasks/service";
 
 const CLUSTER_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -108,27 +109,19 @@ async function findClusterForItem(
   const fingerprint = fingerprintSeed ? normalizeFingerprint(fingerprintSeed) : "";
   const since = new Date(item.publishedAt.getTime() - CLUSTER_LOOKBACK_MS);
   const until = new Date(item.publishedAt.getTime() + CLUSTER_LOOKBACK_MS);
-
-  if (fingerprint) {
-    const exactMatch = await findActiveClusterByFingerprint(fingerprint, since, until);
-
-    if (exactMatch) {
-      return {
-        cluster: exactMatch,
-        fingerprint,
-      };
-    }
-  }
-
-  const candidates = await findRecentActiveClusterCandidates({
+  const exactMatch = fingerprint ? await findActiveClusterByFingerprint(fingerprint, since, until) : null;
+  const recentCandidates = await findRecentActiveClusterCandidates({
     since,
     until,
     limit: CLUSTER_CANDIDATE_LIMIT,
   });
+  const candidates = exactMatch
+    ? [exactMatch, ...recentCandidates.filter((candidate) => candidate.id !== exactMatch.id)]
+    : recentCandidates;
 
   if (!options.aiProvider || candidates.length === 0) {
     return {
-      cluster: null,
+      cluster: exactMatch,
       fingerprint,
     };
   }
@@ -144,12 +137,12 @@ async function findClusterForItem(
     });
 
     return {
-      cluster: candidates.find((candidate) => candidate.id === matchedClusterId) ?? null,
+      cluster: candidates.find((candidate) => candidate.id === matchedClusterId) ?? exactMatch ?? null,
       fingerprint,
     };
   } catch {
     return {
-      cluster: null,
+      cluster: exactMatch,
       fingerprint,
     };
   }
@@ -272,25 +265,39 @@ export async function enqueueClusterSummaryTask(clusterId: string) {
   });
 }
 
-export async function executeClusterSummaryTask(taskRun: { id: string; entityId: string | null }) {
+export async function executeClusterSummaryTask(
+  taskRun: { id: string; entityId: string | null },
+  options?: { aiProvider?: AiProvider },
+) {
   if (!taskRun.entityId) {
     throw new Error("Task entityId is required.");
   }
 
+  const aiUsage = createTaskAiUsageTracker(1);
+
   await updateTaskRun(taskRun.id, {
     status: "running",
     progressLabel: "正在重新生成聚合摘要",
+    aiCallCountActual: 0,
+    aiCallCountEstimated: aiUsage.snapshot().estimated,
   });
 
   try {
-    const runtimeConfig = await getIngestionRuntimeConfig();
+    const runtimeConfig = options?.aiProvider ? null : await getIngestionRuntimeConfig();
+    const trackedAiProvider = aiUsage.wrapProvider(
+      options?.aiProvider ??
+        createAiProvider(runtimeConfig!.modelApi, {
+          itemAnalysisPrompt: runtimeConfig!.prompts.itemAnalysis,
+          clusterSummaryPrompt: runtimeConfig!.prompts.clusterSummary,
+          clusterMatchPrompt: runtimeConfig!.prompts.clusterMatch,
+        }),
+      {
+        summarizeClusterEstimated: false,
+      },
+    );
     const cluster = await recomputeCluster(
       taskRun.entityId,
-      createAiProvider(runtimeConfig.modelApi, {
-        itemAnalysisPrompt: runtimeConfig.prompts.itemAnalysis,
-        clusterSummaryPrompt: runtimeConfig.prompts.clusterSummary,
-        clusterMatchPrompt: runtimeConfig.prompts.clusterMatch,
-      }),
+      trackedAiProvider,
     );
 
     await updateTaskRun(taskRun.id, {
@@ -298,6 +305,8 @@ export async function executeClusterSummaryTask(taskRun: { id: string; entityId:
       progressCurrent: 1,
       progressTotal: 1,
       progressLabel: "已完成聚合摘要重生成",
+      aiCallCountActual: aiUsage.snapshot().actual,
+      aiCallCountEstimated: aiUsage.snapshot().estimated,
       finishedAt: new Date(),
       errorSummary: null,
     });
@@ -309,6 +318,8 @@ export async function executeClusterSummaryTask(taskRun: { id: string; entityId:
       progressCurrent: 1,
       progressTotal: 1,
       progressLabel: "聚合摘要重生成失败",
+      aiCallCountActual: aiUsage.snapshot().actual,
+      aiCallCountEstimated: aiUsage.snapshot().estimated,
       finishedAt: new Date(),
       errorSummary: error instanceof Error ? error.message : "Unknown cluster summary error",
     });

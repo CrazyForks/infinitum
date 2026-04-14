@@ -413,26 +413,23 @@ export function FeedPanel({
         }
 
         setQueuedRefreshAt(null);
-
-        if (payload.run.status !== "running") {
-          const feedPayload = await fetchFeed({
-            range,
-            sort,
-            startDate,
-            endDate,
-            groupId,
-            sourceId,
-          });
-          setItems(feedPayload.items);
-          setNextCursor(feedPayload.nextCursor);
-          setExpandedClusters({});
-          setOpenClusters({});
-          setRefreshMessage(
-            payload.run.status === "succeeded" || payload.run.status === "partial"
-              ? "抓取完成，已重新载入当前时间范围。"
-              : "抓取失败，请稍后重试。",
-          );
-        }
+        const feedPayload = await fetchFeed({
+          range,
+          sort,
+          startDate,
+          endDate,
+          groupId,
+          sourceId,
+        });
+        setItems(feedPayload.items);
+        setNextCursor(feedPayload.nextCursor);
+        setExpandedClusters({});
+        setOpenClusters({});
+        setRefreshMessage(
+          payload.run.status === "succeeded" || payload.run.status === "partial"
+            ? "抓取完成，已重新载入当前时间范围。"
+            : "抓取失败，请稍后重试。",
+        );
       });
     }, STATUS_POLL_INTERVAL_MS);
 

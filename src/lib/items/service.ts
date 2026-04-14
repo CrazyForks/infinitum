@@ -5,6 +5,7 @@ import { assignItemToCluster, recomputeCluster } from "@/lib/clusters/service";
 import { prisma } from "@/lib/db";
 import { shouldTranslateTitle, stripHtmlTags } from "@/lib/feed/presentation";
 import { getIngestionRuntimeConfig } from "@/lib/settings/service";
+import { createTaskAiUsageTracker } from "@/lib/tasks/ai-usage";
 import { enqueueTaskRun, updateTaskRun } from "@/lib/tasks/service";
 
 type RegenerationTarget = "translation" | "summary";
@@ -117,12 +118,20 @@ export async function executeItemRegenerationTask(
     throw new Error("Task entityId is required.");
   }
 
+  const aiUsage = createTaskAiUsageTracker(1);
+  const trackedAiProvider = aiUsage.wrapProvider(await resolveAiProvider(options?.aiProvider));
+
   await updateTaskRun(taskRun.id, {
     status: "running",
     progressLabel: "正在读取条目",
+    aiCallCountActual: 0,
+    aiCallCountEstimated: aiUsage.snapshot().estimated,
   });
 
-  const item = await regenerateItemContent(taskRun.entityId, target, options);
+  const item = await regenerateItemContent(taskRun.entityId, target, {
+    ...options,
+    aiProvider: trackedAiProvider,
+  });
   const succeeded = !item.errorMessage;
 
   await updateTaskRun(taskRun.id, {
@@ -130,6 +139,8 @@ export async function executeItemRegenerationTask(
     progressCurrent: 1,
     progressTotal: 1,
     progressLabel: succeeded ? "已完成条目更新" : "条目更新失败",
+    aiCallCountActual: aiUsage.snapshot().actual,
+    aiCallCountEstimated: aiUsage.snapshot().estimated,
     finishedAt: new Date(),
     errorSummary: item.errorMessage ?? null,
   });
@@ -240,19 +251,29 @@ export async function executeItemReanalyzeTask(
     throw new Error("Task entityId is required.");
   }
 
+  const aiUsage = createTaskAiUsageTracker(1);
+  const trackedAiProvider = aiUsage.wrapProvider(await resolveAiProvider(options?.aiProvider));
+
   await updateTaskRun(taskRun.id, {
     status: "running",
     progressLabel: "正在重新 AI 判定",
+    aiCallCountActual: 0,
+    aiCallCountEstimated: aiUsage.snapshot().estimated,
   });
 
   try {
-    const item = await reanalyzeItem(taskRun.entityId, options);
+    const item = await reanalyzeItem(taskRun.entityId, {
+      ...options,
+      aiProvider: trackedAiProvider,
+    });
 
     await updateTaskRun(taskRun.id, {
       status: "succeeded",
       progressCurrent: 1,
       progressTotal: 1,
       progressLabel: "已完成重新 AI 判定",
+      aiCallCountActual: aiUsage.snapshot().actual,
+      aiCallCountEstimated: aiUsage.snapshot().estimated,
       finishedAt: new Date(),
       errorSummary: null,
     });
@@ -264,6 +285,8 @@ export async function executeItemReanalyzeTask(
       progressCurrent: 1,
       progressTotal: 1,
       progressLabel: "重新 AI 判定失败",
+      aiCallCountActual: aiUsage.snapshot().actual,
+      aiCallCountEstimated: aiUsage.snapshot().estimated,
       finishedAt: new Date(),
       errorSummary: error instanceof Error ? error.message : "Unknown item reanalyze error",
     });

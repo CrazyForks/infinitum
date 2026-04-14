@@ -18,6 +18,11 @@ const RANGE_SET = new Set<FeedRange>(RANGE_OPTIONS.map((option) => option.value)
 const SORT_SET = new Set<FeedSort>(SORT_OPTIONS.map((option) => option.value));
 const FEED_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
+export function normalizeFeedFilterId(value: string | null | undefined): string | null {
+  const normalized = value?.trim();
+  return normalized ? normalized : null;
+}
+
 export function isFeedRange(value: string): value is FeedRange {
   return RANGE_SET.has(value as FeedRange);
 }
@@ -98,6 +103,8 @@ export function resolveFeedFilters(
       sort: input.sort,
       start,
       end,
+      groupId: normalizeFeedFilterId(input.groupId),
+      sourceId: normalizeFeedFilterId(input.sourceId),
       rangeStart: start ? buildUtcDateBoundary(start, "start") : null,
       rangeEnd: end ? buildUtcDateBoundary(end, "end") : null,
       isCustomRange: true,
@@ -109,6 +116,8 @@ export function resolveFeedFilters(
     sort: input.sort,
     start: null,
     end: null,
+    groupId: normalizeFeedFilterId(input.groupId),
+    sourceId: normalizeFeedFilterId(input.sourceId),
     rangeStart: getRangeStart(input.range, now),
     rangeEnd: null,
     isCustomRange: false,

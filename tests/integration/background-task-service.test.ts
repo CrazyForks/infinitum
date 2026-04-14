@@ -7,6 +7,8 @@ import {
   ensureDefaultIngestionSchedule,
   enqueueTaskRun,
   listRecentTaskRuns,
+  requestTaskRunCancellation,
+  updateTaskRun,
   updateDefaultIngestionSchedule,
 } from "@/lib/tasks/service";
 import { recoverStaleTaskRuns, runWorkerCycle } from "@/lib/tasks/worker";
@@ -160,10 +162,15 @@ describe("background task persistence", () => {
 
   it("builds a monitor snapshot with schedule and task lists", async () => {
     await ensureDefaultIngestionSchedule();
-    await enqueueTaskRun({
+    const taskRun = await enqueueTaskRun({
       kind: "ingestion",
       triggerType: "manual",
       label: "默认抓取任务",
+    });
+    await updateTaskRun(taskRun.id, {
+      status: "running",
+      aiCallCountActual: 3,
+      aiCallCountEstimated: 8,
     });
 
     const snapshot = await getBackgroundTaskMonitorSnapshot(new Date("2026-04-12T01:00:00.000Z"));
@@ -172,5 +179,75 @@ describe("background task persistence", () => {
     expect(Array.isArray(snapshot.runningTasks)).toBe(true);
     expect(Array.isArray(snapshot.recentTasks)).toBe(true);
     expect(snapshot.recentTasks[0]?.label).toBe("默认抓取任务");
+    expect(snapshot.recentTasks[0]?.aiCallCountActual).toBe(3);
+    expect(snapshot.recentTasks[0]?.aiCallCountEstimated).toBe(8);
+  });
+
+  it("cancels a queued task immediately", async () => {
+    const taskRun = await enqueueTaskRun({
+      kind: "ingestion",
+      triggerType: "manual",
+      label: "默认抓取任务",
+    });
+
+    const cancelledTaskRun = await requestTaskRunCancellation(taskRun.id);
+
+    expect(cancelledTaskRun.status).toBe("cancelled");
+    expect(cancelledTaskRun.finishedAt).not.toBeNull();
+    expect(cancelledTaskRun.cancelRequestedAt).not.toBeNull();
+    expect(cancelledTaskRun.progressLabel).toBe("任务已终止");
+  });
+
+  it("marks a running task as cancellation requested", async () => {
+    const taskRun = await prisma.backgroundTaskRun.create({
+      data: {
+        kind: "ingestion",
+        triggerType: "manual",
+        status: "running",
+        label: "默认抓取任务",
+        startedAt: new Date("2026-04-12T00:31:00.000Z"),
+      },
+    });
+
+    const updatedTaskRun = await requestTaskRunCancellation(taskRun.id);
+
+    expect(updatedTaskRun.status).toBe("running");
+    expect(updatedTaskRun.cancelRequestedAt).not.toBeNull();
+  });
+
+  it("refreshes the scheduler heartbeat while a task is reporting progress", async () => {
+    const schedule = await prisma.taskSchedule.create({
+      data: {
+        key: "ingestion_default",
+        enabled: true,
+        intervalMinutes: 60,
+        timezone: "Asia/Shanghai",
+        nextRunAt: new Date("2026-04-12T01:00:00.000Z"),
+        lastHeartbeatAt: new Date("2026-04-12T00:00:00.000Z"),
+      },
+    });
+    const taskRun = await prisma.backgroundTaskRun.create({
+      data: {
+        kind: "ingestion",
+        triggerType: "manual",
+        status: "running",
+        label: "默认抓取任务",
+        startedAt: new Date("2026-04-12T00:31:00.000Z"),
+      },
+    });
+
+    await updateTaskRun(taskRun.id, {
+      status: "running",
+      progressCurrent: 1,
+      progressTotal: 10,
+      progressLabel: "已处理 1/10 条内容",
+    });
+
+    const updatedSchedule = await prisma.taskSchedule.findUniqueOrThrow({
+      where: { id: schedule.id },
+    });
+
+    expect(updatedSchedule.lastHeartbeatAt).not.toBeNull();
+    expect(updatedSchedule.lastHeartbeatAt?.getTime()).toBeGreaterThan(schedule.lastHeartbeatAt?.getTime() ?? 0);
   });
 });
