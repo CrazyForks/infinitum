@@ -1,10 +1,11 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AdminMonitorPanel } from "@/components/admin/admin-monitor-panel";
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -47,6 +48,10 @@ describe("AdminMonitorPanel", () => {
   it("renders schedule details and running tasks", () => {
     render(<AdminMonitorPanel initialSnapshot={initialSnapshot} />);
 
+    expect(screen.getByRole("heading", { name: "任务监控", level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "调度设置" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "运行中任务" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "最近任务" })).toBeInTheDocument();
     expect(screen.getAllByText("默认抓取任务")[0]).toBeInTheDocument();
     expect(screen.getByLabelText("抓取频率（分钟）")).toHaveValue(60);
     expect(screen.getByText("已处理 3/10 条内容，来自 1 个源，失败 0 项")).toBeInTheDocument();
@@ -91,6 +96,61 @@ describe("AdminMonitorPanel", () => {
         }),
       });
     });
+  });
+
+  it("shows an error banner when saving schedule changes fails", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn<typeof fetch>().mockRejectedValueOnce(new Error("network down"));
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<AdminMonitorPanel initialSnapshot={initialSnapshot} />);
+
+    await user.click(screen.getByRole("button", { name: "保存调度设置" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent("调度配置保存失败。");
+    });
+  });
+
+  it("keeps dirty schedule form values when polling refreshes snapshot", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          ...initialSnapshot,
+          schedule: {
+            ...initialSnapshot.schedule,
+            enabled: true,
+            intervalMinutes: 60,
+            nextRunAt: "2026-04-12T02:00:00.000Z",
+          },
+        }),
+      ),
+    );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<AdminMonitorPanel initialSnapshot={initialSnapshot} />);
+
+    const intervalInput = screen.getByLabelText("抓取频率（分钟）");
+    const enabledCheckbox = screen.getByLabelText("启用默认抓取任务");
+
+    fireEvent.change(intervalInput, { target: { value: "120" } });
+    fireEvent.click(enabledCheckbox);
+
+    expect(intervalInput).toHaveValue(120);
+    expect(enabledCheckbox).not.toBeChecked();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_500);
+    });
+    await Promise.resolve();
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/admin/monitor");
+
+    expect(intervalInput).toHaveValue(120);
+    expect(enabledCheckbox).not.toBeChecked();
   });
 
   it("submits a cancel request for a running task", async () => {
