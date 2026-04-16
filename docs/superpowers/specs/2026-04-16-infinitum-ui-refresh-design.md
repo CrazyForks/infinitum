@@ -1,4 +1,4 @@
-# Infinitum 全站 UI 改造设计
+# Infinitum 全站 UI 改造与 Tailwind 落地设计
 
 日期：2026-04-16
 
@@ -11,7 +11,7 @@
 
 这会让首页与后台看起来像两个独立产品，也不利于继续扩展筛选、审核、监控和配置能力。
 
-本次改造以 `/Users/shawn/Documents/GitHub/lumina` 的文章列表页和管理页为参考，目标是把 `infinitum` 全站统一成更接近现代内容管理产品的界面体系。
+本次改造以 `/Users/shawn/Documents/GitHub/lumina` 的文章列表页和管理页为参考，目标是把 `infinitum` 全站统一成更接近现代内容管理产品的界面体系，并同步完成 Tailwind 落地。
 
 ## 目标
 
@@ -19,15 +19,16 @@
 2. 让首页从“内容展示页”升级为“可操作的信息流工作台”。
 3. 让后台四个页面形成统一的管理系统体验，而不是孤立页面。
 4. 在不改变业务逻辑、接口、路由的前提下完成全站样式升级。
-5. 在桌面端和移动端都保持稳定可用，不出现严重布局破碎。
+5. 在本项目内建立可持续扩展的 Tailwind 样式基础设施，作为后续页面的默认样式方案。
+6. 在桌面端和移动端都保持稳定可用，不出现严重布局破碎。
 
 ## 非目标
 
 1. 不改动现有 API、数据库、任务调度、数据结构和业务规则。
-2. 不迁移到 Tailwind 或其他样式系统。
-3. 不把 App Router 改写成 Pages Router。
-4. 不新增复杂导航体系，例如完整侧边栏、权限系统或多层信息架构。
-5. 不重做功能交互流程，只重组 UI 组织和视觉层级。
+2. 不把 App Router 改写成 Pages Router。
+3. 不新增复杂导航体系，例如完整侧边栏、权限系统或多层信息架构。
+4. 不重做功能交互流程，只重组 UI 组织和视觉层级。
+5. 不直接复制 `lumina` 的完整前端框架、路由结构或上下文逻辑。
 
 ## 现状概览
 
@@ -41,6 +42,12 @@
 - 全局样式：`src/app/globals.css`
 - 首页样式：`src/components/feed/feed-panel.module.css`
 - 后台样式：`src/components/admin/admin.module.css`
+
+当前样式栈情况：
+
+- `infinitum` 目前使用 `globals.css` + CSS Modules。
+- 项目尚未安装 Tailwind，也没有 PostCSS/Tailwind 配置文件。
+- `lumina` 使用 Tailwind 3，但当前项目的 Next.js 16 文档优先指向更新的 Tailwind 接入方式。
 
 当前问题主要集中在：
 
@@ -58,15 +65,48 @@
 - 页面整体气质偏“内容平台 + 管理后台”的现代产品风格。
 - 首页保留信息流和聚合卡的业务结构，但视觉和布局向 `lumina /list` 靠拢。
 - 后台页面保留当前轻量导航方式，但统一成同一套工作区语言。
+- 样式实现层面采用 Tailwind 作为主方案，但不照搬 `lumina` 的 Tailwind 3 配置。
+
+## Tailwind 落地选型
+
+### 选型结论
+
+本次采用以下策略：
+
+1. 使用适配当前 Next.js 16 文档的 Tailwind 接入方式。
+2. 借鉴 `lumina` 的视觉 token、布局密度和组件层级，但不直接迁移其前端框架。
+3. 本轮涉及页面优先迁移为 Tailwind class 驱动。
+4. 仅在确有必要时保留少量 CSS Modules 或全局补充样式。
+
+### 不直接照搬 `lumina` Tailwind 配置的原因
+
+- `lumina` 当前是 Tailwind 3 配置。
+- 当前项目所依赖的 Next.js 16 文档优先推荐最新 Tailwind 接法：
+  - 安装 `tailwindcss` 与 `@tailwindcss/postcss`
+  - 在 PostCSS 中启用 `@tailwindcss/postcss`
+  - 在 `src/app/globals.css` 中使用 `@import 'tailwindcss';`
+- 因此本项目不应机械复制 `lumina/frontend/tailwind.config.js` 和 `lumina/frontend/postcss.config.js`，而应按当前框架文档建立新的 Tailwind 基线。
+
+### 迁移策略
+
+采用“主迁移，不一次性清零”的方式：
+
+- 首页与后台四个页面在本轮内尽量迁移到 Tailwind。
+- 原有 `feed-panel.module.css` 与 `admin.module.css` 可在过渡期保留，但目标是大幅收缩或删除。
+- 全局保留 `src/app/globals.css`，用于：
+  - 导入 Tailwind
+  - 定义 CSS variables
+  - 放置少量基础 reset 和 app 级全局规则
+- 不在这次改造里把全仓所有历史样式一次性迁移完。
 
 ## 总体设计原则
 
 ### 1. 保持技术边界稳定
 
 - 保留现有 App Router 结构。
-- 保留 CSS Modules + `globals.css` 的样式组织方式。
 - 保留现有客户端组件职责划分。
-- 允许提炼少量通用布局类或共用样式变量，但不引入新的 UI 依赖。
+- 允许提炼少量通用布局组件、class 组合函数或共用样式变量，但不引入新的 UI 组件库依赖。
+- 样式主实现从 CSS Modules 升级为 Tailwind + `globals.css` 变量系统。
 
 ### 2. 用统一骨架组织页面
 
@@ -92,11 +132,31 @@
 - 列表卡片结构
 - 空状态和加载状态
 
+### 4. Tailwind 负责结构，CSS variables 负责主题
+
+Tailwind 负责：
+
+- 布局
+- 间距
+- 排版
+- 边框
+- 阴影
+- 状态 class
+
+CSS variables 负责：
+
+- 品牌色
+- 语义色
+- 文本层级色
+- 背景与边框基准值
+
+这样可以兼顾 Tailwind 的开发效率与后续主题一致性。
+
 ## 视觉系统设计
 
 ### 全局 Tokens
 
-在 `src/app/globals.css` 中重建全局变量，方向接近参考项目：
+在 `src/app/globals.css` 中重建全局变量，并作为 Tailwind 使用的设计基线，方向接近参考项目：
 
 - `--bg-app`：浅灰应用背景
 - `--bg-surface`：白色主面板背景
@@ -115,6 +175,7 @@
 - 正文与界面统一为更现代、清晰的无衬线或中文系统化字体栈。
 - 移除当前偏纸媒的 display serif 主导风格。
 - 需要保留少量 `mono` 用于标签、辅助信息和状态文本。
+- Tailwind class 中的字体使用应围绕全局字体变量展开，而不是零散写死。
 
 ### 背景与表面
 
@@ -124,7 +185,7 @@
 
 ## 首页改造设计
 
-首页改造对象为 `src/components/feed/feed-panel.tsx` 与其样式文件。
+首页改造对象为 `src/components/feed/feed-panel.tsx`，并优先把页面样式从 CSS Modules 迁移到 Tailwind。
 
 ### 页面头
 
@@ -181,7 +242,7 @@
 
 ## 后台页面改造设计
 
-后台改造对象主要为 `src/components/admin/*.tsx` 和 `src/components/admin/admin.module.css`。
+后台改造对象主要为 `src/components/admin/*.tsx`，并优先把页面样式从 CSS Modules 迁移到 Tailwind。
 
 ### 共用后台壳层
 
@@ -267,6 +328,12 @@
 - 文字按钮：导航或轻量跳转
 - 危险按钮：删除、清空、隐藏等
 
+需要建立可复用的按钮 class 策略，避免每个页面手写一套长 class 串。允许采用以下任一方式：
+
+- 轻量 class 常量
+- 小型样式组合函数
+- 极少量通用展示组件
+
 ### 表单状态
 
 输入框和下拉框统一支持：
@@ -288,6 +355,32 @@
 - 文案变化
 - 必要时轻量降低面板透明度或使用统一 busy 状态
 
+## Tailwind 技术落地范围
+
+### 基础设施
+
+需要新增或调整：
+
+- `package.json`：增加 Tailwind 相关依赖
+- `postcss.config.mjs`：启用 `@tailwindcss/postcss`
+- `src/app/globals.css`：导入 Tailwind，并保留全局变量和基础规则
+
+### 组件迁移
+
+本轮页面中，以下组件以 Tailwind 为主进行改造：
+
+- `src/components/feed/feed-panel.tsx`
+- `src/components/admin/admin-login-form.tsx`
+- `src/components/admin/content-review-panel.tsx`
+- `src/components/admin/admin-monitor-panel.tsx`
+- `src/components/admin/admin-settings-panel.tsx`
+
+### 过渡策略
+
+- 旧 CSS Module 可以暂时保留，直到对应组件已迁移完成。
+- 完成迁移后，应删除明显不再使用的样式类和文件内容。
+- 如果某些复杂选择器或极少量全局规则用 Tailwind 表达成本过高，可以继续留在 `globals.css`。
+
 ## 响应式要求
 
 ### 首页
@@ -306,6 +399,8 @@
 
 本次 UI 设计落地应至少覆盖以下文件：
 
+- `package.json`
+- `postcss.config.mjs`
 - `src/app/globals.css`
 - `src/components/feed/feed-panel.tsx`
 - `src/components/feed/feed-panel.module.css`
@@ -317,6 +412,8 @@
 
 如果实现过程中发现适合抽取共享布局组件，可新增轻量组件，但应控制范围，避免为了抽象而抽象。
 
+`src/components/feed/feed-panel.module.css` 与 `src/components/admin/admin.module.css` 在本轮中不再视为长期方案，而是迁移中的过渡资产。
+
 ## 验收标准
 
 ### 视觉验收
@@ -324,12 +421,14 @@
 1. 首页、登录页、内容审核、任务监控、后台设置五类页面明显属于同一套产品。
 2. 首页整体风格明显接近 `lumina` 列表页，而不是当前纸媒风。
 3. 后台整体风格明显接近 `lumina` 管理页，具备更强工具感和层级感。
+4. 本轮改造页面已经以 Tailwind 作为主要样式实现方式。
 
 ### 功能验收
 
 1. 不改变现有页面路由与主要交互流程。
 2. 不影响首页筛选、抓取、展开聚合、加载更多等功能。
 3. 不影响后台登录、审核、监控、设置等既有行为。
+4. Tailwind 接入后，构建、开发与现有页面渲染保持正常。
 
 ### 适配验收
 
@@ -338,16 +437,18 @@
 
 ## 风险与注意事项
 
-1. `AdminSettingsPanel` 内容量较大，纯样式重构时要注意不要破坏当前表单行为。
-2. 首页聚合展开与后台按钮较多，样式改造时要特别注意不同状态下的视觉优先级。
-3. 由于本次不引入完整后台框架，统一感主要依赖页面头、卡片系统和全局 token，一致性必须严格执行。
+1. `AdminSettingsPanel` 内容量较大，迁移到 Tailwind 时要注意不要破坏当前表单行为。
+2. 首页聚合展开与后台按钮较多，迁移为 Tailwind class 时要特别注意不同状态下的视觉优先级与可维护性。
+3. 由于本次不引入完整后台框架，统一感主要依赖页面头、卡片系统、Tailwind class 约定和全局 token，一致性必须严格执行。
+4. 若过度内联长 class 串，可能降低可读性，因此需要适度提炼共享 class 策略。
+5. `lumina` 使用的是 Tailwind 3，而当前项目将按更适配 Next.js 16 的方式接入，迁移时不能混用两套旧新配置习惯。
 
 ## 下一步
 
 在本设计获批后，下一阶段应编写实现计划，拆解为：
 
-1. 全局 token 与基础样式重建
-2. 首页信息流重构
-3. 后台共用样式系统重构
+1. Tailwind 基础设施接入与全局 token 重建
+2. 首页信息流迁移到 Tailwind 并重构界面
+3. 后台共用样式语言迁移到 Tailwind
 4. 登录页、审核页、监控页、设置页逐页落地
-5. 响应式和验收修正
+5. 清理过渡 CSS Modules、补齐响应式和验收修正
