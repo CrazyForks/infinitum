@@ -50,6 +50,7 @@ const initialEntries: FeedEntryDTO[] = [
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   vi.useRealTimers();
 });
 
@@ -128,7 +129,10 @@ describe("FeedPanel", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "信息流" })).toBeInTheDocument();
+    expect(screen.getByText("Infinitum Feed")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "信息流控制台" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "信息流筛选" })).toBeInTheDocument();
+    expect(screen.queryByText("Infinitum Admin")).not.toBeInTheDocument();
     expect(screen.getByText("OpenAI Agent 发布")).toBeInTheDocument();
     expect(screen.getByText("中文标题")).toBeInTheDocument();
 
@@ -359,6 +363,39 @@ describe("FeedPanel", () => {
     });
 
     expect(screen.getByText("抓取任务已进入队列，等待后台执行。")).toBeInTheDocument();
+    expect(screen.getByText("抓取任务已进入队列，等待后台执行。").closest('[role="status"]')).not.toBeNull();
+  });
+
+  it("renders refresh API errors as alerts", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: "Unauthorized",
+        }),
+        { status: 401 },
+      ),
+    );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <FeedPanel
+        initialItems={initialEntries}
+        initialRange="7d"
+        initialSort="time_desc"
+        initialStartDate={null}
+        initialEndDate={null}
+        initialNextCursor={null}
+        initialStatus={null}
+        isAdmin
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "立即刷新" }));
+
+    expect(await screen.findByText("Unauthorized")).toBeInTheDocument();
+    expect(screen.getByText("Unauthorized").closest('[role="alert"]')).not.toBeNull();
   });
 
   it("hides admin-only controls for anonymous visitors", () => {
@@ -379,7 +416,7 @@ describe("FeedPanel", () => {
     expect(screen.queryByRole("button", { name: "重新生成摘要" })).not.toBeInTheDocument();
   });
 
-  it("shows admin actions and updates a single item after regenerating the summary", async () => {
+  it("shows admin actions and queues a background task after regenerating the summary", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
       const url = typeof input === "string" ? input : input.url;
@@ -389,11 +426,11 @@ describe("FeedPanel", () => {
 
         return new Response(
           JSON.stringify({
-            item: {
-              ...initialEntries[1],
-              summary: "重生成后的摘要",
+            taskRun: {
+              id: "task-2",
             },
           }),
+          { status: 202 },
         );
       }
 
@@ -430,7 +467,47 @@ describe("FeedPanel", () => {
       });
     });
 
-    expect(await screen.findByText("重生成后的摘要")).toBeInTheDocument();
+    expect(await screen.findByText("已创建后台任务，正在处理中。")).toBeInTheDocument();
+    expect(screen.getByText("已创建后台任务，正在处理中。").closest('[role="status"]')).not.toBeNull();
+    expect(screen.getByText("摘要内容")).toBeInTheDocument();
+  });
+
+  it("renders regenerate API errors as alerts", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+      const url = typeof input === "string" ? input : input.url;
+
+      if (url === "/api/admin/items/item-1/regenerate") {
+        return new Response(
+          JSON.stringify({
+            error: "An ingestion run is already in progress.",
+          }),
+          { status: 409 },
+        );
+      }
+
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <FeedPanel
+        initialItems={initialEntries}
+        initialRange="7d"
+        initialSort="time_desc"
+        initialStartDate={null}
+        initialEndDate={null}
+        initialNextCursor={null}
+        initialStatus={null}
+        isAdmin={true}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "重新生成摘要" }));
+
+    expect(await screen.findByText("An ingestion run is already in progress.")).toBeInTheDocument();
+    expect(screen.getByText("An ingestion run is already in progress.").closest('[role="alert"]')).not.toBeNull();
   });
 
   it("requests feed data with group and source filters while preserving the current range inputs", async () => {
