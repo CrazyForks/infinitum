@@ -212,28 +212,35 @@ describe("/api/feed", () => {
   });
 
   it("sorts the mixed feed by score when requested", async () => {
-    const { GET } = await import("@/app/api/feed/route");
-    const response = await GET(new Request("http://localhost/api/feed?range=7d&sort=score_desc"));
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-10T12:00:00.000Z"));
 
-    const json = await response.json();
+    try {
+      const { GET } = await import("@/app/api/feed/route");
+      const response = await GET(new Request("http://localhost/api/feed?range=7d&sort=score_desc"));
 
-    expect(json.items).toHaveLength(3);
-    expect(json.items[0]).toMatchObject({
-      type: "single",
-      id: "item-c1",
-      score: 98,
-    });
-    expect(json.items[1]).toMatchObject({
-      type: "cluster",
-      id: "cluster-a",
-      score: 90,
-    });
-    expect(json.items[2]).toMatchObject({
-      type: "single",
-      id: "item-b1",
-      score: 62,
-    });
-    expect(json.sort).toBe("score_desc");
+      const json = await response.json();
+
+      expect(json.items).toHaveLength(3);
+      expect(json.items[0]).toMatchObject({
+        type: "single",
+        id: "item-c1",
+        score: 98,
+      });
+      expect(json.items[1]).toMatchObject({
+        type: "cluster",
+        id: "cluster-a",
+        score: 90,
+      });
+      expect(json.items[2]).toMatchObject({
+        type: "single",
+        id: "item-b1",
+        score: 62,
+      });
+      expect(json.sort).toBe("score_desc");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("filters feed entries by group and only returns matching content", async () => {

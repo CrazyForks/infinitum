@@ -292,9 +292,11 @@ export function AdminMonitorPanel({ initialSnapshot }: AdminMonitorPanelProps) {
           return;
         }
 
+        const schedule = payload.schedule;
+
         setSnapshot((current) => ({
           ...current,
-          schedule: payload.schedule,
+          schedule,
         }));
         setFeedback({ tone: "success", text: "调度配置已保存。" });
       } catch {

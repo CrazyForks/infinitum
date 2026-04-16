@@ -137,11 +137,13 @@ export function AdminSettingsPanel({ initialSettings }: AdminSettingsPanelProps)
           return;
         }
 
+        const source = payload.source;
+
         setNewSource((current) => ({
           ...current,
-          name: payload.source.name,
-          rssUrl: payload.source.rssUrl,
-          siteUrl: payload.source.siteUrl,
+          name: source.name,
+          rssUrl: source.rssUrl,
+          siteUrl: source.siteUrl,
         }));
         setFeedback({ tone: "success", text: "已根据 RSS 自动填充信息源基本信息。" });
       } catch {
