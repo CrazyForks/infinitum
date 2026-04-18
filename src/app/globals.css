@@ -109,6 +109,40 @@ main {
   border: 1px solid rgba(59, 130, 246, 0.18);
 }
 
+.lumina-home-action-button {
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--text-2);
+  font-weight: 400;
+}
+
+.lumina-home-action-button span {
+  font-size: inherit;
+  line-height: inherit;
+  color: inherit;
+}
+
+.lumina-home-action-button svg {
+  color: inherit;
+}
+
+.lumina-home-action-button--active {
+  color: var(--accent-strong);
+}
+
+.lumina-home-action-button--primary {
+  color: #fff;
+  font-weight: 500;
+}
+
+.lumina-home-action-button--clear {
+  color: var(--text-2);
+}
+
+.lumina-home-action-button--disabled {
+  color: var(--text-3);
+}
+
 .select-modern {
   appearance: none;
   background-color: var(--surface);

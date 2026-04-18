@@ -120,6 +120,28 @@ function buildFallbackSummary(rssExcerpt: string | null, fallbackBody: string | 
   return null;
 }
 
+function hasAnalysisInputsChanged(
+  existing: {
+    originalTitle: string;
+    publishedAt: Date;
+    rssExcerpt: string | null;
+    rssContent: string | null;
+  },
+  next: {
+    originalTitle: string;
+    publishedAt: Date;
+    rssExcerpt: string | null;
+    rssContent: string | null;
+  },
+) {
+  return (
+    existing.originalTitle !== next.originalTitle ||
+    existing.publishedAt.getTime() !== next.publishedAt.getTime() ||
+    (existing.rssExcerpt ?? null) !== (next.rssExcerpt ?? null) ||
+    (existing.rssContent ?? null) !== (next.rssContent ?? null)
+  );
+}
+
 function willRequireAiAnalysis(preparedItem: PreparedFeedItem, blacklist: string[]) {
   const originalTitle = preparedItem.item.title?.trim();
   const originalUrl = preparedItem.item.link?.trim();
@@ -230,6 +252,14 @@ async function processFeedItem({
     publishedAt,
   });
   const existing = await findExistingItem(dedupeKeys.urlHash, dedupeKeys.signature);
+  const analysisInputsChanged = existing
+    ? hasAnalysisInputsChanged(existing, {
+        originalTitle,
+        publishedAt,
+        rssExcerpt,
+        rssContent,
+      })
+    : true;
 
   let fullText = existing?.fullText ?? null;
   let translatedTitle = existing?.translatedTitle ?? null;
@@ -245,6 +275,14 @@ async function processFeedItem({
   let clusterHint: string | null = null;
   const issues: string[] = [];
   const contentForFullTextDecision = fullText || rssContent || rssExcerpt || "";
+  const canReuseExistingAnalysis = Boolean(
+    existing &&
+      !analysisInputsChanged &&
+      existing.aiProcessedAt &&
+      existing.status !== "new" &&
+      existing.status !== "fetched" &&
+      existing.status !== "failed",
+  );
   const initialFilterMatch = findBlacklistMatch({
     title: originalTitle,
     content: [rssContent, rssExcerpt].filter(Boolean).join("\n"),
@@ -290,6 +328,45 @@ async function processFeedItem({
     if (existing?.clusterId) {
       await recomputeCluster(existing.clusterId, aiProvider);
     }
+
+    return { id: stored.id, status: stored.status };
+  }
+
+  if (canReuseExistingAnalysis) {
+    const stored = await upsertItem(
+      {
+        id: existing?.id,
+        urlHash: dedupeKeys.urlHash,
+        dedupeSignature: dedupeKeys.signature,
+      },
+      {
+        sourceId,
+        originalUrl,
+        canonicalUrl: dedupeKeys.canonicalUrl,
+        urlHash: dedupeKeys.urlHash,
+        dedupeSignature: dedupeKeys.signature,
+        originalTitle,
+        translatedTitle,
+        author: item.creator || item.author || null,
+        publishedAt,
+        rssExcerpt,
+        rssContent,
+        fullText,
+        summaryText,
+        language: existing?.language ?? (shouldTranslateTitle(originalTitle) ? "en" : "unknown"),
+        status,
+        filterReason,
+        moderationStatus,
+        moderationReason,
+        moderationDetail,
+        qualityScore,
+        qualityRationale,
+        topicLabel,
+        aiProcessedAt: existing?.aiProcessedAt,
+        clusterId: existing?.clusterId ?? null,
+        errorMessage: null,
+      },
+    );
 
     return { id: stored.id, status: stored.status };
   }

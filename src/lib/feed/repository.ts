@@ -214,7 +214,7 @@ function buildItemWhere(
         ...(clusterId ? { clusterId } : {}),
         ...(filters.rangeStart || filters.rangeEnd
           ? {
-              publishedAt: {
+              createdAt: {
                 ...(filters.rangeStart ? { gte: filters.rangeStart } : {}),
                 ...(filters.rangeEnd ? { lte: filters.rangeEnd } : {}),
               },

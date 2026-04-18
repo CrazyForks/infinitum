@@ -188,7 +188,7 @@ describe("FeedPanel", () => {
     await selectFilterOption(user, "创建时间", "1月");
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=1m&sort=time_desc");
+      expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=1m&sort=time_desc&tzOffsetMinutes=-480");
     });
 
     expect(await screen.findByText("一月内标题")).toBeInTheDocument();
@@ -236,20 +236,19 @@ describe("FeedPanel", () => {
       expect(screen.getByRole("button", { name: "高级筛选" })).toHaveAttribute("aria-expanded", "true");
     });
 
+    expect(screen.getAllByText("创建时间").length).toBeGreaterThan(0);
+    expect(screen.getByPlaceholderText("开始日期")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("结束日期")).toBeInTheDocument();
+
     await user.type(screen.getByLabelText("标题模糊搜索"), "Agent");
     await selectFilterOption(user, "排序方式", "按评分倒序");
-    await user.type(screen.getByLabelText("开始日期"), "2026-04-01");
-    await user.type(screen.getByLabelText("结束日期"), "2026-04-10");
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/feed?range=7d&sort=score_desc&start=2026-04-01&end=2026-04-10&title=Agent",
-      );
+      expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=7d&sort=score_desc&title=Agent&tzOffsetMinutes=-480");
     });
 
     expect(await screen.findByText("评分最高内容")).toBeInTheDocument();
     expect(screen.getByText("标题：Agent")).toBeInTheDocument();
-    expect(screen.getByText("创建时间：2026-04-01 至 2026-04-10")).toBeInTheDocument();
     expect(screen.getByText("排序：按评分倒序")).toBeInTheDocument();
   });
 
@@ -284,6 +283,38 @@ describe("FeedPanel", () => {
     expect(within(filterRegion).getByText("抓取说明：2 个源抓取失败")).toBeInTheDocument();
   });
 
+  it("keeps the latest ingestion summary next to the refresh button for admins", () => {
+    render(
+      <FeedPanel
+        initialItems={initialEntries}
+        initialRange="7d"
+        initialSort="time_desc"
+        initialStartDate={null}
+        initialEndDate={null}
+        initialNextCursor={null}
+        initialStatus={{
+          id: "run-summary-inline-1",
+          status: "succeeded",
+          triggerType: "manual",
+          startedAt: "2026-04-18T00:40:00.000Z",
+          finishedAt: "2026-04-18T00:58:00.000Z",
+          sourceCount: 50,
+          itemCount: 50,
+          successCount: 50,
+          failureCount: 0,
+          errorSummary: null,
+        }}
+        isAdmin
+      />,
+    );
+
+    const refreshButton = screen.getByRole("button", { name: "立即刷新" });
+    const inlineControls = refreshButton.parentElement;
+
+    expect(inlineControls).not.toBeNull();
+    expect(inlineControls).toHaveTextContent("最近抓取：已成功 · 50/50 · 2026/04/18 08:58");
+  });
+
   it("keeps Lumina-like typography on the homepage filter controls and cards", () => {
     render(
       <FeedPanel
@@ -299,6 +330,7 @@ describe("FeedPanel", () => {
     );
 
     const advancedToggle = screen.getByRole("button", { name: "高级筛选" });
+    const refreshButton = screen.queryByRole("button", { name: "立即刷新" });
     const rangeSelect = getSelectRoot("创建时间");
     const sortSelect = getSelectRoot("排序方式");
     const clearButton = screen.getByRole("button", { name: "清除筛选" });
@@ -307,7 +339,7 @@ describe("FeedPanel", () => {
     expect(advancedToggle.className).toContain("text-sm");
     expect(advancedToggle.className).toContain("px-4");
     expect(advancedToggle.className).toContain("py-1");
-    expect(advancedToggle.className).not.toContain("font-medium");
+    expect(refreshButton).toBeNull();
     expect(rangeSelect?.className).toContain("select-modern-antd");
     expect(rangeSelect?.className).toContain("h-9");
     expect(sortSelect?.className).toContain("select-modern-antd");
@@ -316,6 +348,117 @@ describe("FeedPanel", () => {
     expect(clearButton.className).toContain("px-3");
     expect(clearButton.className).toContain("py-1");
     expect(title.className).toContain("text-xl");
+  });
+
+  it("matches Lumina button color states for advanced filters and clear filters", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <FeedPanel
+        initialItems={initialEntries}
+        initialRange="7d"
+        initialSort="time_desc"
+        initialStartDate={null}
+        initialEndDate={null}
+        initialNextCursor={null}
+        initialStatus={null}
+        isAdmin={false}
+      />,
+    );
+
+    const advancedToggle = screen.getByRole("button", { name: "高级筛选" });
+    const clearButton = screen.getByRole("button", { name: "清除筛选" });
+
+    expect(advancedToggle.className).toContain("lumina-home-action-button");
+    expect(clearButton.className).toContain("lumina-home-action-button");
+    expect(advancedToggle.className).toContain("bg-[var(--bg-muted)]");
+    expect(advancedToggle.className).toContain("text-[var(--text-2)]");
+    expect(advancedToggle.className).toContain("hover:bg-[var(--surface)]");
+
+    expect(clearButton.className).toContain("bg-[var(--surface)]");
+    expect(clearButton.className).toContain("text-[var(--text-2)]");
+    expect(clearButton.className).toContain("hover:bg-[var(--bg-muted)]");
+    expect(clearButton.className).toContain("hover:text-[var(--text-1)]");
+
+    await user.click(advancedToggle);
+
+    expect(advancedToggle.className).toContain("bg-[var(--accent-soft)]");
+    expect(advancedToggle.className).toContain("text-[var(--accent-strong)]");
+  });
+
+  it("keeps the clear filters button enabled when the summary shows non-default filter chips", () => {
+    render(
+      <FeedPanel
+        initialItems={initialEntries}
+        initialRange="7d"
+        initialSort="time_desc"
+        initialStartDate={null}
+        initialEndDate={null}
+        initialNextCursor={null}
+        initialStatus={null}
+        isAdmin={false}
+      />,
+    );
+
+    const clearButton = screen.getByRole("button", { name: "清除筛选" });
+
+    expect(screen.getByText("创建时间：7天")).toBeInTheDocument();
+    expect(screen.getByText("排序：按时间倒序")).toBeInTheDocument();
+    expect(clearButton).toBeEnabled();
+    expect(clearButton.className).toContain("lumina-home-action-button--clear");
+  });
+
+  it("uses the same search and refresh icons as Lumina for the filter action buttons", () => {
+    render(
+      <FeedPanel
+        initialItems={initialEntries}
+        initialRange="7d"
+        initialSort="time_desc"
+        initialStartDate={null}
+        initialEndDate={null}
+        initialNextCursor={null}
+        initialStatus={null}
+        isAdmin
+      />,
+    );
+
+    const advancedToggle = screen.getByRole("button", { name: "高级筛选" });
+    const refreshButton = screen.getByRole("button", { name: "立即刷新" });
+    const advancedIcon = advancedToggle.querySelector("svg");
+    const refreshIcon = refreshButton.querySelector("svg");
+
+    expect(advancedIcon?.getAttribute("viewBox")).toBe("0 0 24 24");
+    expect(advancedIcon?.innerHTML).toContain('circle cx="11" cy="11" r="7"');
+    expect(advancedIcon?.innerHTML).toContain('path d="m21 21-4.3-4.3"');
+
+    expect(refreshIcon?.getAttribute("viewBox")).toBe("0 0 24 24");
+    expect(refreshIcon?.innerHTML).toContain('path d="M21 12a9 9 0 0 1-9 9 9 9 0 0 1-7.5-4"');
+    expect(refreshIcon?.innerHTML).toContain('path d="M3 12a9 9 0 0 1 9-9 9 9 0 0 1 7.5 4"');
+    expect(refreshIcon?.innerHTML).toContain('path d="M3 5v4h4"');
+    expect(refreshIcon?.innerHTML).toContain('path d="M21 19v-4h-4"');
+  });
+
+  it("keeps the admin refresh button as a white-on-primary Lumina-style action", () => {
+    render(
+      <FeedPanel
+        initialItems={initialEntries}
+        initialRange="7d"
+        initialSort="time_desc"
+        initialStartDate={null}
+        initialEndDate={null}
+        initialNextCursor={null}
+        initialStatus={null}
+        isAdmin
+      />,
+    );
+
+    const refreshButton = screen.getByRole("button", { name: "立即刷新" });
+
+    expect(refreshButton.className).toContain("lumina-home-action-button");
+    expect(refreshButton.className).toContain("lumina-home-action-button--primary");
+    expect(refreshButton.className).toContain("bg-[var(--accent)]");
+    expect(refreshButton.className).toContain("text-white");
+    expect(refreshButton.className).toContain("font-medium");
   });
 
   it("uses transplanted Lumina filter components on the homepage", () => {
@@ -377,7 +520,7 @@ describe("FeedPanel", () => {
     await user.click(screen.getByRole("button", { name: "展开相关内容" }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("/api/feed/clusters/cluster-1?range=7d&sort=time_desc");
+      expect(fetchMock).toHaveBeenCalledWith("/api/feed/clusters/cluster-1?range=7d&sort=time_desc&tzOffsetMinutes=-480");
     });
 
     expect(await screen.findByText("详细标题")).toBeInTheDocument();
@@ -444,7 +587,7 @@ describe("FeedPanel", () => {
         );
       }
 
-      if (url === "/api/feed?range=7d&sort=time_desc") {
+      if (url === "/api/feed?range=7d&sort=time_desc&tzOffsetMinutes=-480") {
         return new Response(
           JSON.stringify({
             items: [
@@ -493,7 +636,7 @@ describe("FeedPanel", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledWith("/api/ingest/status");
-    expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=7d&sort=time_desc");
+    expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=7d&sort=time_desc&tzOffsetMinutes=-480");
     expect(screen.getByText("刷新后的标题")).toBeInTheDocument();
   });
 
@@ -738,7 +881,7 @@ describe("FeedPanel", () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/feed?range=7d&sort=score_desc&start=2026-04-01&end=2026-04-10&groupId=group-1&sourceId=source-2",
+        "/api/feed?range=7d&sort=score_desc&start=2026-04-01&end=2026-04-10&groupId=group-1&sourceId=source-2&tzOffsetMinutes=-480",
       );
     });
   });
@@ -747,7 +890,7 @@ describe("FeedPanel", () => {
     const user = userEvent.setup();
     const fetchMock = vi
       .fn<typeof fetch>()
-      .mockResolvedValue(
+      .mockImplementation(async () =>
         new Response(
           JSON.stringify({
             items: initialEntries,
@@ -770,28 +913,28 @@ describe("FeedPanel", () => {
         initialItems={initialEntries}
         initialRange="7d"
         initialSort="score_desc"
-        initialStartDate="2026-04-01"
-        initialEndDate="2026-04-10"
+        initialStartDate={null}
+        initialEndDate={null}
         initialNextCursor={null}
         initialStatus={null}
         isAdmin={false}
         initialGroupId="group-1"
         initialSourceId="source-2"
+        initialTitle="Agent"
         availableGroups={[{ id: "group-1", name: "Core" }]}
         availableSources={[{ id: "source-2", name: "Feed Two", groupId: "group-1" }]}
       />,
     );
 
     expect(screen.getByRole("button", { name: "高级筛选" })).toHaveAttribute("aria-expanded", "true");
-    await user.type(await screen.findByLabelText("标题模糊搜索"), "Agent");
     await user.click(screen.getByRole("button", { name: "清除筛选" }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenLastCalledWith("/api/feed?range=today&sort=time_desc");
+      expect(fetchMock).toHaveBeenLastCalledWith("/api/feed?range=today&sort=time_desc&tzOffsetMinutes=-480");
     });
 
-    expect(getSelectRoot("创建时间")).toHaveTextContent("当前");
-    expect(screen.getByText("创建时间：当前")).toBeInTheDocument();
+    expect(getSelectRoot("创建时间")).toHaveTextContent("当天");
+    expect(screen.getByText("创建时间：当天")).toBeInTheDocument();
     expect(screen.getByText("排序：按时间倒序")).toBeInTheDocument();
     expect(screen.queryByText("标题：Agent")).not.toBeInTheDocument();
   });

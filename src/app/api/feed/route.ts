@@ -1,5 +1,12 @@
 import { listFeedItems } from "@/lib/feed/repository";
-import { isFeedRange, isFeedSort, normalizeFeedDateInput, normalizeFeedFilterId, resolveFeedFilters } from "@/lib/feed/range";
+import {
+  isFeedRange,
+  isFeedSort,
+  normalizeFeedDateInput,
+  normalizeFeedFilterId,
+  normalizeFeedTimeZoneOffset,
+  resolveFeedFilters,
+} from "@/lib/feed/range";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -11,9 +18,10 @@ export async function GET(request: Request) {
   const sourceId = normalizeFeedFilterId(searchParams.get("sourceId"));
   const title = searchParams.get("title")?.trim() || null;
   const cursor = searchParams.get("cursor");
+  const timeZoneOffsetMinutes = normalizeFeedTimeZoneOffset(searchParams.get("tzOffsetMinutes"));
   const range = isFeedRange(rangeParam) ? rangeParam : "today";
   const sort = isFeedSort(sortParam) ? sortParam : "time_desc";
-  const filters = resolveFeedFilters({ range, sort, start, end, groupId, sourceId, title });
+  const filters = resolveFeedFilters({ range, sort, start, end, groupId, sourceId, title }, new Date(), timeZoneOffsetMinutes);
   const result = await listFeedItems(filters, cursor);
 
   return Response.json({

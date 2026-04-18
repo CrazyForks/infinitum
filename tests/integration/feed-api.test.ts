@@ -78,6 +78,7 @@ describe("/api/feed", () => {
           qualityScore: 92,
           qualityRationale: "高质量",
           language: "en",
+          createdAt: new Date("2026-04-10T09:05:00.000Z"),
         },
         {
           id: "item-a2",
@@ -97,6 +98,7 @@ describe("/api/feed", () => {
           qualityScore: 88,
           qualityRationale: "高质量",
           language: "en",
+          createdAt: new Date("2026-04-10T08:35:00.000Z"),
         },
         {
           id: "item-b1",
@@ -116,6 +118,7 @@ describe("/api/feed", () => {
           qualityScore: 62,
           qualityRationale: "一般质量",
           language: "en",
+          createdAt: new Date("2026-04-09T09:05:00.000Z"),
         },
         {
           id: "item-c1",
@@ -135,6 +138,7 @@ describe("/api/feed", () => {
           qualityScore: 98,
           qualityRationale: "非常高质量",
           language: "en",
+          createdAt: new Date("2026-04-08T09:05:00.000Z"),
         },
         {
           id: "item-d1",
@@ -152,6 +156,45 @@ describe("/api/feed", () => {
           qualityScore: 20,
           qualityRationale: "低质量",
           language: "en",
+          createdAt: new Date("2026-04-10T08:05:00.000Z"),
+        },
+        {
+          id: "item-timezone-created",
+          sourceId: source.id,
+          originalUrl: "https://api.example.com/timezone-created",
+          canonicalUrl: "https://api.example.com/timezone-created",
+          urlHash: "hash-timezone-created",
+          dedupeSignature: "api feed|timezone created|2026-04-01t00:00:00.000z",
+          originalTitle: "Timezone Created",
+          translatedTitle: "按创建时间归档",
+          author: "Author TZ",
+          publishedAt: new Date("2026-04-01T00:00:00.000Z"),
+          summaryText: "创建时间落在东八区当天",
+          status: "processed",
+          moderationStatus: "allowed",
+          qualityScore: 75,
+          qualityRationale: "测试创建时间筛选",
+          language: "en",
+          createdAt: new Date("2026-04-09T18:00:00.000Z"),
+        },
+        {
+          id: "item-created-too-old",
+          sourceId: source.id,
+          originalUrl: "https://api.example.com/created-too-old",
+          canonicalUrl: "https://api.example.com/created-too-old",
+          urlHash: "hash-created-too-old",
+          dedupeSignature: "api feed|created too old|2026-04-10t11:00:00.000z",
+          originalTitle: "Created Too Old",
+          translatedTitle: "发布时间新但创建时间旧",
+          author: "Author Old",
+          publishedAt: new Date("2026-04-10T11:00:00.000Z"),
+          summaryText: "应该被创建时间筛掉",
+          status: "processed",
+          moderationStatus: "allowed",
+          qualityScore: 66,
+          qualityRationale: "测试创建时间优先",
+          language: "en",
+          createdAt: new Date("2026-04-01T11:00:00.000Z"),
         },
       ],
     });
@@ -168,7 +211,7 @@ describe("/api/feed", () => {
 
     const json = await response.json();
 
-    expect(json.items).toHaveLength(3);
+    expect(json.items).toHaveLength(4);
     expect(json.items[0]).toMatchObject({
       type: "cluster",
       id: "cluster-a",
@@ -189,6 +232,13 @@ describe("/api/feed", () => {
       title: "故事 C1",
       itemCount: 1,
       score: 98,
+    });
+    expect(json.items[3]).toMatchObject({
+      type: "single",
+      id: "item-timezone-created",
+      title: "按创建时间归档",
+      itemCount: 1,
+      score: 75,
     });
     expect(json.sort).toBe("time_desc");
 
@@ -211,6 +261,25 @@ describe("/api/feed", () => {
     expect(json.end).toBe("2026-04-10");
   });
 
+  it("filters by item createdAt and respects the user's timezone offset", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-10T12:00:00.000Z"));
+
+    try {
+      const { GET } = await import("@/app/api/feed/route");
+      const response = await GET(new Request("http://localhost/api/feed?range=today&tzOffsetMinutes=-480"));
+
+      const json = await response.json();
+      const itemIds = json.items.map((item: { id: string }) => item.id);
+
+      expect(itemIds).toContain("cluster-a");
+      expect(itemIds).toContain("item-timezone-created");
+      expect(itemIds).not.toContain("item-created-too-old");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("sorts the mixed feed by score when requested", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-10T12:00:00.000Z"));
@@ -221,7 +290,7 @@ describe("/api/feed", () => {
 
       const json = await response.json();
 
-      expect(json.items).toHaveLength(3);
+      expect(json.items).toHaveLength(4);
       expect(json.items[0]).toMatchObject({
         type: "single",
         id: "item-c1",
@@ -233,6 +302,11 @@ describe("/api/feed", () => {
         score: 90,
       });
       expect(json.items[2]).toMatchObject({
+        type: "single",
+        id: "item-timezone-created",
+        score: 75,
+      });
+      expect(json.items[3]).toMatchObject({
         type: "single",
         id: "item-b1",
         score: 62,

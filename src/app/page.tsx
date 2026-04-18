@@ -1,7 +1,14 @@
 import { getAdminSession } from "@/lib/admin/session";
 import { FeedPanel } from "@/components/feed/feed-panel";
 import { getLatestFetchRun, listFeedFilterOptions, listFeedItems, toFetchRunSnapshot } from "@/lib/feed/repository";
-import { isFeedRange, isFeedSort, normalizeFeedDateInput, normalizeFeedFilterId, resolveFeedFilters } from "@/lib/feed/range";
+import {
+  isFeedRange,
+  isFeedSort,
+  normalizeFeedDateInput,
+  normalizeFeedFilterId,
+  normalizeFeedTimeZoneOffset,
+  resolveFeedFilters,
+} from "@/lib/feed/range";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +30,8 @@ export default async function Home({ searchParams }: PageProps) {
   const candidateSourceId =
     Array.isArray(resolvedSearchParams.sourceId) ? resolvedSearchParams.sourceId[0] : resolvedSearchParams.sourceId;
   const candidateTitle = Array.isArray(resolvedSearchParams.title) ? resolvedSearchParams.title[0] : resolvedSearchParams.title;
+  const candidateTimeZoneOffset =
+    Array.isArray(resolvedSearchParams.tzOffsetMinutes) ? resolvedSearchParams.tzOffsetMinutes[0] : resolvedSearchParams.tzOffsetMinutes;
   const range = candidateRange && isFeedRange(candidateRange) ? candidateRange : "today";
   const sort = candidateSort && isFeedSort(candidateSort) ? candidateSort : "time_desc";
   const filters = resolveFeedFilters({
@@ -33,7 +42,7 @@ export default async function Home({ searchParams }: PageProps) {
     groupId: normalizeFeedFilterId(candidateGroupId),
     sourceId: normalizeFeedFilterId(candidateSourceId),
     title: candidateTitle?.trim() ? candidateTitle.trim() : null,
-  });
+  }, new Date(), normalizeFeedTimeZoneOffset(candidateTimeZoneOffset));
   const [feed, latestRun, adminSession, feedFilterOptions] = await Promise.all([
     listFeedItems(filters),
     getLatestFetchRun(),

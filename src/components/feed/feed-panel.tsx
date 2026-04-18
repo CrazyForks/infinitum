@@ -1,16 +1,16 @@
 "use client";
 
+import dayjs, { type Dayjs } from "dayjs";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import { PageShell } from "@/components/ui/page-shell";
 import { StatusBanner } from "@/components/ui/status-banner";
-import { Button } from "@/components/ui/button";
+import { DateRangePicker } from "@/components/ui/date-range-picker";
 import { FilterInput } from "@/components/ui/filter-input";
 import { FilterSelect } from "@/components/ui/filter-select";
 import { FilterSelectInline } from "@/components/ui/filter-select-inline";
 import { FilterSummary } from "@/components/ui/filter-summary";
 import { FormField } from "@/components/ui/form-field";
-import { TextInput } from "@/components/ui/text-input";
 import { RANGE_OPTIONS, SORT_OPTIONS } from "@/lib/feed/range";
 import type {
   FeedClusterPreviewItemDTO,
@@ -65,6 +65,8 @@ type FeedFeedback = {
   message: string;
 };
 
+type DateRangeValue = [Dayjs | null, Dayjs | null] | null;
+
 const TITLE_SEARCH_DEBOUNCE_MS = 320;
 
 function formatDate(value: string): string {
@@ -112,7 +114,7 @@ function formatRangeLabel(range: FeedRange, startDate: string | null, endDate: s
     return `${startDate ?? "最早"} 至 ${endDate ?? "最新"}`;
   }
 
-  return RANGE_OPTIONS.find((option) => option.value === range)?.label ?? "当前";
+  return RANGE_OPTIONS.find((option) => option.value === range)?.label ?? "当天";
 }
 
 function normalizeOptionalId(value: string | null | undefined): string | null {
@@ -123,6 +125,18 @@ function normalizeOptionalId(value: string | null | undefined): string | null {
 function normalizeSearchText(value: string | null | undefined): string | null {
   const normalized = value?.trim();
   return normalized ? normalized : null;
+}
+
+function toDayjsRange(startDate: string | null, endDate: string | null): [Dayjs | null, Dayjs | null] {
+  return [startDate ? dayjs(startDate, "YYYY-MM-DD") : null, endDate ? dayjs(endDate, "YYYY-MM-DD") : null];
+}
+
+function getBrowserTimeZoneOffsetMinutes(): number {
+  return new Date().getTimezoneOffset();
+}
+
+function isTimeZoneSensitiveQuery(range: FeedRange, startDate: string | null, endDate: string | null): boolean {
+  return Boolean(startDate || endDate || range === "today" || range === "1m" || range === "1y");
 }
 
 function buildFeedSearch({ range, sort, startDate, endDate, groupId, sourceId, title }: FeedQueryState, cursor?: string | null): string {
@@ -158,7 +172,78 @@ function buildFeedSearch({ range, sort, startDate, endDate, groupId, sourceId, t
     search.set("cursor", cursor);
   }
 
+  const timeZoneOffsetMinutes = getBrowserTimeZoneOffsetMinutes();
+  if (timeZoneOffsetMinutes !== 0) {
+    search.set("tzOffsetMinutes", String(timeZoneOffsetMinutes));
+  }
+
   return search.toString();
+}
+
+async function requestFeed(query: FeedQueryState, cursor?: string | null) {
+  const response = await fetch(`/api/feed?${buildFeedSearch(query, cursor)}`);
+  return (await response.json()) as {
+    items: FeedEntryDTO[];
+    nextCursor: string | null;
+    range: FeedRange;
+    sort: FeedSort;
+    start: string | null;
+    end: string | null;
+    groupId: string | null;
+    sourceId: string | null;
+    title: string | null;
+  };
+}
+
+async function requestClusterItems(clusterId: string, query: FeedQueryState) {
+  const response = await fetch(`/api/feed/clusters/${clusterId}?${buildFeedSearch(query)}`);
+  const payload = (await response.json()) as {
+    items: FeedClusterPreviewItemDTO[];
+  };
+
+  return payload.items;
+}
+
+function SearchIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="h-4 w-4"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="11" cy="11" r="7" />
+      <path d="m21 21-4.3-4.3" />
+    </svg>
+  );
+}
+
+function RefreshIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="h-4 w-4"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M21 12a9 9 0 0 1-9 9 9 9 0 0 1-7.5-4" />
+      <path d="M3 12a9 9 0 0 1 9-9 9 9 0 0 1 7.5 4" />
+      <path d="M3 5v4h4" />
+      <path d="M21 19v-4h-4" />
+    </svg>
+  );
 }
 
 export function FeedPanel({
@@ -195,6 +280,7 @@ export function FeedPanel({
     Boolean(initialStartDate || initialEndDate || initialGroupId || initialSourceId || initialTitle),
   );
   const skipTitleEffectRef = useRef(true);
+  const didHydrateTimeZoneRef = useRef(false);
   const latestQueryRef = useRef<FeedQueryState>({
     range: initialRange,
     sort: initialSort,
@@ -234,33 +320,9 @@ export function FeedPanel({
     return filters;
   }, [availableGroups, availableSources, groupId, sourceId, summary.rangeLabel, summary.sortLabel, title]);
 
-  async function fetchFeed(query: FeedQueryState, cursor?: string | null) {
-    const response = await fetch(`/api/feed?${buildFeedSearch(query, cursor)}`);
-    return (await response.json()) as {
-      items: FeedEntryDTO[];
-      nextCursor: string | null;
-      range: FeedRange;
-      sort: FeedSort;
-      start: string | null;
-      end: string | null;
-      groupId: string | null;
-      sourceId: string | null;
-      title: string | null;
-    };
-  }
-
-  async function fetchClusterItems(clusterId: string, query: FeedQueryState) {
-    const response = await fetch(`/api/feed/clusters/${clusterId}?${buildFeedSearch(query)}`);
-    const payload = (await response.json()) as {
-      items: FeedClusterPreviewItemDTO[];
-    };
-
-    return payload.items;
-  }
-
   const loadFeed = (query: FeedQueryState) => {
     startTransition(async () => {
-      const payload = await fetchFeed(query);
+      const payload = await requestFeed(query);
       setItems(payload.items);
       setNextCursor(payload.nextCursor);
       setExpandedClusters({});
@@ -279,8 +341,6 @@ export function FeedPanel({
     title: normalizeSearchText(title),
     ...overrides,
   });
-
-  latestQueryRef.current = buildQuery();
 
   const updateRange = (nextRange: FeedRange) => {
     setRange(nextRange);
@@ -331,20 +391,17 @@ export function FeedPanel({
     );
   };
 
-  const changeStartDate = (nextStartDate: string | null) => {
-    setStartDate(nextStartDate);
-    loadFeed(
-      buildQuery({
-        startDate: nextStartDate,
-      }),
-    );
-  };
+  const changeDateRange = (nextRange: DateRangeValue) => {
+    const [nextStartDate, nextEndDate] = nextRange ?? [null, null];
+    const normalizedStartDate = nextStartDate ? nextStartDate.format("YYYY-MM-DD") : null;
+    const normalizedEndDate = nextEndDate ? nextEndDate.format("YYYY-MM-DD") : null;
 
-  const changeEndDate = (nextEndDate: string | null) => {
-    setEndDate(nextEndDate);
+    setStartDate(normalizedStartDate);
+    setEndDate(normalizedEndDate);
     loadFeed(
       buildQuery({
-        endDate: nextEndDate,
+        startDate: normalizedStartDate,
+        endDate: normalizedEndDate,
       }),
     );
   };
@@ -434,7 +491,7 @@ export function FeedPanel({
       const nextOpen = !openClusters[clusterId];
 
       if (nextOpen && !expandedClusters[clusterId]) {
-        const clusterItems = await fetchClusterItems(clusterId, buildQuery());
+        const clusterItems = await requestClusterItems(clusterId, buildQuery());
         setExpandedClusters((current) => ({
           ...current,
           [clusterId]: clusterItems,
@@ -449,18 +506,57 @@ export function FeedPanel({
   };
 
   useEffect(() => {
+    latestQueryRef.current = {
+      range,
+      sort,
+      startDate,
+      endDate,
+      groupId,
+      sourceId,
+      title: normalizeSearchText(title),
+    };
+  }, [endDate, groupId, range, sort, sourceId, startDate, title]);
+
+  useEffect(() => {
+    if (didHydrateTimeZoneRef.current) {
+      return;
+    }
+
+    didHydrateTimeZoneRef.current = true;
+
+    if (getBrowserTimeZoneOffsetMinutes() === 0 || !isTimeZoneSensitiveQuery(range, startDate, endDate)) {
+      return;
+    }
+
+    loadFeed({
+      range,
+      sort,
+      startDate,
+      endDate,
+      groupId,
+      sourceId,
+      title: normalizeSearchText(title),
+    });
+  }, [endDate, groupId, range, sort, sourceId, startDate, title]);
+
+  useEffect(() => {
     if (skipTitleEffectRef.current) {
       skipTitleEffectRef.current = false;
       return;
     }
 
     const timer = window.setTimeout(() => {
-      loadFeed(
-        {
+      startTransition(async () => {
+        const payload = await requestFeed({
           ...latestQueryRef.current,
           title: normalizeSearchText(title),
-        },
-      );
+        });
+        setItems(payload.items);
+        setNextCursor(payload.nextCursor);
+        setExpandedClusters({});
+        setOpenClusters({});
+        setRefreshFeedback(null);
+      });
     }, TITLE_SEARCH_DEBOUNCE_MS);
 
     return () => {
@@ -501,7 +597,7 @@ export function FeedPanel({
         }
 
         setQueuedRefreshAt(null);
-        const feedPayload = await fetchFeed({
+        const feedPayload = await requestFeed({
           range,
           sort,
           startDate,
@@ -535,7 +631,7 @@ export function FeedPanel({
     }
 
     startTransition(async () => {
-      const payload = await fetchFeed(
+      const payload = await requestFeed(
         {
           range,
           sort,
@@ -559,8 +655,7 @@ export function FeedPanel({
     "inline-flex items-center rounded-sm border border-[color:var(--line)] bg-[var(--surface-muted)] px-2.5 py-1 text-sm text-[var(--muted)]";
   const denseCardClassName =
     "rounded-lg border border-[color:var(--line)] bg-white px-4 py-4 shadow-[var(--shadow-sm)] transition hover:border-[color:var(--line-strong)] sm:px-6 sm:py-5";
-  const hasAdvancedFilters = Boolean(title.trim() || groupId || sourceId || startDate || endDate);
-  const hasClearableFilters = hasAdvancedFilters || range !== "today" || sort !== "time_desc";
+  const hasClearableFilters = activeFilterSummary.length > 0;
   const latestRunSummary = formatRunSummary(status);
   const latestRunDetail = formatRunDetail(status);
 
@@ -580,42 +675,37 @@ export function FeedPanel({
         >
           <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   aria-expanded={advancedFiltersOpen}
                   className={cx(
-                    "inline-flex whitespace-nowrap rounded-sm px-4 py-1 text-sm transition",
+                    "lumina-home-action-button inline-flex whitespace-nowrap px-4 py-1 text-sm rounded-sm transition",
                     advancedFiltersOpen
-                      ? "bg-[var(--accent-soft)] text-[var(--accent-strong)]"
-                      : "bg-[var(--surface-muted)] text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--foreground)]",
+                      ? "lumina-home-action-button--active bg-[var(--accent-soft)] text-[var(--accent-strong)]"
+                      : "bg-[var(--bg-muted)] text-[var(--text-2)] hover:bg-[var(--surface)]",
                   )}
                   type="button"
                   onClick={() => setAdvancedFiltersOpen((current) => !current)}
                 >
                   <span className="inline-flex items-center gap-2">
-                    <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 16 16" fill="none">
-                      <path
-                        d="M2.5 3.5h11m-9 4h7m-4 4h1"
-                        stroke="currentColor"
-                        strokeWidth="1.4"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
+                    <SearchIcon />
                     <span>高级筛选</span>
                   </span>
                 </button>
                 {isAdmin ? (
-                  <Button
+                  <button
+                    type="button"
                     onClick={refresh}
-                    variant="primary"
-                    size="sm"
-                    className="whitespace-nowrap"
                     disabled={isPending}
+                    className="lumina-home-action-button lumina-home-action-button--primary inline-flex items-center justify-center whitespace-nowrap rounded-sm bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(59,130,246,0.35)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)] disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    立即刷新
-                  </Button>
+                    <span className="inline-flex items-center gap-2">
+                      <RefreshIcon />
+                      <span>立即刷新</span>
+                    </span>
+                  </button>
                 ) : null}
+                <span className="text-sm text-[var(--text-2)]">{latestRunSummary}</span>
               </div>
 
               <div className="flex flex-wrap items-center gap-4 lg:justify-end">
@@ -688,25 +778,12 @@ export function FeedPanel({
                     ]}
                   />
 
-                  <FormField label="开始日期" htmlFor="feed-start-date">
-                    <TextInput
-                      id="feed-start-date"
-                      aria-label="开始日期"
-                      type="date"
-                      value={startDate ?? ""}
-                      onChange={(event) => changeStartDate(event.target.value || null)}
-                      disabled={isPending}
-                    />
-                  </FormField>
-
-                  <FormField label="结束日期" htmlFor="feed-end-date">
-                    <TextInput
-                      id="feed-end-date"
-                      aria-label="结束日期"
-                      type="date"
-                      value={endDate ?? ""}
-                      onChange={(event) => changeEndDate(event.target.value || null)}
-                      disabled={isPending}
+                  <FormField label="创建时间" htmlFor="feed-created-date-range">
+                    <DateRangePicker
+                      id="feed-created-date-range"
+                      value={toDayjsRange(startDate, endDate)}
+                      onChange={changeDateRange}
+                      className="w-full"
                     />
                   </FormField>
                 </div>
@@ -717,12 +794,7 @@ export function FeedPanel({
               items={activeFilterSummary}
               onClear={clearFilters}
               canClear={hasClearableFilters && !isPending}
-              details={
-                <>
-                  <span>{latestRunSummary}</span>
-                  {latestRunDetail ? <span>{latestRunDetail}</span> : null}
-                </>
-              }
+              details={latestRunDetail ? <span>{latestRunDetail}</span> : null}
             />
           </div>
         </section>
