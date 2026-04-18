@@ -4,15 +4,16 @@ import { isFeedRange, isFeedSort, normalizeFeedDateInput, normalizeFeedFilterId,
 export async function GET(request: Request, context: RouteContext<"/api/feed/clusters/[id]">) {
   const { id } = await context.params;
   const { searchParams } = new URL(request.url);
-  const rangeParam = searchParams.get("range") ?? "7d";
+  const rangeParam = searchParams.get("range") ?? "today";
   const sortParam = searchParams.get("sort") ?? "time_desc";
   const filters = resolveFeedFilters({
-    range: isFeedRange(rangeParam) ? rangeParam : "7d",
+    range: isFeedRange(rangeParam) ? rangeParam : "today",
     sort: isFeedSort(sortParam) ? sortParam : "time_desc",
     start: normalizeFeedDateInput(searchParams.get("start")),
     end: normalizeFeedDateInput(searchParams.get("end")),
     groupId: normalizeFeedFilterId(searchParams.get("groupId")),
     sourceId: normalizeFeedFilterId(searchParams.get("sourceId")),
+    title: searchParams.get("title")?.trim() || null,
   });
   const items = await listClusterItems(id, filters);
 

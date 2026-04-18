@@ -1,7 +1,7 @@
 import type { FeedFilters, FeedRange, FeedSort } from "@/lib/feed/types";
 
 export const RANGE_OPTIONS: Array<{ value: FeedRange; label: string }> = [
-  { value: "today", label: "当天" },
+  { value: "today", label: "当前" },
   { value: "3d", label: "3天" },
   { value: "7d", label: "7天" },
   { value: "1m", label: "1月" },
@@ -105,6 +105,7 @@ export function resolveFeedFilters(
       end,
       groupId: normalizeFeedFilterId(input.groupId),
       sourceId: normalizeFeedFilterId(input.sourceId),
+      title: input.title?.trim() ? input.title.trim() : null,
       rangeStart: start ? buildUtcDateBoundary(start, "start") : null,
       rangeEnd: end ? buildUtcDateBoundary(end, "end") : null,
       isCustomRange: true,
@@ -118,6 +119,7 @@ export function resolveFeedFilters(
     end: null,
     groupId: normalizeFeedFilterId(input.groupId),
     sourceId: normalizeFeedFilterId(input.sourceId),
+    title: input.title?.trim() ? input.title.trim() : null,
     rangeStart: getRangeStart(input.range, now),
     rangeEnd: null,
     isCustomRange: false,

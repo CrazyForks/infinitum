@@ -1,9 +1,21 @@
 import type { Metadata } from "next";
+import localFont from "next/font/local";
+
+import "antd/dist/reset.css";
 import "./globals.css";
 
+const luminaMono = localFont({
+  src: "./fonts/LXGWWenKaiMono.ttf",
+  weight: "400",
+  style: "normal",
+  display: "swap",
+  fallback: ["system-ui", "sans-serif"],
+  variable: "--font-lumina",
+});
+
 export const metadata: Metadata = {
-  title: "Infinitum Feed",
-  description: "一个支持抓取、过滤、翻译与摘要的信息流面板。",
+  title: "Infinitum Lumina Console",
+  description: "面向抓取、审核、聚合与监控的高密度信息流后台。",
 };
 
 export default function RootLayout({
@@ -12,7 +24,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="zh-CN">
+    <html className={luminaMono.variable} lang="zh-CN">
       <body>{children}</body>
     </html>
   );

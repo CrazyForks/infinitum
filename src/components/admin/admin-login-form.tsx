@@ -7,6 +7,12 @@ import { PageHeader } from "@/components/ui/page-header";
 import { PageShell } from "@/components/ui/page-shell";
 import { StatusBanner } from "@/components/ui/status-banner";
 
+export const loginSuccessRedirect = {
+  assign(url: string) {
+    window.location.assign(url);
+  },
+};
+
 export function AdminLoginForm() {
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState<string | null>(null);
@@ -48,7 +54,7 @@ export function AdminLoginForm() {
           return;
         }
 
-        window.location.href = "/admin/settings";
+        loginSuccessRedirect.assign("/admin/settings");
       } catch {
         setMessage(fallbackMessage);
       }
@@ -56,48 +62,50 @@ export function AdminLoginForm() {
   };
 
   return (
-    <PageShell>
-      <section className="grid gap-8 lg:grid-cols-[minmax(0,1.2fr)_minmax(360px,420px)] lg:items-start">
-        <div className="space-y-6">
+    <PageShell header={{ activeNav: null, isAdmin: false }}>
+      <section className="grid gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(340px,420px)] xl:items-start">
+        <div className="space-y-5">
           <PageHeader
+            eyebrow="Admin Access"
             title="管理员登录"
-            description="后台访问受密码保护，登录后可管理抓取、审核与配置。"
+            description="使用统一入口访问审核与管理后台。"
           />
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="rounded-3xl border border-[color:var(--line)] bg-[var(--surface)] p-5 shadow-[var(--shadow-sm)]">
+          <div className="grid gap-4 md:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+            <article className="rounded-[1.75rem] border border-[color:var(--line)] bg-[var(--surface)] p-5 shadow-[var(--shadow-sm)]">
               <p className="font-mono text-[11px] font-medium uppercase tracking-[0.24em] text-[var(--accent-strong)]">
-                Access Scope
+                Console Scope
               </p>
+              <h2 className="mt-3 text-xl font-semibold tracking-[-0.03em] text-[var(--foreground)]">统一管理入口</h2>
               <p className="mt-3 text-sm leading-7 text-[var(--muted)]">
-                登录后进入后台设置页，可继续处理抓取调度、配置维护与内容审核相关操作。
+                登录后保持原有跳转到 `/admin/settings` 的行为，同时通过共享壳层快速切换到审核与后台管理。
               </p>
-            </div>
+            </article>
 
-            <div className="rounded-3xl border border-[color:var(--line)] bg-[var(--surface-muted)] p-5 shadow-[var(--shadow-sm)]">
+            <article className="rounded-[1.75rem] border border-[color:var(--line)] bg-[var(--surface-muted)] p-5 shadow-[var(--shadow-sm)]">
               <p className="font-mono text-[11px] font-medium uppercase tracking-[0.24em] text-[var(--muted)]">
                 Security
               </p>
               <p className="mt-3 text-sm leading-7 text-[var(--muted)]">
-                使用统一管理员密码验证身份，失败时保留原有错误反馈，成功后跳转到 `/admin/settings`。
+                登录请求、错误提示与成功跳转逻辑保持不变；这里只重做共享 Header 和更紧凑的控制台排版。
               </p>
-            </div>
+            </article>
           </div>
         </div>
 
-        <div className="rounded-3xl border border-[color:var(--line)] bg-[var(--surface)] p-6 shadow-[var(--shadow-lg)] sm:p-8">
+        <div className="rounded-[1.9rem] border border-[color:var(--line)] bg-[var(--surface)] p-6 shadow-[var(--shadow-lg)] sm:p-8">
           <form className="space-y-6" onSubmit={submit}>
             <div className="space-y-2">
               <h2 className="font-mono text-[11px] font-medium uppercase tracking-[0.28em] text-[var(--muted)]">Secure Sign-In</h2>
               <p className="text-sm leading-7 text-[var(--muted)]">
-                输入管理员密码后继续访问，界面已切换为更通用的控制台壳层，验证与跳转逻辑保持不变。
+                输入管理员密码后继续访问，系统会保持既有的验证、失败反馈与成功跳转流程。
               </p>
             </div>
 
             <label className="grid gap-3 text-sm font-medium text-[var(--foreground)]">
               <span>管理员密码</span>
               <input
-                className="w-full rounded-2xl border border-[color:var(--line)] bg-[var(--surface)] px-4 py-3 text-base text-[var(--foreground)] shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] outline-none transition focus:border-[color:var(--accent)] focus:ring-4 focus:ring-[rgba(37,99,235,0.14)]"
+                className="w-full rounded-2xl border border-[color:var(--line)] bg-[var(--surface-highlight)] px-4 py-3 text-base text-[var(--foreground)] shadow-[inset_0_1px_0_rgba(255,255,255,0.84)] outline-none transition focus:border-[color:var(--accent)] focus:ring-4 focus:ring-[rgba(33,111,255,0.12)]"
                 type="password"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}

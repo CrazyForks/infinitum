@@ -1,11 +1,12 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState, useTransition } from "react";
 
-import { PageHeader } from "@/components/ui/page-header";
 import { PageShell } from "@/components/ui/page-shell";
 import { StatusBanner } from "@/components/ui/status-banner";
+import { FilterInput } from "@/components/ui/filter-input";
+import { FilterSelect } from "@/components/ui/filter-select";
+import { FilterSummary } from "@/components/ui/filter-summary";
 import type { ClusterDTO, ReviewItemDTO } from "@/lib/feed/types";
 import { cx } from "@/lib/ui/cx";
 
@@ -31,19 +32,16 @@ type CollectionPayload = {
 };
 
 const tabConfig: Array<{
-  description: string;
   key: ReviewTab;
   label: string;
 }> = [
   {
     key: "filtered",
     label: "过滤内容",
-    description: "重点处理 AI 过滤的单条内容，快速复核来源、时间、原因与质量分。",
   },
   {
     key: "clusters",
     label: "聚合管理",
-    description: "检查聚合摘要、预览子条目，并控制聚合组显隐与重生成。",
   },
 ];
 
@@ -61,15 +59,13 @@ const clusterStatusLabels: Record<ClusterDTO["status"], string> = {
 };
 
 const surfaceCardClassName =
-  "rounded-[1.75rem] border border-[color:var(--line)] bg-white/95 shadow-[var(--shadow-sm)]";
+  "rounded-[1.1rem] border border-[color:var(--line)] bg-white/96 shadow-[var(--shadow-sm)]";
 const subtleCardClassName =
-  "rounded-[1.5rem] border border-[color:var(--line)] bg-[var(--surface-muted)] shadow-[var(--shadow-sm)]";
+  "rounded-[0.95rem] border border-[color:var(--line)] bg-[var(--surface-muted)]/82 shadow-[var(--shadow-sm)]";
 const secondaryButtonClassName =
-  "inline-flex min-h-11 items-center justify-center rounded-2xl border border-[color:var(--line)] bg-white px-4 py-3 text-sm font-medium text-[var(--foreground)] shadow-[var(--shadow-sm)] transition hover:bg-[var(--surface)] disabled:cursor-not-allowed disabled:opacity-55";
+  "inline-flex min-h-8 items-center justify-center rounded-[0.8rem] border border-[color:var(--line)] bg-white px-2.5 py-1.5 text-[13px] font-medium text-[var(--foreground)] shadow-[var(--shadow-sm)] transition hover:bg-[var(--surface)] disabled:cursor-not-allowed disabled:opacity-55";
 const primaryButtonClassName =
-  "inline-flex min-h-11 items-center justify-center rounded-2xl bg-[var(--accent)] px-4 py-3 text-sm font-semibold text-white shadow-[0_16px_32px_rgba(37,99,235,0.2)] transition hover:bg-[var(--accent-strong)] disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:bg-[var(--accent)]";
-const navLinkClassName =
-  "inline-flex min-h-11 items-center justify-center rounded-2xl border border-[color:var(--line)] bg-white px-4 py-3 text-sm font-medium text-[var(--foreground)] shadow-[var(--shadow-sm)] transition hover:border-[color:var(--line-strong)] hover:bg-[var(--surface)]";
+  "inline-flex min-h-8 items-center justify-center rounded-[0.8rem] bg-[var(--accent)] px-2.5 py-1.5 text-[13px] font-semibold text-white shadow-[0_14px_24px_rgba(37,99,235,0.16)] transition hover:bg-[var(--accent-strong)] disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:bg-[var(--accent)]";
 
 function formatDateTime(value: string) {
   return new Intl.DateTimeFormat("zh-CN", {
@@ -101,10 +97,27 @@ function getResponseError(
   return payload.error ?? null;
 }
 
+function truncateText(value: string | null | undefined, maxLength: number) {
+  if (!value) {
+    return "暂无摘要。";
+  }
+
+  if (value.length <= maxLength) {
+    return value;
+  }
+
+  return `${value.slice(0, maxLength).trimEnd()}...`;
+}
+
 export function ContentReviewPanel() {
   const [activeTab, setActiveTab] = useState<ReviewTab>("filtered");
   const [filteredItems, setFilteredItems] = useState<ReviewItemDTO[]>([]);
   const [clusters, setClusters] = useState<ClusterDTO[]>([]);
+  const [filteredSearch, setFilteredSearch] = useState("");
+  const [filteredSource, setFilteredSource] = useState("");
+  const [filteredReason, setFilteredReason] = useState("");
+  const [clusterSearch, setClusterSearch] = useState("");
+  const [clusterStatus, setClusterStatus] = useState<ClusterDTO["status"] | "">("");
   const [feedback, setFeedback] = useState<FeedbackState>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -185,121 +198,196 @@ export function ContentReviewPanel() {
 
   const filteredCount = filteredItems.length;
   const clusterCount = clusters.length;
-  const hiddenClusterCount = clusters.filter((cluster) => cluster.status === "hidden").length;
+  const filteredSources = Array.from(new Set(filteredItems.map((item) => item.sourceName))).sort((left, right) =>
+    left.localeCompare(right),
+  );
+  const visibleFilteredItems = filteredItems.filter((item) => {
+    const keyword = filteredSearch.trim().toLowerCase();
+    const matchesKeyword =
+      !keyword ||
+      item.title.toLowerCase().includes(keyword) ||
+      (item.summary ?? "").toLowerCase().includes(keyword) ||
+      (item.moderationDetail ?? "").toLowerCase().includes(keyword);
+    const matchesSource = !filteredSource || item.sourceName === filteredSource;
+    const matchesReason = !filteredReason || item.moderationReason === filteredReason;
+
+    return matchesKeyword && matchesSource && matchesReason;
+  });
+  const visibleClusters = clusters.filter((cluster) => {
+    const keyword = clusterSearch.trim().toLowerCase();
+    const matchesKeyword =
+      !keyword ||
+      cluster.title.toLowerCase().includes(keyword) ||
+      (cluster.summary ?? "").toLowerCase().includes(keyword) ||
+      cluster.items.some(
+        (item) =>
+          item.title.toLowerCase().includes(keyword) ||
+          (item.summary ?? "").toLowerCase().includes(keyword) ||
+          item.sourceName.toLowerCase().includes(keyword),
+      );
+    const matchesStatus = !clusterStatus || cluster.status === clusterStatus;
+
+    return matchesKeyword && matchesStatus;
+  });
+  const currentResultCount = activeTab === "filtered" ? visibleFilteredItems.length : visibleClusters.length;
+  const activeFilterSummary =
+    activeTab === "filtered"
+      ? [
+          filteredSearch.trim() ? `关键词：${filteredSearch.trim()}` : null,
+          filteredSource ? `来源：${filteredSource}` : null,
+          filteredReason ? `原因：${reviewReasonLabels[filteredReason as keyof typeof reviewReasonLabels]}` : null,
+        ].filter((item): item is string => Boolean(item))
+      : [
+          clusterSearch.trim() ? `关键词：${clusterSearch.trim()}` : null,
+          clusterStatus ? `状态：${clusterStatusLabels[clusterStatus]}` : null,
+        ].filter((item): item is string => Boolean(item));
+  const clearActiveFilters = () => {
+    if (activeTab === "filtered") {
+      setFilteredSearch("");
+      setFilteredSource("");
+      setFilteredReason("");
+      return;
+    }
+
+    setClusterSearch("");
+    setClusterStatus("");
+  };
 
   return (
-    <PageShell contentClassName="gap-6">
-      <section className="grid gap-6 xl:grid-cols-[minmax(0,1.45fr)_340px]">
-        <div className="space-y-6">
-          <PageHeader
-            eyebrow="Content Review"
-            title="内容审核工作台"
-            description="将被过滤的内容复核、恢复与聚合结果管理收拢到同一工作台，优先查看来源、时间、质量分和触发原因。"
-          />
-
-          <div className="grid gap-4 md:grid-cols-3">
-            <article className={cx(subtleCardClassName, "p-5")}>
-              <p className="font-mono text-[11px] font-medium uppercase tracking-[0.24em] text-[var(--muted)]">
-                Filter Queue
-              </p>
-              <p className="mt-3 text-3xl font-semibold tracking-[-0.04em] text-[var(--foreground)]">{filteredCount}</p>
-              <p className="mt-2 text-sm leading-6 text-[var(--muted)]">等待人工复核的过滤内容数量。</p>
-            </article>
-
-            <article className={cx(subtleCardClassName, "p-5")}>
-              <p className="font-mono text-[11px] font-medium uppercase tracking-[0.24em] text-[var(--muted)]">
-                Cluster Queue
-              </p>
-              <p className="mt-3 text-3xl font-semibold tracking-[-0.04em] text-[var(--foreground)]">{clusterCount}</p>
-              <p className="mt-2 text-sm leading-6 text-[var(--muted)]">当前可操作的聚合结果与摘要工作区。</p>
-            </article>
-
-            <article className={cx(subtleCardClassName, "p-5")}>
-              <p className="font-mono text-[11px] font-medium uppercase tracking-[0.24em] text-[var(--muted)]">
-                Hidden Clusters
-              </p>
-              <p className="mt-3 text-3xl font-semibold tracking-[-0.04em] text-[var(--foreground)]">{hiddenClusterCount}</p>
-              <p className="mt-2 text-sm leading-6 text-[var(--muted)]">可在聚合管理中恢复的隐藏聚合组。</p>
-            </article>
-          </div>
-        </div>
-
-        <aside className={cx(surfaceCardClassName, "flex flex-col gap-5 p-6")}>
-          <div>
-            <p className="font-mono text-[11px] font-medium uppercase tracking-[0.24em] text-[var(--accent-strong)]">
-              Review Toolkit
-            </p>
-            <h2 className="mt-3 text-xl font-semibold tracking-[-0.03em] text-[var(--foreground)]">后台快捷入口</h2>
-            <p className="mt-3 text-sm leading-7 text-[var(--muted)]">
-              内容审核页面已经切换到统一后台壳层，常用入口与反馈状态保持一致，方便在审核与监控之间切换。
-            </p>
-          </div>
-
-          <div className="grid gap-3">
-            <Link className={navLinkClassName} href="/">
-              返回首页
-            </Link>
-            <Link className={navLinkClassName} href="/admin/settings">
-              后台设置
-            </Link>
-            <Link className={navLinkClassName} href="/admin/monitor">
-              任务监控
-            </Link>
-          </div>
-
-          <div className="rounded-[1.5rem] border border-dashed border-[color:var(--line)] bg-[var(--surface)] p-4 text-sm leading-7 text-[var(--muted)]">
-            过滤内容优先展示来源、发布时间、原因和质量分；聚合管理保留嵌套预览与操作按钮，便于逐条拆分处理。
-          </div>
-        </aside>
-      </section>
-
+    <PageShell header={{ activeNav: "review", isAdmin: true }} contentClassName="gap-3">
       {feedback ? (
-        <StatusBanner className="rounded-[1.75rem] px-5 py-4" tone={feedback.tone}>
+        <StatusBanner className="rounded-[1.25rem] px-4 py-3" tone={feedback.tone}>
           {feedback.text}
         </StatusBanner>
       ) : null}
 
-      <section className={cx(surfaceCardClassName, "p-4 sm:p-5")}>
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-          <div className="space-y-2">
-            <p className="font-mono text-[11px] font-medium uppercase tracking-[0.24em] text-[var(--muted)]">Workspace Views</p>
-            <h2 className="text-xl font-semibold tracking-[-0.03em] text-[var(--foreground)]">审核视图切换</h2>
-            <p className="max-w-2xl text-sm leading-7 text-[var(--muted)]">
-              {tabConfig.find((tab) => tab.key === activeTab)?.description}
-            </p>
+      <section className={cx(surfaceCardClassName, "px-3 py-2.5")}>
+        <div role="toolbar" aria-label="审核工具条" className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <div
+              role="tablist"
+              aria-label="内容审核视图"
+              className="inline-flex flex-wrap gap-1.5 rounded-[0.9rem] border border-[color:var(--line)] bg-[var(--surface-muted)]/80 p-1"
+            >
+              {tabConfig.map((tab) => {
+                const tabId = `content-review-tab-${tab.key}`;
+                const panelId = `content-review-panel-${tab.key}`;
+                const isActive = activeTab === tab.key;
+
+                return (
+                  <button
+                    key={tab.key}
+                    id={tabId}
+                    role="tab"
+                    aria-controls={panelId}
+                    aria-selected={isActive}
+                    className={cx(
+                      "inline-flex min-h-8 items-center justify-center rounded-[0.75rem] px-2.5 py-1.5 text-sm font-medium transition",
+                      isActive
+                        ? "bg-[var(--accent)] text-white shadow-[0_10px_18px_rgba(37,99,235,0.14)]"
+                        : "bg-white text-[var(--foreground)] shadow-[var(--shadow-sm)] hover:bg-[var(--surface)]",
+                    )}
+                    type="button"
+                    onClick={() => setActiveTab(tab.key)}
+                  >
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
-          <div
-            role="tablist"
-            aria-label="内容审核视图"
-            className="inline-flex flex-wrap gap-2 rounded-[1.75rem] border border-[color:var(--line)] bg-[var(--surface-muted)] p-2"
-          >
-            {tabConfig.map((tab) => {
-              const tabId = `content-review-tab-${tab.key}`;
-              const panelId = `content-review-panel-${tab.key}`;
-              const isActive = activeTab === tab.key;
-
-              return (
-                <button
-                  key={tab.key}
-                  id={tabId}
-                  role="tab"
-                  aria-controls={panelId}
-                  aria-selected={isActive}
-                  className={cx(
-                    "inline-flex min-h-11 items-center justify-center rounded-2xl px-4 py-3 text-sm font-medium transition",
-                    isActive
-                      ? "bg-[var(--accent)] text-white shadow-[0_12px_24px_rgba(37,99,235,0.18)]"
-                      : "bg-white text-[var(--foreground)] shadow-[var(--shadow-sm)] hover:bg-[var(--surface)]",
-                  )}
-                  type="button"
-                  onClick={() => setActiveTab(tab.key)}
-                >
-                  {tab.label}
-                </button>
-              );
-            })}
+          <div className="flex flex-wrap items-center gap-1.5 text-xs text-[var(--muted)]">
+            <span className="rounded-full border border-[color:var(--line)] bg-[var(--surface-muted)]/72 px-2.5 py-1">
+              过滤 {filteredCount}
+            </span>
+            <span className="rounded-full border border-[color:var(--line)] bg-[var(--surface-muted)]/72 px-2.5 py-1">
+              聚合 {clusterCount}
+            </span>
           </div>
+        </div>
+      </section>
+
+      <section
+        role="region"
+        aria-label="审核筛选"
+        className="panel-raised rounded-sm border border-[color:var(--line)] p-4 sm:p-6"
+      >
+        <div className="flex flex-col gap-4">
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.9fr)]">
+            <FilterInput
+              id="content-review-keyword"
+              label="关键词"
+              ariaLabel="审核关键词"
+              placeholder={activeTab === "filtered" ? "搜索标题、摘要或复核说明" : "搜索聚合标题、摘要或子项"}
+              value={activeTab === "filtered" ? filteredSearch : clusterSearch}
+              onChange={(value) => {
+                if (activeTab === "filtered") {
+                  setFilteredSearch(value);
+                } else {
+                  setClusterSearch(value);
+                }
+              }}
+            />
+
+            {activeTab === "filtered" ? (
+              <div className="grid gap-4 sm:grid-cols-2">
+                <FilterSelect
+                  id="content-review-source"
+                  label="来源"
+                  ariaLabel="审核来源"
+                  value={filteredSource}
+                  onChange={setFilteredSource}
+                  showSearch={false}
+                  options={[
+                    { value: "", label: "全部来源" },
+                    ...filteredSources.map((source) => ({
+                      value: source,
+                      label: source,
+                    })),
+                  ]}
+                />
+
+                <FilterSelect
+                  id="content-review-reason"
+                  label="原因"
+                  ariaLabel="过滤原因"
+                  value={filteredReason}
+                  onChange={setFilteredReason}
+                  showSearch={false}
+                  options={[
+                    { value: "", label: "全部原因" },
+                    ...Object.entries(reviewReasonLabels).map(([reason, label]) => ({
+                      value: reason,
+                      label,
+                    })),
+                  ]}
+                />
+              </div>
+            ) : (
+              <FilterSelect
+                id="content-review-status"
+                label="状态"
+                ariaLabel="聚合状态"
+                value={clusterStatus}
+                onChange={(value) => setClusterStatus(value as ClusterDTO["status"] | "")}
+                showSearch={false}
+                options={[
+                  { value: "", label: "全部状态" },
+                  { value: "active", label: "显示中" },
+                  { value: "hidden", label: "已隐藏" },
+                ]}
+              />
+            )}
+          </div>
+
+          <FilterSummary
+            items={activeFilterSummary}
+            onClear={clearActiveFilters}
+            canClear={activeFilterSummary.length > 0}
+            clearLabel="清空筛选"
+            details={<span>结果 {currentResultCount}</span>}
+          />
         </div>
       </section>
 
@@ -309,76 +397,51 @@ export function ContentReviewPanel() {
           role="tabpanel"
           aria-labelledby="content-review-tab-filtered"
           aria-busy={isPending}
-          className="space-y-4"
+          className="space-y-2.5"
         >
-          <div className="flex flex-wrap items-end justify-between gap-3">
-            <div>
-              <p className="font-mono text-[11px] font-medium uppercase tracking-[0.22em] text-[var(--muted)]">Filtered Items</p>
-              <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-[var(--foreground)]">待处理过滤内容</h2>
-            </div>
-            <div className="rounded-full border border-[color:var(--line)] bg-[var(--surface-muted)] px-3 py-1 font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--muted)]">
-              {filteredCount} items
-            </div>
-          </div>
-
-          <div className="grid gap-4">
-            {filteredItems.map((item) => (
-              <article key={item.id} className={cx(surfaceCardClassName, "overflow-hidden p-5 sm:p-6")}>
-                <div className="flex flex-col gap-5">
-                  <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                    <div className="space-y-3">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="rounded-full border border-[color:var(--line)] bg-[var(--surface-muted)] px-3 py-1 text-sm font-medium text-[var(--foreground)]">
-                          {item.sourceName}
-                        </span>
-                        <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--muted)]">
-                          {formatDateTime(item.publishedAt)}
-                        </span>
-                      </div>
-                      <div className="space-y-2">
-                        <h3 className="text-xl font-semibold tracking-[-0.03em] text-[var(--foreground)] sm:text-2xl">{item.title}</h3>
-                        <p className="text-base leading-7 text-[var(--foreground)]/84">{item.summary}</p>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap gap-2 xl:max-w-[280px] xl:justify-end">
-                      <span className="rounded-full border border-[color:var(--line-strong)] bg-[var(--accent-soft)] px-3 py-1 font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--accent-strong)]">
-                        原因 {getReviewReasonLabel(item.moderationReason)}
+          <section role="region" aria-label="过滤内容列表" className="grid gap-2">
+            {visibleFilteredItems.map((item) => (
+              <article key={item.id} className={cx(surfaceCardClassName, "overflow-hidden px-3.5 py-3")}>
+                <div className="flex flex-col gap-2.5 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="rounded-full border border-[color:var(--line)] bg-[var(--surface-muted)] px-2.5 py-1 text-xs font-medium text-[var(--foreground)]">
+                        {item.sourceName}
                       </span>
-                      <span className="rounded-full border border-[color:var(--line)] bg-[var(--surface-muted)] px-3 py-1 font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--muted)]">
+                      <span className="font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--muted)]">
+                        {formatDateTime(item.publishedAt)}
+                      </span>
+                      <span className="rounded-full border border-[color:var(--line-strong)] bg-[var(--accent-soft)] px-2.5 py-1 font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--accent-strong)]">
+                        {getReviewReasonLabel(item.moderationReason)}
+                      </span>
+                      <span className="rounded-full border border-[color:var(--line)] bg-[var(--surface-muted)] px-2.5 py-1 font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--muted)]">
                         质量 {item.qualityScore}
                       </span>
+                      <span className="rounded-full border border-[color:var(--line)] bg-white px-2.5 py-1 text-xs text-[var(--muted)]">
+                        {item.topicLabel ?? "未归类主题"}
+                      </span>
+                    </div>
+
+                    <div className="space-y-1">
+                      <h3 className="text-[1rem] font-semibold tracking-[-0.03em] text-[var(--foreground)]">{item.title}</h3>
+                      <p className="text-sm leading-6 text-[var(--foreground)]/84">{truncateText(item.summary, 88)}</p>
+                    </div>
+
+                    <div className="grid gap-2 text-sm leading-6 text-[var(--muted)] xl:grid-cols-[minmax(0,1fr)_auto] xl:items-center">
+                      <p>{item.moderationDetail || item.qualityRationale || "暂无复核说明。"}</p>
+                      <a
+                        aria-label={`查看原文：${item.title}`}
+                        className="inline-flex max-w-full truncate text-[var(--accent)] underline decoration-[rgba(37,99,235,0.28)] underline-offset-4"
+                        href={item.originalUrl}
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        查看原文
+                      </a>
                     </div>
                   </div>
 
-                  <div className="grid gap-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(220px,280px)]">
-                    <div className={cx(subtleCardClassName, "p-4")}>
-                      <p className="font-mono text-[11px] font-medium uppercase tracking-[0.22em] text-[var(--muted)]">Review Notes</p>
-                      <p className="mt-3 text-sm leading-7 text-[var(--muted)]">
-                        {item.moderationDetail || item.qualityRationale}
-                      </p>
-                    </div>
-
-                    <div className={cx(subtleCardClassName, "grid gap-3 p-4 text-sm leading-7 text-[var(--muted)]")}>
-                      <div>
-                        <p className="font-mono text-[11px] font-medium uppercase tracking-[0.22em] text-[var(--muted)]">Topic</p>
-                        <p className="mt-2 text-[var(--foreground)]">{item.topicLabel ?? "未归类主题"}</p>
-                      </div>
-                      <div>
-                        <p className="font-mono text-[11px] font-medium uppercase tracking-[0.22em] text-[var(--muted)]">Original Link</p>
-                        <a
-                          className="mt-2 inline-flex max-w-full truncate text-[var(--accent)] underline decoration-[rgba(37,99,235,0.28)] underline-offset-4"
-                          href={item.originalUrl}
-                          rel="noreferrer"
-                          target="_blank"
-                        >
-                          {item.originalUrl}
-                        </a>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap gap-3">
+                  <div className="flex shrink-0 flex-wrap items-center gap-1.5 rounded-[0.95rem] border border-[color:var(--line)] bg-[var(--surface-muted)]/72 p-1 lg:w-auto lg:justify-end">
                     <button
                       className={primaryButtonClassName}
                       type="button"
@@ -418,11 +481,15 @@ export function ContentReviewPanel() {
             ))}
 
             {filteredCount === 0 ? (
-              <div className="rounded-[1.75rem] border border-dashed border-[color:var(--line)] bg-[var(--surface)] px-5 py-8 text-sm leading-7 text-[var(--muted)]">
+              <div className="rounded-[1.25rem] border border-dashed border-[color:var(--line)] bg-[var(--surface)] px-4 py-6 text-sm leading-6 text-[var(--muted)]">
                 当前没有待处理的过滤内容。
               </div>
+            ) : visibleFilteredItems.length === 0 ? (
+              <div className="rounded-[1.25rem] border border-dashed border-[color:var(--line)] bg-[var(--surface)] px-4 py-6 text-sm leading-6 text-[var(--muted)]">
+                当前筛选条件下没有匹配内容。
+              </div>
             ) : null}
-          </div>
+          </section>
         </section>
       ) : (
         <section
@@ -430,58 +497,43 @@ export function ContentReviewPanel() {
           role="tabpanel"
           aria-labelledby="content-review-tab-clusters"
           aria-busy={isPending}
-          className="space-y-4"
+          className="space-y-2.5"
         >
-          <div className="flex flex-wrap items-end justify-between gap-3">
-            <div>
-              <p className="font-mono text-[11px] font-medium uppercase tracking-[0.22em] text-[var(--muted)]">Cluster Management</p>
-              <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-[var(--foreground)]">聚合结果管理</h2>
-            </div>
-            <div className="rounded-full border border-[color:var(--line)] bg-[var(--surface-muted)] px-3 py-1 font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--muted)]">
-              {clusterCount} clusters
-            </div>
-          </div>
-
-          <div className="grid gap-4">
-            {clusters.map((cluster) => (
-              <article key={cluster.id} className={cx(surfaceCardClassName, "p-5 sm:p-6")}>
-                <div className="flex flex-col gap-5">
-                  <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                    <div className="space-y-3">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="rounded-full border border-[color:var(--line)] bg-[var(--surface-muted)] px-3 py-1 text-sm font-medium text-[var(--foreground)]">
-                          {cluster.itemCount} 条内容
-                        </span>
-                        <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--muted)]">
-                          {formatDateTime(cluster.latestPublishedAt)}
-                        </span>
-                      </div>
-                      <div className="space-y-2">
-                        <h3 className="text-xl font-semibold tracking-[-0.03em] text-[var(--foreground)] sm:text-2xl">{cluster.title}</h3>
-                        <p className="text-base leading-7 text-[var(--foreground)]/84">{cluster.summary}</p>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap gap-2 xl:max-w-[280px] xl:justify-end">
-                      <span className="rounded-full border border-[color:var(--line-strong)] bg-[var(--accent-soft)] px-3 py-1 font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--accent-strong)]">
-                        {clusterStatusLabels[cluster.status]}
-                      </span>
-                      <span className="rounded-full border border-[color:var(--line)] bg-[var(--surface-muted)] px-3 py-1 font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--muted)]">
-                        质量 {cluster.score}
-                      </span>
-                    </div>
+          <section role="region" aria-label="聚合管理列表" className="grid gap-2">
+            {visibleClusters.map((cluster) => (
+              <article key={cluster.id} className={cx(surfaceCardClassName, "px-3.5 py-3")}>
+                <div className="flex flex-col gap-2.5">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="rounded-full border border-[color:var(--line)] bg-[var(--surface-muted)] px-2.5 py-1 text-xs font-medium text-[var(--foreground)]">
+                      {cluster.itemCount} 条内容
+                    </span>
+                    <span className="font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--muted)]">
+                      {formatDateTime(cluster.latestPublishedAt)}
+                    </span>
+                    <span className="rounded-full border border-[color:var(--line-strong)] bg-[var(--accent-soft)] px-2.5 py-1 font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--accent-strong)]">
+                      {clusterStatusLabels[cluster.status]}
+                    </span>
+                    <span className="rounded-full border border-[color:var(--line)] bg-[var(--surface-muted)] px-2.5 py-1 font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--muted)]">
+                      质量 {cluster.score}
+                    </span>
                   </div>
 
-                  <div className="grid gap-3">
+                  <div className="space-y-1">
+                    <h3 className="text-[1rem] font-semibold tracking-[-0.03em] text-[var(--foreground)]">{cluster.title}</h3>
+                    <p className="text-sm leading-6 text-[var(--foreground)]/84">{truncateText(cluster.summary, 96)}</p>
+                  </div>
+
+                  <div className="grid gap-2">
                     {cluster.items.map((item) => (
-                      <div key={item.id} className={cx(subtleCardClassName, "grid gap-4 p-4")}>
-                        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                          <div className="space-y-2">
-                            <strong className="block text-base font-semibold text-[var(--foreground)]">{item.title}</strong>
-                            <div className="flex flex-wrap items-center gap-2 text-sm text-[var(--muted)]">
+                      <div key={item.id} className={cx(subtleCardClassName, "grid gap-2 p-3")}>
+                        <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+                          <div className="min-w-0 space-y-1">
+                            <strong className="block text-sm font-semibold text-[var(--foreground)]">{item.title}</strong>
+                            <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--muted)]">
                               <span>{item.sourceName}</span>
-                              <span className="font-mono text-[11px] uppercase tracking-[0.18em]">{formatDateTime(item.publishedAt)}</span>
+                              <span className="font-mono uppercase tracking-[0.16em]">{formatDateTime(item.publishedAt)}</span>
                             </div>
+                            <p className="text-sm leading-6 text-[var(--muted)]">{truncateText(item.summary, 72)}</p>
                           </div>
                           <button
                             className={secondaryButtonClassName}
@@ -501,12 +553,17 @@ export function ContentReviewPanel() {
                             移出条目
                           </button>
                         </div>
-                        <p className="text-sm leading-7 text-[var(--muted)]">{item.summary}</p>
                       </div>
                     ))}
+
+                    {cluster.items.length === 0 ? (
+                      <div className={cx(subtleCardClassName, "px-3 py-3 text-sm leading-6 text-[var(--muted)]")}>
+                        聚合组当前没有子项预览。
+                      </div>
+                    ) : null}
                   </div>
 
-                  <div className="flex flex-wrap gap-3">
+                  <div className="flex flex-wrap items-center gap-1.5 rounded-[0.95rem] border border-[color:var(--line)] bg-[var(--surface-muted)]/72 p-1">
                     <button
                       className={secondaryButtonClassName}
                       type="button"
@@ -519,54 +576,42 @@ export function ContentReviewPanel() {
                     >
                       重新生成聚合摘要
                     </button>
-                    {cluster.status === "hidden" ? (
-                      <button
-                        className={primaryButtonClassName}
-                        type="button"
-                        disabled={isPending}
-                        onClick={() =>
-                          postAction(`/api/admin/clusters/${cluster.id}/restore`, "聚合组已恢复。", {
+                    <button
+                      className={secondaryButtonClassName}
+                      type="button"
+                      disabled={isPending}
+                      onClick={() =>
+                        postAction(
+                          `/api/admin/clusters/${cluster.id}/${cluster.status === "hidden" ? "restore" : "hide"}`,
+                          cluster.status === "hidden" ? "聚合组已恢复。" : "聚合组已隐藏。",
+                          {
                             requiredField: "cluster",
                             onSuccess: (payload) => {
                               setClusters((current) =>
                                 current.map((entry) => (entry.id === cluster.id ? payload.cluster ?? entry : entry)),
                               );
                             },
-                          })
-                        }
-                      >
-                        恢复聚合组
-                      </button>
-                    ) : (
-                      <button
-                        className={primaryButtonClassName}
-                        type="button"
-                        disabled={isPending}
-                        onClick={() =>
-                          postAction(`/api/admin/clusters/${cluster.id}/hide`, "聚合组已隐藏。", {
-                            requiredField: "cluster",
-                            onSuccess: (payload) => {
-                              setClusters((current) =>
-                                current.map((entry) => (entry.id === cluster.id ? payload.cluster ?? entry : entry)),
-                              );
-                            },
-                          })
-                        }
-                      >
-                        隐藏聚合组
-                      </button>
-                    )}
+                          },
+                        )
+                      }
+                    >
+                      {cluster.status === "hidden" ? "恢复聚合组" : "隐藏聚合组"}
+                    </button>
                   </div>
                 </div>
               </article>
             ))}
 
             {clusterCount === 0 ? (
-              <div className="rounded-[1.75rem] border border-dashed border-[color:var(--line)] bg-[var(--surface)] px-5 py-8 text-sm leading-7 text-[var(--muted)]">
+              <div className="rounded-[1.25rem] border border-dashed border-[color:var(--line)] bg-[var(--surface)] px-4 py-6 text-sm leading-6 text-[var(--muted)]">
                 当前没有可管理的聚合结果。
               </div>
+            ) : visibleClusters.length === 0 ? (
+              <div className="rounded-[1.25rem] border border-dashed border-[color:var(--line)] bg-[var(--surface)] px-4 py-6 text-sm leading-6 text-[var(--muted)]">
+                当前筛选条件下没有匹配内容。
+              </div>
             ) : null}
-          </div>
+          </section>
         </section>
       )}
     </PageShell>

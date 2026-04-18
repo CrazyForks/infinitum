@@ -1,6 +1,18 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+const { pushMock, refreshMock } = vi.hoisted(() => ({
+  pushMock: vi.fn(),
+  refreshMock: vi.fn(),
+}));
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({
+    push: pushMock,
+    refresh: refreshMock,
+  }),
+}));
 
 import { ContentReviewPanel } from "@/components/admin/content-review-panel";
 
@@ -59,6 +71,8 @@ function createCluster(overrides: Partial<Record<string, unknown>> = {}) {
 }
 
 afterEach(() => {
+  pushMock.mockReset();
+  refreshMock.mockReset();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -105,10 +119,24 @@ describe("ContentReviewPanel", () => {
 
     render(<ContentReviewPanel />);
 
-    expect(await screen.findByText("营销内容")).toBeInTheDocument();
-    expect(screen.getByText("Content Review")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "内容审核工作台" })).toBeInTheDocument();
-    expect(screen.getByRole("tablist", { name: "内容审核视图" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "营销内容" })).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "主导航" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "内容审核" })).not.toBeInTheDocument();
+    expect(screen.queryByText("处理过滤队列与聚合结果。")).not.toBeInTheDocument();
+    expect(screen.queryByText("聚焦过滤队列与聚合结果，优先处理真正需要人工判断的内容。")).not.toBeInTheDocument();
+    const toolbar = screen.getByRole("toolbar", { name: "审核工具条" });
+    const filterRegion = screen.getByRole("region", { name: "审核筛选" });
+    const filteredRegion = screen.getByRole("region", { name: "过滤内容列表" });
+    const actionBar = screen.getByRole("button", { name: "恢复内容" }).parentElement;
+
+    expect(within(toolbar).getByRole("tablist", { name: "内容审核视图" })).toBeInTheDocument();
+    expect(within(filterRegion).getByLabelText("审核关键词")).toBeInTheDocument();
+    expect(within(filterRegion).getByLabelText("审核来源")).toBeInTheDocument();
+    expect(within(filterRegion).getByText("结果 1")).toBeInTheDocument();
+    expect(within(filteredRegion).getByRole("heading", { name: "营销内容" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "查看原文：营销内容" })).toHaveAttribute("href", "https://example.com/1");
+    expect(actionBar).toHaveClass("rounded-[0.95rem]", "border");
+    expect(actionBar).not.toHaveClass("lg:w-[220px]");
 
     await user.click(screen.getByRole("button", { name: "恢复内容" }));
 
@@ -117,8 +145,35 @@ describe("ContentReviewPanel", () => {
         method: "POST",
       });
     });
+  });
 
-    expect(screen.getByRole("link", { name: "任务监控" })).toHaveAttribute("href", "/admin/monitor");
+  it("filters the current review list by keyword", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+      const url = typeof input === "string" ? input : input.url;
+
+      if (url === "/api/admin/items?moderationStatus=filtered") {
+        return new Response(JSON.stringify({ items: [createFilteredItem()] }));
+      }
+
+      if (url === "/api/admin/clusters") {
+        return new Response(JSON.stringify({ clusters: [] }));
+      }
+
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ContentReviewPanel />);
+
+    expect(await screen.findByRole("heading", { name: "营销内容" })).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("审核关键词"), "不存在的关键词");
+
+    await waitFor(() => {
+      expect(screen.getByText("当前筛选条件下没有匹配内容。")).toBeInTheDocument();
+    });
   });
 
   it("queues reanalyze as a background task", async () => {
@@ -159,7 +214,7 @@ describe("ContentReviewPanel", () => {
 
     render(<ContentReviewPanel />);
 
-    expect(await screen.findByText("营销内容")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "营销内容" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "重新 AI 判定" }));
 
@@ -170,7 +225,7 @@ describe("ContentReviewPanel", () => {
     });
 
     expect(screen.getByText("已创建后台任务，正在处理中。")).toBeInTheDocument();
-    expect(screen.getByText("营销内容")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "营销内容" })).toBeInTheDocument();
   });
 
   it("shows an error when reanalyze returns 202 without taskRun", async () => {
@@ -199,7 +254,7 @@ describe("ContentReviewPanel", () => {
 
     render(<ContentReviewPanel />);
 
-    expect(await screen.findByText("营销内容")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "营销内容" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "重新 AI 判定" }));
 
@@ -208,7 +263,7 @@ describe("ContentReviewPanel", () => {
     });
 
     expect(screen.queryByText("已创建后台任务，正在处理中。")).not.toBeInTheDocument();
-    expect(screen.getByText("营销内容")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "营销内容" })).toBeInTheDocument();
   });
 
   it("updates cluster preview after detaching an item", async () => {

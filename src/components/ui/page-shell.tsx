@@ -1,14 +1,34 @@
 import type { ComponentPropsWithoutRef, ReactNode } from "react";
 
+import { GlobalHeader } from "@/components/ui/global-header";
 import { cx } from "@/lib/ui/cx";
+
+type PageShellNav = "home" | "review" | "monitor" | "admin" | null;
+
+type PageShellHeader = {
+  activeNav: PageShellNav;
+  isAdmin: boolean;
+};
 
 type PageShellProps = ComponentPropsWithoutRef<"main"> & {
   children: ReactNode;
   contentClassName?: string;
+  contentWidth?: "default" | "workspace";
+  header?: PageShellHeader | null;
   chromeLabel?: string | null;
+  sidebar?: ReactNode;
 };
 
-export function PageShell({ children, chromeLabel = "Infinitum Admin", className, contentClassName, ...props }: PageShellProps) {
+export function PageShell({
+  children,
+  header,
+  chromeLabel = null,
+  className,
+  contentClassName,
+  contentWidth = "default",
+  sidebar,
+  ...props
+}: PageShellProps) {
   return (
     <main
       className={cx(
@@ -17,7 +37,9 @@ export function PageShell({ children, chromeLabel = "Infinitum Admin", className
       )}
       {...props}
     >
-      {chromeLabel ? (
+      {header ? <GlobalHeader activeNav={header.activeNav} isAdmin={header.isAdmin} /> : null}
+
+      {!header && chromeLabel ? (
         <div className="border-b border-[color:var(--line)] bg-white/80 backdrop-blur">
           <div className="mx-auto flex h-14 w-full max-w-6xl items-center px-4 sm:px-6 lg:px-8">
             <div className="font-mono text-[11px] font-medium uppercase tracking-[0.28em] text-[var(--muted)]">
@@ -29,11 +51,19 @@ export function PageShell({ children, chromeLabel = "Infinitum Admin", className
 
       <div
         className={cx(
-          "mx-auto flex w-full max-w-6xl flex-col gap-8 px-4 py-8 sm:px-6 sm:py-10 lg:px-8 lg:py-12",
+          "mx-auto flex w-full flex-col gap-6 px-4 py-6 sm:px-6 sm:py-8 lg:px-8 lg:py-10",
+          contentWidth === "workspace" ? "max-w-[92rem]" : "max-w-6xl",
           contentClassName,
         )}
       >
-        {children}
+        {sidebar ? (
+          <div className="grid gap-4 xl:grid-cols-[240px_minmax(0,1fr)] xl:items-start">
+            <div className="min-w-0">{sidebar}</div>
+            <div className="min-w-0">{children}</div>
+          </div>
+        ) : (
+          children
+        )}
       </div>
     </main>
   );

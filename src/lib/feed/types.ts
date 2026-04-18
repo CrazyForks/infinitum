@@ -8,6 +8,7 @@ export type FeedFilters = {
   end: string | null;
   groupId: string | null;
   sourceId: string | null;
+  title: string | null;
 };
 
 export type FeedSingleEntryDTO = {

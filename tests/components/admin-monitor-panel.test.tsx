@@ -1,16 +1,32 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+import type { BackgroundTaskMonitorSnapshot } from "@/lib/tasks/types";
+const { pushMock, refreshMock } = vi.hoisted(() => ({
+  pushMock: vi.fn(),
+  refreshMock: vi.fn(),
+}));
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({
+    push: pushMock,
+    refresh: refreshMock,
+  }),
+}));
 
 import { AdminMonitorPanel } from "@/components/admin/admin-monitor-panel";
 
 afterEach(() => {
   vi.useRealTimers();
+  pushMock.mockReset();
+  refreshMock.mockReset();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("AdminMonitorPanel", () => {
-  const initialSnapshot = {
+  const initialSnapshot: BackgroundTaskMonitorSnapshot = {
     schedule: {
       key: "ingestion_default",
       enabled: true,
@@ -43,12 +59,19 @@ describe("AdminMonitorPanel", () => {
       },
     ],
     recentTasks: [],
-  } as const;
+  };
 
-  it("renders schedule details and running tasks", () => {
+  it("renders the monitor workspace with aligned global and sidebar navigation", () => {
     render(<AdminMonitorPanel initialSnapshot={initialSnapshot} />);
 
+    expect(screen.getByRole("navigation", { name: "主导航" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "任务" })).toHaveAttribute("aria-current", "page");
+    const adminNav = screen.getByRole("complementary", { name: "管理导航" });
+
+    expect(within(adminNav).getByRole("link", { name: "任务监控" })).toHaveAttribute("aria-current", "page");
+    expect(within(adminNav).getByRole("link", { name: "后台设置" })).toHaveAttribute("href", "/admin/settings");
     expect(screen.getByRole("heading", { name: "任务监控", level: 1 })).toBeInTheDocument();
+    expect(screen.queryByText("Task Monitor")).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "调度设置" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "运行中任务" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "最近任务" })).toBeInTheDocument();

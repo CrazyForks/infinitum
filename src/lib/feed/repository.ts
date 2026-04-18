@@ -205,27 +205,33 @@ function buildItemWhere(
   clusterId?: string,
 ): Prisma.ItemWhereInput {
   return {
-    status: "processed",
-    moderationStatus: {
-      in: [...DISPLAYABLE_MODERATION_STATUSES],
-    },
-    ...(clusterId ? { clusterId } : {}),
-    ...(filters.rangeStart || filters.rangeEnd
-      ? {
-          publishedAt: {
-            ...(filters.rangeStart ? { gte: filters.rangeStart } : {}),
-            ...(filters.rangeEnd ? { lte: filters.rangeEnd } : {}),
+    AND: [
+      {
+        status: "processed",
+        moderationStatus: {
+          in: [...DISPLAYABLE_MODERATION_STATUSES],
+        },
+        ...(clusterId ? { clusterId } : {}),
+        ...(filters.rangeStart || filters.rangeEnd
+          ? {
+              publishedAt: {
+                ...(filters.rangeStart ? { gte: filters.rangeStart } : {}),
+                ...(filters.rangeEnd ? { lte: filters.rangeEnd } : {}),
+              },
+            }
+          : {}),
+        source: {
+          is: {
+            enabled: true,
+            ...(filters.groupId ? { groupId: filters.groupId } : {}),
+            ...(filters.sourceId ? { id: filters.sourceId } : {}),
           },
-        }
-      : {}),
-    source: {
-      is: {
-        enabled: true,
-        ...(filters.groupId ? { groupId: filters.groupId } : {}),
-        ...(filters.sourceId ? { id: filters.sourceId } : {}),
+        },
       },
-    },
-    OR: [{ clusterId: null }, { cluster: { is: { status: "active" } } }],
+      {
+        OR: [{ clusterId: null }, { cluster: { is: { status: "active" } } }],
+      },
+    ],
   };
 }
 
@@ -274,6 +280,20 @@ function compareFeedEntries(left: FeedEntryDTO, right: FeedEntryDTO, sort: FeedF
   }
 
   return right.id.localeCompare(left.id);
+}
+
+function normalizeTitleSearch(value: string | null) {
+  return value?.trim().toLocaleLowerCase() ?? "";
+}
+
+function matchesEntryTitle(entry: FeedEntryDTO, title: string | null) {
+  const normalizedTitle = normalizeTitleSearch(title);
+
+  if (!normalizedTitle) {
+    return true;
+  }
+
+  return entry.title.toLocaleLowerCase().includes(normalizedTitle);
 }
 
 export async function listFeedFilterOptions(): Promise<{
@@ -334,7 +354,9 @@ export async function listFeedItems(filters: FeedFilters & { rangeStart: Date | 
   const clusterEntries = [...groupedItems.entries()].map(([, clusterItems]) =>
     mapClusterSubsetToEntry((clusterItems[0] as ItemWithSourceAndCluster).cluster!, clusterItems),
   );
-  const entries = [...singleEntries, ...clusterEntries].sort((left, right) => compareFeedEntries(left, right, filters.sort));
+  const entries = [...singleEntries, ...clusterEntries]
+    .filter((entry) => matchesEntryTitle(entry, filters.title))
+    .sort((left, right) => compareFeedEntries(left, right, filters.sort));
   const startIndex = cursor ? Math.max(0, entries.findIndex((entry) => entry.id === cursor) + 1) : 0;
   const slice = entries.slice(startIndex, startIndex + take);
   const nextCursor = startIndex + take < entries.length ? slice[slice.length - 1]?.id ?? null : null;

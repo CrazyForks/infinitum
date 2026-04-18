@@ -22,7 +22,8 @@ export default async function Home({ searchParams }: PageProps) {
   const candidateGroupId = Array.isArray(resolvedSearchParams.groupId) ? resolvedSearchParams.groupId[0] : resolvedSearchParams.groupId;
   const candidateSourceId =
     Array.isArray(resolvedSearchParams.sourceId) ? resolvedSearchParams.sourceId[0] : resolvedSearchParams.sourceId;
-  const range = candidateRange && isFeedRange(candidateRange) ? candidateRange : "7d";
+  const candidateTitle = Array.isArray(resolvedSearchParams.title) ? resolvedSearchParams.title[0] : resolvedSearchParams.title;
+  const range = candidateRange && isFeedRange(candidateRange) ? candidateRange : "today";
   const sort = candidateSort && isFeedSort(candidateSort) ? candidateSort : "time_desc";
   const filters = resolveFeedFilters({
     range,
@@ -31,6 +32,7 @@ export default async function Home({ searchParams }: PageProps) {
     end: normalizeFeedDateInput(candidateEnd),
     groupId: normalizeFeedFilterId(candidateGroupId),
     sourceId: normalizeFeedFilterId(candidateSourceId),
+    title: candidateTitle?.trim() ? candidateTitle.trim() : null,
   });
   const [feed, latestRun, adminSession, feedFilterOptions] = await Promise.all([
     listFeedItems(filters),
@@ -52,6 +54,7 @@ export default async function Home({ searchParams }: PageProps) {
         isAdmin={adminSession.isAdmin}
         initialGroupId={filters.groupId}
         initialSourceId={filters.sourceId}
+        initialTitle={filters.title}
         availableGroups={feedFilterOptions.groups}
         availableSources={feedFilterOptions.sources}
       />
