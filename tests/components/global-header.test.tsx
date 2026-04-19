@@ -23,15 +23,12 @@ afterEach(() => {
 });
 
 describe("GlobalHeader", () => {
-  it("renders the shared shell navigation, including the monitor tab, brand, and login action", () => {
+  it("renders the shared shell navigation, including the homepage and admin button", () => {
     render(<GlobalHeader activeNav="home" isAdmin={false} />);
 
     expect(screen.getByRole("link", { name: /Infinitum/i })).toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "主导航" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "主页" })).toHaveAttribute("href", "/");
-    expect(screen.getByRole("link", { name: "审核" })).toHaveAttribute("href", "/admin/content");
-    expect(screen.getByRole("link", { name: "任务" })).toHaveAttribute("href", "/admin/monitor");
-    expect(screen.getByRole("link", { name: "管理" })).toHaveAttribute("href", "/admin/settings");
     expect(screen.getByRole("button", { name: "登录" })).toBeInTheDocument();
   });
 
@@ -60,19 +57,16 @@ describe("GlobalHeader", () => {
     expect(screen.getByRole("button", { name: "登出" })).toBeInTheDocument();
   });
 
-  it("marks the monitor tab active when requested", () => {
-    render(<GlobalHeader activeNav="monitor" isAdmin />);
+  it("renders the admin button for admin sessions", () => {
+    render(<GlobalHeader activeNav="admin" isAdmin />);
 
-    expect(screen.getByRole("link", { name: "任务" })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("link", { name: "管理" })).not.toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "管理" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "管理" })).toHaveAttribute("href", "/admin");
   });
 
   it("supports rendering with no active navigation item", () => {
     render(<GlobalHeader activeNav={null} isAdmin={false} />);
 
     expect(screen.getByRole("link", { name: "主页" })).not.toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("link", { name: "审核" })).not.toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("link", { name: "任务" })).not.toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("link", { name: "管理" })).not.toHaveAttribute("aria-current", "page");
   });
 });

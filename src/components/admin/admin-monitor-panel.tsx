@@ -13,6 +13,9 @@ import { cx } from "@/lib/ui/cx";
 
 type AdminMonitorPanelProps = {
   initialSnapshot: BackgroundTaskMonitorSnapshot;
+  embedMode?: boolean;
+  showSchedule?: boolean;
+  showScheduleOnly?: boolean;
 };
 
 type FeedbackTone = "error" | "info" | "success";
@@ -253,7 +256,12 @@ function TaskCard({
   );
 }
 
-export function AdminMonitorPanel({ initialSnapshot }: AdminMonitorPanelProps) {
+export function AdminMonitorPanel({
+  initialSnapshot,
+  embedMode,
+  showSchedule = true,
+  showScheduleOnly = false,
+}: AdminMonitorPanelProps) {
   const [snapshot, setSnapshot] = useState(initialSnapshot);
   const [enabled, setEnabled] = useState(initialSnapshot.schedule.enabled);
   const [intervalMinutes, setIntervalMinutes] = useState(
@@ -393,275 +401,293 @@ export function AdminMonitorPanel({ initialSnapshot }: AdminMonitorPanelProps) {
     }
   };
 
-  return (
-    <PageShell
-      header={{ activeNav: "monitor", isAdmin: true }}
-      contentClassName="gap-4 sm:gap-5"
-      contentWidth="workspace"
-      sidebar={<AdminWorkspaceSidebar activeItem="monitor" />}
+  const scheduleSection = (
+    <section
+      aria-labelledby="monitor-schedule-heading"
+      className={cx(surfaceCardClassName, "space-y-5 p-4 sm:p-5")}
     >
-      <section className="space-y-4">
-        <h1 className="sr-only">任务监控</h1>
-
-        {feedback ? (
-          <StatusBanner
-            className="rounded-[1rem] px-4 py-3"
-            tone={feedback.tone}
+      <div className="flex flex-col gap-4 border-b border-[color:var(--line)] pb-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="font-mono text-[11px] font-medium uppercase tracking-[0.24em] text-[var(--accent-strong)]">
+              Default Ingestion
+            </p>
+            <h2
+              id="monitor-schedule-heading"
+              className="mt-2 text-lg font-semibold tracking-[-0.03em] text-[var(--foreground)]"
+            >
+              调度设置
+            </h2>
+          </div>
+          <TaskToneBadge
+            tone={snapshot.schedule.enabled ? "success" : "muted"}
           >
-            {feedback.text}
-          </StatusBanner>
-        ) : null}
+            {snapshot.schedule.enabled ? "启用中" : "已停用"}
+          </TaskToneBadge>
+        </div>
 
-        <div className="grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)] xl:items-start">
-          <section
-            aria-labelledby="monitor-schedule-heading"
-            className={cx(surfaceCardClassName, "space-y-5 p-4 sm:p-5")}
-          >
-            <div className="flex flex-col gap-4 border-b border-[color:var(--line)] pb-4">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <p className="font-mono text-[11px] font-medium uppercase tracking-[0.24em] text-[var(--accent-strong)]">
-                    Default Ingestion
-                  </p>
-                  <h2
-                    id="monitor-schedule-heading"
-                    className="mt-2 text-lg font-semibold tracking-[-0.03em] text-[var(--foreground)]"
-                  >
-                    调度设置
-                  </h2>
-                </div>
-                <TaskToneBadge
-                  tone={snapshot.schedule.enabled ? "success" : "muted"}
-                >
-                  {snapshot.schedule.enabled ? "启用中" : "已停用"}
-                </TaskToneBadge>
-              </div>
+        <p className="text-sm leading-6 text-[var(--muted)]">
+          控制默认抓取任务的频率与开关，同时查看调度器健康和下次运行时间。
+        </p>
+      </div>
 
-              <p className="text-sm leading-6 text-[var(--muted)]">
-                控制默认抓取任务的频率与开关，同时查看调度器健康和下次运行时间。
-              </p>
-            </div>
+      <div className="grid gap-3">
+        <label
+          className={cx(subtleCardClassName, "flex flex-col gap-3 p-3.5")}
+        >
+          <span className="font-mono text-[11px] font-medium uppercase tracking-[0.22em] text-[var(--muted)]">
+            Interval
+          </span>
+          <span className="text-sm font-medium text-[var(--foreground)]">
+            抓取频率（分钟）
+          </span>
+          <input
+            aria-label="抓取频率（分钟）"
+            className={inputClassName}
+            min={5}
+            type="number"
+            value={intervalMinutes}
+            onChange={(event) => setIntervalMinutes(event.target.value)}
+          />
+        </label>
 
-            <div className="grid gap-3">
-              <label
-                className={cx(subtleCardClassName, "flex flex-col gap-3 p-3.5")}
-              >
-                <span className="font-mono text-[11px] font-medium uppercase tracking-[0.22em] text-[var(--muted)]">
-                  Interval
-                </span>
-                <span className="text-sm font-medium text-[var(--foreground)]">
-                  抓取频率（分钟）
-                </span>
-                <input
-                  aria-label="抓取频率（分钟）"
-                  className={inputClassName}
-                  min={5}
-                  type="number"
-                  value={intervalMinutes}
-                  onChange={(event) => setIntervalMinutes(event.target.value)}
-                />
-              </label>
-
-              <label
-                className={cx(
-                  subtleCardClassName,
-                  "flex cursor-pointer flex-col gap-3 p-3.5",
-                )}
-              >
-                <span className="font-mono text-[11px] font-medium uppercase tracking-[0.22em] text-[var(--muted)]">
-                  Scheduler
-                </span>
-                <div className="space-y-2">
-                  <p className="text-sm font-medium text-[var(--foreground)]">
-                    启用默认抓取任务
-                  </p>
-                  <p className="text-sm leading-6 text-[var(--muted)]">
-                    停用后不会继续自动拉取新内容，但历史任务记录仍会保留。
-                  </p>
-                </div>
-                <span className="inline-flex items-center gap-3">
-                  <span
-                    aria-hidden="true"
-                    className={cx(
-                      "relative inline-flex h-7 w-12 rounded-full border transition",
-                      enabled
-                        ? "border-[color:var(--accent)] bg-[var(--accent)]"
-                        : "border-[color:var(--line)] bg-[var(--surface)]",
-                    )}
-                  >
-                    <span
-                      className={cx(
-                        "absolute left-0.5 top-0.5 h-6 w-6 rounded-full bg-white shadow-[var(--shadow-sm)] transition-transform",
-                        enabled ? "translate-x-5" : "translate-x-0",
-                      )}
-                    />
-                  </span>
-                  <input
-                    aria-label="启用默认抓取任务"
-                    checked={enabled}
-                    className="sr-only"
-                    type="checkbox"
-                    onChange={(event) => setEnabled(event.target.checked)}
-                  />
-                  <span className="text-sm font-medium text-[var(--foreground)]">
-                    {enabled ? "当前已启用" : "当前已停用"}
-                  </span>
-                </span>
-              </label>
-            </div>
-
-            <div className="grid gap-2.5 sm:grid-cols-2">
-              <TaskFact
-                label="Health"
-                value={
-                  snapshot.schedule.isHeartbeatStale
-                    ? "调度器离线"
-                    : "调度器在线"
-                }
-              />
-              <TaskFact
-                label="Last Status"
-                value={
-                  snapshot.schedule.lastRunStatus
-                    ? statusLabels[snapshot.schedule.lastRunStatus]
-                    : "暂无"
-                }
-              />
-              <TaskFact
-                label="Next Run"
-                value={formatDateTime(snapshot.schedule.nextRunAt)}
-              />
-              <TaskFact label="Timezone" value={snapshot.schedule.timezone} />
-            </div>
-
-            <div className="flex flex-col gap-3">
-              <button
-                className={primaryButtonClassName}
-                type="button"
-                disabled={isPending}
-                onClick={saveSchedule}
-              >
-                保存调度设置
-              </button>
-            </div>
-          </section>
-
-          <div className="grid gap-4">
-            <section
-              aria-labelledby="monitor-running-heading"
+        <label
+          className={cx(
+            subtleCardClassName,
+            "flex cursor-pointer flex-col gap-3 p-3.5",
+          )}
+        >
+          <span className="font-mono text-[11px] font-medium uppercase tracking-[0.22em] text-[var(--muted)]">
+            Scheduler
+          </span>
+          <div className="space-y-2">
+            <p className="text-sm font-medium text-[var(--foreground)]">
+              启用默认抓取任务
+            </p>
+            <p className="text-sm leading-6 text-[var(--muted)]">
+              停用后不会继续自动拉取新内容，但历史任务记录仍会保留。
+            </p>
+          </div>
+          <span className="inline-flex items-center gap-3">
+            <span
+              aria-hidden="true"
               className={cx(
-                surfaceCardClassName,
-                "space-y-5 border-[color:var(--line-strong)] bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(239,246,255,0.82))] p-4 sm:p-5",
+                "relative inline-flex h-7 w-12 rounded-full border transition",
+                enabled
+                  ? "border-[color:var(--accent)] bg-[var(--accent)]"
+                  : "border-[color:var(--line)] bg-[var(--surface)]",
               )}
             >
-              <div className="flex flex-col gap-4 border-b border-[color:var(--line)] pb-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <p className="font-mono text-[11px] font-medium uppercase tracking-[0.24em] text-[var(--accent-strong)]">
-                      Live Queue
-                    </p>
-                    <h2
-                      id="monitor-running-heading"
-                      className="mt-2 text-lg font-semibold tracking-[-0.03em] text-[var(--foreground)]"
-                    >
-                      运行中任务
-                    </h2>
-                  </div>
-                  <TaskToneBadge
-                    tone={snapshot.runningTasks.length > 0 ? "accent" : "muted"}
-                  >
-                    {snapshot.runningTasks.length > 0
-                      ? `${snapshot.runningTasks.length} 个活动任务`
-                      : "队列空闲"}
-                  </TaskToneBadge>
-                </div>
-
-                <p className="text-sm leading-6 text-[var(--muted)]">
-                  优先展示正在执行或等待终止的任务，保留终止入口与关键运行指标。
-                </p>
-              </div>
-
-              <div className="grid gap-3">
-                {snapshot.runningTasks.length > 0 ? (
-                  snapshot.runningTasks.map((task) => (
-                    <TaskCard
-                      key={task.id}
-                      cancellable={task.kind === "ingestion"}
-                      cancellingTaskId={cancellingTaskId}
-                      emphasis="strong"
-                      emptyProgressLabel="等待处理"
-                      task={task}
-                      onCancel={cancelTask}
-                    />
-                  ))
-                ) : (
-                  <div
-                    className={cx(
-                      subtleCardClassName,
-                      "p-4 text-sm leading-6 text-[var(--muted)]",
-                    )}
-                  >
-                    当前没有运行中的后台任务。
-                  </div>
+              <span
+                className={cx(
+                  "absolute left-0.5 top-0.5 h-6 w-6 rounded-full bg-white shadow-[var(--shadow-sm)] transition-transform",
+                  enabled ? "translate-x-5" : "translate-x-0",
                 )}
-              </div>
-            </section>
+              />
+            </span>
+            <input
+              aria-label="启用默认抓取任务"
+              checked={enabled}
+              className="sr-only"
+              type="checkbox"
+              onChange={(event) => setEnabled(event.target.checked)}
+            />
+            <span className="text-sm font-medium text-[var(--foreground)]">
+              {enabled ? "当前已启用" : "当前已停用"}
+            </span>
+          </span>
+        </label>
+      </div>
 
-            <section
-              aria-labelledby="monitor-recent-heading"
-              className={cx(surfaceCardClassName, "space-y-5 p-4 sm:p-5")}
+      <div className="grid gap-2.5 sm:grid-cols-2">
+        <TaskFact
+          label="Health"
+          value={
+            snapshot.schedule.isHeartbeatStale
+              ? "调度器离线"
+              : "调度器在线"
+          }
+        />
+        <TaskFact
+          label="Last Status"
+          value={
+            snapshot.schedule.lastRunStatus
+              ? statusLabels[snapshot.schedule.lastRunStatus]
+              : "暂无"
+          }
+        />
+        <TaskFact
+          label="Next Run"
+          value={formatDateTime(snapshot.schedule.nextRunAt)}
+        />
+        <TaskFact label="Timezone" value={snapshot.schedule.timezone} />
+      </div>
+
+      <div className="flex flex-col gap-3">
+        <button
+          className={primaryButtonClassName}
+          type="button"
+          disabled={isPending}
+          onClick={saveSchedule}
+        >
+          保存调度设置
+        </button>
+      </div>
+    </section>
+  );
+
+  const tasksSection = (
+    <div className="grid gap-4">
+      <section
+        aria-labelledby="monitor-running-heading"
+        className={cx(
+          surfaceCardClassName,
+          "space-y-5 border-[color:var(--line-strong)] bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(239,246,255,0.82))] p-4 sm:p-5",
+        )}
+      >
+        <div className="flex flex-col gap-4 border-b border-[color:var(--line)] pb-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="font-mono text-[11px] font-medium uppercase tracking-[0.24em] text-[var(--accent-strong)]">
+                Live Queue
+              </p>
+              <h2
+                id="monitor-running-heading"
+                className="mt-2 text-lg font-semibold tracking-[-0.03em] text-[var(--foreground)]"
+              >
+                运行中任务
+              </h2>
+            </div>
+            <TaskToneBadge
+              tone={snapshot.runningTasks.length > 0 ? "accent" : "muted"}
             >
-              <div className="flex flex-col gap-4 border-b border-[color:var(--line)] pb-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <p className="font-mono text-[11px] font-medium uppercase tracking-[0.24em] text-[var(--accent-strong)]">
-                      Recent Runs
-                    </p>
-                    <h2
-                      id="monitor-recent-heading"
-                      className="mt-2 text-lg font-semibold tracking-[-0.03em] text-[var(--foreground)]"
-                    >
-                      最近任务
-                    </h2>
-                  </div>
-                  <TaskToneBadge tone="muted">
-                    {snapshot.recentTasks.length} 条记录
-                  </TaskToneBadge>
-                </div>
-
-                <p className="text-sm leading-6 text-[var(--muted)]">
-                  最近任务沿用与运行中任务一致的状态、触发方式、AI
-                  调用数和错误摘要样式。
-                </p>
-              </div>
-
-              <div className="grid gap-3 lg:grid-cols-2">
-                {snapshot.recentTasks.length > 0 ? (
-                  snapshot.recentTasks.map((task) => (
-                    <TaskCard
-                      key={task.id}
-                      cancellable={false}
-                      cancellingTaskId={cancellingTaskId}
-                      emptyProgressLabel="暂无进度信息"
-                      task={task}
-                      onCancel={cancelTask}
-                    />
-                  ))
-                ) : (
-                  <div
-                    className={cx(
-                      subtleCardClassName,
-                      "p-4 text-sm leading-6 text-[var(--muted)]",
-                    )}
-                  >
-                    当前还没有后台任务记录。
-                  </div>
-                )}
-              </div>
-            </section>
+              {snapshot.runningTasks.length > 0
+                ? `${snapshot.runningTasks.length} 个活动任务`
+                : "队列空闲"}
+            </TaskToneBadge>
           </div>
+
+          <p className="text-sm leading-6 text-[var(--muted)]">
+            优先展示正在执行或等待终止的任务，保留终止入口与关键运行指标。
+          </p>
+        </div>
+
+        <div className="grid gap-3">
+          {snapshot.runningTasks.length > 0 ? (
+            snapshot.runningTasks.map((task) => (
+              <TaskCard
+                key={task.id}
+                cancellable={task.kind === "ingestion"}
+                cancellingTaskId={cancellingTaskId}
+                emphasis="strong"
+                emptyProgressLabel="等待处理"
+                task={task}
+                onCancel={cancelTask}
+              />
+            ))
+          ) : (
+            <div
+              className={cx(
+                subtleCardClassName,
+                "p-4 text-sm leading-6 text-[var(--muted)]",
+              )}
+            >
+              当前没有运行中的后台任务。
+            </div>
+          )}
         </div>
       </section>
+
+      <section
+        aria-labelledby="monitor-recent-heading"
+        className={cx(surfaceCardClassName, "space-y-5 p-4 sm:p-5")}
+      >
+        <div className="flex flex-col gap-4 border-b border-[color:var(--line)] pb-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="font-mono text-[11px] font-medium uppercase tracking-[0.24em] text-[var(--accent-strong)]">
+                Recent Runs
+              </p>
+              <h2
+                id="monitor-recent-heading"
+                className="mt-2 text-lg font-semibold tracking-[-0.03em] text-[var(--foreground)]"
+              >
+                最近任务
+              </h2>
+            </div>
+            <TaskToneBadge tone="muted">
+              {snapshot.recentTasks.length} 条记录
+            </TaskToneBadge>
+          </div>
+
+          <p className="text-sm leading-6 text-[var(--muted)]">
+            最近任务沿用与运行中任务一致的状态、触发方式、AI
+            调用数和错误摘要样式。
+          </p>
+        </div>
+
+        <div className="grid gap-3 lg:grid-cols-2">
+          {snapshot.recentTasks.length > 0 ? (
+            snapshot.recentTasks.map((task) => (
+              <TaskCard
+                key={task.id}
+                cancellable={false}
+                cancellingTaskId={cancellingTaskId}
+                emptyProgressLabel="暂无进度信息"
+                task={task}
+                onCancel={cancelTask}
+              />
+            ))
+          ) : (
+            <div
+              className={cx(
+                subtleCardClassName,
+                "p-4 text-sm leading-6 text-[var(--muted)]",
+              )}
+            >
+              当前还没有后台任务记录。
+            </div>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+
+  const content = (
+    <section className="space-y-4">
+      <h1 className="sr-only">任务监控</h1>
+
+      {feedback ? (
+        <StatusBanner
+          className="rounded-[1rem] px-4 py-3"
+          tone={feedback.tone}
+        >
+          {feedback.text}
+        </StatusBanner>
+      ) : null}
+
+      {showScheduleOnly ? (
+        scheduleSection
+      ) : (
+        <div className="grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)] xl:items-start">
+          {showSchedule && scheduleSection}
+          {tasksSection}
+        </div>
+      )}
+    </section>
+  );
+
+  if (embedMode) {
+    return content;
+  }
+
+  return (
+    <PageShell
+      header={{ activeNav: null, isAdmin: true }}
+      contentClassName="gap-4 sm:gap-5"
+      contentWidth="workspace"
+    >
+      {content}
     </PageShell>
   );
 }

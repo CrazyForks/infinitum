@@ -7,15 +7,12 @@ import { useRouter } from "next/navigation";
 import { cx } from "@/lib/ui/cx";
 
 type GlobalHeaderProps = {
-  activeNav: "home" | "review" | "monitor" | "admin" | null;
+  activeNav: "home" | "admin" | null;
   isAdmin: boolean;
 };
 
 const navItems = [
   { href: "/", key: "home", label: "主页" },
-  { href: "/admin/content", key: "review", label: "审核" },
-  { href: "/admin/monitor", key: "monitor", label: "任务" },
-  { href: "/admin/settings", key: "admin", label: "管理" },
 ] as const;
 
 function HeaderActionIcon({ direction }: { direction: "enter" | "leave" }) {
@@ -110,26 +107,52 @@ export function GlobalHeader({ activeNav, isAdmin }: GlobalHeaderProps) {
           })}
         </nav>
 
-        {isAdmin ? (
-          <button
-            aria-label="登出"
-            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[color:var(--line)] bg-[var(--surface)] text-[var(--foreground)] shadow-[var(--shadow-sm)] transition hover:border-[color:var(--line-strong)] hover:bg-[var(--surface-highlight)] disabled:cursor-not-allowed disabled:opacity-55"
-            disabled={isPending}
-            onClick={logout}
-            type="button"
-          >
-            <HeaderActionIcon direction="leave" />
-          </button>
-        ) : (
-          <button
-            aria-label="登录"
-            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[color:var(--line)] bg-[var(--surface)] text-[var(--foreground)] shadow-[var(--shadow-sm)] transition hover:border-[color:var(--line-strong)] hover:bg-[var(--surface-highlight)]"
-            onClick={goToLogin}
-            type="button"
-          >
-            <HeaderActionIcon direction="enter" />
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {isAdmin && (
+            <Link
+              href="/admin"
+              className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[color:var(--line)] bg-[var(--surface)] text-[var(--foreground)] shadow-[var(--shadow-sm)] transition hover:border-[color:var(--line-strong)] hover:bg-[var(--surface-highlight)]"
+              aria-label="管理"
+              title="管理"
+            >
+              <svg
+                aria-hidden="true"
+                className="h-4 w-4"
+                fill="none"
+                viewBox="0 0 16 16"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M8 1.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Zm4.5 6a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Zm-9 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Zm9-6a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Zm-9 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3ZM8 7a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Z"
+                  stroke="currentColor"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="1.4"
+                />
+              </svg>
+            </Link>
+          )}
+          {isAdmin ? (
+            <button
+              aria-label="登出"
+              className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[color:var(--line)] bg-[var(--surface)] text-[var(--foreground)] shadow-[var(--shadow-sm)] transition hover:border-[color:var(--line-strong)] hover:bg-[var(--surface-highlight)] disabled:cursor-not-allowed disabled:opacity-55"
+              disabled={isPending}
+              onClick={logout}
+              type="button"
+            >
+              <HeaderActionIcon direction="leave" />
+            </button>
+          ) : (
+            <button
+              aria-label="登录"
+              className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[color:var(--line)] bg-[var(--surface)] text-[var(--foreground)] shadow-[var(--shadow-sm)] transition hover:border-[color:var(--line-strong)] hover:bg-[var(--surface-highlight)]"
+              onClick={goToLogin}
+              type="button"
+            >
+              <HeaderActionIcon direction="enter" />
+            </button>
+          )}
+        </div>
       </div>
     </header>
   );

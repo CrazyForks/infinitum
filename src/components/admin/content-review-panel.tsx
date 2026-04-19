@@ -109,7 +109,7 @@ function truncateText(value: string | null | undefined, maxLength: number) {
   return `${value.slice(0, maxLength).trimEnd()}...`;
 }
 
-export function ContentReviewPanel() {
+function ContentReviewContent() {
   const [activeTab, setActiveTab] = useState<ReviewTab>("filtered");
   const [filteredItems, setFilteredItems] = useState<ReviewItemDTO[]>([]);
   const [clusters, setClusters] = useState<ClusterDTO[]>([]);
@@ -254,7 +254,7 @@ export function ContentReviewPanel() {
   };
 
   return (
-    <PageShell header={{ activeNav: "review", isAdmin: true }} contentClassName="gap-3">
+    <>
       {feedback ? (
         <StatusBanner className="rounded-[1.25rem] px-4 py-3" tone={feedback.tone}>
           {feedback.text}
@@ -614,6 +614,18 @@ export function ContentReviewPanel() {
           </section>
         </section>
       )}
+    </>
+  );
+}
+
+export function ContentReviewPanel({ embedMode }: { embedMode?: boolean }) {
+  if (embedMode) {
+    return <ContentReviewContent />;
+  }
+
+  return (
+    <PageShell header={{ activeNav: null, isAdmin: true }} contentClassName="gap-3">
+      <ContentReviewContent />
     </PageShell>
   );
 }

@@ -13,9 +13,11 @@ import { cx } from "@/lib/ui/cx";
 type AdminSettingsPanelProps = {
   initialSettings: AdminSettingsSnapshot;
   onRefresh?: () => void;
+  embedMode?: boolean;
+  activeSection?: AdminSettingsSection;
 };
 
-type AdminSettingsSection = "basic" | "blacklist" | "groups" | "sources";
+type AdminSettingsSection = "basic" | "blacklist" | "groups" | "sources" | "schedule";
 
 type FeedbackState = {
   text: string;
@@ -52,10 +54,11 @@ const settingsNavItems: Array<{
   key: AdminSettingsSection;
   label: string;
 }> = [
-  { key: "basic", label: "基础配置" },
+  { key: "basic", label: "模型API / 提示词" },
   { key: "blacklist", label: "黑名单" },
   { key: "groups", label: "分组" },
-  { key: "sources", label: "信息源管理" },
+  { key: "sources", label: "信息源" },
+  { key: "schedule", label: "调度" },
 ] as const;
 
 function refreshPage() {
@@ -67,11 +70,18 @@ function refreshPage() {
 export function AdminSettingsPanel({
   initialSettings,
   onRefresh,
+  embedMode,
+  activeSection: externalActiveSection,
 }: AdminSettingsPanelProps) {
   const [isPending, startTransition] = useTransition();
   const [feedback, setFeedback] = useState<FeedbackState>(null);
   const [activeSection, setActiveSection] =
-    useState<AdminSettingsSection>("basic");
+    useState<AdminSettingsSection>(externalActiveSection ?? "basic");
+
+  // Sync externalActiveSection with internal state
+  if (externalActiveSection && externalActiveSection !== activeSection) {
+    setActiveSection(externalActiveSection);
+  }
   const [baseUrl, setBaseUrl] = useState(
     initialSettings.appConfig.modelApi.baseURL,
   );
@@ -243,9 +253,482 @@ export function AdminSettingsPanel({
     });
   };
 
+  const content = (
+    <section aria-label="后台设置工作台" className="space-y-4">
+      {feedback ? (
+        <StatusBanner
+          className="rounded-[1rem] px-4 py-3"
+          tone={feedback.tone}
+        >
+          {feedback.text}
+        </StatusBanner>
+      ) : null}
+
+      <section
+        aria-labelledby={`settings-tab-${activeSection}`}
+        className="space-y-4"
+        id={`settings-panel-${activeSection}`}
+        role="tabpanel"
+      >
+        {activeSection === "basic" ? (
+          <SectionCard headingId="settings-basic" title="基础配置">
+            <div className="grid gap-3.5 md:grid-cols-2">
+              <label className="space-y-2">
+                <span className={labelClassName}>模型 API Base URL</span>
+                <input
+                  className={inputClassName}
+                  value={baseUrl}
+                  onChange={(event) => setBaseUrl(event.target.value)}
+                />
+              </label>
+
+              <label className="space-y-2">
+                <span className={labelClassName}>模型名</span>
+                <input
+                  className={inputClassName}
+                  value={model}
+                  onChange={(event) => setModel(event.target.value)}
+                />
+              </label>
+              <label className="space-y-2">
+                <span className={labelClassName}>并发数</span>
+                <input
+                  aria-label="并发数"
+                  className={inputClassName}
+                  max={10}
+                  min={1}
+                  type="number"
+                  value={itemConcurrency}
+                  onChange={(event) => setItemConcurrency(event.target.value)}
+                />
+              </label>
+
+              <label className="space-y-2">
+                <span className={labelClassName}>API Key</span>
+                <input
+                  className={inputClassName}
+                  placeholder={
+                    initialSettings.appConfig.modelApi.apiKeyMasked ||
+                    "留空保持不变"
+                  }
+                  value={apiKey}
+                  onChange={(event) => {
+                    setApiKey(event.target.value);
+                    setApiKeyMode(event.target.value ? "replace" : "keep");
+                  }}
+                />
+                <span className={helperTextClassName}>
+                  当前显示为掩码占位；留空会保持现有值不变。
+                </span>
+              </label>
+
+              <label className="space-y-2 md:col-span-2">
+                <span className={labelClassName}>内容分析提示词</span>
+                <textarea
+                  aria-label="内容分析提示词"
+                  className={textareaClassName}
+                  value={itemAnalysisPrompt}
+                  onChange={(event) =>
+                    setItemAnalysisPrompt(event.target.value)
+                  }
+                />
+                <span className={helperTextClassName}>
+                  用于单条内容的分析与过滤判断，建议保留明确输出格式与判定标准。
+                </span>
+              </label>
+
+              <label className="space-y-2 md:col-span-2">
+                <span className={labelClassName}>聚合摘要提示词</span>
+                <textarea
+                  aria-label="聚合摘要提示词"
+                  className={textareaClassName}
+                  value={clusterSummaryPrompt}
+                  onChange={(event) =>
+                    setClusterSummaryPrompt(event.target.value)
+                  }
+                />
+                <span className={helperTextClassName}>
+                  用于聚合后的摘要生成，可在这里调整摘要风格、长度和重点字段。
+                </span>
+              </label>
+
+              <label className="space-y-2 md:col-span-2">
+                <span className={labelClassName}>归组判定提示词</span>
+                <textarea
+                  aria-label="归组判定提示词"
+                  className={textareaClassName}
+                  value={clusterMatchPrompt}
+                  onChange={(event) =>
+                    setClusterMatchPrompt(event.target.value)
+                  }
+                />
+                <span className={helperTextClassName}>
+                  用于判断内容是否应并入已有聚合组，建议保持条件明确，避免误并。
+                </span>
+              </label>
+            </div>
+
+            <div className="flex flex-wrap gap-3">
+              <button
+                className={secondaryButtonClassName}
+                type="button"
+                onClick={() => {
+                  setApiKey("");
+                  setApiKeyMode("clear");
+                }}
+              >
+                清空 API Key
+              </button>
+              <button
+                className={primaryButtonClassName}
+                type="button"
+                onClick={() =>
+                  submitJson(
+                    "/api/admin/settings/app-config",
+                    "PUT",
+                    {
+                      ingestionItemConcurrency: Number(itemConcurrency),
+                      modelApiBaseUrl: baseUrl,
+                      modelApiModel: model,
+                      modelApiKey: apiKey,
+                      apiKeyMode,
+                      itemAnalysisPrompt,
+                      clusterSummaryPrompt,
+                      clusterMatchPrompt,
+                    },
+                    "基础配置已保存。",
+                  )
+                }
+                disabled={isPending}
+              >
+                保存基础配置
+              </button>
+            </div>
+          </SectionCard>
+        ) : null}
+
+        {activeSection === "blacklist" ? (
+          <SectionCard headingId="settings-blacklist" title="黑名单">
+            <label className="space-y-2">
+              <span className={labelClassName}>关键词列表（每行一个）</span>
+              <textarea
+                className={cx(textareaClassName, "min-h-[14rem]")}
+                value={blacklistText}
+                onChange={(event) => setBlacklistText(event.target.value)}
+              />
+              <span className={helperTextClassName}>
+                保存时会自动去掉空行与首尾空格。
+              </span>
+            </label>
+
+            <div className="flex flex-wrap gap-3">
+              <button
+                className={primaryButtonClassName}
+                type="button"
+                onClick={() =>
+                  submitJson(
+                    "/api/admin/settings/blacklist",
+                    "PUT",
+                    {
+                      keywords: blacklistText
+                        .split("\n")
+                        .map((keyword) => keyword.trim())
+                        .filter(Boolean),
+                    },
+                    "黑名单已保存。",
+                  )
+                }
+                disabled={isPending}
+              >
+                保存黑名单
+              </button>
+            </div>
+          </SectionCard>
+        ) : null}
+
+        {activeSection === "groups" ? (
+          <SectionCard headingId="settings-groups" title="分组">
+            <div
+              className={cx(subtleCardClassName, "flex flex-col gap-3 p-3")}
+            >
+              <div className="space-y-1">
+                <p className={labelClassName}>新建分组</p>
+                <p className={helperTextClassName}>
+                  用于批量组织 OPML 导入结果与后续信息源维护。
+                </p>
+              </div>
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <input
+                  className={cx(inputClassName, "sm:flex-1")}
+                  placeholder="新分组名称"
+                  value={newGroupName}
+                  onChange={(event) => setNewGroupName(event.target.value)}
+                />
+                <button
+                  className={primaryButtonClassName}
+                  type="button"
+                  onClick={() =>
+                    submitJson(
+                      "/api/admin/settings/groups",
+                      "POST",
+                      { name: newGroupName },
+                      "分组已创建。",
+                      true,
+                    )
+                  }
+                  disabled={isPending || !newGroupName.trim()}
+                >
+                  创建分组
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              {initialSettings.groups.length ? (
+                initialSettings.groups.map((group) => (
+                  <GroupRow
+                    key={group.id}
+                    group={group}
+                    submitJson={submitJson}
+                  />
+                ))
+              ) : (
+                <div className="rounded-[1rem] border border-dashed border-[color:var(--line)] bg-[var(--surface)] px-4 py-4 text-sm leading-6 text-[var(--muted)]">
+                  还没有分组，创建后就可以在信息源管理里直接归类。
+                </div>
+              )}
+            </div>
+          </SectionCard>
+        ) : null}
+
+        {activeSection === "sources" ? (
+          <SectionCard headingId="settings-sources" title="信息源管理">
+            <section
+              role="region"
+              aria-label="信息源工作区"
+              className="grid gap-0 overflow-hidden rounded-[1rem] border border-[color:var(--line)] bg-[var(--surface-muted)]/72 xl:grid-cols-[minmax(0,0.96fr)_minmax(0,1.04fr)]"
+            >
+              <section
+                role="region"
+                aria-label="新建信息源"
+                className="space-y-4 p-4"
+              >
+                <div className="space-y-3 border-b border-[color:var(--line)] pb-4">
+                  <div className="space-y-1">
+                    <p className={labelClassName}>导入 OPML</p>
+                    <p className={helperTextClassName}>
+                      支持 `.opml` 与 XML 文件，导入完成后会自动刷新页面。
+                    </p>
+                  </div>
+                  <div className="flex flex-col gap-3 sm:flex-row">
+                    <input
+                      aria-label="OPML 文件"
+                      className={cx(
+                        inputClassName,
+                        "file:mr-4 file:rounded-[0.9rem] file:border-0 file:bg-[var(--surface)] file:px-3 file:py-2 file:text-sm file:font-medium file:text-[var(--foreground)] sm:flex-1",
+                      )}
+                      accept=".opml,.xml,text/xml,application/xml"
+                      type="file"
+                      onChange={(event) =>
+                        setOpmlFile(event.target.files?.[0] ?? null)
+                      }
+                    />
+                    <button
+                      className={secondaryButtonClassName}
+                      type="button"
+                      onClick={importOpml}
+                      disabled={isPending || !opmlFile}
+                    >
+                      导入 OPML
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="space-y-1">
+                    <p className={labelClassName}>新建信息源</p>
+                    <p className={helperTextClassName}>
+                      支持先输入 RSS URL 自动填充，再补充分组与抓取策略。
+                    </p>
+                  </div>
+
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <FilterInput
+                      id="new-source-name"
+                      label="名称"
+                      ariaLabel="名称"
+                      value={newSource.name}
+                      placeholder="名称"
+                      onChange={(value) =>
+                        setNewSource((current) => ({
+                          ...current,
+                          name: value,
+                        }))
+                      }
+                    />
+
+                    <FilterInput
+                      id="new-source-rss"
+                      label="RSS URL"
+                      ariaLabel="RSS URL"
+                      value={newSource.rssUrl}
+                      placeholder="RSS URL"
+                      onChange={(value) =>
+                        setNewSource((current) => ({
+                          ...current,
+                          rssUrl: value,
+                        }))
+                      }
+                    />
+
+                    <FilterInput
+                      id="new-source-site"
+                      label="站点 URL"
+                      ariaLabel="站点 URL"
+                      value={newSource.siteUrl}
+                      placeholder="站点 URL"
+                      onChange={(value) =>
+                        setNewSource((current) => ({
+                          ...current,
+                          siteUrl: value,
+                        }))
+                      }
+                    />
+
+                    <FilterSelect
+                      id="new-source-group"
+                      label="所属分组"
+                      ariaLabel="所属分组"
+                      value={newSource.groupId}
+                      onChange={(value) =>
+                        setNewSource((current) => ({
+                          ...current,
+                          groupId: value,
+                        }))
+                      }
+                      showSearch={false}
+                      options={[
+                        { value: "", label: "未分组" },
+                        ...initialSettings.groups.map((group) => ({
+                          value: group.id,
+                          label: group.name,
+                        })),
+                      ]}
+                    />
+                  </div>
+
+                  <div className="flex flex-wrap gap-3">
+                    <label className={checkboxClassName}>
+                      <input
+                        checked={newSource.enabled}
+                        className={checkboxInputClassName}
+                        type="checkbox"
+                        onChange={(event) =>
+                          setNewSource((current) => ({
+                            ...current,
+                            enabled: event.target.checked,
+                          }))
+                        }
+                      />
+                      启用
+                    </label>
+                    <label className={checkboxClassName}>
+                      <input
+                        checked={newSource.fetchFullTextWhenMissing}
+                        className={checkboxInputClassName}
+                        type="checkbox"
+                        onChange={(event) =>
+                          setNewSource((current) => ({
+                            ...current,
+                            fetchFullTextWhenMissing: event.target.checked,
+                          }))
+                        }
+                      />
+                      缺全文时补抓
+                    </label>
+                  </div>
+
+                  <div className="flex flex-wrap gap-3">
+                    <button
+                      className={secondaryButtonClassName}
+                      type="button"
+                      onClick={resolveSourceFromRss}
+                      disabled={isPending || !newSource.rssUrl.trim()}
+                    >
+                      根据 RSS 自动填充
+                    </button>
+                    <button
+                      className={primaryButtonClassName}
+                      type="button"
+                      onClick={() =>
+                        submitJson(
+                          "/api/admin/settings/sources",
+                          "POST",
+                          {
+                            ...newSource,
+                            groupId: newSource.groupId || null,
+                          },
+                          "信息源已创建。",
+                          true,
+                        )
+                      }
+                      disabled={
+                        isPending ||
+                        !newSource.name ||
+                        !newSource.rssUrl ||
+                        !newSource.siteUrl
+                      }
+                    >
+                      创建信息源
+                    </button>
+                  </div>
+                </div>
+              </section>
+
+              <section
+                role="region"
+                aria-label="已有信息源列表"
+                className="space-y-3 p-4 xl:border-l xl:border-[color:var(--line)]"
+              >
+                <div className="space-y-1">
+                  <p className={labelClassName}>已有信息源</p>
+                  <p className={helperTextClassName}>
+                    可直接修改名称、分组、抓取策略，保存接口与删除行为不变。
+                  </p>
+                </div>
+
+                <div className="space-y-0">
+                  {initialSettings.sources.length ? (
+                    initialSettings.sources.map((source) => (
+                      <SourceRow
+                        key={source.id}
+                        groups={initialSettings.groups}
+                        source={source}
+                        submitJson={submitJson}
+                      />
+                    ))
+                  ) : (
+                    <div className="rounded-[0.95rem] border border-dashed border-[color:var(--line)] bg-white px-4 py-4 text-sm leading-6 text-[var(--muted)]">
+                      还没有信息源。可以通过 RSS 手动创建，或先导入 OPML
+                      批量建立。
+                    </div>
+                  )}
+                </div>
+              </section>
+            </section>
+          </SectionCard>
+        ) : null}
+      </section>
+    </section>
+  );
+
+  if (embedMode) {
+    return content;
+  }
+
   return (
     <PageShell
-      header={{ activeNav: "admin", isAdmin: true }}
+      header={{ activeNav: null, isAdmin: true }}
       contentClassName="gap-4"
       contentWidth="workspace"
       sidebar={
@@ -255,472 +738,7 @@ export function AdminSettingsPanel({
         />
       }
     >
-      <section aria-label="后台设置工作台" className="space-y-4">
-        {feedback ? (
-          <StatusBanner
-            className="rounded-[1rem] px-4 py-3"
-            tone={feedback.tone}
-          >
-            {feedback.text}
-          </StatusBanner>
-        ) : null}
-
-        <section
-          aria-labelledby={`settings-tab-${activeSection}`}
-          className="space-y-4"
-          id={`settings-panel-${activeSection}`}
-          role="tabpanel"
-        >
-          {activeSection === "basic" ? (
-            <SectionCard headingId="settings-basic" title="基础配置">
-              <div className="grid gap-3.5 md:grid-cols-2">
-                <label className="space-y-2">
-                  <span className={labelClassName}>模型 API Base URL</span>
-                  <input
-                    className={inputClassName}
-                    value={baseUrl}
-                    onChange={(event) => setBaseUrl(event.target.value)}
-                  />
-                </label>
-
-                <label className="space-y-2">
-                  <span className={labelClassName}>模型名</span>
-                  <input
-                    className={inputClassName}
-                    value={model}
-                    onChange={(event) => setModel(event.target.value)}
-                  />
-                </label>
-                <label className="space-y-2">
-                  <span className={labelClassName}>并发数</span>
-                  <input
-                    aria-label="并发数"
-                    className={inputClassName}
-                    max={10}
-                    min={1}
-                    type="number"
-                    value={itemConcurrency}
-                    onChange={(event) => setItemConcurrency(event.target.value)}
-                  />
-                </label>
-
-                <label className="space-y-2">
-                  <span className={labelClassName}>API Key</span>
-                  <input
-                    className={inputClassName}
-                    placeholder={
-                      initialSettings.appConfig.modelApi.apiKeyMasked ||
-                      "留空保持不变"
-                    }
-                    value={apiKey}
-                    onChange={(event) => {
-                      setApiKey(event.target.value);
-                      setApiKeyMode(event.target.value ? "replace" : "keep");
-                    }}
-                  />
-                  <span className={helperTextClassName}>
-                    当前显示为掩码占位；留空会保持现有值不变。
-                  </span>
-                </label>
-
-                <label className="space-y-2 md:col-span-2">
-                  <span className={labelClassName}>内容分析提示词</span>
-                  <textarea
-                    aria-label="内容分析提示词"
-                    className={textareaClassName}
-                    value={itemAnalysisPrompt}
-                    onChange={(event) =>
-                      setItemAnalysisPrompt(event.target.value)
-                    }
-                  />
-                  <span className={helperTextClassName}>
-                    用于单条内容的分析与过滤判断，建议保留明确输出格式与判定标准。
-                  </span>
-                </label>
-
-                <label className="space-y-2 md:col-span-2">
-                  <span className={labelClassName}>聚合摘要提示词</span>
-                  <textarea
-                    aria-label="聚合摘要提示词"
-                    className={textareaClassName}
-                    value={clusterSummaryPrompt}
-                    onChange={(event) =>
-                      setClusterSummaryPrompt(event.target.value)
-                    }
-                  />
-                  <span className={helperTextClassName}>
-                    用于聚合后的摘要生成，可在这里调整摘要风格、长度和重点字段。
-                  </span>
-                </label>
-
-                <label className="space-y-2 md:col-span-2">
-                  <span className={labelClassName}>归组判定提示词</span>
-                  <textarea
-                    aria-label="归组判定提示词"
-                    className={textareaClassName}
-                    value={clusterMatchPrompt}
-                    onChange={(event) =>
-                      setClusterMatchPrompt(event.target.value)
-                    }
-                  />
-                  <span className={helperTextClassName}>
-                    用于判断内容是否应并入已有聚合组，建议保持条件明确，避免误并。
-                  </span>
-                </label>
-              </div>
-
-              <div className="flex flex-wrap gap-3">
-                <button
-                  className={secondaryButtonClassName}
-                  type="button"
-                  onClick={() => {
-                    setApiKey("");
-                    setApiKeyMode("clear");
-                  }}
-                >
-                  清空 API Key
-                </button>
-                <button
-                  className={primaryButtonClassName}
-                  type="button"
-                  onClick={() =>
-                    submitJson(
-                      "/api/admin/settings/app-config",
-                      "PUT",
-                      {
-                        ingestionItemConcurrency: Number(itemConcurrency),
-                        modelApiBaseUrl: baseUrl,
-                        modelApiModel: model,
-                        modelApiKey: apiKey,
-                        apiKeyMode,
-                        itemAnalysisPrompt,
-                        clusterSummaryPrompt,
-                        clusterMatchPrompt,
-                      },
-                      "基础配置已保存。",
-                    )
-                  }
-                  disabled={isPending}
-                >
-                  保存基础配置
-                </button>
-              </div>
-            </SectionCard>
-          ) : null}
-
-          {activeSection === "blacklist" ? (
-            <SectionCard headingId="settings-blacklist" title="黑名单">
-              <label className="space-y-2">
-                <span className={labelClassName}>关键词列表（每行一个）</span>
-                <textarea
-                  className={cx(textareaClassName, "min-h-[14rem]")}
-                  value={blacklistText}
-                  onChange={(event) => setBlacklistText(event.target.value)}
-                />
-                <span className={helperTextClassName}>
-                  保存时会自动去掉空行与首尾空格。
-                </span>
-              </label>
-
-              <div className="flex flex-wrap gap-3">
-                <button
-                  className={primaryButtonClassName}
-                  type="button"
-                  onClick={() =>
-                    submitJson(
-                      "/api/admin/settings/blacklist",
-                      "PUT",
-                      {
-                        keywords: blacklistText
-                          .split("\n")
-                          .map((keyword) => keyword.trim())
-                          .filter(Boolean),
-                      },
-                      "黑名单已保存。",
-                    )
-                  }
-                  disabled={isPending}
-                >
-                  保存黑名单
-                </button>
-              </div>
-            </SectionCard>
-          ) : null}
-
-          {activeSection === "groups" ? (
-            <SectionCard headingId="settings-groups" title="分组">
-              <div
-                className={cx(subtleCardClassName, "flex flex-col gap-3 p-3")}
-              >
-                <div className="space-y-1">
-                  <p className={labelClassName}>新建分组</p>
-                  <p className={helperTextClassName}>
-                    用于批量组织 OPML 导入结果与后续信息源维护。
-                  </p>
-                </div>
-                <div className="flex flex-col gap-3 sm:flex-row">
-                  <input
-                    className={cx(inputClassName, "sm:flex-1")}
-                    placeholder="新分组名称"
-                    value={newGroupName}
-                    onChange={(event) => setNewGroupName(event.target.value)}
-                  />
-                  <button
-                    className={primaryButtonClassName}
-                    type="button"
-                    onClick={() =>
-                      submitJson(
-                        "/api/admin/settings/groups",
-                        "POST",
-                        { name: newGroupName },
-                        "分组已创建。",
-                        true,
-                      )
-                    }
-                    disabled={isPending || !newGroupName.trim()}
-                  >
-                    创建分组
-                  </button>
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                {initialSettings.groups.length ? (
-                  initialSettings.groups.map((group) => (
-                    <GroupRow
-                      key={group.id}
-                      group={group}
-                      submitJson={submitJson}
-                    />
-                  ))
-                ) : (
-                  <div className="rounded-[1rem] border border-dashed border-[color:var(--line)] bg-[var(--surface)] px-4 py-4 text-sm leading-6 text-[var(--muted)]">
-                    还没有分组，创建后就可以在信息源管理里直接归类。
-                  </div>
-                )}
-              </div>
-            </SectionCard>
-          ) : null}
-
-          {activeSection === "sources" ? (
-            <SectionCard headingId="settings-sources" title="信息源管理">
-              <section
-                role="region"
-                aria-label="信息源工作区"
-                className="grid gap-0 overflow-hidden rounded-[1rem] border border-[color:var(--line)] bg-[var(--surface-muted)]/72 xl:grid-cols-[minmax(0,0.96fr)_minmax(0,1.04fr)]"
-              >
-                <section
-                  role="region"
-                  aria-label="新建信息源"
-                  className="space-y-4 p-4"
-                >
-                  <div className="space-y-3 border-b border-[color:var(--line)] pb-4">
-                    <div className="space-y-1">
-                      <p className={labelClassName}>导入 OPML</p>
-                      <p className={helperTextClassName}>
-                        支持 `.opml` 与 XML 文件，导入完成后会自动刷新页面。
-                      </p>
-                    </div>
-                    <div className="flex flex-col gap-3 sm:flex-row">
-                      <input
-                        aria-label="OPML 文件"
-                        className={cx(
-                          inputClassName,
-                          "file:mr-4 file:rounded-[0.9rem] file:border-0 file:bg-[var(--surface)] file:px-3 file:py-2 file:text-sm file:font-medium file:text-[var(--foreground)] sm:flex-1",
-                        )}
-                        accept=".opml,.xml,text/xml,application/xml"
-                        type="file"
-                        onChange={(event) =>
-                          setOpmlFile(event.target.files?.[0] ?? null)
-                        }
-                      />
-                      <button
-                        className={secondaryButtonClassName}
-                        type="button"
-                        onClick={importOpml}
-                        disabled={isPending || !opmlFile}
-                      >
-                        导入 OPML
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="space-y-4">
-                    <div className="space-y-1">
-                      <p className={labelClassName}>新建信息源</p>
-                      <p className={helperTextClassName}>
-                        支持先输入 RSS URL 自动填充，再补充分组与抓取策略。
-                      </p>
-                    </div>
-
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <FilterInput
-                        id="new-source-name"
-                        label="名称"
-                        ariaLabel="名称"
-                        value={newSource.name}
-                        placeholder="名称"
-                        onChange={(value) =>
-                          setNewSource((current) => ({
-                            ...current,
-                            name: value,
-                          }))
-                        }
-                      />
-
-                      <FilterInput
-                        id="new-source-rss"
-                        label="RSS URL"
-                        ariaLabel="RSS URL"
-                        value={newSource.rssUrl}
-                        placeholder="RSS URL"
-                        onChange={(value) =>
-                          setNewSource((current) => ({
-                            ...current,
-                            rssUrl: value,
-                          }))
-                        }
-                      />
-
-                      <FilterInput
-                        id="new-source-site"
-                        label="站点 URL"
-                        ariaLabel="站点 URL"
-                        value={newSource.siteUrl}
-                        placeholder="站点 URL"
-                        onChange={(value) =>
-                          setNewSource((current) => ({
-                            ...current,
-                            siteUrl: value,
-                          }))
-                        }
-                      />
-
-                      <FilterSelect
-                        id="new-source-group"
-                        label="所属分组"
-                        ariaLabel="所属分组"
-                        value={newSource.groupId}
-                        onChange={(value) =>
-                          setNewSource((current) => ({
-                            ...current,
-                            groupId: value,
-                          }))
-                        }
-                        showSearch={false}
-                        options={[
-                          { value: "", label: "未分组" },
-                          ...initialSettings.groups.map((group) => ({
-                            value: group.id,
-                            label: group.name,
-                          })),
-                        ]}
-                      />
-                    </div>
-
-                    <div className="flex flex-wrap gap-3">
-                      <label className={checkboxClassName}>
-                        <input
-                          checked={newSource.enabled}
-                          className={checkboxInputClassName}
-                          type="checkbox"
-                          onChange={(event) =>
-                            setNewSource((current) => ({
-                              ...current,
-                              enabled: event.target.checked,
-                            }))
-                          }
-                        />
-                        启用
-                      </label>
-                      <label className={checkboxClassName}>
-                        <input
-                          checked={newSource.fetchFullTextWhenMissing}
-                          className={checkboxInputClassName}
-                          type="checkbox"
-                          onChange={(event) =>
-                            setNewSource((current) => ({
-                              ...current,
-                              fetchFullTextWhenMissing: event.target.checked,
-                            }))
-                          }
-                        />
-                        缺全文时补抓
-                      </label>
-                    </div>
-
-                    <div className="flex flex-wrap gap-3">
-                      <button
-                        className={secondaryButtonClassName}
-                        type="button"
-                        onClick={resolveSourceFromRss}
-                        disabled={isPending || !newSource.rssUrl.trim()}
-                      >
-                        根据 RSS 自动填充
-                      </button>
-                      <button
-                        className={primaryButtonClassName}
-                        type="button"
-                        onClick={() =>
-                          submitJson(
-                            "/api/admin/settings/sources",
-                            "POST",
-                            {
-                              ...newSource,
-                              groupId: newSource.groupId || null,
-                            },
-                            "信息源已创建。",
-                            true,
-                          )
-                        }
-                        disabled={
-                          isPending ||
-                          !newSource.name ||
-                          !newSource.rssUrl ||
-                          !newSource.siteUrl
-                        }
-                      >
-                        创建信息源
-                      </button>
-                    </div>
-                  </div>
-                </section>
-
-                <section
-                  role="region"
-                  aria-label="已有信息源列表"
-                  className="space-y-3 p-4 xl:border-l xl:border-[color:var(--line)]"
-                >
-                  <div className="space-y-1">
-                    <p className={labelClassName}>已有信息源</p>
-                    <p className={helperTextClassName}>
-                      可直接修改名称、分组、抓取策略，保存接口与删除行为不变。
-                    </p>
-                  </div>
-
-                  <div className="space-y-0">
-                    {initialSettings.sources.length ? (
-                      initialSettings.sources.map((source) => (
-                        <SourceRow
-                          key={source.id}
-                          groups={initialSettings.groups}
-                          source={source}
-                          submitJson={submitJson}
-                        />
-                      ))
-                    ) : (
-                      <div className="rounded-[0.95rem] border border-dashed border-[color:var(--line)] bg-white px-4 py-4 text-sm leading-6 text-[var(--muted)]">
-                        还没有信息源。可以通过 RSS 手动创建，或先导入 OPML
-                        批量建立。
-                      </div>
-                    )}
-                  </div>
-                </section>
-              </section>
-            </SectionCard>
-          ) : null}
-        </section>
-      </section>
+      {content}
     </PageShell>
   );
 }

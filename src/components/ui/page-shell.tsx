@@ -3,7 +3,7 @@ import type { ComponentPropsWithoutRef, ReactNode } from "react";
 import { GlobalHeader } from "@/components/ui/global-header";
 import { cx } from "@/lib/ui/cx";
 
-type PageShellNav = "home" | "review" | "monitor" | "admin" | null;
+type PageShellNav = "home" | "admin" | null;
 
 type PageShellHeader = {
   activeNav: PageShellNav;
