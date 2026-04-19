@@ -67,7 +67,8 @@ async function enqueueScheduledIngestionIfDue(now: Date) {
 
 export async function recoverStaleTaskRuns(now = new Date()) {
   const staleBefore = new Date(now.getTime() - DEFAULT_TASK_STALE_MS);
-  const result = await prisma.backgroundTaskRun.updateMany({
+  const staleReason = "Worker exited before completing the task.";
+  const staleRuns = await prisma.backgroundTaskRun.findMany({
     where: {
       status: "running",
       startedAt: {
@@ -75,14 +76,64 @@ export async function recoverStaleTaskRuns(now = new Date()) {
       },
       finishedAt: null,
     },
-    data: {
-      status: "failed",
-      finishedAt: now,
-      errorSummary: "Worker exited before completing the task.",
+    select: {
+      id: true,
     },
   });
 
-  return result.count;
+  const staleTaskRunIds = staleRuns.map((run) => run.id);
+  let recoveredCount = 0;
+
+  if (staleTaskRunIds.length > 0) {
+    const result = await prisma.backgroundTaskRun.updateMany({
+      where: {
+        id: {
+          in: staleTaskRunIds,
+        },
+      },
+      data: {
+        status: "failed",
+        finishedAt: now,
+        errorSummary: staleReason,
+      },
+    });
+
+    await prisma.fetchRun.updateMany({
+      where: {
+        taskRunId: {
+          in: staleTaskRunIds,
+        },
+        status: "running",
+      },
+      data: {
+        status: "failed",
+        finishedAt: now,
+        errorSummary: staleReason,
+      },
+    });
+
+    recoveredCount = result.count;
+  }
+
+  await prisma.fetchRun.updateMany({
+    where: {
+      status: "running",
+      taskRun: {
+        is: {
+          status: {
+            in: ["failed", "cancelled", "partial", "succeeded"],
+          },
+        },
+      },
+    },
+    data: {
+      status: "failed",
+      finishedAt: now,
+      errorSummary: staleReason,
+    },
+  });
+
+  return recoveredCount;
 }
 
 export async function runWorkerCycle(options?: {

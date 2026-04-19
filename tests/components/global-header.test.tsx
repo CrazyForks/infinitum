@@ -35,6 +35,25 @@ describe("GlobalHeader", () => {
     expect(screen.getByRole("button", { name: "登录" })).toBeInTheDocument();
   });
 
+  it("uses the widened shared header container width", () => {
+    render(<GlobalHeader activeNav="home" isAdmin={false} />);
+
+    const headerContent = screen.getByRole("navigation", { name: "主导航" }).parentElement;
+
+    expect(headerContent).not.toBeNull();
+    expect(headerContent?.className).toContain("max-w-7xl");
+  });
+
+  it("keeps the homepage header non-sticky to match the Lumina feed layout", () => {
+    render(<GlobalHeader activeNav="home" isAdmin={false} />);
+
+    const header = screen.getByRole("navigation", { name: "主导航" }).closest("header");
+
+    expect(header).not.toBeNull();
+    expect(header?.className).not.toContain("sticky");
+    expect(header?.className).not.toContain("top-0");
+  });
+
   it("renders the logout action for admin sessions", () => {
     render(<GlobalHeader activeNav="admin" isAdmin />);
 

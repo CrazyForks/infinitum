@@ -11,8 +11,12 @@ import { FilterSelect } from "@/components/ui/filter-select";
 import { FilterSelectInline } from "@/components/ui/filter-select-inline";
 import { FilterSummary } from "@/components/ui/filter-summary";
 import { FormField } from "@/components/ui/form-field";
+import { ModalShell } from "@/components/ui/modal-shell";
+import { SelectField } from "@/components/ui/select-field";
+import { TextInput } from "@/components/ui/text-input";
 import { RANGE_OPTIONS, SORT_OPTIONS } from "@/lib/feed/range";
 import type {
+  FeedPagination,
   FeedClusterPreviewItemDTO,
   FeedEntryDTO,
   FeedGroupOption,
@@ -21,9 +25,11 @@ import type {
   FeedSort,
   FetchRunSnapshot,
 } from "@/lib/feed/types";
+import { DEFAULT_FEED_PAGE_SIZE, FEED_PAGE_SIZE_OPTIONS } from "@/lib/feed/types";
 import { cx } from "@/lib/ui/cx";
+import { Button } from "@/components/ui/button";
 
-const STATUS_POLL_INTERVAL_MS = 2_000;
+const STATUS_POLL_INTERVAL_MS = 30_000;
 const DISPLAY_TIME_ZONE = "Asia/Shanghai";
 const FETCH_STATUS_LABELS = {
   running: "运行中",
@@ -38,13 +44,15 @@ type FeedPanelProps = {
   initialSort: FeedSort;
   initialStartDate: string | null;
   initialEndDate: string | null;
-  initialNextCursor: string | null;
+  initialNextCursor?: string | null;
+  initialPagination?: FeedPagination | null;
   initialStatus: FetchRunSnapshot | null;
   isAdmin: boolean;
   initialGroupId?: string | null;
   initialSourceId?: string | null;
   initialTitle?: string | null;
   availableGroups?: FeedGroupOption[];
+  initialGroupTotalCount?: number;
   availableSources?: FeedSourceOption[];
 };
 
@@ -64,6 +72,14 @@ type FeedFeedback = {
   tone: FeedbackTone;
   message: string;
 };
+
+type RegenerateDialogState = {
+  itemId: string;
+  canRegenerateTranslation: boolean;
+  shouldAnnounceClusterRefresh?: boolean;
+} | null;
+
+type RegenerateMode = "summary" | "translation" | "both";
 
 type DateRangeValue = [Dayjs | null, Dayjs | null] | null;
 
@@ -117,6 +133,46 @@ function formatRangeLabel(range: FeedRange, startDate: string | null, endDate: s
   return RANGE_OPTIONS.find((option) => option.value === range)?.label ?? "当天";
 }
 
+function formatClusterSourceLabel(entry: FeedEntryDTO): string {
+  if (entry.type === "single") {
+    return entry.sourceName;
+  }
+
+  if (entry.sourceCount <= 1) {
+    return entry.itemsPreview[0]?.sourceName ?? "未知来源";
+  }
+
+  return `${entry.sourceCount} 个来源`;
+}
+
+function formatClusterAuthorLabel(entry: FeedEntryDTO): string {
+  if (entry.type === "single") {
+    return entry.author || "未知作者";
+  }
+
+  const uniqueAuthors = Array.from(
+    new Set(
+      entry.itemsPreview
+        .map((item) => item.author?.trim())
+        .filter((author): author is string => Boolean(author)),
+    ),
+  );
+
+  if (uniqueAuthors.length === 1) {
+    return uniqueAuthors[0];
+  }
+
+  if (uniqueAuthors.length > 1) {
+    return `${uniqueAuthors.length} 位作者`;
+  }
+
+  return "未知作者";
+}
+
+function formatMetaLabel(label: string, value: string): string {
+  return `${label}：${value}`;
+}
+
 function normalizeOptionalId(value: string | null | undefined): string | null {
   const normalized = value?.trim();
   return normalized ? normalized : null;
@@ -139,7 +195,13 @@ function isTimeZoneSensitiveQuery(range: FeedRange, startDate: string | null, en
   return Boolean(startDate || endDate || range === "today" || range === "1m" || range === "1y");
 }
 
-function buildFeedSearch({ range, sort, startDate, endDate, groupId, sourceId, title }: FeedQueryState, cursor?: string | null): string {
+function buildFeedSearch(
+  { range, sort, startDate, endDate, groupId, sourceId, title }: FeedQueryState,
+  pagination?: {
+    page?: number;
+    size?: number;
+  },
+): string {
   const search = new URLSearchParams({
     range,
     sort,
@@ -147,6 +209,8 @@ function buildFeedSearch({ range, sort, startDate, endDate, groupId, sourceId, t
   const normalizedGroupId = normalizeOptionalId(groupId);
   const normalizedSourceId = normalizeOptionalId(sourceId);
   const normalizedTitle = normalizeSearchText(title);
+  const page = pagination?.page ?? 1;
+  const size = pagination?.size ?? DEFAULT_FEED_PAGE_SIZE;
 
   if (startDate) {
     search.set("start", startDate);
@@ -168,8 +232,12 @@ function buildFeedSearch({ range, sort, startDate, endDate, groupId, sourceId, t
     search.set("title", normalizedTitle);
   }
 
-  if (cursor) {
-    search.set("cursor", cursor);
+  if (page > 1) {
+    search.set("page", String(page));
+  }
+
+  if (size !== DEFAULT_FEED_PAGE_SIZE) {
+    search.set("size", String(size));
   }
 
   const timeZoneOffsetMinutes = getBrowserTimeZoneOffsetMinutes();
@@ -180,11 +248,22 @@ function buildFeedSearch({ range, sort, startDate, endDate, groupId, sourceId, t
   return search.toString();
 }
 
-async function requestFeed(query: FeedQueryState, cursor?: string | null) {
-  const response = await fetch(`/api/feed?${buildFeedSearch(query, cursor)}`);
-  return (await response.json()) as {
+async function requestFeed(
+  query: FeedQueryState,
+  pagination?: {
+    page?: number;
+    size?: number;
+  },
+) {
+  const requestedPage = pagination?.page ?? 1;
+  const requestedSize = pagination?.size ?? DEFAULT_FEED_PAGE_SIZE;
+  const response = await fetch(`/api/feed?${buildFeedSearch(query, pagination)}`);
+  const payload = (await response.json()) as {
     items: FeedEntryDTO[];
-    nextCursor: string | null;
+    groups?: FeedGroupOption[];
+    groupTotalCount?: number;
+    nextCursor?: string | null;
+    pagination?: FeedPagination;
     range: FeedRange;
     sort: FeedSort;
     start: string | null;
@@ -192,6 +271,16 @@ async function requestFeed(query: FeedQueryState, cursor?: string | null) {
     groupId: string | null;
     sourceId: string | null;
     title: string | null;
+  };
+
+  return {
+    ...payload,
+    pagination: payload.pagination ?? {
+      page: requestedPage,
+      size: requestedSize,
+      total: payload.items.length,
+      totalPages: 1,
+    },
   };
 }
 
@@ -246,39 +335,166 @@ function RefreshIcon() {
   );
 }
 
+function ChevronIcon({ expanded, className }: { expanded: boolean; className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={cx("h-4 w-4 transition", expanded ? "rotate-180" : "", className)}
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="m6 9 6 6 6-6" />
+    </svg>
+  );
+}
+
+function formatGroupOptionLabel(name: string, count: number): string {
+  return `${name} (${count})`;
+}
+
+function GroupFilterSidebar({
+  groups,
+  totalCount,
+  selectedGroupId,
+  expanded,
+  onToggle,
+  onSelect,
+}: {
+  groups: FeedGroupOption[];
+  totalCount: number;
+  selectedGroupId: string | null;
+  expanded: boolean;
+  onToggle: () => void;
+  onSelect: (groupId: string) => void;
+}) {
+  const optionClassName =
+    "flex w-full items-center justify-between rounded-sm px-3 py-2 text-left text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(59,130,246,0.28)]";
+
+  return (
+    <aside
+      role="complementary"
+      aria-label="分组筛选侧栏"
+      className="w-full lg:h-full"
+    >
+      <div className="panel-raised rounded-sm border border-[color:var(--line)] p-4 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
+        <div className="mb-4 flex items-center justify-between">
+          {expanded ? (
+            <h2 className="inline-flex items-center gap-2 font-semibold text-[var(--foreground)]">
+              <span>分组筛选</span>
+            </h2>
+          ) : null}
+          <button
+            type="button"
+            aria-expanded={expanded}
+            aria-label={expanded ? "收起分组筛选" : "展开分组筛选"}
+            onClick={onToggle}
+            className="text-[var(--text-3)] transition hover:text-[var(--text-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(59,130,246,0.28)]"
+          >
+            {expanded ? "«" : "»"}
+          </button>
+        </div>
+
+        {expanded ? (
+          <div className="space-y-2">
+            <button
+              type="button"
+              aria-pressed={selectedGroupId === null}
+              aria-label={formatGroupOptionLabel("全部分组", totalCount)}
+              onClick={() => onSelect("")}
+              className={cx(
+                optionClassName,
+                selectedGroupId === null
+                  ? "bg-[var(--accent-soft)] text-[var(--accent-strong)]"
+                  : "text-[var(--text-2)] hover:bg-[var(--bg-muted)]",
+              )}
+            >
+              <span>{formatGroupOptionLabel("全部分组", totalCount)}</span>
+            </button>
+
+            {groups.map((group) => {
+              const isActive = selectedGroupId === group.id;
+
+              return (
+                <button
+                  key={group.id}
+                  type="button"
+                  aria-pressed={isActive}
+                  aria-label={formatGroupOptionLabel(group.name, group.count)}
+                  onClick={() => onSelect(group.id)}
+                  className={cx(
+                    optionClassName,
+                    isActive
+                      ? "bg-[var(--accent-soft)] text-[var(--accent-strong)]"
+                      : "text-[var(--text-2)] hover:bg-[var(--bg-muted)]",
+                  )}
+                >
+                  <span>{formatGroupOptionLabel(group.name, group.count)}</span>
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+      </div>
+    </aside>
+  );
+}
+
 export function FeedPanel({
   initialItems,
   initialRange,
   initialSort,
   initialStartDate,
   initialEndDate,
-  initialNextCursor,
+  initialNextCursor = null,
+  initialPagination = null,
   initialStatus,
   isAdmin,
   initialGroupId = null,
   initialSourceId = null,
   initialTitle = null,
   availableGroups = [],
+  initialGroupTotalCount,
   availableSources = [],
 }: FeedPanelProps) {
+  const fallbackInitialPagination: FeedPagination = initialPagination ?? {
+    page: 1,
+    size: DEFAULT_FEED_PAGE_SIZE,
+    total: initialItems.length + (initialNextCursor ? 1 : 0),
+    totalPages: initialNextCursor ? 2 : 1,
+  };
   const [items, setItems] = useState(initialItems);
+  const [pagination, setPagination] = useState<FeedPagination>(fallbackInitialPagination);
+  const [jumpToPage, setJumpToPage] = useState(String(fallbackInitialPagination.page));
   const [range, setRange] = useState<FeedRange>(initialRange);
   const [sort, setSort] = useState<FeedSort>(initialSort);
   const [startDate, setStartDate] = useState<string | null>(initialStartDate);
   const [endDate, setEndDate] = useState<string | null>(initialEndDate);
   const [groupId, setGroupId] = useState<string | null>(normalizeOptionalId(initialGroupId));
   const [sourceId, setSourceId] = useState<string | null>(normalizeOptionalId(initialSourceId));
-  const [title, setTitle] = useState<string>(normalizeSearchText(initialTitle) ?? "");
-  const [nextCursor, setNextCursor] = useState<string | null>(initialNextCursor);
+  const [titleInput, setTitleInput] = useState<string>(normalizeSearchText(initialTitle) ?? "");
+  const [titleFilter, setTitleFilter] = useState<string | null>(normalizeSearchText(initialTitle));
   const [status, setStatus] = useState<FetchRunSnapshot | null>(initialStatus);
+  const [groups, setGroups] = useState<FeedGroupOption[]>(availableGroups);
+  const [groupTotalCount, setGroupTotalCount] = useState<number>(
+    initialGroupTotalCount ?? fallbackInitialPagination.total,
+  );
   const [queuedRefreshAt, setQueuedRefreshAt] = useState<string | null>(null);
   const [expandedClusters, setExpandedClusters] = useState<Record<string, FeedClusterPreviewItemDTO[]>>({});
   const [openClusters, setOpenClusters] = useState<Record<string, boolean>>({});
   const [isPending, startTransition] = useTransition();
   const [refreshFeedback, setRefreshFeedback] = useState<FeedFeedback | null>(null);
+  const [regenerateDialog, setRegenerateDialog] = useState<RegenerateDialogState>(null);
+  const [regenerateMode, setRegenerateMode] = useState<RegenerateMode>("summary");
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(
-    Boolean(initialStartDate || initialEndDate || initialGroupId || initialSourceId || initialTitle),
+    Boolean(initialStartDate || initialEndDate || initialSourceId || initialTitle),
   );
+  const [groupSidebarExpanded, setGroupSidebarExpanded] = useState(true);
   const skipTitleEffectRef = useRef(true);
   const didHydrateTimeZoneRef = useRef(false);
   const latestQueryRef = useRef<FeedQueryState>({
@@ -294,6 +510,13 @@ export function FeedPanel({
     () => availableSources.filter((source) => (!groupId ? true : source.groupId === groupId)),
     [availableSources, groupId],
   );
+  const currentPage = pagination.page;
+  const pageSize = pagination.size;
+  const total = pagination.total;
+  const totalPages = pagination.totalPages;
+  const canGoPreviousPage = currentPage > 1;
+  const canGoNextPage = currentPage < totalPages;
+  const shouldShowPagination = total > 0;
 
   const summary = useMemo(
     () => ({
@@ -305,8 +528,8 @@ export function FeedPanel({
   const activeFilterSummary = useMemo(() => {
     const filters = [`创建时间：${summary.rangeLabel}`, `排序：${summary.sortLabel}`];
 
-    if (title.trim()) {
-      filters.push(`标题：${title.trim()}`);
+    if (titleFilter) {
+      filters.push(`标题：${titleFilter}`);
     }
 
     if (groupId) {
@@ -318,15 +541,29 @@ export function FeedPanel({
     }
 
     return filters;
-  }, [availableGroups, availableSources, groupId, sourceId, summary.rangeLabel, summary.sortLabel, title]);
+  }, [availableGroups, availableSources, groupId, sourceId, summary.rangeLabel, summary.sortLabel, titleFilter]);
 
-  const loadFeed = (query: FeedQueryState) => {
+  const resetExpandedClusterState = () => {
+    setExpandedClusters({});
+    setOpenClusters({});
+  };
+
+  const replaceFeedData = (nextItems: FeedEntryDTO[], nextPagination: FeedPagination) => {
+    setItems(nextItems);
+    setPagination(nextPagination);
+    resetExpandedClusterState();
+  };
+
+  const loadFeed = (
+    query: FeedQueryState,
+    page = 1,
+    size = pageSize,
+  ) => {
     startTransition(async () => {
-      const payload = await requestFeed(query);
-      setItems(payload.items);
-      setNextCursor(payload.nextCursor);
-      setExpandedClusters({});
-      setOpenClusters({});
+      const payload = await requestFeed(query, { page, size });
+      replaceFeedData(payload.items, payload.pagination);
+      setGroups(payload.groups ?? availableGroups);
+      setGroupTotalCount(payload.groupTotalCount ?? payload.pagination.total);
       setRefreshFeedback(null);
     });
   };
@@ -338,7 +575,7 @@ export function FeedPanel({
     endDate,
     groupId,
     sourceId,
-    title: normalizeSearchText(title),
+    title: titleFilter,
     ...overrides,
   });
 
@@ -352,6 +589,7 @@ export function FeedPanel({
         startDate: null,
         endDate: null,
       }),
+      1,
     );
   };
 
@@ -361,6 +599,7 @@ export function FeedPanel({
       buildQuery({
         sort: nextSort,
       }),
+      1,
     );
   };
 
@@ -378,6 +617,7 @@ export function FeedPanel({
         groupId: normalizedGroupId,
         sourceId: nextSourceId,
       }),
+      1,
     );
   };
 
@@ -388,6 +628,7 @@ export function FeedPanel({
       buildQuery({
         sourceId: normalizedSourceId,
       }),
+      1,
     );
   };
 
@@ -403,6 +644,7 @@ export function FeedPanel({
         startDate: normalizedStartDate,
         endDate: normalizedEndDate,
       }),
+      1,
     );
   };
 
@@ -413,7 +655,8 @@ export function FeedPanel({
     setEndDate(null);
     setGroupId(null);
     setSourceId(null);
-    setTitle("");
+    setTitleInput("");
+    setTitleFilter(null);
     setAdvancedFiltersOpen(false);
     loadFeed({
       range: "today",
@@ -423,7 +666,7 @@ export function FeedPanel({
       groupId: null,
       sourceId: null,
       title: null,
-    });
+    }, 1);
   };
 
   const refresh = () => {
@@ -456,34 +699,87 @@ export function FeedPanel({
     });
   };
 
-  const regenerateItem = (itemId: string, target: "translation" | "summary") => {
-    startTransition(async () => {
-      const response = await fetch(`/api/admin/items/${itemId}/regenerate`, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({ target }),
-      });
-      const payload = (await response.json()) as {
-        taskRun?: {
-          id: string;
-        } | null;
-        error?: string;
-      };
-
-      if (payload.error) {
-        setRefreshFeedback({ tone: "error", message: payload.error });
-        return;
-      }
-
-      if (!payload.taskRun) {
-        setRefreshFeedback({ tone: "error", message: "未返回后台任务信息。" });
-        return;
-      }
-
-      setRefreshFeedback({ tone: "success", message: "已创建后台任务，正在处理中。" });
+  const requestRegeneration = async (itemId: string, target: "translation" | "summary") => {
+    const response = await fetch(`/api/admin/items/${itemId}/regenerate`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ target }),
     });
+    return (await response.json()) as {
+      taskRun?: {
+        id: string;
+      } | null;
+      error?: string;
+    };
+  };
+
+  const runRegeneration = (targets: Array<"translation" | "summary">) => {
+    if (!regenerateDialog) {
+      return;
+    }
+
+    const { itemId, shouldAnnounceClusterRefresh } = regenerateDialog;
+    setRegenerateDialog(null);
+
+    startTransition(async () => {
+      for (const target of targets) {
+        const payload = await requestRegeneration(itemId, target);
+
+        if (payload.error) {
+          setRefreshFeedback({ tone: "error", message: payload.error });
+          return;
+        }
+
+        if (!payload.taskRun) {
+          setRefreshFeedback({ tone: "error", message: "未返回后台任务信息。" });
+          return;
+        }
+      }
+
+      setRefreshFeedback({
+        tone: "success",
+        message: shouldAnnounceClusterRefresh
+          ? "已创建后台任务，完成后会自动重算所属聚合。"
+          : targets.length > 1
+            ? "已创建摘要与翻译后台任务，正在处理中。"
+            : "已创建后台任务，正在处理中。",
+      });
+    });
+  };
+
+  const openRegenerateDialog = (
+    itemId: string,
+    canRegenerateTranslation: boolean,
+    options?: {
+      shouldAnnounceClusterRefresh?: boolean;
+    },
+  ) => {
+    setRegenerateDialog({
+      itemId,
+      canRegenerateTranslation,
+      shouldAnnounceClusterRefresh: options?.shouldAnnounceClusterRefresh ?? false,
+    });
+    setRegenerateMode("summary");
+  };
+
+  const confirmRegeneration = () => {
+    if (!regenerateDialog) {
+      return;
+    }
+
+    if (regenerateMode === "translation") {
+      runRegeneration(["translation"]);
+      return;
+    }
+
+    if (regenerateMode === "both") {
+      runRegeneration(["translation", "summary"]);
+      return;
+    }
+
+    runRegeneration(["summary"]);
   };
 
   const toggleCluster = (clusterId: string) => {
@@ -513,9 +809,9 @@ export function FeedPanel({
       endDate,
       groupId,
       sourceId,
-      title: normalizeSearchText(title),
+      title: titleFilter,
     };
-  }, [endDate, groupId, range, sort, sourceId, startDate, title]);
+  }, [endDate, groupId, range, sort, sourceId, startDate, titleFilter]);
 
   useEffect(() => {
     if (didHydrateTimeZoneRef.current) {
@@ -528,16 +824,23 @@ export function FeedPanel({
       return;
     }
 
-    loadFeed({
-      range,
-      sort,
-      startDate,
-      endDate,
-      groupId,
-      sourceId,
-      title: normalizeSearchText(title),
+    startTransition(async () => {
+      const payload = await requestFeed({
+        range,
+        sort,
+        startDate,
+        endDate,
+        groupId,
+        sourceId,
+        title: titleFilter,
+      }, { page: 1, size: pageSize });
+      setItems(payload.items);
+      setPagination(payload.pagination);
+      setGroups(payload.groups ?? availableGroups);
+      resetExpandedClusterState();
+      setRefreshFeedback(null);
     });
-  }, [endDate, groupId, range, sort, sourceId, startDate, title]);
+  }, [availableGroups, endDate, groupId, pageSize, range, sort, sourceId, startDate, titleFilter]);
 
   useEffect(() => {
     if (skipTitleEffectRef.current) {
@@ -546,15 +849,24 @@ export function FeedPanel({
     }
 
     const timer = window.setTimeout(() => {
+      const normalizedTitle = normalizeSearchText(titleInput);
+
+      if (normalizedTitle === latestQueryRef.current.title) {
+        setTitleFilter(normalizedTitle);
+        return;
+      }
+
+      setTitleFilter(normalizedTitle);
+
       startTransition(async () => {
         const payload = await requestFeed({
           ...latestQueryRef.current,
-          title: normalizeSearchText(title),
-        });
+          title: normalizedTitle,
+        }, { page: 1, size: pageSize });
         setItems(payload.items);
-        setNextCursor(payload.nextCursor);
-        setExpandedClusters({});
-        setOpenClusters({});
+        setPagination(payload.pagination);
+        setGroups(payload.groups ?? availableGroups);
+        resetExpandedClusterState();
         setRefreshFeedback(null);
       });
     }, TITLE_SEARCH_DEBOUNCE_MS);
@@ -562,9 +874,13 @@ export function FeedPanel({
     return () => {
       window.clearTimeout(timer);
     };
-  }, [title]);
+  }, [availableGroups, pageSize, titleInput]);
 
   useEffect(() => {
+    if (!isAdmin) {
+      return;
+    }
+
     if (status?.status !== "running" && !queuedRefreshAt) {
       return;
     }
@@ -604,12 +920,12 @@ export function FeedPanel({
           endDate,
           groupId,
           sourceId,
-          title: normalizeSearchText(title),
-        });
+          title: titleFilter,
+        }, { page: 1, size: pageSize });
         setItems(feedPayload.items);
-        setNextCursor(feedPayload.nextCursor);
-        setExpandedClusters({});
-        setOpenClusters({});
+        setPagination(feedPayload.pagination);
+        setGroups(feedPayload.groups ?? availableGroups);
+        resetExpandedClusterState();
         setRefreshFeedback({
           tone: payload.run.status === "succeeded" || payload.run.status === "partial" ? "success" : "error",
           message:
@@ -623,42 +939,72 @@ export function FeedPanel({
     return () => {
       window.clearInterval(timer);
     };
-  }, [endDate, groupId, queuedRefreshAt, range, sort, sourceId, startDate, startTransition, status, title]);
+  }, [availableGroups, endDate, groupId, isAdmin, pageSize, queuedRefreshAt, range, sort, sourceId, startDate, startTransition, status, titleFilter]);
 
-  const loadMore = () => {
-    if (!nextCursor) {
+  useEffect(() => {
+    setJumpToPage(String(currentPage));
+  }, [currentPage]);
+
+  const goToPreviousPage = () => {
+    if (!canGoPreviousPage) {
       return;
     }
 
-    startTransition(async () => {
-      const payload = await requestFeed(
-        {
-          range,
-          sort,
-          startDate,
-          endDate,
-          groupId,
-          sourceId,
-          title: normalizeSearchText(title),
-        },
-        nextCursor,
-      );
-
-      setItems((current) => [...current, ...payload.items]);
-      setNextCursor(payload.nextCursor);
-    });
+    loadFeed(buildQuery(), currentPage - 1, pageSize);
   };
 
-  const secondaryButtonClassName =
-    "inline-flex items-center justify-center rounded-sm border border-[color:var(--line)] bg-white px-3 py-1 text-sm text-[var(--muted)] transition hover:bg-[var(--surface-muted)] hover:text-[var(--foreground)] disabled:cursor-not-allowed disabled:opacity-55";
+  const goToNextPage = () => {
+    if (!canGoNextPage) {
+      return;
+    }
+
+    loadFeed(buildQuery(), currentPage + 1, pageSize);
+  };
+
+  const handlePageSizeChange = (value: unknown) => {
+    const nextSize = Number(value);
+    if (!FEED_PAGE_SIZE_OPTIONS.includes(nextSize as (typeof FEED_PAGE_SIZE_OPTIONS)[number])) {
+      return;
+    }
+
+    loadFeed(buildQuery(), 1, nextSize);
+  };
+
+  const handleJumpToPage = () => {
+    const nextPage = Number.parseInt(jumpToPage, 10);
+    if (!Number.isFinite(nextPage)) {
+      setJumpToPage(String(currentPage));
+      return;
+    }
+
+    const normalizedPage = Math.min(Math.max(1, nextPage), totalPages);
+    if (normalizedPage === currentPage) {
+      setJumpToPage(String(normalizedPage));
+      return;
+    }
+
+    loadFeed(buildQuery(), normalizedPage, pageSize);
+  };
+
   const neutralBadgeClassName =
-    "inline-flex items-center rounded-sm border border-[color:var(--line)] bg-[var(--surface-muted)] px-2.5 py-1 text-sm text-[var(--muted)]";
+    "inline-flex items-center rounded-sm border border-[color:var(--line)] bg-[var(--surface-muted)] px-2 py-1 text-xs text-[var(--muted)]";
   const denseCardClassName =
-    "rounded-lg border border-[color:var(--line)] bg-white px-4 py-4 shadow-[var(--shadow-sm)] transition hover:border-[color:var(--line-strong)] sm:px-6 sm:py-5";
+    "rounded-lg border border-[color:var(--line)] bg-white px-4 py-4 shadow-[var(--shadow-sm)] transition hover:border-[color:var(--line-strong)] hover:shadow-md sm:px-6 sm:py-5";
+  const cardMetaRowClassName = "flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-[var(--muted)]";
+  const cardSummaryClassName = "text-sm leading-6 text-[var(--muted)]";
+  const cardTitleClassName = "text-xl font-semibold leading-7 text-[var(--foreground)]";
+  const metaTextClassName = "inline-flex items-center";
+  const iconButtonClassName =
+    "feed-card-icon-button inline-flex h-8 w-8 items-center justify-center rounded-sm border border-transparent bg-transparent text-[var(--muted)] transition hover:bg-[var(--surface-muted)] hover:text-[var(--foreground)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(59,130,246,0.28)] focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:cursor-not-allowed disabled:opacity-55";
+  const clusterToggleClassName =
+    "inline-flex shrink-0 items-center gap-1 bg-transparent px-0 py-0 text-left text-[11px] leading-none text-[var(--muted)] transition hover:text-[var(--foreground)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(59,130,246,0.28)] focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:cursor-not-allowed disabled:opacity-55";
+  const paginationButtonClassName =
+    "inline-flex items-center justify-center rounded-sm px-3 py-1.5 text-sm font-medium border border-[color:var(--line)] transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(59,130,246,0.35)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)]";
+  const paginationBadgeClassName =
+    "px-4 py-2 text-sm rounded-sm border border-[color:var(--line)] bg-[var(--surface)] text-[var(--muted)]";
   const hasClearableFilters = activeFilterSummary.length > 0;
   const latestRunSummary = formatRunSummary(status);
   const latestRunDetail = formatRunDetail(status);
-
   return (
     <PageShell
       header={{
@@ -666,6 +1012,21 @@ export function FeedPanel({
         isAdmin,
       }}
       contentClassName="gap-5 sm:gap-6"
+      sidebarContainerClassName={cx(
+        "flex-shrink-0 transition-all duration-300",
+        groupSidebarExpanded ? "lg:w-56" : "lg:w-12",
+      )}
+      sidebarVisibility="lg"
+      sidebar={
+        <GroupFilterSidebar
+          groups={groups}
+          totalCount={groupTotalCount}
+          selectedGroupId={groupId}
+          expanded={groupSidebarExpanded}
+          onToggle={() => setGroupSidebarExpanded((current) => !current)}
+          onSelect={changeGroup}
+        />
+      }
     >
       <section className="grid gap-4">
         <section
@@ -735,31 +1096,37 @@ export function FeedPanel({
               </div>
             </div>
 
+            <div className="lg:hidden">
+              <div className="rounded-sm border border-[color:var(--line)] bg-white px-3 py-3 shadow-[var(--shadow-sm)]">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <span className="text-sm font-medium text-[var(--foreground)]">分组筛选</span>
+                  <FilterSelectInline
+                    label="分组："
+                    ariaLabel="移动端分组筛选"
+                    value={groupId ?? ""}
+                    onChange={changeGroup}
+                    options={[
+                      { value: "", label: formatGroupOptionLabel("全部分组", groupTotalCount) },
+                      ...groups.map((group) => ({
+                        value: group.id,
+                        label: formatGroupOptionLabel(group.name, group.count),
+                      })),
+                    ]}
+                    showSearch={false}
+                  />
+                </div>
+              </div>
+            </div>
+
             {advancedFiltersOpen ? (
               <div className="border-t border-[color:var(--line)] pt-4">
                 <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                   <FilterInput
                     id="feed-title-filter"
                     label="标题模糊搜索"
-                    value={title}
-                    onChange={setTitle}
+                    value={titleInput}
+                    onChange={setTitleInput}
                     placeholder="输入标题关键词"
-                  />
-
-                  <FilterSelect
-                    id="feed-group-filter"
-                    label="分组"
-                    ariaLabel="分组"
-                    value={groupId ?? ""}
-                    onChange={changeGroup}
-                    showSearch={false}
-                    options={[
-                      { value: "", label: "全部分组" },
-                      ...availableGroups.map((group) => ({
-                        value: group.id,
-                        label: group.name,
-                      })),
-                    ]}
                   />
 
                   <FilterSelect
@@ -816,145 +1183,231 @@ export function FeedPanel({
             items.map((entry) =>
               entry.type === "cluster" ? (
                 <article key={entry.id} className={denseCardClassName}>
-                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                    <div className="min-w-0 space-y-2">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="rounded-sm bg-[var(--accent-soft)] px-2 py-1 text-xs text-[var(--accent-strong)]">
-                          聚合事件
-                        </span>
-                        <span className={neutralBadgeClassName}>{entry.itemCount} 条条目</span>
-                        <span className={neutralBadgeClassName}>{entry.sourceCount} 来源</span>
-                        <span className={neutralBadgeClassName}>{formatScore(entry.score)}</span>
-                      </div>
-                      <h2 className="text-xl font-semibold text-[var(--foreground)]">
-                        {entry.title}
-                      </h2>
-                      <div className="flex flex-wrap gap-2 text-sm text-[var(--muted)]">
-                        <span className={neutralBadgeClassName}>{formatDate(entry.latestPublishedAt)}</span>
-                      </div>
-                      <p className="line-clamp-3 max-w-4xl text-sm text-[var(--muted)]">{entry.summary}</p>
+                  <div className="space-y-3">
+                    <h2 className={cardTitleClassName}>{entry.title}</h2>
+                    <div className={cardMetaRowClassName}>
+                      <span className="rounded-sm bg-[var(--accent-soft)] px-2 py-1 text-[11px] text-[var(--accent-strong)]">聚合</span>
+                      <span className={neutralBadgeClassName}>{formatScore(entry.score)}</span>
+                      <span className={metaTextClassName}>{formatMetaLabel("来源", formatClusterSourceLabel(entry))}</span>
+                      <span className={metaTextClassName}>{formatMetaLabel("作者", formatClusterAuthorLabel(entry))}</span>
+                      <span className={metaTextClassName}>{formatMetaLabel("发表", formatDate(entry.latestPublishedAt))}</span>
                     </div>
-                    <button
-                      className={secondaryButtonClassName}
-                      type="button"
-                      onClick={() => toggleCluster(entry.id)}
-                      disabled={isPending}
-                    >
-                      {openClusters[entry.id] ? "收起相关内容" : "展开相关内容"}
-                    </button>
-                  </div>
-
-                  <div className="mt-3 divide-y divide-[color:var(--line)] rounded-[1rem] border border-[color:var(--line)] bg-[var(--surface-muted)]/74">
-                    {entry.itemsPreview.map((preview) => (
-                      <div
-                        key={preview.id}
-                        className="flex flex-col gap-1.5 px-3 py-2.5 sm:flex-row sm:items-start sm:justify-between"
-                      >
-                        <p className="text-sm font-medium text-[var(--foreground)]">{preview.title}</p>
-                        <div className="flex flex-wrap gap-2 text-xs text-[var(--muted)] sm:justify-end">
-                          <span>{preview.sourceName}</span>
-                          <span>{formatScore(preview.score)}</span>
-                        </div>
+                    <p className={cardSummaryClassName}>{entry.summary}</p>
+                    <div className="mt-4">
+                      <div className="flex items-center gap-3">
+                        <button
+                          aria-label={openClusters[entry.id] ? "收起相关内容" : "展开相关内容"}
+                          aria-expanded={Boolean(openClusters[entry.id])}
+                          className={clusterToggleClassName}
+                          type="button"
+                          onClick={() => toggleCluster(entry.id)}
+                          disabled={isPending}
+                        >
+                          <ChevronIcon expanded={Boolean(openClusters[entry.id])} className="h-3.5 w-3.5" />
+                          <span>{entry.itemCount} 条</span>
+                        </button>
+                        <div aria-hidden="true" className="h-px flex-1 bg-[color:var(--line)]" />
                       </div>
-                    ))}
+                    </div>
                   </div>
 
                   {openClusters[entry.id] ? (
-                    <div className="mt-3 rounded-[1rem] border border-[color:var(--line)] bg-[var(--surface-muted)]/82 p-3 sm:p-3.5">
-                      <div className="mb-3 flex items-center justify-between gap-3">
-                        <h3 className="text-sm font-semibold text-[var(--foreground)]">展开条目</h3>
-                        <span className="text-xs text-[var(--muted)]">保留原始来源、时间与作者信息</span>
-                      </div>
-                      <div className="grid gap-2.5">
-                        {(expandedClusters[entry.id] ?? entry.itemsPreview).map((clusterItem) => (
-                          <div
-                            key={clusterItem.id}
-                            className="rounded-[0.95rem] border border-[color:var(--line)] bg-white px-3 py-2.5 shadow-[var(--shadow-sm)]"
-                          >
-                            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="mt-3 space-y-2">
+                      {(expandedClusters[entry.id] ?? entry.itemsPreview).map((clusterItem) => (
+                        <div
+                          key={clusterItem.id}
+                          className="rounded-sm border border-[color:var(--line)] bg-[var(--surface)] px-3 py-3"
+                        >
+                          <div className="space-y-2">
+                            <div className="flex items-start justify-between gap-3">
                               <a
-                                className="text-base font-medium text-[var(--foreground)] underline decoration-transparent underline-offset-4 transition hover:decoration-[var(--accent)]"
+                                className="block min-w-0 flex-1 text-base font-medium leading-6 text-[var(--foreground)] underline decoration-transparent underline-offset-4 transition hover:decoration-[var(--accent)]"
                                 href={clusterItem.originalUrl}
                                 target="_blank"
                                 rel="noreferrer"
                               >
                                 {clusterItem.title}
                               </a>
-                              <span className="rounded-sm bg-[var(--accent-soft)] px-2 py-1 text-xs text-[var(--accent-strong)]">
-                                {formatScore(clusterItem.score)}
-                              </span>
+                              {isAdmin ? (
+                                <button
+                                  aria-label={`重新生成内容：${clusterItem.title}`}
+                                  title="重新生成内容"
+                                  className={iconButtonClassName}
+                                  type="button"
+                                  onClick={() =>
+                                    openRegenerateDialog(clusterItem.id, Boolean(clusterItem.canRegenerateTranslation), {
+                                      shouldAnnounceClusterRefresh: true,
+                                    })
+                                  }
+                                  disabled={isPending}
+                                >
+                                  <RefreshIcon />
+                                </button>
+                              ) : null}
                             </div>
-                            <div className="mt-2 flex flex-wrap gap-2 text-sm text-[var(--muted)]">
-                              <span className={neutralBadgeClassName}>{formatDate(clusterItem.publishedAt)}</span>
-                              <span className={neutralBadgeClassName}>{clusterItem.sourceName}</span>
-                              <span className={neutralBadgeClassName}>{clusterItem.author || "未知作者"}</span>
+                            <div className={cardMetaRowClassName}>
+                              <span className={neutralBadgeClassName}>{formatScore(clusterItem.score)}</span>
+                              <span className={metaTextClassName}>{formatMetaLabel("来源", clusterItem.sourceName)}</span>
+                              <span className={metaTextClassName}>{formatMetaLabel("作者", clusterItem.author || "未知作者")}</span>
+                              <span className={metaTextClassName}>{formatMetaLabel("发表", formatDate(clusterItem.publishedAt))}</span>
                             </div>
-                            <p className="mt-2 line-clamp-3 text-sm text-[var(--muted)]">{clusterItem.summary}</p>
+                            <p className={cardSummaryClassName}>{clusterItem.summary}</p>
                           </div>
-                        ))}
-                      </div>
+                        </div>
+                      ))}
                     </div>
                   ) : null}
                 </article>
               ) : (
                 <article key={entry.id} className={denseCardClassName}>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="rounded-sm bg-[var(--surface-muted)] px-2 py-1 text-xs text-[var(--muted)]">
-                      单条条目
-                    </span>
-                    <span className={neutralBadgeClassName}>{formatScore(entry.score)}</span>
-                    <span className={neutralBadgeClassName}>{entry.sourceName}</span>
-                    <span className={neutralBadgeClassName}>{formatDate(entry.publishedAt)}</span>
-                  </div>
-                  <h2 className="mt-3 text-xl font-semibold text-[var(--foreground)]">
-                    <a
-                      className="underline decoration-transparent underline-offset-4 transition hover:decoration-[var(--accent)]"
-                      href={entry.originalUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      {entry.title}
-                    </a>
-                  </h2>
-                  <div className="mt-1.5 flex flex-wrap gap-2 text-sm text-[var(--muted)]">
-                    <span className={neutralBadgeClassName}>{entry.author || "未知作者"}</span>
-                  </div>
-                  <p className="mt-2 line-clamp-3 max-w-4xl text-sm text-[var(--muted)]">{entry.summary}</p>
-                  {isAdmin ? (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {entry.canRegenerateTranslation ? (
+                  <div className="space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <h2 className={cx(cardTitleClassName, "min-w-0 flex-1")}>
+                        <a
+                          className="underline decoration-transparent underline-offset-4 transition hover:decoration-[var(--accent)]"
+                          href={entry.originalUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          {entry.title}
+                        </a>
+                      </h2>
+                      {isAdmin ? (
                         <button
-                          className={secondaryButtonClassName}
+                          aria-label="重新生成内容"
+                          title="重新生成内容"
+                          className={iconButtonClassName}
                           type="button"
-                          onClick={() => regenerateItem(entry.id, "translation")}
+                          onClick={() => openRegenerateDialog(entry.id, Boolean(entry.canRegenerateTranslation))}
                           disabled={isPending}
                         >
-                          重新生成翻译
+                          <RefreshIcon />
                         </button>
                       ) : null}
-                      <button
-                        className={secondaryButtonClassName}
-                        type="button"
-                        onClick={() => regenerateItem(entry.id, "summary")}
-                        disabled={isPending}
-                      >
-                        重新生成摘要
-                      </button>
                     </div>
-                  ) : null}
+                    <div className={cardMetaRowClassName}>
+                      <span className={neutralBadgeClassName}>{formatScore(entry.score)}</span>
+                      <span className={metaTextClassName}>{formatMetaLabel("来源", entry.sourceName)}</span>
+                      <span className={metaTextClassName}>{formatMetaLabel("作者", entry.author || "未知作者")}</span>
+                      <span className={metaTextClassName}>{formatMetaLabel("发表", formatDate(entry.publishedAt))}</span>
+                    </div>
+                    <p className={cardSummaryClassName}>{entry.summary}</p>
+                  </div>
                 </article>
               ),
             )
           )}
         </section>
 
-        {nextCursor ? (
-          <div className="flex justify-center pt-1">
-            <button className={secondaryButtonClassName} type="button" onClick={loadMore} disabled={isPending}>
-              {isPending ? "载入中..." : "加载更多"}
-            </button>
+        {shouldShowPagination ? (
+          <div className="mt-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-wrap items-center gap-2 text-sm text-[var(--muted)]">
+              <span>每页显示</span>
+              <SelectField
+                aria-label="每页显示"
+                value={pageSize}
+                onChange={handlePageSizeChange}
+                className="w-20"
+                options={FEED_PAGE_SIZE_OPTIONS.map((option) => ({
+                  value: option,
+                  label: String(option),
+                }))}
+              />
+              <span>条，共 {total} 条</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={goToPreviousPage}
+                disabled={!canGoPreviousPage || isPending}
+                className={cx(
+                  paginationButtonClassName,
+                  canGoPreviousPage && !isPending
+                    ? "bg-[var(--surface)] text-[var(--muted)] hover:bg-[var(--surface-muted)] hover:text-[var(--foreground)]"
+                    : "cursor-not-allowed bg-[var(--surface-muted)] text-[var(--muted)]/70",
+                )}
+              >
+                上一页
+              </button>
+              <span className={paginationBadgeClassName}>
+                第 {currentPage} / {totalPages} 页
+              </span>
+              <button
+                type="button"
+                onClick={goToNextPage}
+                disabled={!canGoNextPage || isPending}
+                className={cx(
+                  paginationButtonClassName,
+                  canGoNextPage && !isPending
+                    ? "bg-[var(--surface)] text-[var(--muted)] hover:bg-[var(--surface-muted)] hover:text-[var(--foreground)]"
+                    : "cursor-not-allowed bg-[var(--surface-muted)] text-[var(--muted)]/70",
+                )}
+              >
+                {isPending ? "加载中..." : "下一页"}
+              </button>
+              <div className="ml-2 flex flex-none items-center gap-1 whitespace-nowrap">
+                <TextInput
+                  aria-label="跳转页码"
+                  type="number"
+                  value={jumpToPage}
+                  onChange={(event) => setJumpToPage(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      handleJumpToPage();
+                    }
+                  }}
+                  className="w-16 text-center"
+                  compact
+                  min={1}
+                  max={totalPages}
+                />
+                <Button onClick={handleJumpToPage} variant="primary" size="sm" className="whitespace-nowrap">
+                  跳转
+                </Button>
+              </div>
+            </div>
           </div>
         ) : null}
+
+        <ModalShell
+          isOpen={Boolean(regenerateDialog)}
+          onClose={() => setRegenerateDialog(null)}
+          title="选择重新生成内容"
+          widthClassName="max-w-sm"
+          showCloseButton={false}
+          bodyClassName="space-y-4 p-4"
+          footer={
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="secondary" onClick={() => setRegenerateDialog(null)} disabled={isPending}>
+                取消
+              </Button>
+              <Button type="button" variant="primary" onClick={confirmRegeneration} disabled={isPending}>
+                确认
+              </Button>
+            </div>
+          }
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-[var(--muted)]">请选择要重新生成的内容范围。</p>
+            <FormField label="重新生成范围">
+              <SelectField
+                aria-label="重新生成范围"
+                value={regenerateMode}
+                onChange={(value) => setRegenerateMode((value as RegenerateMode | null) ?? "summary")}
+                showSearch={false}
+                options={[
+                  { value: "summary", label: "仅摘要" },
+                  ...(regenerateDialog?.canRegenerateTranslation
+                    ? [
+                        { value: "translation", label: "仅翻译" },
+                        { value: "both", label: "全部重新生成" },
+                      ]
+                    : []),
+                ]}
+              />
+            </FormField>
+          </div>
+        </ModalShell>
       </section>
     </PageShell>
   );

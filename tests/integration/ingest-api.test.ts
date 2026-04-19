@@ -81,6 +81,7 @@ describe("/api/ingest", () => {
   });
 
   it("returns the latest run status including progress counters", async () => {
+    requireAdmin.mockResolvedValue(undefined);
     getLatestFetchRun.mockResolvedValue({
       id: "run-2",
       status: "running",
@@ -102,5 +103,17 @@ describe("/api/ingest", () => {
     expect(json.run.itemCount).toBe(10);
     expect(json.run.successCount).toBe(6);
     expect(json.run.failureCount).toBe(1);
+  });
+
+  it("rejects ingest status requests when the requester is not an admin", async () => {
+    requireAdmin.mockRejectedValue(new Error("Unauthorized"));
+
+    const { GET } = await import("@/app/api/ingest/status/route");
+    const response = await GET();
+    const json = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(getLatestFetchRun).not.toHaveBeenCalled();
+    expect(json.error).toBe("Unauthorized");
   });
 });

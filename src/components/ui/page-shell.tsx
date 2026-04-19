@@ -17,6 +17,8 @@ type PageShellProps = ComponentPropsWithoutRef<"main"> & {
   header?: PageShellHeader | null;
   chromeLabel?: string | null;
   sidebar?: ReactNode;
+  sidebarContainerClassName?: string;
+  sidebarVisibility?: "always" | "lg" | "xl";
 };
 
 export function PageShell({
@@ -27,6 +29,8 @@ export function PageShell({
   contentClassName,
   contentWidth = "default",
   sidebar,
+  sidebarContainerClassName,
+  sidebarVisibility = "always",
   ...props
 }: PageShellProps) {
   return (
@@ -52,13 +56,29 @@ export function PageShell({
       <div
         className={cx(
           "mx-auto flex w-full flex-col gap-6 px-4 py-6 sm:px-6 sm:py-8 lg:px-8 lg:py-10",
-          contentWidth === "workspace" ? "max-w-[92rem]" : "max-w-6xl",
+          contentWidth === "workspace" ? "max-w-[92rem]" : "max-w-7xl",
           contentClassName,
         )}
       >
         {sidebar ? (
-          <div className="grid gap-4 xl:grid-cols-[240px_minmax(0,1fr)] xl:items-start">
-            <div className="min-w-0">{sidebar}</div>
+          <div
+            className={cx(
+              "flex flex-col gap-6",
+              sidebarVisibility === "lg" ? "lg:flex-row" : null,
+              sidebarVisibility === "xl" ? "xl:grid xl:grid-cols-[240px_minmax(0,1fr)] xl:items-start xl:gap-4" : null,
+            )}
+          >
+            <div
+              className={cx(
+                "min-w-0",
+                sidebarVisibility === "always" ? "w-full" : null,
+                sidebarVisibility === "lg" ? "hidden lg:block" : null,
+                sidebarVisibility === "xl" ? "hidden xl:block" : null,
+                sidebarContainerClassName,
+              )}
+            >
+              {sidebar}
+            </div>
             <div className="min-w-0">{children}</div>
           </div>
         ) : (

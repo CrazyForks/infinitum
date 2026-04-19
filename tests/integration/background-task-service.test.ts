@@ -111,15 +111,61 @@ describe("background task persistence", () => {
         startedAt: new Date("2026-04-12T00:00:00.000Z"),
       },
     });
+    const fetchRun = await prisma.fetchRun.create({
+      data: {
+        taskRunId: taskRun.id,
+        triggerType: "manual",
+        status: "running",
+        startedAt: new Date("2026-04-12T00:00:00.000Z"),
+      },
+    });
 
     const recovered = await recoverStaleTaskRuns(new Date("2026-04-12T00:20:00.000Z"));
     const updatedTaskRun = await prisma.backgroundTaskRun.findUniqueOrThrow({
       where: { id: taskRun.id },
     });
+    const updatedFetchRun = await prisma.fetchRun.findUniqueOrThrow({
+      where: { id: fetchRun.id },
+    });
 
     expect(recovered).toBe(1);
     expect(updatedTaskRun.status).toBe("failed");
     expect(updatedTaskRun.errorSummary).toContain("Worker exited");
+    expect(updatedFetchRun.status).toBe("failed");
+    expect(updatedFetchRun.errorSummary).toContain("Worker exited");
+    expect(updatedFetchRun.finishedAt).not.toBeNull();
+  });
+
+  it("reconciles running fetch runs whose linked task is already terminal", async () => {
+    const taskRun = await prisma.backgroundTaskRun.create({
+      data: {
+        kind: "ingestion",
+        triggerType: "manual",
+        status: "failed",
+        label: "默认抓取任务",
+        startedAt: new Date("2026-04-12T00:00:00.000Z"),
+        finishedAt: new Date("2026-04-12T00:05:00.000Z"),
+        errorSummary: "Worker exited before completing the task.",
+      },
+    });
+    const fetchRun = await prisma.fetchRun.create({
+      data: {
+        taskRunId: taskRun.id,
+        triggerType: "manual",
+        status: "running",
+        startedAt: new Date("2026-04-12T00:00:00.000Z"),
+      },
+    });
+
+    const recovered = await recoverStaleTaskRuns(new Date("2026-04-12T00:20:00.000Z"));
+    const updatedFetchRun = await prisma.fetchRun.findUniqueOrThrow({
+      where: { id: fetchRun.id },
+    });
+
+    expect(recovered).toBe(0);
+    expect(updatedFetchRun.status).toBe("failed");
+    expect(updatedFetchRun.errorSummary).toContain("Worker exited");
+    expect(updatedFetchRun.finishedAt).not.toBeNull();
   });
 
   it("enqueues a scheduled ingestion task when due", async () => {

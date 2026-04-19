@@ -1,9 +1,8 @@
 import {
-  type ContentCluster,
   type FetchRun,
   FetchRunStatus,
   type Item,
-  type Prisma,
+  Prisma,
   type Source,
 } from "@prisma/client";
 
@@ -16,6 +15,7 @@ import type {
   FeedEntryDTO,
   FeedFilters,
   FeedItemDTO,
+  FeedPagination,
   FeedSourceOption,
   FetchRunSnapshot,
   ReviewItemDTO,
@@ -25,7 +25,20 @@ import type {
 const DISPLAYABLE_MODERATION_STATUSES = ["allowed", "restored"] as const;
 
 type ItemWithSource = Item & { source: Source };
-type ItemWithSourceAndCluster = Item & { source: Source; cluster: ContentCluster | null };
+type FeedEntryRow = {
+  id: string;
+  entryType: "single" | "cluster";
+  title: string;
+  summary: string | null;
+  latestPublishedAt: Date | string;
+  score: number | bigint;
+  sourceCount: number | bigint;
+  itemCount: number | bigint;
+};
+
+type CountRow = {
+  total: bigint;
+};
 
 export async function syncSources(sourceConfigs: SourceConfig[]) {
   for (const source of sourceConfigs) {
@@ -202,7 +215,7 @@ export function mapItemToReviewItem(item: ItemWithSource): ReviewItemDTO {
 
 function buildItemWhere(
   filters: FeedFilters & { rangeStart: Date | null; rangeEnd: Date | null },
-  clusterId?: string,
+  clusterId?: string | string[],
 ): Prisma.ItemWhereInput {
   return {
     AND: [
@@ -211,7 +224,11 @@ function buildItemWhere(
         moderationStatus: {
           in: [...DISPLAYABLE_MODERATION_STATUSES],
         },
-        ...(clusterId ? { clusterId } : {}),
+        ...(clusterId
+          ? {
+              clusterId: Array.isArray(clusterId) ? { in: clusterId } : clusterId,
+            }
+          : {}),
         ...(filters.rangeStart || filters.rangeEnd
           ? {
               createdAt: {
@@ -235,65 +252,125 @@ function buildItemWhere(
   };
 }
 
-function mapClusterSubsetToEntry(cluster: ContentCluster, items: ItemWithSource[]): FeedEntryDTO {
-  const sortedItems = [...items].sort((left, right) => right.publishedAt.getTime() - left.publishedAt.getTime());
-
-  if (sortedItems.length === 1) {
-    return mapItemToFeedItem(sortedItems[0]!);
-  }
-
-  const preview = sortedItems.slice(0, 3).map(mapItemToClusterPreview);
-  const latestPublishedAt = sortedItems[0]!.publishedAt.toISOString();
-  const score = Math.round(sortedItems.reduce((sum, item) => sum + item.qualityScore, 0) / sortedItems.length);
-
-  return {
-    id: cluster.id,
-    type: "cluster",
-    title: cluster.title,
-    summary: cluster.summary,
-    publishedAt: latestPublishedAt,
-    latestPublishedAt,
-    score,
-    sourceCount: new Set(sortedItems.map((item) => item.sourceId)).size,
-    itemCount: sortedItems.length,
-    itemsPreview: preview,
-    hasMoreItems: sortedItems.length > preview.length,
-  };
-}
-
-function compareFeedEntries(left: FeedEntryDTO, right: FeedEntryDTO, sort: FeedFilters["sort"]) {
-  if (sort === "score_desc" && right.score !== left.score) {
-    return right.score - left.score;
-  }
-
-  const publishedDelta = new Date(right.latestPublishedAt).getTime() - new Date(left.latestPublishedAt).getTime();
-  if (publishedDelta !== 0) {
-    return publishedDelta;
-  }
-
-  if (right.score !== left.score) {
-    return right.score - left.score;
-  }
-
-  if (right.itemCount !== left.itemCount) {
-    return right.itemCount - left.itemCount;
-  }
-
-  return right.id.localeCompare(left.id);
-}
-
 function normalizeTitleSearch(value: string | null) {
   return value?.trim().toLocaleLowerCase() ?? "";
 }
 
-function matchesEntryTitle(entry: FeedEntryDTO, title: string | null) {
+function toNumber(value: number | bigint) {
+  return typeof value === "bigint" ? Number(value) : value;
+}
+
+function toIsoString(value: Date | string) {
+  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+}
+
+function buildFeedEntryCandidatesCte(filters: FeedFilters & { rangeStart: Date | null; rangeEnd: Date | null }) {
+  const whereClauses: Prisma.Sql[] = [
+    Prisma.sql`i.status = ${"processed"}`,
+    Prisma.sql`i."moderationStatus" IN (${Prisma.join([...DISPLAYABLE_MODERATION_STATUSES])})`,
+    Prisma.sql`s.enabled = ${true}`,
+    Prisma.sql`(i."clusterId" IS NULL OR c.status = ${"active"})`,
+  ];
+
+  if (filters.rangeStart) {
+    whereClauses.push(Prisma.sql`i."createdAt" >= ${filters.rangeStart}`);
+  }
+
+  if (filters.rangeEnd) {
+    whereClauses.push(Prisma.sql`i."createdAt" <= ${filters.rangeEnd}`);
+  }
+
+  if (filters.groupId) {
+    whereClauses.push(Prisma.sql`s."groupId" = ${filters.groupId}`);
+  }
+
+  if (filters.sourceId) {
+    whereClauses.push(Prisma.sql`s.id = ${filters.sourceId}`);
+  }
+
+  return Prisma.sql`
+    WITH filtered_items AS (
+      SELECT
+        i.id AS "itemId",
+        i."clusterId" AS "clusterId",
+        i."sourceId" AS "sourceId",
+        i."publishedAt" AS "publishedAt",
+        i."qualityScore" AS "qualityScore",
+        i."originalTitle" AS "originalTitle",
+        i."translatedTitle" AS "translatedTitle",
+        c.title AS "clusterTitle",
+        c.summary AS "clusterSummary"
+      FROM "items" i
+      INNER JOIN "sources" s ON s.id = i."sourceId"
+      LEFT JOIN "content_clusters" c ON c.id = i."clusterId"
+      WHERE ${Prisma.join(whereClauses, " AND ")}
+    ),
+    cluster_groups AS (
+      SELECT
+        fi."clusterId" AS id,
+        MIN(fi."clusterTitle") AS title,
+        MIN(fi."clusterSummary") AS summary,
+        MAX(fi."publishedAt") AS "latestPublishedAt",
+        CAST(ROUND(AVG(fi."qualityScore")) AS INTEGER) AS score,
+        COUNT(*) AS "itemCount",
+        COUNT(DISTINCT fi."sourceId") AS "sourceCount"
+      FROM filtered_items fi
+      WHERE fi."clusterId" IS NOT NULL
+      GROUP BY fi."clusterId"
+    ),
+    single_entries AS (
+      SELECT
+        fi."itemId" AS id,
+        'single' AS type,
+        COALESCE(NULLIF(TRIM(fi."translatedTitle"), ''), fi."originalTitle") AS title,
+        NULL AS summary,
+        fi."publishedAt" AS "latestPublishedAt",
+        fi."qualityScore" AS score,
+        1 AS "sourceCount",
+        1 AS "itemCount"
+      FROM filtered_items fi
+      LEFT JOIN cluster_groups cg ON cg.id = fi."clusterId"
+      WHERE fi."clusterId" IS NULL OR cg."itemCount" = 1
+    ),
+    cluster_entries AS (
+      SELECT
+        cg.id AS id,
+        'cluster' AS type,
+        cg.title AS title,
+        cg.summary AS summary,
+        cg."latestPublishedAt" AS "latestPublishedAt",
+        cg.score AS score,
+        cg."sourceCount" AS "sourceCount",
+        cg."itemCount" AS "itemCount"
+      FROM cluster_groups cg
+      WHERE cg."itemCount" > 1
+    ),
+    entry_candidates AS (
+      SELECT id, type, title, summary, "latestPublishedAt", score, "sourceCount", "itemCount"
+      FROM cluster_entries
+      UNION ALL
+      SELECT id, type, title, summary, "latestPublishedAt", score, "sourceCount", "itemCount"
+      FROM single_entries
+    )
+  `;
+}
+
+function buildFeedEntryTitleFilter(title: string | null) {
   const normalizedTitle = normalizeTitleSearch(title);
 
   if (!normalizedTitle) {
-    return true;
+    return Prisma.empty;
   }
 
-  return entry.title.toLocaleLowerCase().includes(normalizedTitle);
+  return Prisma.sql`WHERE LOWER(title) LIKE ${`%${normalizedTitle}%`}`;
+}
+
+function buildFeedEntryOrderBy(sort: FeedFilters["sort"]) {
+  if (sort === "score_desc") {
+    return Prisma.sql`ORDER BY score DESC, "latestPublishedAt" DESC, "itemCount" DESC, id DESC`;
+  }
+
+  return Prisma.sql`ORDER BY "latestPublishedAt" DESC, score DESC, "itemCount" DESC, id DESC`;
 }
 
 export async function listFeedFilterOptions(): Promise<{
@@ -310,10 +387,16 @@ export async function listFeedFilterOptions(): Promise<{
 
   for (const source of sources) {
     if (source.groupId && source.group) {
-      groups.set(source.groupId, {
-        id: source.groupId,
-        name: source.group.name,
-      });
+      const current = groups.get(source.groupId);
+      if (current) {
+        current.count += 1;
+      } else {
+        groups.set(source.groupId, {
+          id: source.groupId,
+          name: source.group.name,
+          count: 1,
+        });
+      }
     }
   }
 
@@ -327,42 +410,175 @@ export async function listFeedFilterOptions(): Promise<{
   };
 }
 
-export async function listFeedItems(filters: FeedFilters & { rangeStart: Date | null; rangeEnd: Date | null }, cursor?: string | null) {
-  const take = 20;
-  const items = await prisma.item.findMany({
-    where: buildItemWhere(filters),
-    include: {
-      source: true,
-      cluster: true,
-    },
-    orderBy: [{ publishedAt: "desc" }, { createdAt: "desc" }],
-  });
-  const groupedItems = new Map<string, ItemWithSource[]>();
-  const singleEntries: FeedEntryDTO[] = [];
+export async function listFeedGroupCounts(
+  filters: FeedFilters & { rangeStart: Date | null; rangeEnd: Date | null },
+): Promise<{
+  groups: FeedGroupOption[];
+  totalCount: number;
+}> {
+  const effectiveFilters = {
+    ...filters,
+    groupId: null,
+  };
 
-  for (const item of items as ItemWithSourceAndCluster[]) {
-    if (!item.clusterId || !item.cluster) {
-      singleEntries.push(mapItemToFeedItem(item));
+  const items = await prisma.item.findMany({
+    where: buildItemWhere(effectiveFilters),
+    select: {
+      source: {
+        select: {
+          groupId: true,
+          group: {
+            select: {
+              name: true,
+            },
+          },
+        },
+      },
+    },
+  });
+
+  const groups = new Map<string, FeedGroupOption>();
+
+  for (const item of items) {
+    const groupId = item.source.groupId;
+    const groupName = item.source.group?.name;
+
+    if (!groupId || !groupName) {
       continue;
     }
 
-    const current = groupedItems.get(item.clusterId) ?? [];
-    current.push(item);
-    groupedItems.set(item.clusterId, current);
+    const current = groups.get(groupId);
+    if (current) {
+      current.count += 1;
+    } else {
+      groups.set(groupId, {
+        id: groupId,
+        name: groupName,
+        count: 1,
+      });
+    }
   }
 
-  const clusterEntries = [...groupedItems.entries()].map(([, clusterItems]) =>
-    mapClusterSubsetToEntry((clusterItems[0] as ItemWithSourceAndCluster).cluster!, clusterItems),
-  );
-  const entries = [...singleEntries, ...clusterEntries]
-    .filter((entry) => matchesEntryTitle(entry, filters.title))
-    .sort((left, right) => compareFeedEntries(left, right, filters.sort));
-  const startIndex = cursor ? Math.max(0, entries.findIndex((entry) => entry.id === cursor) + 1) : 0;
-  const slice = entries.slice(startIndex, startIndex + take);
-  const nextCursor = startIndex + take < entries.length ? slice[slice.length - 1]?.id ?? null : null;
+  return {
+    groups: [...groups.values()].sort((left, right) => left.name.localeCompare(right.name)),
+    totalCount: items.length,
+  };
+}
+
+export async function listFeedItems(
+  filters: FeedFilters & { rangeStart: Date | null; rangeEnd: Date | null },
+  pagination: {
+    page: number;
+    size: number;
+  },
+) {
+  const entryCandidatesCte = buildFeedEntryCandidatesCte(filters);
+  const titleFilter = buildFeedEntryTitleFilter(filters.title);
+  const countRows = await prisma.$queryRaw<CountRow[]>(Prisma.sql`
+    ${entryCandidatesCte}
+    SELECT COUNT(*) AS total
+    FROM entry_candidates
+    ${titleFilter}
+  `);
+  const totalRaw = countRows[0]?.total ?? BigInt(0);
+  const total = Number(totalRaw);
+  const totalPages = Math.max(1, Math.ceil(total / pagination.size));
+  const page = Math.min(Math.max(1, pagination.page), totalPages);
+  const offset = (page - 1) * pagination.size;
+  const pageRows = await prisma.$queryRaw<FeedEntryRow[]>(Prisma.sql`
+    ${entryCandidatesCte}
+    SELECT
+      id,
+      type AS "entryType",
+      title,
+      summary,
+      "latestPublishedAt",
+      score,
+      "sourceCount",
+      "itemCount"
+    FROM entry_candidates
+    ${titleFilter}
+    ${buildFeedEntryOrderBy(filters.sort)}
+    LIMIT ${pagination.size}
+    OFFSET ${offset}
+  `);
+  const singleIds = pageRows.filter((row) => row.entryType === "single").map((row) => row.id);
+  const clusterIds = pageRows.filter((row) => row.entryType === "cluster").map((row) => row.id);
+  const [singleItems, clusterItems, groupCounts] = await Promise.all([
+    singleIds.length > 0
+      ? prisma.item.findMany({
+          where: {
+            id: {
+              in: singleIds,
+            },
+          },
+          include: {
+            source: true,
+          },
+        })
+      : Promise.resolve([]),
+    clusterIds.length > 0
+      ? prisma.item.findMany({
+          where: buildItemWhere(filters, clusterIds),
+          include: {
+            source: true,
+          },
+          orderBy: [{ publishedAt: "desc" }, { createdAt: "desc" }],
+        })
+      : Promise.resolve([]),
+    listFeedGroupCounts(filters),
+  ]);
+  const singleItemMap = new Map(singleItems.map((item) => [item.id, mapItemToFeedItem(item)]));
+  const clusterItemMap = new Map<string, ItemWithSource[]>();
+
+  for (const item of clusterItems) {
+    if (!item.clusterId) {
+      continue;
+    }
+
+    const current = clusterItemMap.get(item.clusterId) ?? [];
+    current.push(item);
+    clusterItemMap.set(item.clusterId, current);
+  }
+
+  const items = pageRows.flatMap<FeedEntryDTO>((row) => {
+    if (row.entryType === "single") {
+      const item = singleItemMap.get(row.id);
+      return item ? [item] : [];
+    }
+
+    const previewItems = (clusterItemMap.get(row.id) ?? []).slice(0, 3).map(mapItemToClusterPreview);
+    const itemCount = toNumber(row.itemCount);
+
+    return [
+      {
+        id: row.id,
+        type: "cluster",
+        title: row.title,
+        summary: row.summary ?? "",
+        publishedAt: toIsoString(row.latestPublishedAt),
+        latestPublishedAt: toIsoString(row.latestPublishedAt),
+        score: toNumber(row.score),
+        sourceCount: toNumber(row.sourceCount),
+        itemCount,
+        itemsPreview: previewItems,
+        hasMoreItems: itemCount > previewItems.length,
+      },
+    ];
+  });
+  const nextCursor = page < totalPages ? pageRows[pageRows.length - 1]?.id ?? null : null;
+  const normalizedPagination: FeedPagination = {
+    page,
+    size: pagination.size,
+    total,
+    totalPages,
+  };
 
   return {
-    items: slice,
+    items,
+    groups: groupCounts.groups,
+    groupTotalCount: groupCounts.totalCount,
+    pagination: normalizedPagination,
     nextCursor,
   };
 }

@@ -1,4 +1,5 @@
 import { listFeedItems } from "@/lib/feed/repository";
+import { DEFAULT_FEED_PAGE_SIZE } from "@/lib/feed/types";
 import {
   isFeedRange,
   isFeedSort,
@@ -7,6 +8,16 @@ import {
   normalizeFeedTimeZoneOffset,
   resolveFeedFilters,
 } from "@/lib/feed/range";
+
+function parsePage(value: string | null): number {
+  const parsed = Number.parseInt(value ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+}
+
+function parsePageSize(value: string | null): number {
+  const parsed = Number.parseInt(value ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, 100) : DEFAULT_FEED_PAGE_SIZE;
+}
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -17,12 +28,13 @@ export async function GET(request: Request) {
   const groupId = normalizeFeedFilterId(searchParams.get("groupId"));
   const sourceId = normalizeFeedFilterId(searchParams.get("sourceId"));
   const title = searchParams.get("title")?.trim() || null;
-  const cursor = searchParams.get("cursor");
+  const page = parsePage(searchParams.get("page"));
+  const size = parsePageSize(searchParams.get("size"));
   const timeZoneOffsetMinutes = normalizeFeedTimeZoneOffset(searchParams.get("tzOffsetMinutes"));
   const range = isFeedRange(rangeParam) ? rangeParam : "today";
   const sort = isFeedSort(sortParam) ? sortParam : "time_desc";
   const filters = resolveFeedFilters({ range, sort, start, end, groupId, sourceId, title }, new Date(), timeZoneOffsetMinutes);
-  const result = await listFeedItems(filters, cursor);
+  const result = await listFeedItems(filters, { page, size });
 
   return Response.json({
     ...result,

@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { prisma } from "@/lib/db";
+import { resolveFeedFilters } from "@/lib/feed/range";
+import { listFeedItems } from "@/lib/feed/repository";
 
 describe("/api/feed", () => {
   beforeEach(async () => {
@@ -240,9 +242,87 @@ describe("/api/feed", () => {
       itemCount: 1,
       score: 75,
     });
+    expect(json.pagination).toMatchObject({
+      page: 1,
+      size: 20,
+      total: 4,
+      totalPages: 1,
+    });
     expect(json.sort).toBe("time_desc");
 
     vi.useRealTimers();
+  });
+
+  it("supports page and size parameters for feed pagination", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-10T12:00:00.000Z"));
+
+    try {
+      const { GET } = await import("@/app/api/feed/route");
+      const response = await GET(new Request("http://localhost/api/feed?range=7d&page=2&size=2"));
+
+      const json = await response.json();
+
+      expect(json.items).toHaveLength(2);
+      expect(json.items[0]).toMatchObject({
+        type: "single",
+        id: "item-c1",
+      });
+      expect(json.items[1]).toMatchObject({
+        type: "single",
+        id: "item-timezone-created",
+      });
+      expect(json.pagination).toMatchObject({
+        page: 2,
+        size: 2,
+        total: 4,
+        totalPages: 2,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("paginates aggregated entries without materializing the full feed item set", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-10T12:00:00.000Z"));
+
+    const findManySpy = vi.spyOn(prisma.item, "findMany");
+
+    try {
+      const filters = resolveFeedFilters(
+        {
+          range: "7d",
+          sort: "time_desc",
+          start: null,
+          end: null,
+          groupId: null,
+          sourceId: null,
+          title: null,
+        },
+        new Date("2026-04-10T12:00:00.000Z"),
+        0,
+      );
+
+      const result = await listFeedItems(filters, { page: 1, size: 2 });
+
+      expect(result.pagination).toMatchObject({
+        page: 1,
+        size: 2,
+        total: 4,
+        totalPages: 2,
+      });
+      expect(result.items).toHaveLength(2);
+      expect(findManySpy).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          include: expect.objectContaining({
+            cluster: true,
+          }),
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("filters the mixed feed by a custom start and end date range", async () => {
@@ -410,6 +490,169 @@ describe("/api/feed", () => {
         title: "基础设施动态",
         sourceName: "Grouped Feed",
       });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("returns dynamic group counts for the current filter range while ignoring the selected group filter", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-10T12:00:00.000Z"));
+
+    try {
+      const infra = await prisma.sourceGroup.create({
+        data: {
+          name: "Infra",
+        },
+      });
+
+      const ai = await prisma.sourceGroup.create({
+        data: {
+          name: "AI",
+        },
+      });
+
+      const infraSource = await prisma.source.create({
+        data: {
+          name: "Infra Feed",
+          rssUrl: "https://infra.example.com/feed.xml",
+          siteUrl: "https://infra.example.com",
+          enabled: true,
+          fetchFullTextWhenMissing: true,
+          groupId: infra.id,
+        },
+      });
+
+      const aiSource = await prisma.source.create({
+        data: {
+          name: "AI Feed",
+          rssUrl: "https://ai.example.com/feed.xml",
+          siteUrl: "https://ai.example.com",
+          enabled: true,
+          fetchFullTextWhenMissing: true,
+          groupId: ai.id,
+        },
+      });
+
+      await prisma.item.createMany({
+        data: [
+          {
+            id: "item-group-count-infra",
+            sourceId: infraSource.id,
+            originalUrl: "https://infra.example.com/post-1",
+            canonicalUrl: "https://infra.example.com/post-1",
+            urlHash: "hash-group-count-infra",
+            dedupeSignature: "infra feed|post 1|2026-04-10t08:00:00.000z",
+            originalTitle: "Infra count story",
+            translatedTitle: "基础设施统计",
+            publishedAt: new Date("2026-04-10T08:00:00.000Z"),
+            summaryText: "Infra summary",
+            status: "processed",
+            moderationStatus: "allowed",
+            qualityScore: 80,
+            qualityRationale: "高质量",
+            language: "en",
+          },
+          {
+            id: "item-group-count-ai",
+            sourceId: aiSource.id,
+            originalUrl: "https://ai.example.com/post-1",
+            canonicalUrl: "https://ai.example.com/post-1",
+            urlHash: "hash-group-count-ai",
+            dedupeSignature: "ai feed|post 1|2026-04-10t09:00:00.000z",
+            originalTitle: "AI count story",
+            translatedTitle: "AI 统计",
+            publishedAt: new Date("2026-04-10T09:00:00.000Z"),
+            summaryText: "AI summary",
+            status: "processed",
+            moderationStatus: "allowed",
+            qualityScore: 81,
+            qualityRationale: "高质量",
+            language: "en",
+          },
+        ],
+      });
+
+      const { GET } = await import("@/app/api/feed/route");
+      const response = await GET(
+        new Request(`http://localhost/api/feed?range=7d&groupId=${infra.id}`),
+      );
+
+      const json = await response.json();
+
+      expect(json.items).toHaveLength(1);
+      expect(json.groupTotalCount).toBe(7);
+      expect(json.groups).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: infra.id, name: "Infra", count: 1 }),
+          expect.objectContaining({ id: ai.id, name: "AI", count: 1 }),
+        ]),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the all-groups total for ungrouped items", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-10T12:00:00.000Z"));
+
+    try {
+      const ungroupedSource = await prisma.source.create({
+        data: {
+          name: "Ungrouped Feed",
+          rssUrl: "https://ungrouped.example.com/feed.xml",
+          siteUrl: "https://ungrouped.example.com",
+          enabled: true,
+          fetchFullTextWhenMissing: true,
+        },
+      });
+
+      await prisma.item.createMany({
+        data: [
+          {
+            id: "item-ungrouped-total-1",
+            sourceId: ungroupedSource.id,
+            originalUrl: "https://ungrouped.example.com/post-1",
+            canonicalUrl: "https://ungrouped.example.com/post-1",
+            urlHash: "hash-ungrouped-total-1",
+            dedupeSignature: "ungrouped feed|post 1|2026-04-10t08:00:00.000z",
+            originalTitle: "Ungrouped story one",
+            translatedTitle: "未分组内容一",
+            publishedAt: new Date("2026-04-10T08:00:00.000Z"),
+            summaryText: "summary 1",
+            status: "processed",
+            moderationStatus: "allowed",
+            qualityScore: 70,
+            qualityRationale: "ok",
+            language: "en",
+          },
+          {
+            id: "item-ungrouped-total-2",
+            sourceId: ungroupedSource.id,
+            originalUrl: "https://ungrouped.example.com/post-2",
+            canonicalUrl: "https://ungrouped.example.com/post-2",
+            urlHash: "hash-ungrouped-total-2",
+            dedupeSignature: "ungrouped feed|post 2|2026-04-10t09:00:00.000z",
+            originalTitle: "Ungrouped story two",
+            translatedTitle: "未分组内容二",
+            publishedAt: new Date("2026-04-10T09:00:00.000Z"),
+            summaryText: "summary 2",
+            status: "processed",
+            moderationStatus: "allowed",
+            qualityScore: 71,
+            qualityRationale: "ok",
+            language: "en",
+          },
+        ],
+      });
+
+      const { GET } = await import("@/app/api/feed/route");
+      const response = await GET(new Request("http://localhost/api/feed?range=7d"));
+      const json = await response.json();
+
+      expect(json.groupTotalCount).toBeGreaterThanOrEqual(2);
+      expect(json.groups).toEqual(expect.any(Array));
     } finally {
       vi.useRealTimers();
     }
