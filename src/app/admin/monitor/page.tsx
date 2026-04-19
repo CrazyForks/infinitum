@@ -8,7 +8,7 @@ export default async function AdminMonitorPage() {
   const session = await getAdminSession();
 
   if (!session.isAdmin) {
-    redirect("/admin/login");
+    redirect("/login?redirect=/admin/monitor");
   }
 
   const snapshot = await getBackgroundTaskMonitorSnapshot();

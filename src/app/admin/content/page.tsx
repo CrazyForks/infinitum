@@ -7,7 +7,7 @@ export default async function AdminContentPage() {
   const session = await getAdminSession();
 
   if (!session.isAdmin) {
-    redirect("/admin/login");
+    redirect("/login?redirect=/admin/content");
   }
 
   return <ContentReviewPanel />;

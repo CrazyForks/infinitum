@@ -3,17 +3,17 @@ import localFont from "next/font/local";
 
 import "./globals.css";
 
-const luminaMono = localFont({
+const brandFont = localFont({
   src: "./fonts/LXGWWenKaiMono.ttf",
   weight: "400",
   style: "normal",
   display: "swap",
   fallback: ["system-ui", "sans-serif"],
-  variable: "--font-lumina",
+  variable: "--font-brand",
 });
 
 export const metadata: Metadata = {
-  title: "Infinitum Lumina Console",
+  title: "Infinitum Console",
   description: "面向抓取、审核、聚合与监控的高密度信息流后台。",
 };
 
@@ -23,7 +23,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html className={luminaMono.variable} lang="zh-CN">
+    <html className={brandFont.variable} lang="zh-CN">
       <body>{children}</body>
     </html>
   );

@@ -13,7 +13,11 @@ export const loginSuccessRedirect = {
   },
 };
 
-export function AdminLoginForm() {
+type AdminLoginFormProps = {
+  redirectPath?: string;
+};
+
+export function AdminLoginForm({ redirectPath }: AdminLoginFormProps) {
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -54,7 +58,8 @@ export function AdminLoginForm() {
           return;
         }
 
-        loginSuccessRedirect.assign("/admin/settings");
+        const targetUrl = redirectPath && redirectPath.startsWith("/") ? redirectPath : "/admin/settings";
+        loginSuccessRedirect.assign(targetUrl);
       } catch {
         setMessage(fallbackMessage);
       }

@@ -48,7 +48,9 @@ export function GlobalHeader({ activeNav, isAdmin }: GlobalHeaderProps) {
 
   const goToLogin = () => {
     startTransition(() => {
-      router.push("/admin/login");
+      const currentPath = window.location.pathname;
+      const loginUrl = currentPath !== "/login" ? `/login?redirect=${encodeURIComponent(currentPath)}` : "/login";
+      router.push(loginUrl);
     });
   };
 
@@ -61,7 +63,7 @@ export function GlobalHeader({ activeNav, isAdmin }: GlobalHeaderProps) {
           method: "POST",
         });
       } finally {
-        router.push("/admin/login");
+        router.push("/login");
         router.refresh();
         setIsPending(false);
       }

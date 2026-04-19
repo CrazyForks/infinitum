@@ -8,7 +8,7 @@ export default async function AdminSettingsPage() {
   const session = await getAdminSession();
 
   if (!session.isAdmin) {
-    redirect("/admin/login");
+    redirect("/login?redirect=/admin/settings");
   }
 
   const settings = await getAdminSettings();
