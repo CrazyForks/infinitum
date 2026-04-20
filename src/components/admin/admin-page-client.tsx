@@ -6,6 +6,7 @@ import { GlobalHeader } from "@/components/ui/global-header";
 import { ContentReviewPanel } from "@/components/admin/content-review-panel";
 import { AdminMonitorPanel } from "@/components/admin/admin-monitor-panel";
 import { AdminSettingsPanel } from "@/components/admin/admin-settings-panel";
+import { TaskMonitorPanel } from "@/components/admin/task-monitor-panel";
 import { SelectableButton } from "@/components/ui/selectable-button";
 import { SectionToggleButton } from "@/components/ui/section-toggle-button";
 import {
@@ -67,10 +68,9 @@ export function AdminPageClient({
     // Monitoring - Tasks
     if (primaryTab === "monitoring" && monitoringSubSection === "tasks") {
       return (
-        <AdminMonitorPanel
-          initialSnapshot={initialSnapshot}
-          embedMode
-          showSchedule={false}
+        <TaskMonitorPanel
+          runningTasks={initialSnapshot.runningTasks}
+          recentTasks={initialSnapshot.recentTasks}
         />
       );
     }

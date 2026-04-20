@@ -194,7 +194,7 @@ export async function assignItemToCluster(
       }));
 
     await setItemCluster(item.id, cluster.id);
-    await recomputeCluster(cluster.id, options.aiProvider);
+    // Note: Cluster summary recomputation is now handled at batch level in executeIngestion
 
     return cluster.id;
   });

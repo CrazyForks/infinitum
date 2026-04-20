@@ -103,9 +103,9 @@ function formatRunSummary(status: FetchRunSnapshot | null): string {
 
   const timestamp = formatDate(status.finishedAt ?? status.startedAt);
   const statusLabel = FETCH_STATUS_LABELS[status.status];
-  const progress = status.itemCount > 0 ? ` · ${status.successCount + status.failureCount}/${status.itemCount}` : "";
+  const addedInfo = status.itemsAdded > 0 ? ` · 新增${status.itemsAdded}条` : "";
 
-  return `最近抓取：${statusLabel}${progress} · ${timestamp}`;
+  return `最近抓取：${statusLabel}${addedInfo} · ${timestamp}`;
 }
 
 function formatRunDetail(status: FetchRunSnapshot | null): string | null {
@@ -405,7 +405,7 @@ function GroupFilterSidebar({
             <button
               type="button"
               aria-pressed={selectedGroupId === null}
-              aria-label={formatGroupOptionLabel("全部分组", totalCount)}
+              aria-label={formatGroupOptionLabel("全部内容", totalCount)}
               onClick={() => onSelect("")}
               className={cx(
                 optionClassName,
@@ -414,7 +414,7 @@ function GroupFilterSidebar({
                   : "text-[var(--text-2)] hover:bg-[var(--bg-muted)]",
               )}
             >
-              <span>{formatGroupOptionLabel("全部分组", totalCount)}</span>
+              <span>{formatGroupOptionLabel("全部内容", totalCount)}</span>
             </button>
 
             {groups.map((group) => {
@@ -989,7 +989,7 @@ export function FeedPanel({
   const neutralBadgeClassName =
     "inline-flex items-center rounded-sm border border-[color:var(--line)] bg-[var(--surface-muted)] px-2 py-1 text-xs text-[var(--muted)]";
   const denseCardClassName =
-    "rounded-lg border border-[color:var(--line)] bg-white px-4 py-4 shadow-[var(--shadow-sm)] transition hover:border-[color:var(--line-strong)] hover:shadow-md sm:px-6 sm:py-5";
+    "w-full rounded-lg border border-[color:var(--line)] bg-white px-4 py-4 shadow-[var(--shadow-sm)] transition hover:border-[color:var(--line-strong)] hover:shadow-md sm:px-6 sm:py-5";
   const cardMetaRowClassName = "flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-[var(--muted)]";
   const cardSummaryClassName = "text-sm leading-6 text-[var(--muted)]";
   const cardTitleClassName = "text-xl font-semibold leading-7 text-[var(--foreground)]";
@@ -1028,11 +1028,11 @@ export function FeedPanel({
         />
       }
     >
-      <section className="grid gap-4">
+      <section className="w-full grid gap-4">
         <section
           role="region"
           aria-label="信息流筛选"
-          className="panel-raised rounded-sm border border-[color:var(--line)] p-4 sm:p-6"
+          className="panel-raised w-full rounded-sm border border-[color:var(--line)] p-4 sm:p-6"
         >
           <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -1066,7 +1066,7 @@ export function FeedPanel({
                     </span>
                   </button>
                 ) : null}
-                <span className="text-sm text-[var(--text-2)]">{latestRunSummary}</span>
+                <span className="min-w-[200px] text-sm text-[var(--text-2)]">{latestRunSummary}</span>
               </div>
 
               <div className="flex flex-wrap items-center gap-4 lg:justify-end">
@@ -1106,7 +1106,7 @@ export function FeedPanel({
                     value={groupId ?? ""}
                     onChange={changeGroup}
                     options={[
-                      { value: "", label: formatGroupOptionLabel("全部分组", groupTotalCount) },
+                      { value: "", label: formatGroupOptionLabel("全部内容", groupTotalCount) },
                       ...groups.map((group) => ({
                         value: group.id,
                         label: formatGroupOptionLabel(group.name, group.count),

@@ -33,6 +33,7 @@ export type TaskRunSnapshot = {
   progressCurrent: number;
   progressTotal: number;
   progressLabel: string | null;
+  itemsAdded: number;
   aiCallCountActual: number;
   aiCallCountEstimated: number;
   cancelRequestedAt: string | null;

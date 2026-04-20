@@ -212,6 +212,40 @@ export function IconX(props: IconProps) {
   );
 }
 
+export function IconPlay(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M5 3l14 9-14 9V3z" />
+    </IconBase>
+  );
+}
+
+export function IconEye(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+      <circle cx="12" cy="12" r="3" />
+    </IconBase>
+  );
+}
+
+export function IconRotateCw(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
+      <path d="M21 3v5h-5" />
+    </IconBase>
+  );
+}
+
+export function IconSquare(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <rect x="4" y="4" width="16" height="16" rx="2" />
+    </IconBase>
+  );
+}
+
 export function IconSearch(props: IconProps) {
   return (
     <IconBase {...props}>

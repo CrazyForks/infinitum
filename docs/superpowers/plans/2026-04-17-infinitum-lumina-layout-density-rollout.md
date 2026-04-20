@@ -502,7 +502,7 @@ return (
         value={groupId ?? ""}
         onChange={(event) => changeGroup(event.target.value)}
       >
-        <option value="">全部分组</option>
+        <option value="">全部内容</option>
         {availableGroups.map((group) => (
           <option key={group.id} value={group.id}>
             {group.name}

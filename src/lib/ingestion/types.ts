@@ -30,6 +30,8 @@ export type ArticleFetcher = (url: string) => Promise<string | null>;
 export type ProcessedItemRecord = {
   id: string;
   status: ItemStatus;
+  isNew: boolean;
+  affectedClusterId?: string | null;
 };
 
 export type RunIngestionOptions = {
@@ -47,6 +49,7 @@ export type RunIngestionOptions = {
     itemCount: number;
     successCount: number;
     failureCount: number;
+    itemsAdded: number;
     aiCallCountActual?: number;
     aiCallCountEstimated?: number;
     errorSummary?: string | null;

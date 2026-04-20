@@ -108,6 +108,7 @@ export async function completeFetchRun(
     itemCount: number;
     successCount: number;
     failureCount: number;
+    itemsAdded: number;
     errorSummary?: string | null;
   },
 ) {
@@ -124,6 +125,7 @@ export async function updateFetchRunProgress(
     itemCount?: number;
     successCount?: number;
     failureCount?: number;
+    itemsAdded?: number;
     errorSummary?: string | null;
   },
 ) {
@@ -150,6 +152,7 @@ export function toFetchRunSnapshot(run: FetchRun): FetchRunSnapshot {
     itemCount: run.itemCount,
     successCount: run.successCount,
     failureCount: run.failureCount,
+    itemsAdded: run.itemsAdded,
     errorSummary: run.errorSummary,
   };
 }

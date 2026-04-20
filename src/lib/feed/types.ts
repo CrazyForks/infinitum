@@ -110,6 +110,7 @@ export type FetchRunSnapshot = {
   itemCount: number;
   successCount: number;
   failureCount: number;
+  itemsAdded: number;
   errorSummary?: string | null;
 };
 

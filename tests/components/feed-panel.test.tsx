@@ -249,7 +249,7 @@ describe("FeedPanel", () => {
     expect(sidebarPanel?.className).toContain("lg:max-h-[calc(100vh-2rem)]");
     expect(within(sidebar).getByRole("heading", { name: "分组筛选" })).toBeInTheDocument();
     expect(within(sidebar).getByRole("button", { name: "收起分组筛选" })).toHaveAttribute("aria-expanded", "true");
-    expect(within(sidebar).getByRole("button", { name: "全部分组 (2)" })).toBeInTheDocument();
+    expect(within(sidebar).getByRole("button", { name: "全部内容 (2)" })).toBeInTheDocument();
     expect(within(sidebar).getByRole("button", { name: "AI (1)" })).toBeInTheDocument();
     expect(within(sidebar).getByRole("button", { name: "研究 (1)" })).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "移动端分组筛选" })).toBeInTheDocument();
@@ -274,7 +274,7 @@ describe("FeedPanel", () => {
 
     const sidebar = screen.getByRole("complementary", { name: "分组筛选侧栏" });
     expect(sidebar).toBeInTheDocument();
-    expect(within(sidebar).getByRole("button", { name: "全部分组 (2)" })).toBeInTheDocument();
+    expect(within(sidebar).getByRole("button", { name: "全部内容 (2)" })).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "移动端分组筛选" })).toBeInTheDocument();
   });
 
@@ -304,14 +304,14 @@ describe("FeedPanel", () => {
     expect(within(sidebar).getByRole("button", { name: "展开分组筛选" })).toHaveAttribute("aria-expanded", "false");
     expect(within(sidebar).getByRole("button", { name: "展开分组筛选" })).toHaveTextContent("»");
     expect(within(sidebar).queryByRole("heading", { name: "分组筛选" })).not.toBeInTheDocument();
-    expect(within(sidebar).queryByRole("button", { name: "全部分组 (2)" })).not.toBeInTheDocument();
+    expect(within(sidebar).queryByRole("button", { name: "全部内容 (2)" })).not.toBeInTheDocument();
     expect(within(sidebar).queryByRole("button", { name: "AI (1)" })).not.toBeInTheDocument();
 
     await user.click(within(sidebar).getByRole("button", { name: "展开分组筛选" }));
 
     expect(within(sidebar).getByRole("button", { name: "收起分组筛选" })).toHaveAttribute("aria-expanded", "true");
     expect(within(sidebar).getByRole("button", { name: "收起分组筛选" })).toHaveTextContent("«");
-    expect(within(sidebar).getByRole("button", { name: "全部分组 (2)" })).toBeInTheDocument();
+    expect(within(sidebar).getByRole("button", { name: "全部内容 (2)" })).toBeInTheDocument();
     expect(within(sidebar).getByRole("button", { name: "AI (1)" })).toBeInTheDocument();
   });
 
@@ -432,7 +432,7 @@ describe("FeedPanel", () => {
       expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=7d&sort=time_desc&groupId=group-ai&tzOffsetMinutes=-480");
     });
 
-    expect(await screen.findByRole("button", { name: "全部分组 (5)" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "全部内容 (5)" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "AI (3)" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "研究 (1)" })).toBeInTheDocument();
   });

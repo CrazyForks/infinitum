@@ -50,6 +50,7 @@ class TaskRunCancellationError extends Error {
     itemCount: number;
     successCount: number;
     failureCount: number;
+    itemsAdded: number;
     errorSummary: string | null;
   };
 
@@ -58,6 +59,7 @@ class TaskRunCancellationError extends Error {
     itemCount: number;
     successCount: number;
     failureCount: number;
+    itemsAdded: number;
     errorSummary: string | null;
   }) {
     super(TASK_RUN_CANCELLED_MESSAGE);
@@ -252,6 +254,7 @@ async function processFeedItem({
     publishedAt,
   });
   const existing = await findExistingItem(dedupeKeys.urlHash, dedupeKeys.signature);
+  const isNew = !existing;
   const analysisInputsChanged = existing
     ? hasAnalysisInputsChanged(existing, {
         originalTitle,
@@ -283,6 +286,16 @@ async function processFeedItem({
       existing.status !== "fetched" &&
       existing.status !== "failed",
   );
+
+  // Debug logging for analysis reuse decision
+  if (existing && !canReuseExistingAnalysis) {
+    console.log(`[DEBUG] Item ${existing.id} cannot reuse analysis:`, {
+      analysisInputsChanged,
+      hasAiProcessedAt: !!existing.aiProcessedAt,
+      status: existing.status,
+      title: existing.originalTitle?.slice(0, 50),
+    });
+  }
   const initialFilterMatch = findBlacklistMatch({
     title: originalTitle,
     content: [rssContent, rssExcerpt].filter(Boolean).join("\n"),
@@ -329,7 +342,7 @@ async function processFeedItem({
       await recomputeCluster(existing.clusterId, aiProvider);
     }
 
-    return { id: stored.id, status: stored.status };
+    return { id: stored.id, status: stored.status, isNew };
   }
 
   if (canReuseExistingAnalysis) {
@@ -368,7 +381,7 @@ async function processFeedItem({
       },
     );
 
-    return { id: stored.id, status: stored.status };
+    return { id: stored.id, status: stored.status, isNew };
   }
 
   if (!fullText && shouldFetchFullText(contentForFullTextDecision, fetchFullTextWhenMissing)) {
@@ -468,19 +481,25 @@ async function processFeedItem({
     },
   );
 
+  // Track cluster changes
+  let affectedClusterId: string | null = null;
+
   if (moderationStatus === "filtered") {
     if (existing?.clusterId) {
-      await recomputeCluster(existing.clusterId, aiProvider);
+      affectedClusterId = existing.clusterId;
     }
   } else {
-    await assignItemToCluster(stored.id, {
+    const clusterId = await assignItemToCluster(stored.id, {
       topicLabel,
       clusterHint,
       aiProvider,
     });
+    if (clusterId && (isNew || existing?.clusterId !== clusterId)) {
+      affectedClusterId = clusterId;
+    }
   }
 
-  return { id: stored.id, status: stored.status };
+  return { id: stored.id, status: stored.status, isNew, affectedClusterId };
 }
 
 async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
@@ -500,12 +519,15 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
   const errors: string[] = [];
   let successCount = 0;
   let failureCount = 0;
+  let itemsAdded = 0;
   let cancellationRequested = false;
+  const affectedClusterIds = new Set<string>();
   const getProgressSnapshot = () => ({
     sourceCount: sources.length,
     itemCount: preparedItems.length,
     successCount,
     failureCount,
+    itemsAdded,
     errorSummary: errors.length > 0 ? errors.join(" | ") : null,
   });
   const checkCancellation = async () => {
@@ -549,6 +571,7 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
     itemCount: preparedItems.length,
     successCount,
     failureCount,
+    itemsAdded,
     errorSummary: errors.length > 0 ? errors.join(" | ") : null,
   });
   await options.onProgress?.({
@@ -557,6 +580,7 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
     itemCount: preparedItems.length,
     successCount,
     failureCount,
+    itemsAdded,
     aiCallCountActual: aiUsage.snapshot().actual,
     aiCallCountEstimated: aiUsage.snapshot().estimated,
     errorSummary: errors.length > 0 ? errors.join(" | ") : null,
@@ -574,6 +598,14 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
         failureCount += 1;
       } else if (result && result.status !== "filtered") {
         successCount += 1;
+        if (result.isNew) {
+          itemsAdded += 1;
+        }
+      }
+
+      // Collect affected clusters for batch recomputation
+      if (result?.affectedClusterId) {
+        affectedClusterIds.add(result.affectedClusterId);
       }
 
       await updateFetchRunProgress(run.id, {
@@ -581,6 +613,7 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
         itemCount: preparedItems.length,
         successCount,
         failureCount,
+        itemsAdded,
         errorSummary: errors.length > 0 ? errors.join(" | ") : null,
       });
       await options.onProgress?.({
@@ -589,6 +622,7 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
         itemCount: preparedItems.length,
         successCount,
         failureCount,
+        itemsAdded,
         aiCallCountActual: aiUsage.snapshot().actual,
         aiCallCountEstimated: aiUsage.snapshot().estimated,
         errorSummary: errors.length > 0 ? errors.join(" | ") : null,
@@ -626,7 +660,11 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
 
   await progressChain;
   await throwIfCancellationRequested();
-  await recomputeAllClusters(trackedAiProvider);
+
+  // Recompute only affected clusters instead of all clusters
+  for (const clusterId of affectedClusterIds) {
+    await recomputeCluster(clusterId, trackedAiProvider);
+  }
 
   const status: FetchRunStatus =
     errors.length > 0 || failureCount > 0
@@ -642,6 +680,7 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
     itemCount: preparedItems.length,
     successCount,
     failureCount,
+    itemsAdded,
     errorSummary: errors.length > 0 ? errors.join(" | ") : null,
   });
 
@@ -651,6 +690,7 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
     itemCount: completedRun.itemCount,
     successCount: completedRun.successCount,
     failureCount: completedRun.failureCount,
+    itemsAdded: completedRun.itemsAdded,
     aiCallCountActual: aiUsage.snapshot().actual,
     aiCallCountEstimated: aiUsage.snapshot().estimated,
     errorSummary: completedRun.errorSummary,
@@ -671,6 +711,7 @@ async function runExistingFetchRun(run: FetchRun, options: ResolvedRunOptions) {
         itemCount: error.snapshot.itemCount,
         successCount: error.snapshot.successCount,
         failureCount: error.snapshot.failureCount,
+        itemsAdded: error.snapshot.itemsAdded,
         errorSummary: TASK_RUN_CANCELLED_MESSAGE,
       });
 
@@ -680,6 +721,7 @@ async function runExistingFetchRun(run: FetchRun, options: ResolvedRunOptions) {
         itemCount: cancelledRun.itemCount,
         successCount: cancelledRun.successCount,
         failureCount: cancelledRun.failureCount,
+        itemsAdded: cancelledRun.itemsAdded,
         errorSummary: cancelledRun.errorSummary,
       });
 
@@ -693,6 +735,7 @@ async function runExistingFetchRun(run: FetchRun, options: ResolvedRunOptions) {
       itemCount: 0,
       successCount: 0,
       failureCount: 1,
+      itemsAdded: 0,
       errorSummary: error instanceof Error ? error.message : "Unknown ingestion error",
     });
 
@@ -702,6 +745,7 @@ async function runExistingFetchRun(run: FetchRun, options: ResolvedRunOptions) {
       itemCount: failedRun.itemCount,
       successCount: failedRun.successCount,
       failureCount: failedRun.failureCount,
+      itemsAdded: failedRun.itemsAdded,
       errorSummary: failedRun.errorSummary,
     });
 
@@ -782,6 +826,7 @@ export async function runIngestionTask(taskRun: BackgroundTaskRun, options?: Par
         progressCurrent: snapshot.successCount + snapshot.failureCount,
         progressTotal: snapshot.itemCount,
         progressLabel: buildTaskProgressLabel(snapshot),
+        itemsAdded: snapshot.itemsAdded,
         aiCallCountActual: latestAiCallCountActual,
         aiCallCountEstimated: latestAiCallCountEstimated,
         errorSummary: snapshot.errorSummary ?? null,
@@ -799,6 +844,7 @@ export async function runIngestionTask(taskRun: BackgroundTaskRun, options?: Par
     progressTotal: completedRun.itemCount,
     progressLabel:
       completedRun.errorSummary === TASK_RUN_CANCELLED_MESSAGE ? TASK_RUN_CANCELLED_LABEL : buildTaskProgressLabel(completedRun),
+    itemsAdded: completedRun.itemsAdded,
     aiCallCountActual: latestAiCallCountActual,
     aiCallCountEstimated: latestAiCallCountEstimated,
     errorSummary: completedRun.errorSummary ?? null,

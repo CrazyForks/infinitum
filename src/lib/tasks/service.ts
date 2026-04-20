@@ -41,6 +41,7 @@ export async function updateTaskRun(
     progressCurrent?: number;
     progressTotal?: number;
     progressLabel?: string | null;
+    itemsAdded?: number;
     aiCallCountActual?: number;
     aiCallCountEstimated?: number;
     cancelRequestedAt?: Date | null;
@@ -76,6 +77,7 @@ export function toTaskRunSnapshot(taskRun: {
   progressCurrent: number;
   progressTotal: number;
   progressLabel: string | null;
+  itemsAdded: number;
   aiCallCountActual: number;
   aiCallCountEstimated: number;
   cancelRequestedAt: Date | null;
@@ -93,6 +95,7 @@ export function toTaskRunSnapshot(taskRun: {
     progressCurrent: taskRun.progressCurrent,
     progressTotal: taskRun.progressTotal,
     progressLabel: taskRun.progressLabel,
+    itemsAdded: taskRun.itemsAdded,
     aiCallCountActual: taskRun.aiCallCountActual,
     aiCallCountEstimated: taskRun.aiCallCountEstimated,
     cancelRequestedAt: taskRun.cancelRequestedAt?.toISOString() ?? null,

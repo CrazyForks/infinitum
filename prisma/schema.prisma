@@ -160,6 +160,7 @@ model FetchRun {
   itemCount    Int                @default(0)
   successCount Int                @default(0)
   failureCount Int                @default(0)
+  itemsAdded   Int                @default(0)
   errorSummary String?
   taskRun      BackgroundTaskRun? @relation(fields: [taskRunId], references: [id], onDelete: SetNull)
 
@@ -195,6 +196,7 @@ model BackgroundTaskRun {
   progressCurrent Int                   @default(0)
   progressTotal   Int                   @default(0)
   progressLabel   String?
+  itemsAdded      Int                   @default(0)
   aiCallCountActual Int                 @default(0)
   aiCallCountEstimated Int              @default(0)
   cancelRequestedAt DateTime?
