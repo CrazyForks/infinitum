@@ -1,12 +1,14 @@
 "use client";
-import { type ReactNode, useEffect, useState, useTransition } from "react";
+import { type ChangeEvent, type ReactNode, useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import { AiSettingsPanel } from "@/components/admin/ai-settings-panel";
 import { Button } from "@/components/ui/button";
 import { PageShell } from "@/components/ui/page-shell";
 import { FilterInput } from "@/components/ui/filter-input";
 import { FilterSelect } from "@/components/ui/filter-select";
-import { FormField } from "@/components/ui/form-field";
+import { IconButton } from "@/components/ui/icon-button";
+import { IconCheck, IconEdit, IconPlus, IconTag, IconTrash, IconX } from "@/components/ui/icons";
+import { ModalShell } from "@/components/ui/modal-shell";
 import { TextArea } from "@/components/ui/text-area";
 import { TextInput } from "@/components/ui/text-input";
 import { useToast } from "@/components/ui/toast";
@@ -29,8 +31,6 @@ type AdminSettingsSection =
 
 const surfaceCardClassName =
   "rounded-[1.1rem] border border-[color:var(--line)] bg-white/96 shadow-[var(--shadow-sm)]";
-const subtleCardClassName =
-  "rounded-[0.95rem] border border-[color:var(--line)] bg-[var(--surface-muted)]/82 shadow-[var(--shadow-sm)]";
 const labelClassName = "text-sm font-medium leading-6 text-[var(--foreground)]";
 const helperTextClassName = "text-xs leading-6 text-[var(--muted)]";
 const checkboxClassName =
@@ -47,6 +47,32 @@ const settingsNavItems: Array<{
   { key: "groups", label: "分组" },
   { key: "sources", label: "信息源" },
 ] as const;
+
+const groupBadgePalette = [
+  "#3b82f6",
+  "#14b8a6",
+  "#f59e0b",
+  "#ef4444",
+  "#8b5cf6",
+  "#06b6d4",
+  "#22c55e",
+  "#f97316",
+] as const;
+
+function getStableGroupBadgeColor(groupName: string) {
+  const normalized = groupName.trim().toLowerCase();
+
+  if (!normalized) {
+    return groupBadgePalette[0];
+  }
+
+  let hash = 0;
+  for (const char of normalized) {
+    hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  }
+
+  return groupBadgePalette[hash % groupBadgePalette.length];
+}
 
 function refreshPage() {
   if (typeof window !== "undefined") {
@@ -67,9 +93,17 @@ export function AdminSettingsPanel({
   const [blacklistText, setBlacklistText] = useState(
     initialSettings.blacklistKeywords.join("\n"),
   );
+  const [showCreateGroupComposer, setShowCreateGroupComposer] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
-  const [opmlFile, setOpmlFile] = useState<File | null>(null);
-  const [newSource, setNewSource] = useState({
+  const opmlFileInputRef = useRef<HTMLInputElement | null>(null);
+  const [sourceModalMode, setSourceModalMode] = useState<"create" | "edit" | null>(null);
+  const [editingSourceId, setEditingSourceId] = useState<string | null>(null);
+  const [sourceNameFilter, setSourceNameFilter] = useState("");
+  const [sourceGroupFilter, setSourceGroupFilter] = useState("");
+  const [sourceEnabledFilter, setSourceEnabledFilter] = useState("");
+  const [sourcePage, setSourcePage] = useState(1);
+  const [sourcePageSize, setSourcePageSize] = useState(10);
+  const [sourceForm, setSourceForm] = useState({
     name: "",
     rssUrl: "",
     siteUrl: "",
@@ -81,6 +115,35 @@ export function AdminSettingsPanel({
     .split("\n")
     .map((keyword) => keyword.trim())
     .filter(Boolean);
+  const filteredSources = useMemo(() => {
+    const keyword = sourceNameFilter.trim().toLowerCase();
+
+    return initialSettings.sources.filter((source) => {
+      const matchesName =
+        !keyword ||
+        source.name.toLowerCase().includes(keyword) ||
+        source.rssUrl.toLowerCase().includes(keyword);
+      const matchesGroup =
+        !sourceGroupFilter ||
+        (sourceGroupFilter === "__ungrouped__"
+          ? !source.groupId
+          : (source.groupId ?? "") === sourceGroupFilter);
+      const matchesEnabled =
+        !sourceEnabledFilter ||
+        (sourceEnabledFilter === "enabled" ? source.enabled : !source.enabled);
+
+      return matchesName && matchesGroup && matchesEnabled;
+    });
+  }, [initialSettings.sources, sourceEnabledFilter, sourceGroupFilter, sourceNameFilter]);
+  const sourceTotalPages = Math.max(1, Math.ceil(filteredSources.length / sourcePageSize));
+  const paginatedSources = useMemo(
+    () =>
+      filteredSources.slice(
+        (sourcePage - 1) * sourcePageSize,
+        sourcePage * sourcePageSize,
+      ),
+    [filteredSources, sourcePage, sourcePageSize],
+  );
 
   const submitJson = (
     url: string,
@@ -126,8 +189,36 @@ export function AdminSettingsPanel({
     }
   }, [externalActiveSection]);
 
+  const openCreateSourceModal = () => {
+    setSourceModalMode("create");
+    setEditingSourceId(null);
+    setSourceForm({
+      name: "",
+      rssUrl: "",
+      siteUrl: "",
+      enabled: true,
+      fetchFullTextWhenMissing: true,
+      groupId: "",
+    });
+  };
+
+  const openEditSourceModal = (
+    source: AdminSettingsSnapshot["sources"][number],
+  ) => {
+    setSourceModalMode("edit");
+    setEditingSourceId(source.id);
+    setSourceForm({
+      name: source.name,
+      rssUrl: source.rssUrl,
+      siteUrl: source.siteUrl,
+      enabled: source.enabled,
+      fetchFullTextWhenMissing: source.fetchFullTextWhenMissing,
+      groupId: source.groupId ?? "",
+    });
+  };
+
   const resolveSourceFromRss = () => {
-    if (!newSource.rssUrl.trim()) {
+    if (!sourceForm.rssUrl.trim()) {
       showToast("请先输入 RSS URL。", "error");
       return;
     }
@@ -140,7 +231,7 @@ export function AdminSettingsPanel({
             "content-type": "application/json",
           },
           body: JSON.stringify({
-            rssUrl: newSource.rssUrl.trim(),
+            rssUrl: sourceForm.rssUrl.trim(),
           }),
         });
         const payload = (await response.json()) as {
@@ -159,7 +250,7 @@ export function AdminSettingsPanel({
 
         const source = payload.source;
 
-        setNewSource((current) => ({
+        setSourceForm((current) => ({
           ...current,
           name: source.name,
           rssUrl: source.rssUrl,
@@ -172,15 +263,15 @@ export function AdminSettingsPanel({
     });
   };
 
-  const importOpml = () => {
-    if (!opmlFile) {
+  const importOpml = (file: File | null) => {
+    if (!file) {
       showToast("请先选择 OPML 文件。", "error");
       return;
     }
 
     startTransition(async () => {
       try {
-        const opmlText = await opmlFile.text();
+        const opmlText = await file.text();
         const response = await fetch("/api/admin/settings/sources/import", {
           method: "POST",
           headers: {
@@ -206,6 +297,9 @@ export function AdminSettingsPanel({
           `OPML 导入完成：新建 ${payload.summary.createdCount} 个，更新 ${payload.summary.updatedCount} 个，失败 ${payload.summary.failedCount} 个。`,
           "success",
         );
+        if (opmlFileInputRef.current) {
+          opmlFileInputRef.current.value = "";
+        }
         window.setTimeout(() => {
           onRefresh?.();
 
@@ -217,6 +311,37 @@ export function AdminSettingsPanel({
         showToast("OPML 导入失败", "error");
       }
     });
+  };
+
+  const handleSourcePageSizeChange = (event: ChangeEvent<HTMLSelectElement>) => {
+    setSourcePageSize(Number(event.target.value));
+    setSourcePage(1);
+  };
+
+  const handleSaveSource = () => {
+    const payload = {
+      ...sourceForm,
+      groupId: sourceForm.groupId || null,
+    };
+
+    if (sourceModalMode === "edit" && editingSourceId) {
+      submitJson(
+        `/api/admin/settings/sources/${editingSourceId}`,
+        "PATCH",
+        payload,
+        "信息源已更新。",
+        true,
+      );
+      return;
+    }
+
+    submitJson(
+      "/api/admin/settings/sources",
+      "POST",
+      payload,
+      "信息源已创建。",
+      true,
+    );
   };
 
   const content = (
@@ -304,273 +429,432 @@ export function AdminSettingsPanel({
         ) : null}
 
         {activeSection === "groups" ? (
-          <SectionCard headingId="settings-groups" title="分组">
-            <div
-              className={cx(subtleCardClassName, "flex flex-col gap-3 p-3")}
-            >
+          <div className="w-full min-w-0 rounded-sm border border-[color:var(--line)] bg-[var(--surface)] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.06)]">
+            <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
               <div className="space-y-1">
-                <p className={labelClassName}>新建分组</p>
-                <p className={helperTextClassName}>
-                  用于批量组织 OPML 导入结果与后续信息源维护。
+                <h2 className="text-lg font-semibold text-[var(--text-1)]" id="settings-groups">
+                  分组列表
+                </h2>
+                <p className="text-sm text-[var(--text-3)]">
+                  用于对信息源进行分类管理，方便后续筛选。
                 </p>
               </div>
-              <div className="flex flex-col gap-3 sm:flex-row">
-                <TextInput
-                  className="sm:flex-1"
-                  placeholder="新分组名称"
-                  value={newGroupName}
-                  onChange={(event) => setNewGroupName(event.target.value)}
-                />
+              <div className="flex flex-wrap items-center gap-2">
                 <Button
                   variant="primary"
                   size="md"
-                  onClick={() =>
-                    submitJson(
-                      "/api/admin/settings/groups",
-                      "POST",
-                      { name: newGroupName },
-                      "分组已创建。",
-                      true,
-                    )
-                  }
-                  disabled={isPending || !newGroupName.trim()}
+                  onClick={() => setShowCreateGroupComposer((current) => !current)}
                 >
-                  创建分组
+                  + 新增分组
                 </Button>
               </div>
             </div>
 
-            <div className="space-y-3">
-              {initialSettings.groups.length ? (
-                initialSettings.groups.map((group) => (
+            {showCreateGroupComposer ? (
+              <div className="mb-4 rounded-lg border border-[color:var(--line)] bg-[var(--surface)] px-3 py-3 shadow-[0_1px_3px_rgba(0,0,0,0.06)]">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex h-8 w-8 items-center justify-center rounded bg-[var(--accent)] text-sm font-bold text-white">
+                      <IconPlus className="h-4 w-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-[var(--text-1)]">新增分组</div>
+                      <div className="text-xs text-[var(--text-2)]">创建后可直接用于信息源归类。</div>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-1 flex-col gap-3 sm:max-w-xl sm:flex-row sm:items-center sm:justify-end">
+                    <TextInput
+                      className="sm:flex-1"
+                      placeholder="新分组名称"
+                      value={newGroupName}
+                      onChange={(event) => setNewGroupName(event.target.value)}
+                    />
+                    <div className="flex gap-2">
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => {
+                          setShowCreateGroupComposer(false);
+                          setNewGroupName("");
+                        }}
+                      >
+                        取消
+                      </Button>
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        onClick={() =>
+                          submitJson(
+                            "/api/admin/settings/groups",
+                            "POST",
+                            { name: newGroupName },
+                            "分组已创建。",
+                            true,
+                          )
+                        }
+                        disabled={isPending || !newGroupName.trim()}
+                      >
+                        创建
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {initialSettings.groups.length ? (
+              <div className="space-y-3">
+                {initialSettings.groups.map((group) => (
                   <GroupRow
                     key={group.id}
                     group={group}
                     submitJson={submitJson}
                   />
-                ))
-              ) : (
-                <div className="rounded-[1rem] border border-dashed border-[color:var(--line)] bg-[var(--surface)] px-4 py-4 text-sm leading-6 text-[var(--muted)]">
-                  还没有分组，创建后就可以在信息源管理里直接归类。
-                </div>
-              )}
-            </div>
-          </SectionCard>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-sm border border-[color:var(--line)] bg-[var(--bg-muted)] px-4 py-8 text-center text-sm text-[var(--text-3)]">
+                <div className="mb-4">暂无分组</div>
+                <Button
+                  variant="primary"
+                  size="md"
+                  onClick={() => setShowCreateGroupComposer(true)}
+                >
+                  新增分组
+                </Button>
+              </div>
+            )}
+          </div>
         ) : null}
 
         {activeSection === "sources" ? (
-          <SectionCard headingId="settings-sources" title="信息源管理">
-            <section
-              role="region"
-              aria-label="信息源工作区"
-              className="grid gap-0 overflow-hidden rounded-[1rem] border border-[color:var(--line)] bg-[var(--surface-muted)]/72 xl:grid-cols-[minmax(0,0.96fr)_minmax(0,1.04fr)]"
-            >
-              <section
-                role="region"
-                aria-label="新建信息源"
-                className="space-y-4 p-4"
-              >
-                <div className="space-y-3 border-b border-[color:var(--line)] pb-4">
-                  <div className="space-y-1">
-                    <p className={labelClassName}>导入 OPML</p>
-                    <p className={helperTextClassName}>
-                      支持 `.opml` 与 XML 文件，导入完成后会自动刷新页面。
-                    </p>
-                  </div>
-                  <div className="flex flex-col gap-3 sm:flex-row">
-                    <input
-                      aria-label="OPML 文件"
-                      className="min-h-9 w-full rounded-[0.9rem] border border-[color:var(--line)] bg-white px-3 py-2 text-sm text-[var(--foreground)] shadow-[var(--shadow-sm)] outline-none transition file:mr-4 file:rounded-[0.9rem] file:border-0 file:bg-[var(--surface)] file:px-3 file:py-2 file:text-sm file:font-medium file:text-[var(--foreground)] sm:flex-1"
-                      accept=".opml,.xml,text/xml,application/xml"
-                      type="file"
-                      onChange={(event) =>
-                        setOpmlFile(event.target.files?.[0] ?? null)
-                      }
-                    />
-                    <Button
-                      variant="secondary"
-                      size="md"
-                      onClick={importOpml}
-                      disabled={isPending || !opmlFile}
-                    >
-                      导入 OPML
-                    </Button>
-                  </div>
-                </div>
+          <div className="space-y-6">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="space-y-1">
+                <h2 className="text-lg font-semibold text-[var(--foreground)]">
+                  信息源管理
+                </h2>
+                <p className="text-sm text-[var(--muted)]">
+                  集中维护 RSS 信息源。
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  ref={opmlFileInputRef}
+                  aria-label="OPML 文件"
+                  accept=".opml,.xml,text/xml,application/xml"
+                  type="file"
+                  className="sr-only"
+                  onChange={(event) => importOpml(event.target.files?.[0] ?? null)}
+                />
+                <Button
+                  variant="secondary"
+                  size="md"
+                  onClick={() => opmlFileInputRef.current?.click()}
+                  disabled={isPending}
+                >
+                  导入 OPML
+                </Button>
+                <Button variant="primary" size="md" onClick={openCreateSourceModal}>
+                  新建信息源
+                </Button>
+              </div>
+            </div>
 
-                <div className="space-y-4">
-                  <div className="space-y-1">
-                    <p className={labelClassName}>新建信息源</p>
-                    <p className={helperTextClassName}>
-                      支持先输入 RSS URL 自动填充，再补充分组与抓取策略。
-                    </p>
-                  </div>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+              <FilterInput
+                id="source-filter-name"
+                label="RSS源名称"
+                ariaLabel="RSS源名称"
+                value={sourceNameFilter}
+                placeholder="按名称或 RSS URL 搜索"
+                onChange={(value) => {
+                  setSourceNameFilter(value);
+                  setSourcePage(1);
+                }}
+              />
+              <FilterSelect
+                id="source-filter-group"
+                label="分组"
+                ariaLabel="分组"
+                value={sourceGroupFilter}
+                onChange={(value) => {
+                  setSourceGroupFilter(value);
+                  setSourcePage(1);
+                }}
+                showSearch={false}
+                options={[
+                  { value: "", label: "全部分组" },
+                  { value: "__ungrouped__", label: "未分组" },
+                  ...initialSettings.groups.map((group) => ({
+                    value: group.id,
+                    label: group.name,
+                  })),
+                ]}
+              />
+              <FilterSelect
+                id="source-filter-enabled"
+                label="是否启用"
+                ariaLabel="是否启用"
+                value={sourceEnabledFilter}
+                onChange={(value) => {
+                  setSourceEnabledFilter(value);
+                  setSourcePage(1);
+                }}
+                showSearch={false}
+                options={[
+                  { value: "", label: "全部" },
+                  { value: "enabled", label: "已启用" },
+                  { value: "disabled", label: "已停用" },
+                ]}
+              />
+            </div>
 
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <FilterInput
-                      id="new-source-name"
-                      label="名称"
-                      ariaLabel="名称"
-                      value={newSource.name}
-                      placeholder="名称"
-                      onChange={(value) =>
-                        setNewSource((current) => ({
-                          ...current,
-                          name: value,
-                        }))
-                      }
-                    />
-
-                    <FilterInput
-                      id="new-source-rss"
-                      label="RSS URL"
-                      ariaLabel="RSS URL"
-                      value={newSource.rssUrl}
-                      placeholder="RSS URL"
-                      onChange={(value) =>
-                        setNewSource((current) => ({
-                          ...current,
-                          rssUrl: value,
-                        }))
-                      }
-                    />
-
-                    <FilterInput
-                      id="new-source-site"
-                      label="站点 URL"
-                      ariaLabel="站点 URL"
-                      value={newSource.siteUrl}
-                      placeholder="站点 URL"
-                      onChange={(value) =>
-                        setNewSource((current) => ({
-                          ...current,
-                          siteUrl: value,
-                        }))
-                      }
-                    />
-
-                    <FilterSelect
-                      id="new-source-group"
-                      label="所属分组"
-                      ariaLabel="所属分组"
-                      value={newSource.groupId}
-                      onChange={(value) =>
-                        setNewSource((current) => ({
-                          ...current,
-                          groupId: value,
-                        }))
-                      }
-                      showSearch={false}
-                      options={[
-                        { value: "", label: "未分组" },
-                        ...initialSettings.groups.map((group) => ({
-                          value: group.id,
-                          label: group.name,
-                        })),
-                      ]}
-                    />
-                  </div>
-
-                  <div className="flex flex-wrap gap-3">
-                    <label className={checkboxClassName}>
-                      <input
-                        checked={newSource.enabled}
-                        className={checkboxInputClassName}
-                        type="checkbox"
-                        onChange={(event) =>
-                          setNewSource((current) => ({
-                            ...current,
-                            enabled: event.target.checked,
-                          }))
-                        }
-                      />
-                      启用
-                    </label>
-                    <label className={checkboxClassName}>
-                      <input
-                        checked={newSource.fetchFullTextWhenMissing}
-                        className={checkboxInputClassName}
-                        type="checkbox"
-                        onChange={(event) =>
-                          setNewSource((current) => ({
-                            ...current,
-                            fetchFullTextWhenMissing: event.target.checked,
-                          }))
-                        }
-                      />
-                      缺全文时补抓
-                    </label>
-                  </div>
-
-                  <div className="flex flex-wrap gap-3">
-                    <Button
-                      variant="secondary"
-                      size="md"
-                      onClick={resolveSourceFromRss}
-                      disabled={isPending || !newSource.rssUrl.trim()}
-                    >
-                      根据 RSS 自动填充
-                    </Button>
-                    <Button
-                      variant="primary"
-                      size="md"
-                      onClick={() =>
-                        submitJson(
-                          "/api/admin/settings/sources",
-                          "POST",
-                          {
-                            ...newSource,
-                            groupId: newSource.groupId || null,
-                          },
-                          "信息源已创建。",
-                          true,
-                        )
-                      }
-                      disabled={
-                        isPending ||
-                        !newSource.name ||
-                        !newSource.rssUrl ||
-                        !newSource.siteUrl
-                      }
-                    >
-                      创建信息源
-                    </Button>
-                  </div>
-                </div>
-              </section>
-
-              <section
-                role="region"
-                aria-label="已有信息源列表"
-                className="space-y-3 p-4 xl:border-l xl:border-[color:var(--line)]"
-              >
-                <div className="space-y-1">
-                  <p className={labelClassName}>已有信息源</p>
-                  <p className={helperTextClassName}>
-                    可直接修改名称、分组、抓取策略，保存接口与删除行为不变。
-                  </p>
-                </div>
-
-                <div className="space-y-0">
-                  {initialSettings.sources.length ? (
-                    initialSettings.sources.map((source) => (
-                      <SourceRow
+            {paginatedSources.length === 0 ? (
+              <div className="rounded-sm border border-[color:var(--line)] bg-[var(--bg-muted)] px-4 py-8 text-center text-sm text-[var(--muted)]">
+                {filteredSources.length === 0 && initialSettings.sources.length > 0
+                  ? "暂无匹配信息源"
+                  : "暂无信息源"}
+              </div>
+            ) : (
+              <div className="w-full overflow-x-auto">
+                <table className="w-full table-auto text-sm">
+                  <thead className="bg-[var(--bg-muted)] text-[var(--muted)]">
+                    <tr>
+                      <th className="w-[28%] px-4 py-3 text-left">RSS 源名称</th>
+                      <th className="w-[18%] px-4 py-3 text-left">分组</th>
+                      <th className="w-[18%] px-4 py-3 text-left">状态</th>
+                      <th className="w-[21%] px-4 py-3 text-left">站点信息</th>
+                      <th className="w-[15%] px-4 py-3 text-right">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[color:var(--line)]">
+                    {paginatedSources.map((source) => (
+                      <tr
                         key={source.id}
-                        groups={initialSettings.groups}
-                        source={source}
-                        submitJson={submitJson}
-                      />
-                    ))
-                  ) : (
-                    <div className="rounded-[0.95rem] border border-dashed border-[color:var(--line)] bg-white px-4 py-4 text-sm leading-6 text-[var(--muted)]">
-                      还没有信息源。可以通过 RSS 手动创建，或先导入 OPML
-                      批量建立。
-                    </div>
-                  )}
+                        className="transition-colors hover:bg-[var(--bg-muted)]"
+                      >
+                        <td className="px-4 py-3">
+                          <div className="font-medium text-[var(--foreground)]">
+                            {source.name}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-[var(--text-2)]">
+                          {source.groupName ?? "未分组"}
+                        </td>
+                        <td className="px-4 py-3 text-[var(--text-2)]">
+                          <div>{source.enabled ? "已启用" : "已停用"}</div>
+                          <div className="mt-1 text-xs text-[var(--text-3)]">
+                            {source.fetchFullTextWhenMissing ? "缺全文时补抓" : "仅保留 RSS"}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-xs text-[var(--text-3)]">
+                          <div>{source.siteUrl}</div>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            <IconButton
+                              variant="secondary"
+                              size="sm"
+                              title="编辑"
+                              onClick={() => openEditSourceModal(source)}
+                            >
+                              <IconEdit className="h-4 w-4" />
+                            </IconButton>
+                            <IconButton
+                              variant="secondary"
+                              size="sm"
+                              title="删除"
+                              className="text-[var(--danger-ink)] hover:bg-[var(--danger-surface)] hover:text-[var(--danger-ink)]"
+                              onClick={() =>
+                                submitJson(
+                                  `/api/admin/settings/sources/${source.id}`,
+                                  "DELETE",
+                                  {},
+                                  "信息源已删除。",
+                                  true,
+                                )
+                              }
+                            >
+                              <IconTrash className="h-4 w-4" />
+                            </IconButton>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {filteredSources.length > 0 ? (
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-sm text-[var(--muted)]">
+                  <span>每页显示</span>
+                  <select
+                    value={sourcePageSize}
+                    onChange={handleSourcePageSizeChange}
+                    className="rounded-sm border border-[color:var(--line)] bg-[var(--surface)] px-2 py-1 text-sm"
+                  >
+                    <option value={10}>10</option>
+                    <option value={20}>20</option>
+                    <option value={50}>50</option>
+                  </select>
+                  <span>条，共 {filteredSources.length} 条</span>
                 </div>
-              </section>
-            </section>
-          </SectionCard>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setSourcePage((current) => Math.max(1, current - 1))}
+                    disabled={sourcePage === 1}
+                  >
+                    上一页
+                  </Button>
+                  <span className="min-w-[100px] rounded-sm border border-[color:var(--line)] bg-[var(--surface)] px-4 py-2 text-center text-sm text-[var(--muted)]">
+                    第 {sourcePage} / {sourceTotalPages} 页
+                  </span>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() =>
+                      setSourcePage((current) => Math.min(sourceTotalPages, current + 1))
+                    }
+                    disabled={sourcePage >= sourceTotalPages}
+                  >
+                    下一页
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+
+            <ModalShell
+              isOpen={Boolean(sourceModalMode)}
+              onClose={() => {
+                setSourceModalMode(null);
+                setEditingSourceId(null);
+              }}
+              title={sourceModalMode === "edit" ? "编辑信息源" : "新建信息源"}
+              widthClassName="max-w-2xl"
+              headerClassName="border-b border-[color:var(--line)] p-6"
+              bodyClassName="space-y-4 p-6"
+              footerClassName="border-t border-[color:var(--line)] bg-[var(--bg-muted)] p-6"
+              footer={
+                <div className="flex justify-end gap-2">
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      setSourceModalMode(null);
+                      setEditingSourceId(null);
+                    }}
+                  >
+                    取消
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={resolveSourceFromRss}
+                    disabled={isPending || !sourceForm.rssUrl.trim()}
+                  >
+                    自动填充
+                  </Button>
+                  <Button
+                    variant="primary"
+                    onClick={handleSaveSource}
+                    disabled={
+                      isPending ||
+                      !sourceForm.name.trim() ||
+                      !sourceForm.rssUrl.trim() ||
+                      !sourceForm.siteUrl.trim()
+                    }
+                  >
+                    {sourceModalMode === "edit" ? "保存" : "创建"}
+                  </Button>
+                </div>
+              }
+            >
+              <div className="grid gap-4 md:grid-cols-2">
+                <FilterInput
+                  id="source-form-name"
+                  label="名称"
+                  ariaLabel="名称"
+                  value={sourceForm.name}
+                  placeholder="信息源名称"
+                  onChange={(value) =>
+                    setSourceForm((current) => ({ ...current, name: value }))
+                  }
+                />
+                <FilterInput
+                  id="source-form-rss"
+                  label="RSS URL"
+                  ariaLabel="RSS URL"
+                  value={sourceForm.rssUrl}
+                  placeholder="https://example.com/feed.xml"
+                  onChange={(value) =>
+                    setSourceForm((current) => ({ ...current, rssUrl: value }))
+                  }
+                />
+                <FilterInput
+                  id="source-form-site"
+                  label="站点 URL"
+                  ariaLabel="站点 URL"
+                  value={sourceForm.siteUrl}
+                  placeholder="https://example.com"
+                  onChange={(value) =>
+                    setSourceForm((current) => ({ ...current, siteUrl: value }))
+                  }
+                />
+                <FilterSelect
+                  id="source-form-group"
+                  label="所属分组"
+                  ariaLabel="所属分组"
+                  value={sourceForm.groupId}
+                  onChange={(value) =>
+                    setSourceForm((current) => ({ ...current, groupId: value }))
+                  }
+                  showSearch={false}
+                  options={[
+                    { value: "", label: "未分组" },
+                    ...initialSettings.groups.map((group) => ({
+                      value: group.id,
+                      label: group.name,
+                    })),
+                  ]}
+                />
+              </div>
+
+              <div className="flex items-center gap-4">
+                <label className="flex flex-wrap items-center gap-2">
+                  <input
+                    checked={sourceForm.enabled}
+                    className={checkboxInputClassName}
+                    type="checkbox"
+                    onChange={(event) =>
+                      setSourceForm((current) => ({
+                        ...current,
+                        enabled: event.target.checked,
+                      }))
+                    }
+                  />
+                  <span className="text-sm text-[var(--text-2)]">启用此信息源</span>
+                </label>
+                <label className="flex flex-wrap items-center gap-2">
+                  <input
+                    checked={sourceForm.fetchFullTextWhenMissing}
+                    className={checkboxInputClassName}
+                    type="checkbox"
+                    onChange={(event) =>
+                      setSourceForm((current) => ({
+                        ...current,
+                        fetchFullTextWhenMissing: event.target.checked,
+                      }))
+                    }
+                  />
+                  <span className="text-sm text-[var(--text-2)]">缺全文时补抓</span>
+                </label>
+              </div>
+            </ModalShell>
+          </div>
         ) : null}
       </section>
     </section>
@@ -692,206 +976,97 @@ function GroupRow({
   ) => void;
 }) {
   const [name, setName] = useState(group.name);
+  const [isEditing, setIsEditing] = useState(false);
+  const initial = group.name.charAt(0).toUpperCase();
+  const badgeColor = getStableGroupBadgeColor(group.name);
 
   return (
     <div
-      className={cx(
-        subtleCardClassName,
-        "flex flex-col gap-3 p-3 sm:flex-row sm:items-center",
-      )}
+      className="rounded-lg border border-[color:var(--line)] bg-[var(--surface)] px-3 py-3 transition hover:shadow-[0_1px_3px_rgba(0,0,0,0.06)]"
     >
-      <TextInput
-        className="sm:flex-1"
-        value={name}
-        onChange={(event) => setName(event.target.value)}
-      />
-      <div className="flex flex-wrap gap-3">
-        <Button
-          variant="secondary"
-          size="md"
-          onClick={() =>
-            submitJson(
-              `/api/admin/settings/groups/${group.id}`,
-              "PATCH",
-              { name },
-              "分组已更新。",
-            )
-          }
-        >
-          保存
-        </Button>
-        <Button
-          variant="danger"
-          size="md"
-          onClick={() =>
-            submitJson(
-              `/api/admin/settings/groups/${group.id}`,
-              "DELETE",
-              {},
-              "分组已删除。",
-              true,
-            )
-          }
-        >
-          删除
-        </Button>
-      </div>
-    </div>
-  );
-}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-center gap-3">
+          <div
+            className="flex h-8 w-8 items-center justify-center rounded text-sm font-bold text-white"
+            style={{ backgroundColor: badgeColor }}
+          >
+            {initial || <IconTag className="h-4 w-4" />}
+          </div>
+          <div className="min-w-0">
+            {isEditing ? (
+              <TextInput
+                className="min-w-[12rem]"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+              />
+            ) : (
+              <h3 className="text-sm font-semibold text-[var(--text-1)]">
+                {group.name}
+              </h3>
+            )}
+          </div>
+        </div>
 
-function SourceRow({
-  source,
-  groups,
-  submitJson,
-}: {
-  source: AdminSettingsSnapshot["sources"][number];
-  groups: AdminSettingsSnapshot["groups"];
-  submitJson: (
-    url: string,
-    method: string,
-    body: unknown,
-    successMessage: string,
-    reload?: boolean,
-  ) => void;
-}) {
-  const [draft, setDraft] = useState({
-    name: source.name,
-    rssUrl: source.rssUrl,
-    siteUrl: source.siteUrl,
-    enabled: source.enabled,
-    fetchFullTextWhenMissing: source.fetchFullTextWhenMissing,
-    groupId: source.groupId ?? "",
-  });
-
-  return (
-    <div className="border-t border-[color:var(--line)] pt-3">
-      <div className="grid gap-3 md:grid-cols-2">
-        <FormField label="名称">
-          <TextInput
-            aria-label="名称"
-            className="min-h-9 rounded-[0.9rem] bg-white px-3 py-2 shadow-[var(--shadow-sm)]"
-            value={draft.name}
-            onChange={(event) =>
-              setDraft((current) => ({ ...current, name: event.target.value }))
+        <div className="flex gap-1">
+          {isEditing ? (
+            <>
+              <IconButton
+                variant="secondary"
+                size="sm"
+                title="保存"
+                onClick={() => {
+                  submitJson(
+                    `/api/admin/settings/groups/${group.id}`,
+                    "PATCH",
+                    { name },
+                    "分组已更新。",
+                  );
+                  setIsEditing(false);
+                }}
+                disabled={!name.trim()}
+              >
+                <IconCheck className="h-4 w-4" />
+              </IconButton>
+              <IconButton
+                variant="secondary"
+                size="sm"
+                title="取消"
+                onClick={() => {
+                  setName(group.name);
+                  setIsEditing(false);
+                }}
+              >
+                <IconX className="h-4 w-4" />
+              </IconButton>
+            </>
+          ) : (
+            <IconButton
+              variant="secondary"
+              size="sm"
+              title="编辑"
+              onClick={() => setIsEditing(true)}
+            >
+              <IconEdit className="h-4 w-4" />
+            </IconButton>
+          )}
+          <IconButton
+            variant="secondary"
+            size="sm"
+            title="删除"
+            className="text-[var(--danger-ink)] hover:bg-[var(--danger-surface)] hover:text-[var(--danger-ink)]"
+            onClick={() =>
+              submitJson(
+                `/api/admin/settings/groups/${group.id}`,
+                "DELETE",
+                {},
+                "分组已删除。",
+                true,
+              )
             }
-          />
-        </FormField>
-
-        <FormField label="RSS URL">
-          <TextInput
-            aria-label="RSS URL"
-            className="min-h-9 rounded-[0.9rem] bg-white px-3 py-2 shadow-[var(--shadow-sm)]"
-            value={draft.rssUrl}
-            onChange={(event) =>
-              setDraft((current) => ({
-                ...current,
-                rssUrl: event.target.value,
-              }))
-            }
-          />
-        </FormField>
-
-        <FormField label="站点 URL">
-          <TextInput
-            aria-label="站点 URL"
-            className="min-h-9 rounded-[0.9rem] bg-white px-3 py-2 shadow-[var(--shadow-sm)]"
-            value={draft.siteUrl}
-            onChange={(event) =>
-              setDraft((current) => ({
-                ...current,
-                siteUrl: event.target.value,
-              }))
-            }
-          />
-        </FormField>
-
-        <FilterSelect
-          id={`source-row-group-${source.id}`}
-          label="所属分组"
-          ariaLabel="所属分组"
-          value={draft.groupId}
-          onChange={(value) =>
-            setDraft((current) => ({
-              ...current,
-              groupId: value,
-            }))
-          }
-          showSearch={false}
-          options={[
-            { value: "", label: "未分组" },
-            ...groups.map((group) => ({
-              value: group.id,
-              label: group.name,
-            })),
-          ]}
-        />
-      </div>
-
-      <div className="mt-3 flex flex-wrap gap-3">
-        <label className={checkboxClassName}>
-          <input
-            checked={draft.enabled}
-            className={checkboxInputClassName}
-            type="checkbox"
-            onChange={(event) =>
-              setDraft((current) => ({
-                ...current,
-                enabled: event.target.checked,
-              }))
-            }
-          />
-          启用
-        </label>
-        <label className={checkboxClassName}>
-          <input
-            checked={draft.fetchFullTextWhenMissing}
-            className={checkboxInputClassName}
-            type="checkbox"
-            onChange={(event) =>
-              setDraft((current) => ({
-                ...current,
-                fetchFullTextWhenMissing: event.target.checked,
-              }))
-            }
-          />
-          缺全文时补抓
-        </label>
-      </div>
-
-      <div className="mt-3 flex flex-wrap gap-3">
-        <Button
-          variant="secondary"
-          size="md"
-          onClick={() =>
-            submitJson(
-              `/api/admin/settings/sources/${source.id}`,
-              "PATCH",
-              {
-                ...draft,
-                groupId: draft.groupId || null,
-              },
-              "信息源已更新。",
-            )
-          }
-        >
-          保存
-        </Button>
-        <Button
-          variant="danger"
-          size="md"
-          onClick={() =>
-            submitJson(
-              `/api/admin/settings/sources/${source.id}`,
-              "DELETE",
-              {},
-              "信息源已删除。",
-              true,
-            )
-          }
-        >
-          删除
-        </Button>
+          >
+            <IconTrash className="h-4 w-4" />
+          </IconButton>
+        </div>
       </div>
     </div>
   );

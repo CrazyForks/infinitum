@@ -323,8 +323,9 @@ describe("AdminSettingsPanel", () => {
     );
 
     await user.click(screen.getByRole("tab", { name: "信息源" }));
+    await user.click(screen.getByRole("button", { name: "新建信息源" }));
     await user.type(screen.getByLabelText("RSS URL"), "https://feeds.example.com/feed.xml?raw=1");
-    await user.click(screen.getByRole("button", { name: "根据 RSS 自动填充" }));
+    await user.click(screen.getByRole("button", { name: "自动填充" }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith("/api/admin/settings/sources/resolve", {
@@ -339,7 +340,7 @@ describe("AdminSettingsPanel", () => {
     });
 
     await user.selectOptions(screen.getByLabelText("所属分组"), "group-1");
-    await user.click(screen.getByRole("button", { name: "创建信息源" }));
+    await user.click(screen.getByRole("button", { name: "创建" }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith("/api/admin/settings/sources", {
@@ -354,6 +355,95 @@ describe("AdminSettingsPanel", () => {
           enabled: true,
           fetchFullTextWhenMissing: true,
           groupId: "group-1",
+        }),
+      });
+    });
+
+    await waitFor(() => {
+      expect(refreshSpy).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("filters the source list by name, group and enabled status", async () => {
+    const user = userEvent.setup();
+
+    renderWithProviders(
+      <AdminSettingsPanel
+        initialSettings={{
+          ...buildInitialSettings(),
+          sources: [
+            buildInitialSettings().sources[0],
+            {
+              id: "source-2",
+              name: "Infra Feed",
+              rssUrl: "https://infra.example.com/rss.xml",
+              siteUrl: "https://infra.example.com",
+              enabled: false,
+              fetchFullTextWhenMissing: false,
+              groupId: null,
+              groupName: null,
+            },
+          ],
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole("tab", { name: "信息源" }));
+    const sourcesPanel = screen.getByRole("tabpanel");
+
+    expect(screen.getByText("Existing Source")).toBeInTheDocument();
+    expect(screen.getByText("Infra Feed")).toBeInTheDocument();
+    expect(screen.queryByText("https://example.com/feed.xml")).not.toBeInTheDocument();
+    expect(screen.queryByText("ID：source-1")).not.toBeInTheDocument();
+    expect(within(sourcesPanel).getByText("站点信息")).toBeInTheDocument();
+
+    await user.type(within(sourcesPanel).getByLabelText("RSS源名称"), "Infra");
+    expect(screen.queryByText("Existing Source")).not.toBeInTheDocument();
+    expect(screen.getByText("Infra Feed")).toBeInTheDocument();
+
+    await user.clear(within(sourcesPanel).getByLabelText("RSS源名称"));
+    await user.selectOptions(within(sourcesPanel).getByLabelText("是否启用"), "enabled");
+    expect(screen.getByText("Existing Source")).toBeInTheDocument();
+    expect(screen.queryByText("Infra Feed")).not.toBeInTheDocument();
+
+    await user.selectOptions(within(sourcesPanel).getByLabelText("分组"), "__ungrouped__");
+    expect(screen.queryByText("Existing Source")).not.toBeInTheDocument();
+  });
+
+  it("renders the Lumina-like group management list and creates a group from the header action", async () => {
+    const user = userEvent.setup();
+    const refreshSpy = vi.fn();
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ ok: true })));
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderWithProviders(
+      <AdminSettingsPanel onRefresh={refreshSpy} initialSettings={buildInitialSettings()} />,
+    );
+
+    await user.click(screen.getByRole("tab", { name: "分组" }));
+
+    const groupsPanel = screen.getByRole("tabpanel");
+
+    expect(within(groupsPanel).getByText("分组列表")).toBeInTheDocument();
+    expect(within(groupsPanel).getByRole("button", { name: "+ 新增分组" })).toBeInTheDocument();
+    expect(within(groupsPanel).getByText("Core")).toBeInTheDocument();
+    expect(
+      within(groupsPanel).queryByText("用于组织信息源与 OPML 导入结果"),
+    ).not.toBeInTheDocument();
+
+    await user.click(within(groupsPanel).getByRole("button", { name: "+ 新增分组" }));
+    await user.type(screen.getByPlaceholderText("新分组名称"), "Infra");
+    await user.click(screen.getByRole("button", { name: "创建" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/admin/settings/groups", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          name: "Infra",
         }),
       });
     });
