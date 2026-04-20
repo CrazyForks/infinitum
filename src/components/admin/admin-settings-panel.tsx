@@ -2,10 +2,12 @@
 import { type ReactNode, useEffect, useState, useTransition } from "react";
 
 import { AiSettingsPanel } from "@/components/admin/ai-settings-panel";
+import { Button } from "@/components/ui/button";
 import { PageShell } from "@/components/ui/page-shell";
 import { FilterInput } from "@/components/ui/filter-input";
 import { FilterSelect } from "@/components/ui/filter-select";
 import { FormField } from "@/components/ui/form-field";
+import { TextArea } from "@/components/ui/text-area";
 import { TextInput } from "@/components/ui/text-input";
 import { useToast } from "@/components/ui/toast";
 import type { AdminSettingsSnapshot } from "@/lib/settings/types";
@@ -31,22 +33,6 @@ const subtleCardClassName =
   "rounded-[0.95rem] border border-[color:var(--line)] bg-[var(--surface-muted)]/82 shadow-[var(--shadow-sm)]";
 const labelClassName = "text-sm font-medium leading-6 text-[var(--foreground)]";
 const helperTextClassName = "text-xs leading-6 text-[var(--muted)]";
-const inputClassName =
-  "min-h-9 w-full rounded-[0.9rem] border border-[color:var(--line)] bg-white px-3 py-2 text-sm text-[var(--foreground)] shadow-[var(--shadow-sm)] outline-none transition placeholder:text-[var(--muted)] focus:border-[color:var(--line-strong)] focus:ring-2 focus:ring-[color:var(--accent-soft)]";
-const textareaClassName = cx(
-  inputClassName,
-  "min-h-[8rem] resize-y py-3 leading-6",
-);
-const selectClassName =
-  "min-h-9 w-full rounded-[0.9rem] border border-[color:var(--line)] bg-white px-3 py-2 text-sm text-[var(--foreground)] shadow-[var(--shadow-sm)] outline-none transition focus:border-[color:var(--line-strong)] focus:ring-2 focus:ring-[color:var(--accent-soft)]";
-const secondaryButtonClassName =
-  "inline-flex min-h-9 items-center justify-center rounded-[0.9rem] border border-[color:var(--line)] bg-white px-3 py-2 text-sm font-medium text-[var(--foreground)] shadow-[var(--shadow-sm)] transition hover:border-[color:var(--line-strong)] hover:bg-[var(--surface)] disabled:cursor-not-allowed disabled:opacity-55";
-const primaryButtonClassName =
-  "inline-flex min-h-9 items-center justify-center rounded-[0.9rem] bg-[var(--accent)] px-3 py-2 text-sm font-semibold text-white shadow-[0_14px_24px_rgba(37,99,235,0.16)] transition hover:bg-[var(--accent-strong)] disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:bg-[var(--accent)]";
-const dangerButtonClassName = cx(
-  secondaryButtonClassName,
-  "border-[color:var(--danger-line)] bg-[var(--danger-surface)] text-[var(--danger-ink)] hover:bg-[var(--danger-surface)]",
-);
 const checkboxClassName =
   "inline-flex min-h-9 items-center gap-3 rounded-[0.9rem] border border-[color:var(--line)] bg-white px-3 py-2 text-sm font-medium text-[var(--foreground)] shadow-[var(--shadow-sm)]";
 const checkboxInputClassName =
@@ -91,6 +77,10 @@ export function AdminSettingsPanel({
     fetchFullTextWhenMissing: true,
     groupId: "",
   });
+  const normalizedBlacklistKeywords = blacklistText
+    .split("\n")
+    .map((keyword) => keyword.trim())
+    .filter(Boolean);
 
   const submitJson = (
     url: string,
@@ -246,42 +236,71 @@ export function AdminSettingsPanel({
         ) : null}
 
         {activeSection === "blacklist" ? (
-          <SectionCard headingId="settings-blacklist" title="黑名单">
-            <label className="space-y-2">
-              <span className={labelClassName}>关键词列表（每行一个）</span>
-              <textarea
-                className={cx(textareaClassName, "min-h-[14rem]")}
+          <div
+            aria-labelledby="settings-blacklist"
+            className="w-full min-w-0"
+          >
+            <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
+              <div className="space-y-1">
+                <h2
+                  className="text-lg font-semibold text-[var(--text-1)]"
+                  id="settings-blacklist"
+                >
+                  黑名单
+                </h2>
+                <p className="text-sm text-[var(--text-3)]">
+                  配置关键词黑名单过滤规则
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="primary"
+                  size="md"
+                  onClick={() =>
+                    submitJson(
+                      "/api/admin/settings/blacklist",
+                      "PUT",
+                      {
+                        keywords: normalizedBlacklistKeywords,
+                      },
+                      "黑名单已保存。",
+                    )
+                  }
+                  disabled={isPending}
+                >
+                  保存配置
+                </Button>
+              </div>
+            </div>
+
+            <section aria-label="黑名单关键词编辑区">
+              <div className="flex items-center gap-2 mb-1">
+                <label
+                  className="block text-sm text-[var(--text-2)]"
+                  htmlFor="blacklist-keywords-textarea"
+                >
+                  关键词列表
+                </label>
+                <div className="relative group">
+                  <span className="inline-flex h-5 w-5 cursor-default items-center justify-center rounded-full border border-[color:var(--line)] text-xs text-[var(--text-3)]">
+                    ?
+                  </span>
+                  <div className="pointer-events-none absolute left-1/2 top-full z-10 mt-2 -translate-x-1/2 whitespace-nowrap rounded-sm border border-[color:var(--line)] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text-2)] shadow-[0_1px_3px_rgba(0,0,0,0.06)] opacity-0 transition group-hover:opacity-100">
+                    支持换行分隔，保存时自动去掉空行与首尾空格
+                  </div>
+                </div>
+              </div>
+
+              <TextArea
+                id="blacklist-keywords-textarea"
+                className="min-h-[112px]"
+                rows={4}
+                placeholder="每行一个黑名单关键词"
                 value={blacklistText}
                 onChange={(event) => setBlacklistText(event.target.value)}
               />
-              <span className={helperTextClassName}>
-                保存时会自动去掉空行与首尾空格。
-              </span>
-            </label>
-
-            <div className="flex flex-wrap gap-3">
-              <button
-                className={primaryButtonClassName}
-                type="button"
-                onClick={() =>
-                  submitJson(
-                    "/api/admin/settings/blacklist",
-                    "PUT",
-                    {
-                      keywords: blacklistText
-                        .split("\n")
-                        .map((keyword) => keyword.trim())
-                        .filter(Boolean),
-                    },
-                    "黑名单已保存。",
-                  )
-                }
-                disabled={isPending}
-              >
-                保存黑名单
-              </button>
-            </div>
-          </SectionCard>
+            </section>
+          </div>
         ) : null}
 
         {activeSection === "groups" ? (
@@ -296,15 +315,15 @@ export function AdminSettingsPanel({
                 </p>
               </div>
               <div className="flex flex-col gap-3 sm:flex-row">
-                <input
-                  className={cx(inputClassName, "sm:flex-1")}
+                <TextInput
+                  className="sm:flex-1"
                   placeholder="新分组名称"
                   value={newGroupName}
                   onChange={(event) => setNewGroupName(event.target.value)}
                 />
-                <button
-                  className={primaryButtonClassName}
-                  type="button"
+                <Button
+                  variant="primary"
+                  size="md"
                   onClick={() =>
                     submitJson(
                       "/api/admin/settings/groups",
@@ -317,7 +336,7 @@ export function AdminSettingsPanel({
                   disabled={isPending || !newGroupName.trim()}
                 >
                   创建分组
-                </button>
+                </Button>
               </div>
             </div>
 
@@ -361,24 +380,21 @@ export function AdminSettingsPanel({
                   <div className="flex flex-col gap-3 sm:flex-row">
                     <input
                       aria-label="OPML 文件"
-                      className={cx(
-                        inputClassName,
-                        "file:mr-4 file:rounded-[0.9rem] file:border-0 file:bg-[var(--surface)] file:px-3 file:py-2 file:text-sm file:font-medium file:text-[var(--foreground)] sm:flex-1",
-                      )}
+                      className="min-h-9 w-full rounded-[0.9rem] border border-[color:var(--line)] bg-white px-3 py-2 text-sm text-[var(--foreground)] shadow-[var(--shadow-sm)] outline-none transition file:mr-4 file:rounded-[0.9rem] file:border-0 file:bg-[var(--surface)] file:px-3 file:py-2 file:text-sm file:font-medium file:text-[var(--foreground)] sm:flex-1"
                       accept=".opml,.xml,text/xml,application/xml"
                       type="file"
                       onChange={(event) =>
                         setOpmlFile(event.target.files?.[0] ?? null)
                       }
                     />
-                    <button
-                      className={secondaryButtonClassName}
-                      type="button"
+                    <Button
+                      variant="secondary"
+                      size="md"
                       onClick={importOpml}
                       disabled={isPending || !opmlFile}
                     >
                       导入 OPML
-                    </button>
+                    </Button>
                   </div>
                 </div>
 
@@ -487,17 +503,17 @@ export function AdminSettingsPanel({
                   </div>
 
                   <div className="flex flex-wrap gap-3">
-                    <button
-                      className={secondaryButtonClassName}
-                      type="button"
+                    <Button
+                      variant="secondary"
+                      size="md"
                       onClick={resolveSourceFromRss}
                       disabled={isPending || !newSource.rssUrl.trim()}
                     >
                       根据 RSS 自动填充
-                    </button>
-                    <button
-                      className={primaryButtonClassName}
-                      type="button"
+                    </Button>
+                    <Button
+                      variant="primary"
+                      size="md"
                       onClick={() =>
                         submitJson(
                           "/api/admin/settings/sources",
@@ -518,7 +534,7 @@ export function AdminSettingsPanel({
                       }
                     >
                       创建信息源
-                    </button>
+                    </Button>
                   </div>
                 </div>
               </section>
@@ -634,11 +650,13 @@ function SectionCard({
   title,
   headingId,
   className,
+  titleClassName,
   children,
 }: {
   title: string;
   headingId: string;
   className?: string;
+  titleClassName?: string;
   children: ReactNode;
 }) {
   return (
@@ -647,7 +665,10 @@ function SectionCard({
       className={cx(surfaceCardClassName, "space-y-3.5 p-3.5", className)}
     >
       <h2
-        className="text-[1rem] font-semibold tracking-[-0.03em] text-[var(--foreground)]"
+        className={cx(
+          "text-[1rem] font-semibold tracking-[-0.03em] text-[var(--foreground)]",
+          titleClassName,
+        )}
         id={headingId}
       >
         {title}
@@ -679,15 +700,15 @@ function GroupRow({
         "flex flex-col gap-3 p-3 sm:flex-row sm:items-center",
       )}
     >
-      <input
-        className={cx(inputClassName, "sm:flex-1")}
+      <TextInput
+        className="sm:flex-1"
         value={name}
         onChange={(event) => setName(event.target.value)}
       />
       <div className="flex flex-wrap gap-3">
-        <button
-          className={secondaryButtonClassName}
-          type="button"
+        <Button
+          variant="secondary"
+          size="md"
           onClick={() =>
             submitJson(
               `/api/admin/settings/groups/${group.id}`,
@@ -698,10 +719,10 @@ function GroupRow({
           }
         >
           保存
-        </button>
-        <button
-          className={dangerButtonClassName}
-          type="button"
+        </Button>
+        <Button
+          variant="danger"
+          size="md"
           onClick={() =>
             submitJson(
               `/api/admin/settings/groups/${group.id}`,
@@ -713,7 +734,7 @@ function GroupRow({
           }
         >
           删除
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -839,9 +860,9 @@ function SourceRow({
       </div>
 
       <div className="mt-3 flex flex-wrap gap-3">
-        <button
-          className={secondaryButtonClassName}
-          type="button"
+        <Button
+          variant="secondary"
+          size="md"
           onClick={() =>
             submitJson(
               `/api/admin/settings/sources/${source.id}`,
@@ -855,10 +876,10 @@ function SourceRow({
           }
         >
           保存
-        </button>
-        <button
-          className={dangerButtonClassName}
-          type="button"
+        </Button>
+        <Button
+          variant="danger"
+          size="md"
           onClick={() =>
             submitJson(
               `/api/admin/settings/sources/${source.id}`,
@@ -870,7 +891,7 @@ function SourceRow({
           }
         >
           删除
-        </button>
+        </Button>
       </div>
     </div>
   );

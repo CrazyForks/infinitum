@@ -53,3 +53,5 @@ next-env.d.ts
 /docker-compose.local.yml
 /scripts/local/
 /scripts/deploy-local/
+/.npm/
+/Library/

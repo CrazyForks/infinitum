@@ -362,4 +362,45 @@ describe("AdminSettingsPanel", () => {
       expect(refreshSpy).toHaveBeenCalledTimes(1);
     });
   });
+
+  it("renders the Lumina-like blacklist layout and keeps the original save payload", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ ok: true })));
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderWithProviders(<AdminSettingsPanel initialSettings={buildInitialSettings()} />);
+
+    await user.click(screen.getByRole("tab", { name: "黑名单" }));
+
+    const blacklistPanel = screen.getByRole("tabpanel");
+
+    expect(within(blacklistPanel).getAllByText("黑名单").length).toBeGreaterThan(0);
+    expect(within(blacklistPanel).getByText("配置关键词黑名单过滤规则")).toBeInTheDocument();
+    expect(within(blacklistPanel).queryByText("规则黑名单")).not.toBeInTheDocument();
+    expect(within(blacklistPanel).queryByText("已生效")).not.toBeInTheDocument();
+
+    const editorRegion = screen.getByRole("region", { name: "黑名单关键词编辑区" });
+    const textarea = within(editorRegion).getByLabelText("关键词列表");
+
+    expect(textarea).toHaveValue("layoffs");
+    expect(textarea).toHaveAttribute("placeholder", "每行一个黑名单关键词");
+    expect(within(editorRegion).getByText("?")).toBeInTheDocument();
+
+    await user.clear(textarea);
+    await user.type(textarea, " layoffs \n\n funding ");
+    await user.click(screen.getByRole("button", { name: "保存配置" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/admin/settings/blacklist", {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          keywords: ["layoffs", "funding"],
+        }),
+      });
+    });
+  });
 });

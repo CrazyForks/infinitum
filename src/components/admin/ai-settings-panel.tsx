@@ -20,6 +20,7 @@ import { SelectableButton } from "@/components/ui/selectable-button";
 import { SelectField } from "@/components/ui/select-field";
 import { StatusBanner } from "@/components/ui/status-banner";
 import { StatusTag } from "@/components/ui/status-tag";
+import { TextArea } from "@/components/ui/text-area";
 import { TextInput } from "@/components/ui/text-input";
 import { useToast } from "@/components/ui/toast";
 import {
@@ -80,7 +81,6 @@ const emptyStateClassName =
 const labelClassName = "block text-sm text-[var(--text-2)]";
 const inputClassName =
   "w-full rounded-sm border border-[color:var(--line)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--foreground)] shadow-[0_1px_3px_rgba(0,0,0,0.06)] transition placeholder:text-[var(--text-3)] focus-visible:border-[color:var(--accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(59,130,246,0.35)]";
-const textareaClassName = cx(inputClassName, "min-h-[8rem] resize-y");
 const codeClassName = "rounded bg-[var(--bg-muted)] px-2 py-1 text-xs";
 const checkboxInputClassName =
   "h-4 w-4 rounded border-[color:var(--line)] text-[var(--accent)] focus:ring-[rgba(59,130,246,0.35)]";
@@ -902,8 +902,8 @@ export function AiSettingsPanel({ initialSettings, mode }: AiSettingsPanelProps)
           }
         >
           <FormBlock label="测试提示词">
-            <textarea
-              className={textareaClassName}
+            <TextArea
+              className="min-h-[8rem] resize-y"
               rows={5}
               value={testPrompt}
               onChange={(event) => setTestPrompt(event.target.value)}
@@ -1136,8 +1136,8 @@ export function AiSettingsPanel({ initialSettings, mode }: AiSettingsPanelProps)
         </FormBlock>
 
         <FormBlock label="系统提示词" required>
-          <textarea
-            className={textareaClassName}
+          <TextArea
+            className="min-h-[8rem] resize-y"
             rows={4}
             value={promptForm.systemPrompt}
             onChange={(event) =>
@@ -1150,8 +1150,8 @@ export function AiSettingsPanel({ initialSettings, mode }: AiSettingsPanelProps)
         </FormBlock>
 
         <FormBlock label="提示词模板" required>
-          <textarea
-            className={textareaClassName}
+          <TextArea
+            className="min-h-[8rem] resize-y"
             rows={6}
             value={promptForm.prompt}
             onChange={(event) =>
