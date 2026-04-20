@@ -10,7 +10,6 @@ import { TaskMonitorPanel } from "@/components/admin/task-monitor-panel";
 import { SelectableButton } from "@/components/ui/selectable-button";
 import { SectionToggleButton } from "@/components/ui/section-toggle-button";
 import {
-  IconSettings,
   IconTag,
   IconList,
   IconRobot,
@@ -27,7 +26,7 @@ import {
 type PrimaryTab = "monitoring" | "settings";
 type MonitorSubSection = "content" | "tasks";
 type ContentSubSection = "filtered" | "clusters";
-type SettingsSection = "basic" | "blacklist" | "groups" | "sources" | "ai";
+type SettingsSection = "blacklist" | "groups" | "sources" | "ai";
 type AISubSection = "model-api" | "prompt";
 
 type AdminPageProps = {
@@ -43,7 +42,7 @@ export function AdminPageClient({
   const [monitoringSubSection, setMonitoringSubSection] =
     useState<MonitorSubSection>("content");
   const [contentSubSection, setContentSubSection] = useState<ContentSubSection>("filtered");
-  const [settingsSection, setSettingsSection] = useState<SettingsSection>("basic");
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>("ai");
   const [aiSubSection, setAiSubSection] = useState<AISubSection>("model-api");
   const [collapsedSections, setCollapsedSections] = useState<{
     ai: boolean;
@@ -91,18 +90,25 @@ export function AdminPageClient({
       );
     }
 
-    // Settings - Basic (Model API & Prompts combined)
-    if (primaryTab === "settings" && settingsSection === "basic") {
-      return <AdminSettingsPanel initialSettings={initialSettings} activeSection="basic" embedMode />;
-    }
-
     // Settings - AI Section
     if (primaryTab === "settings" && settingsSection === "ai") {
       if (aiSubSection === "model-api") {
-        return <AdminSettingsPanel initialSettings={initialSettings} activeSection="basic" embedMode />;
+        return (
+          <AdminSettingsPanel
+            initialSettings={initialSettings}
+            activeSection="ai-model-api"
+            embedMode
+          />
+        );
       }
       if (aiSubSection === "prompt") {
-        return <AdminSettingsPanel initialSettings={initialSettings} activeSection="basic" embedMode />;
+        return (
+          <AdminSettingsPanel
+            initialSettings={initialSettings}
+            activeSection="ai-prompt"
+            embedMode
+          />
+        );
       }
     }
 
@@ -144,7 +150,8 @@ export function AdminPageClient({
             <SelectableButton
               onClick={() => {
                 setPrimaryTab("settings");
-                setSettingsSection("basic");
+                setSettingsSection("ai");
+                setAiSubSection("model-api");
               }}
               active={primaryTab === "settings"}
               variant="tab"
@@ -230,17 +237,6 @@ export function AdminPageClient({
                     </>
                   ) : (
                     <>
-                      <SelectableButton
-                        onClick={() => setSettingsSection("basic")}
-                        active={settingsSection === "basic"}
-                        variant="menu"
-                      >
-                        <span className="inline-flex items-center gap-2">
-                          <IconSettings className="h-4 w-4" />
-                          <span>基础配置</span>
-                        </span>
-                      </SelectableButton>
-
                       <SectionToggleButton
                         label="AI配置"
                         active={settingsSection === "ai"}

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState, useTransition } from "react";
 
 import { PageShell } from "@/components/ui/page-shell";
+import { useToast } from "@/components/ui/toast";
 import { StatusBanner } from "@/components/ui/status-banner";
 import type {
   BackgroundTaskMonitorSnapshot,
@@ -17,12 +18,6 @@ type AdminMonitorPanelProps = {
   showSchedule?: boolean;
   showScheduleOnly?: boolean;
 };
-
-type FeedbackTone = "error" | "info" | "success";
-type FeedbackState = {
-  text: string;
-  tone: FeedbackTone;
-} | null;
 
 type SchedulePayload = {
   error?: string;
@@ -262,15 +257,16 @@ export function AdminMonitorPanel({
   showSchedule = true,
   showScheduleOnly = false,
 }: AdminMonitorPanelProps) {
+  const { showToast } = useToast();
   const [snapshot, setSnapshot] = useState(initialSnapshot);
   const [enabled, setEnabled] = useState(initialSnapshot.schedule.enabled);
   const [intervalMinutes, setIntervalMinutes] = useState(
     String(initialSnapshot.schedule.intervalMinutes),
   );
-  const [feedback, setFeedback] = useState<FeedbackState>(null);
   const [isPending, startTransition] = useTransition();
   const [cancellingTaskId, setCancellingTaskId] = useState<string | null>(null);
   const isScheduleDirtyRef = useRef(false);
+  const hasShownRefreshErrorRef = useRef(false);
   const isScheduleDirty =
     enabled !== snapshot.schedule.enabled ||
     intervalMinutes !== String(snapshot.schedule.intervalMinutes);
@@ -292,14 +288,15 @@ export function AdminMonitorPanel({
         }
 
         if (!response.ok || !isMonitorSnapshot(payload)) {
-          setFeedback(
-            (current) =>
-              current ?? { tone: "error", text: "任务监控刷新失败。" },
-          );
+          if (!hasShownRefreshErrorRef.current) {
+            showToast("任务监控刷新失败。", "error");
+            hasShownRefreshErrorRef.current = true;
+          }
           return;
         }
 
         setSnapshot(payload);
+        hasShownRefreshErrorRef.current = false;
 
         if (!isScheduleDirtyRef.current) {
           setEnabled(payload.schedule.enabled);
@@ -307,10 +304,10 @@ export function AdminMonitorPanel({
         }
       } catch {
         if (!disposed) {
-          setFeedback(
-            (current) =>
-              current ?? { tone: "error", text: "任务监控刷新失败。" },
-          );
+          if (!hasShownRefreshErrorRef.current) {
+            showToast("任务监控刷新失败。", "error");
+            hasShownRefreshErrorRef.current = true;
+          }
         }
       }
     };
@@ -326,7 +323,7 @@ export function AdminMonitorPanel({
       disposed = true;
       window.clearInterval(timer);
     };
-  }, [snapshot.runningTasks.length]);
+  }, [showToast, snapshot.runningTasks.length]);
 
   const saveSchedule = () => {
     startTransition(async () => {
@@ -347,10 +344,7 @@ export function AdminMonitorPanel({
         const payload = await readJson<SchedulePayload>(response);
 
         if (!response.ok || payload.error || !payload.schedule) {
-          setFeedback({
-            tone: "error",
-            text: payload.error ?? "调度配置保存失败。",
-          });
+          showToast(payload.error ?? "调度配置保存失败。", "error");
           return;
         }
 
@@ -360,9 +354,9 @@ export function AdminMonitorPanel({
           ...current,
           schedule,
         }));
-        setFeedback({ tone: "success", text: "调度配置已保存。" });
+        showToast("调度配置已保存。", "success");
       } catch {
-        setFeedback({ tone: "error", text: "调度配置保存失败。" });
+        showToast("调度配置保存失败。", "error");
       }
     });
   };
@@ -380,7 +374,7 @@ export function AdminMonitorPanel({
       const payload = await readJson<CancelPayload>(response);
 
       if (!response.ok || payload.error || !payload.task) {
-        setFeedback({ tone: "error", text: payload.error ?? "终止任务失败。" });
+        showToast(payload.error ?? "终止任务失败。", "error");
         return;
       }
 
@@ -393,9 +387,9 @@ export function AdminMonitorPanel({
           task.id === payload.task!.id ? payload.task! : task,
         ),
       }));
-      setFeedback({ tone: "success", text: "终止请求已提交。" });
+      showToast("终止请求已提交。", "success");
     } catch {
-      setFeedback({ tone: "error", text: "终止任务失败。" });
+      showToast("终止任务失败。", "error");
     } finally {
       setCancellingTaskId(null);
     }
@@ -656,15 +650,6 @@ export function AdminMonitorPanel({
   const content = (
     <section className="space-y-4">
       <h1 className="sr-only">任务监控</h1>
-
-      {feedback ? (
-        <StatusBanner
-          className="rounded-[1rem] px-4 py-3"
-          tone={feedback.tone}
-        >
-          {feedback.text}
-        </StatusBanner>
-      ) : null}
 
       {showScheduleOnly ? (
         scheduleSection

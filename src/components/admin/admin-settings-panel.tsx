@@ -1,12 +1,13 @@
 "use client";
-import { type ReactNode, useState, useTransition } from "react";
+import { type ReactNode, useEffect, useState, useTransition } from "react";
 
+import { AiSettingsPanel } from "@/components/admin/ai-settings-panel";
 import { PageShell } from "@/components/ui/page-shell";
-import { StatusBanner } from "@/components/ui/status-banner";
 import { FilterInput } from "@/components/ui/filter-input";
 import { FilterSelect } from "@/components/ui/filter-select";
 import { FormField } from "@/components/ui/form-field";
 import { TextInput } from "@/components/ui/text-input";
+import { useToast } from "@/components/ui/toast";
 import type { AdminSettingsSnapshot } from "@/lib/settings/types";
 import { cx } from "@/lib/ui/cx";
 
@@ -17,12 +18,12 @@ type AdminSettingsPanelProps = {
   activeSection?: AdminSettingsSection;
 };
 
-type AdminSettingsSection = "basic" | "blacklist" | "groups" | "sources" | "schedule";
-
-type FeedbackState = {
-  text: string;
-  tone: "error" | "success";
-} | null;
+type AdminSettingsSection =
+  | "ai-model-api"
+  | "ai-prompt"
+  | "blacklist"
+  | "groups"
+  | "sources";
 
 const surfaceCardClassName =
   "rounded-[1.1rem] border border-[color:var(--line)] bg-white/96 shadow-[var(--shadow-sm)]";
@@ -54,11 +55,11 @@ const settingsNavItems: Array<{
   key: AdminSettingsSection;
   label: string;
 }> = [
-  { key: "basic", label: "模型API / 提示词" },
+  { key: "ai-model-api", label: "模型API" },
+  { key: "ai-prompt", label: "提示词" },
   { key: "blacklist", label: "黑名单" },
   { key: "groups", label: "分组" },
   { key: "sources", label: "信息源" },
-  { key: "schedule", label: "调度" },
 ] as const;
 
 function refreshPage() {
@@ -74,34 +75,9 @@ export function AdminSettingsPanel({
   activeSection: externalActiveSection,
 }: AdminSettingsPanelProps) {
   const [isPending, startTransition] = useTransition();
-  const [feedback, setFeedback] = useState<FeedbackState>(null);
+  const { showToast } = useToast();
   const [activeSection, setActiveSection] =
-    useState<AdminSettingsSection>(externalActiveSection ?? "basic");
-
-  // Sync externalActiveSection with internal state
-  if (externalActiveSection && externalActiveSection !== activeSection) {
-    setActiveSection(externalActiveSection);
-  }
-  const [baseUrl, setBaseUrl] = useState(
-    initialSettings.appConfig.modelApi.baseURL,
-  );
-  const [model, setModel] = useState(initialSettings.appConfig.modelApi.model);
-  const [apiKey, setApiKey] = useState("");
-  const [apiKeyMode, setApiKeyMode] = useState<"keep" | "replace" | "clear">(
-    "keep",
-  );
-  const [itemConcurrency, setItemConcurrency] = useState(
-    String(initialSettings.appConfig.ingestionItemConcurrency),
-  );
-  const [itemAnalysisPrompt, setItemAnalysisPrompt] = useState(
-    initialSettings.appConfig.prompts.itemAnalysis,
-  );
-  const [clusterSummaryPrompt, setClusterSummaryPrompt] = useState(
-    initialSettings.appConfig.prompts.clusterSummary,
-  );
-  const [clusterMatchPrompt, setClusterMatchPrompt] = useState(
-    initialSettings.appConfig.prompts.clusterMatch,
-  );
+    useState<AdminSettingsSection>(externalActiveSection ?? "ai-model-api");
   const [blacklistText, setBlacklistText] = useState(
     initialSettings.blacklistKeywords.join("\n"),
   );
@@ -135,11 +111,11 @@ export function AdminSettingsPanel({
         const payload = (await response.json()) as { error?: string };
 
         if (!response.ok || payload.error) {
-          setFeedback({ tone: "error", text: payload.error ?? "保存失败" });
+          showToast(payload.error ?? "保存失败", "error");
           return;
         }
 
-        setFeedback({ tone: "success", text: successMessage });
+        showToast(successMessage, "success");
 
         if (reload) {
           onRefresh?.();
@@ -149,14 +125,20 @@ export function AdminSettingsPanel({
           }
         }
       } catch {
-        setFeedback({ tone: "error", text: "保存失败" });
+        showToast("保存失败", "error");
       }
     });
   };
 
+  useEffect(() => {
+    if (externalActiveSection) {
+      setActiveSection(externalActiveSection);
+    }
+  }, [externalActiveSection]);
+
   const resolveSourceFromRss = () => {
     if (!newSource.rssUrl.trim()) {
-      setFeedback({ tone: "error", text: "请先输入 RSS URL。" });
+      showToast("请先输入 RSS URL。", "error");
       return;
     }
 
@@ -181,7 +163,7 @@ export function AdminSettingsPanel({
         };
 
         if (!response.ok || payload.error || !payload.source) {
-          setFeedback({ tone: "error", text: payload.error ?? "RSS 解析失败" });
+          showToast(payload.error ?? "RSS 解析失败", "error");
           return;
         }
 
@@ -193,19 +175,16 @@ export function AdminSettingsPanel({
           rssUrl: source.rssUrl,
           siteUrl: source.siteUrl,
         }));
-        setFeedback({
-          tone: "success",
-          text: "已根据 RSS 自动填充信息源基本信息。",
-        });
+        showToast("已根据 RSS 自动填充信息源基本信息。", "success");
       } catch {
-        setFeedback({ tone: "error", text: "RSS 解析失败" });
+        showToast("RSS 解析失败", "error");
       }
     });
   };
 
   const importOpml = () => {
     if (!opmlFile) {
-      setFeedback({ tone: "error", text: "请先选择 OPML 文件。" });
+      showToast("请先选择 OPML 文件。", "error");
       return;
     }
 
@@ -229,17 +208,14 @@ export function AdminSettingsPanel({
         };
 
         if (!response.ok || payload.error || !payload.summary) {
-          setFeedback({
-            tone: "error",
-            text: payload.error ?? "OPML 导入失败",
-          });
+          showToast(payload.error ?? "OPML 导入失败", "error");
           return;
         }
 
-        setFeedback({
-          tone: "success",
-          text: `OPML 导入完成：新建 ${payload.summary.createdCount} 个，更新 ${payload.summary.updatedCount} 个，失败 ${payload.summary.failedCount} 个。`,
-        });
+        showToast(
+          `OPML 导入完成：新建 ${payload.summary.createdCount} 个，更新 ${payload.summary.updatedCount} 个，失败 ${payload.summary.failedCount} 个。`,
+          "success",
+        );
         window.setTimeout(() => {
           onRefresh?.();
 
@@ -248,163 +224,25 @@ export function AdminSettingsPanel({
           }
         }, 600);
       } catch {
-        setFeedback({ tone: "error", text: "OPML 导入失败" });
+        showToast("OPML 导入失败", "error");
       }
     });
   };
 
   const content = (
     <section aria-label="后台设置工作台" className="space-y-4">
-      {feedback ? (
-        <StatusBanner
-          className="rounded-[1rem] px-4 py-3"
-          tone={feedback.tone}
-        >
-          {feedback.text}
-        </StatusBanner>
-      ) : null}
-
       <section
         aria-labelledby={`settings-tab-${activeSection}`}
         className="space-y-4"
         id={`settings-panel-${activeSection}`}
         role="tabpanel"
       >
-        {activeSection === "basic" ? (
-          <SectionCard headingId="settings-basic" title="基础配置">
-            <div className="grid gap-3.5 md:grid-cols-2">
-              <label className="space-y-2">
-                <span className={labelClassName}>模型 API Base URL</span>
-                <input
-                  className={inputClassName}
-                  value={baseUrl}
-                  onChange={(event) => setBaseUrl(event.target.value)}
-                />
-              </label>
+        {activeSection === "ai-model-api" ? (
+          <AiSettingsPanel initialSettings={initialSettings} mode="model-api" />
+        ) : null}
 
-              <label className="space-y-2">
-                <span className={labelClassName}>模型名</span>
-                <input
-                  className={inputClassName}
-                  value={model}
-                  onChange={(event) => setModel(event.target.value)}
-                />
-              </label>
-              <label className="space-y-2">
-                <span className={labelClassName}>并发数</span>
-                <input
-                  aria-label="并发数"
-                  className={inputClassName}
-                  max={10}
-                  min={1}
-                  type="number"
-                  value={itemConcurrency}
-                  onChange={(event) => setItemConcurrency(event.target.value)}
-                />
-              </label>
-
-              <label className="space-y-2">
-                <span className={labelClassName}>API Key</span>
-                <input
-                  className={inputClassName}
-                  placeholder={
-                    initialSettings.appConfig.modelApi.apiKeyMasked ||
-                    "留空保持不变"
-                  }
-                  value={apiKey}
-                  onChange={(event) => {
-                    setApiKey(event.target.value);
-                    setApiKeyMode(event.target.value ? "replace" : "keep");
-                  }}
-                />
-                <span className={helperTextClassName}>
-                  当前显示为掩码占位；留空会保持现有值不变。
-                </span>
-              </label>
-
-              <label className="space-y-2 md:col-span-2">
-                <span className={labelClassName}>内容分析提示词</span>
-                <textarea
-                  aria-label="内容分析提示词"
-                  className={textareaClassName}
-                  value={itemAnalysisPrompt}
-                  onChange={(event) =>
-                    setItemAnalysisPrompt(event.target.value)
-                  }
-                />
-                <span className={helperTextClassName}>
-                  用于单条内容的分析与过滤判断，建议保留明确输出格式与判定标准。
-                </span>
-              </label>
-
-              <label className="space-y-2 md:col-span-2">
-                <span className={labelClassName}>聚合摘要提示词</span>
-                <textarea
-                  aria-label="聚合摘要提示词"
-                  className={textareaClassName}
-                  value={clusterSummaryPrompt}
-                  onChange={(event) =>
-                    setClusterSummaryPrompt(event.target.value)
-                  }
-                />
-                <span className={helperTextClassName}>
-                  用于聚合后的摘要生成，可在这里调整摘要风格、长度和重点字段。
-                </span>
-              </label>
-
-              <label className="space-y-2 md:col-span-2">
-                <span className={labelClassName}>归组判定提示词</span>
-                <textarea
-                  aria-label="归组判定提示词"
-                  className={textareaClassName}
-                  value={clusterMatchPrompt}
-                  onChange={(event) =>
-                    setClusterMatchPrompt(event.target.value)
-                  }
-                />
-                <span className={helperTextClassName}>
-                  用于判断内容是否应并入已有聚合组，建议保持条件明确，避免误并。
-                </span>
-              </label>
-            </div>
-
-            <div className="flex flex-wrap gap-3">
-              <button
-                className={secondaryButtonClassName}
-                type="button"
-                onClick={() => {
-                  setApiKey("");
-                  setApiKeyMode("clear");
-                }}
-              >
-                清空 API Key
-              </button>
-              <button
-                className={primaryButtonClassName}
-                type="button"
-                onClick={() =>
-                  submitJson(
-                    "/api/admin/settings/app-config",
-                    "PUT",
-                    {
-                      ingestionItemConcurrency: Number(itemConcurrency),
-                      modelApiBaseUrl: baseUrl,
-                      modelApiModel: model,
-                      modelApiKey: apiKey,
-                      apiKeyMode,
-                      itemAnalysisPrompt,
-                      clusterSummaryPrompt,
-                      clusterMatchPrompt,
-                    },
-                    "基础配置已保存。",
-                  )
-                }
-                disabled={isPending}
-              >
-                保存基础配置
-              </button>
-            </div>
-          </SectionCard>
+        {activeSection === "ai-prompt" ? (
+          <AiSettingsPanel initialSettings={initialSettings} mode="prompt" />
         ) : null}
 
         {activeSection === "blacklist" ? (

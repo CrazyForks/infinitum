@@ -21,7 +21,6 @@ describe("background task persistence", () => {
     await prisma.source.deleteMany();
     await prisma.sourceGroup.deleteMany();
     await prisma.blacklistKeyword.deleteMany();
-    await prisma.appConfig.deleteMany();
     await prisma.taskSchedule.deleteMany();
   });
 

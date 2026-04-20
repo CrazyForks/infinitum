@@ -8,7 +8,7 @@
 - 英文标题自动翻译为中文
 - 通过 OpenAI-compatible API 生成中文摘要
 - 管理员登录后触发刷新、重生成翻译与摘要
-- 后台配置页管理信息源、分组、黑名单和模型 API
+- 后台配置页管理信息源、分组、黑名单和 AI 配置（模型 API、提示词）
 - 按时间范围浏览信息流
 - 支持本地运行与 Docker Compose 部署
 
@@ -100,11 +100,16 @@ cp .env.example .env
 
 直接编辑 [infinitum.config.json](/Users/shawn/Documents/GitHub/infinitum/config/infinitum.config.json)。
 
-4. 初始化 SQLite 数据库
+4. 初始化或升级 SQLite 数据库
 
 ```bash
 npm run db:setup
 ```
+
+说明：
+
+- 这个命令会在首次运行时建表
+- 如果本地数据库字段落后于当前版本，也会自动补齐当前运行所需字段
 
 5. 启动开发服务器
 

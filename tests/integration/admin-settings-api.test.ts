@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const requireAdmin = vi.fn();
 const getAdminSettings = vi.fn();
-const updateAppConfig = vi.fn();
+const createModelApiConfig = vi.fn();
+const createPromptConfig = vi.fn();
+const getModelApiConfig = vi.fn();
 
 vi.mock("@/lib/admin/session", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/admin/session")>();
@@ -19,7 +21,9 @@ vi.mock("@/lib/settings/service", async (importOriginal) => {
   return {
     ...actual,
     getAdminSettings,
-    updateAppConfig,
+    createModelApiConfig,
+    createPromptConfig,
+    getModelApiConfig,
   };
 });
 
@@ -29,23 +33,42 @@ afterEach(() => {
 });
 
 describe("/api/admin/settings", () => {
-  it("returns the database-backed settings payload for admins", async () => {
+  it("returns the settings payload for admins", async () => {
     requireAdmin.mockResolvedValue(undefined);
     getAdminSettings.mockResolvedValue({
-      appConfig: {
-        ingestionItemConcurrency: 3,
-        modelApi: {
-          baseURL: "https://example.com/v1",
-          model: "gpt-test",
-          apiKeyMasked: "••••••••1234",
+      modelApiConfigs: [
+        {
+          id: "model-1",
+          name: "默认模型配置",
+          baseUrl: "https://example.com/v1",
+          modelName: "gpt-test",
+          ingestionItemConcurrency: 3,
+          apiKeyMasked: "••••••••••••",
           hasApiKey: true,
+          isEnabled: true,
+          isDefault: true,
+          createdAt: "2026-04-20T10:00:00.000Z",
+          updatedAt: "2026-04-20T10:00:00.000Z",
         },
-        prompts: {
-          itemAnalysis: "单条提示词",
-          clusterSummary: "聚合提示词",
-          clusterMatch: "归组提示词",
+      ],
+      promptConfigs: [
+        {
+          id: "prompt-1",
+          name: "默认内容分析提示词",
+          type: "item_analysis",
+          prompt: "标题：{{title}}",
+          systemPrompt: "分析内容",
+          temperature: null,
+          maxTokens: null,
+          topP: null,
+          modelApiConfigId: "model-1",
+          modelApiConfigName: "默认模型配置",
+          isEnabled: true,
+          isDefault: true,
+          createdAt: "2026-04-20T10:00:00.000Z",
+          updatedAt: "2026-04-20T10:00:00.000Z",
         },
-      },
+      ],
       blacklistKeywords: ["layoffs"],
       groups: [{ id: "group-1", name: "Core" }],
       sources: [],
@@ -56,29 +79,54 @@ describe("/api/admin/settings", () => {
     const json = await response.json();
 
     expect(response.status).toBe(200);
-    expect(json.groups[0].name).toBe("Core");
-    expect(json.appConfig.modelApi.apiKeyMasked).toBe("••••••••1234");
-    expect(json.appConfig.prompts.itemAnalysis).toBe("单条提示词");
-    expect(json.appConfig.prompts.clusterMatch).toBe("归组提示词");
+    expect(json.modelApiConfigs[0].apiKeyMasked).toBe("••••••••••••");
+    expect(json.promptConfigs[0].type).toBe("item_analysis");
   });
 
-  it("updates basic app config for admins", async () => {
+  it("returns raw api key only from the single model config detail endpoint", async () => {
     requireAdmin.mockResolvedValue(undefined);
-    updateAppConfig.mockResolvedValue(undefined);
+    getModelApiConfig.mockResolvedValue({
+      id: "model-1",
+      name: "默认模型配置",
+      baseUrl: "https://example.com/v1",
+      modelName: "gpt-test",
+      ingestionItemConcurrency: 3,
+      apiKeyMasked: "••••••••••••",
+      apiKeyRaw: "sk-test-1234",
+      hasApiKey: true,
+      isEnabled: true,
+      isDefault: true,
+      createdAt: "2026-04-20T10:00:00.000Z",
+      updatedAt: "2026-04-20T10:00:00.000Z",
+    });
 
-    const { PUT } = await import("@/app/api/admin/settings/app-config/route");
-    const response = await PUT(
-      new Request("http://localhost/api/admin/settings/app-config", {
-        method: "PUT",
+    const { GET } = await import("@/app/api/admin/settings/model-api-configs/[id]/route");
+    const response = await GET(new Request("http://localhost/api/admin/settings/model-api-configs/model-1"), {
+      params: Promise.resolve({ id: "model-1" }),
+    });
+    const json = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(json.apiKeyMasked).toBe("••••••••••••");
+    expect(json.apiKeyRaw).toBe("sk-test-1234");
+  });
+
+  it("creates model api configs for admins", async () => {
+    requireAdmin.mockResolvedValue(undefined);
+    createModelApiConfig.mockResolvedValue({ id: "model-1" });
+
+    const { POST } = await import("@/app/api/admin/settings/model-api-configs/route");
+    const response = await POST(
+      new Request("http://localhost/api/admin/settings/model-api-configs", {
+        method: "POST",
         body: JSON.stringify({
+          name: "默认模型配置",
+          baseUrl: "https://example.com/v1",
+          apiKey: "sk-test",
+          modelName: "gpt-4.1-mini",
           ingestionItemConcurrency: 4,
-          modelApiBaseUrl: "https://example.com/v1",
-          modelApiModel: "gpt-4.1-mini",
-          modelApiKey: "sk-updated",
-          apiKeyMode: "replace",
-          itemAnalysisPrompt: "新的单条分析提示词",
-          clusterSummaryPrompt: "新的聚合摘要提示词",
-          clusterMatchPrompt: "新的归组判定提示词",
+          isEnabled: true,
+          isDefault: true,
         }),
         headers: {
           "content-type": "application/json",
@@ -86,16 +134,57 @@ describe("/api/admin/settings", () => {
       }),
     );
 
-    expect(response.status).toBe(200);
-    expect(updateAppConfig).toHaveBeenCalledWith({
-      ingestionItemConcurrency: 4,
-      modelApiBaseUrl: "https://example.com/v1",
-      modelApiModel: "gpt-4.1-mini",
-      modelApiKey: "sk-updated",
+    expect(response.status).toBe(201);
+    expect(createModelApiConfig).toHaveBeenCalledWith({
+      name: "默认模型配置",
+      baseUrl: "https://example.com/v1",
+      apiKey: "sk-test",
       apiKeyMode: "replace",
-      itemAnalysisPrompt: "新的单条分析提示词",
-      clusterSummaryPrompt: "新的聚合摘要提示词",
-      clusterMatchPrompt: "新的归组判定提示词",
+      modelName: "gpt-4.1-mini",
+      ingestionItemConcurrency: 4,
+      isEnabled: true,
+      isDefault: true,
+    });
+  });
+
+  it("creates prompt configs for admins", async () => {
+    requireAdmin.mockResolvedValue(undefined);
+    createPromptConfig.mockResolvedValue({ id: "prompt-1" });
+
+    const { POST } = await import("@/app/api/admin/settings/prompt-configs/route");
+    const response = await POST(
+      new Request("http://localhost/api/admin/settings/prompt-configs", {
+        method: "POST",
+        body: JSON.stringify({
+          name: "默认内容分析提示词",
+          type: "item_analysis",
+          prompt: "标题：{{title}}",
+          systemPrompt: "分析内容",
+          temperature: null,
+          maxTokens: null,
+          topP: null,
+          modelApiConfigId: "model-1",
+          isEnabled: true,
+          isDefault: true,
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    expect(createPromptConfig).toHaveBeenCalledWith({
+      name: "默认内容分析提示词",
+      type: "item_analysis",
+      prompt: "标题：{{title}}",
+      systemPrompt: "分析内容",
+      temperature: null,
+      maxTokens: null,
+      topP: null,
+      modelApiConfigId: "model-1",
+      isEnabled: true,
+      isDefault: true,
     });
   });
 });

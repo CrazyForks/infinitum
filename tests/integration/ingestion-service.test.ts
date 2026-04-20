@@ -9,10 +9,12 @@ describe("runIngestion", () => {
     await prisma.item.deleteMany();
     await prisma.fetchRun.deleteMany();
     await prisma.backgroundTaskRun.deleteMany();
+    await prisma.promptConfig.deleteMany();
+    await prisma.modelApiConfig.deleteMany();
+    await prisma.contentCluster.deleteMany();
     await prisma.source.deleteMany();
     await prisma.sourceGroup.deleteMany();
     await prisma.blacklistKeyword.deleteMany();
-    await prisma.appConfig.deleteMany();
     await prisma.taskSchedule.deleteMany();
   });
 
@@ -88,8 +90,8 @@ describe("runIngestion", () => {
     expect(storedTaskRun.progressCurrent).toBe(2);
     expect(storedTaskRun.progressTotal).toBe(2);
     expect(storedTaskRun.progressLabel).toBe("已处理 2/2 条内容，来自 1 个源，失败 0 项");
-    expect(storedTaskRun.aiCallCountActual).toBe(5);
-    expect(storedTaskRun.aiCallCountEstimated).toBe(5);
+    expect(storedTaskRun.aiCallCountActual).toBe(4);
+    expect(storedTaskRun.aiCallCountEstimated).toBe(4);
   });
 
   it("stops ingestion after a cancellation request", async () => {
@@ -778,14 +780,46 @@ describe("runIngestion", () => {
   });
 
   it("uses database-backed runtime settings when explicit ingestion options are omitted", async () => {
-    await prisma.appConfig.create({
+    const modelConfig = await prisma.modelApiConfig.create({
       data: {
-        id: "default",
-        modelApiKey: "sk-db",
-        modelApiBaseUrl: "https://db.example.com/v1",
-        modelApiModel: "gpt-db",
-        ingestionItemConcurrency: 2,
+        name: "数据库默认模型",
+        baseUrl: "https://db.example.com/v1",
+        apiKey: "sk-db",
+        modelName: "gpt-db",
+        ingestionItemConcurrency: 5,
+        isEnabled: true,
+        isDefault: true,
       },
+    });
+
+    await prisma.promptConfig.createMany({
+      data: [
+        {
+          name: "数据库默认内容分析提示词",
+          type: "item_analysis",
+          prompt: "标题：{{title}}\n正文：{{inputText}}",
+          systemPrompt: "数据库内容分析提示词",
+          modelApiConfigId: modelConfig.id,
+          isEnabled: true,
+          isDefault: true,
+        },
+        {
+          name: "数据库默认聚合摘要提示词",
+          type: "cluster_summary",
+          prompt: "主题：{{title}}\n候选内容：{{inputText}}",
+          systemPrompt: "数据库聚合摘要提示词",
+          isEnabled: true,
+          isDefault: true,
+        },
+        {
+          name: "数据库默认归组判定提示词",
+          type: "cluster_match",
+          prompt: "当前内容标题：{{title}}\n候选聚合组：{{candidatesJson}}",
+          systemPrompt: "数据库归组判定提示词",
+          isEnabled: true,
+          isDefault: true,
+        },
+      ],
     });
 
     await prisma.blacklistKeyword.create({

@@ -30,6 +30,7 @@ describe("ai provider", () => {
         baseURL: "https://example.com/v1",
         model: "test-model",
       },
+      undefined,
       {
         chat: {
           completions: {
@@ -86,6 +87,7 @@ describe("ai provider", () => {
         baseURL: "https://example.com/v1",
         model: "test-model",
       },
+      undefined,
       {
         chat: {
           completions: {
@@ -165,6 +167,7 @@ describe("ai provider", () => {
         baseURL: "https://example.com/v1",
         model: "test-model",
       },
+      undefined,
       {
         chat: {
           completions: {
@@ -202,6 +205,7 @@ describe("ai provider", () => {
         baseURL: "https://example.com/v1",
         model: "test-model",
       },
+      undefined,
       {
         chat: {
           completions: {
@@ -248,6 +252,7 @@ describe("ai provider", () => {
         baseURL: "https://example.com/v1",
         model: "test-model",
       },
+      undefined,
       {
         chat: {
           completions: {
@@ -287,8 +292,14 @@ describe("ai provider", () => {
         model: "test-model",
       },
       {
-        itemAnalysisPrompt: "内容分析提示词",
-        clusterSummaryPrompt: "聚合摘要专用提示词",
+        itemAnalysis: {
+          systemPrompt: "内容分析提示词",
+          promptTemplate: "标题：{{title}}\n正文：{{inputText}}",
+        },
+        clusterSummary: {
+          systemPrompt: "聚合摘要专用提示词",
+          promptTemplate: "主题：{{title}}\n候选内容：{{inputText}}",
+        },
       },
       {
         chat: {
@@ -328,9 +339,18 @@ describe("ai provider", () => {
         model: "test-model",
       },
       {
-        itemAnalysisPrompt: "内容分析提示词",
-        clusterSummaryPrompt: "聚合摘要专用提示词",
-        clusterMatchPrompt: "归组判定专用提示词",
+        itemAnalysis: {
+          systemPrompt: "内容分析提示词",
+          promptTemplate: "标题：{{title}}\n正文：{{inputText}}",
+        },
+        clusterSummary: {
+          systemPrompt: "聚合摘要专用提示词",
+          promptTemplate: "主题：{{title}}\n候选内容：{{inputText}}",
+        },
+        clusterMatch: {
+          systemPrompt: "归组判定专用提示词",
+          promptTemplate: "当前内容标题：{{title}}\n候选聚合组：{{candidatesJson}}",
+        },
       },
       {
         chat: {
@@ -376,6 +396,7 @@ describe("ai provider", () => {
         baseURL: "https://example.com/v1",
         model: "test-model",
       },
+      undefined,
       {
         chat: {
           completions: {

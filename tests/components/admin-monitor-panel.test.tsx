@@ -1,7 +1,9 @@
+import type { ReactNode } from "react";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { ToastProvider } from "@/components/ui/toast";
 import type { BackgroundTaskMonitorSnapshot } from "@/lib/tasks/types";
 const { pushMock, refreshMock } = vi.hoisted(() => ({
   pushMock: vi.fn(),
@@ -16,6 +18,10 @@ vi.mock("next/navigation", () => ({
 }));
 
 import { AdminMonitorPanel } from "@/components/admin/admin-monitor-panel";
+
+function renderWithProviders(node: ReactNode) {
+  return render(<ToastProvider>{node}</ToastProvider>);
+}
 
 afterEach(() => {
   vi.useRealTimers();
@@ -62,14 +68,11 @@ describe("AdminMonitorPanel", () => {
   };
 
   it("renders the monitor workspace with aligned global and sidebar navigation", () => {
-    render(<AdminMonitorPanel initialSnapshot={initialSnapshot} />);
+    renderWithProviders(<AdminMonitorPanel initialSnapshot={initialSnapshot} />);
 
     expect(screen.getByRole("navigation", { name: "主导航" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "任务" })).toHaveAttribute("aria-current", "page");
-    const adminNav = screen.getByRole("complementary", { name: "管理导航" });
-
-    expect(within(adminNav).getByRole("link", { name: "任务监控" })).toHaveAttribute("aria-current", "page");
-    expect(within(adminNav).getByRole("link", { name: "后台设置" })).toHaveAttribute("href", "/admin/settings");
+    expect(screen.getByRole("link", { name: "主页" })).toHaveAttribute("href", "/");
+    expect(screen.getByRole("link", { name: "管理" })).toHaveAttribute("href", "/admin");
     expect(screen.getByRole("heading", { name: "任务监控", level: 1 })).toBeInTheDocument();
     expect(screen.queryByText("Task Monitor")).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "调度设置" })).toBeInTheDocument();
@@ -100,7 +103,7 @@ describe("AdminMonitorPanel", () => {
 
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<AdminMonitorPanel initialSnapshot={initialSnapshot} />);
+    renderWithProviders(<AdminMonitorPanel initialSnapshot={initialSnapshot} />);
 
     await user.clear(screen.getByLabelText("抓取频率（分钟）"));
     await user.type(screen.getByLabelText("抓取频率（分钟）"), "120");
@@ -127,7 +130,7 @@ describe("AdminMonitorPanel", () => {
 
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<AdminMonitorPanel initialSnapshot={initialSnapshot} />);
+    renderWithProviders(<AdminMonitorPanel initialSnapshot={initialSnapshot} />);
 
     await user.click(screen.getByRole("button", { name: "保存调度设置" }));
 
@@ -154,7 +157,7 @@ describe("AdminMonitorPanel", () => {
 
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<AdminMonitorPanel initialSnapshot={initialSnapshot} />);
+    renderWithProviders(<AdminMonitorPanel initialSnapshot={initialSnapshot} />);
 
     const intervalInput = screen.getByLabelText("抓取频率（分钟）");
     const enabledCheckbox = screen.getByLabelText("启用默认抓取任务");
@@ -193,7 +196,7 @@ describe("AdminMonitorPanel", () => {
 
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<AdminMonitorPanel initialSnapshot={initialSnapshot} />);
+    renderWithProviders(<AdminMonitorPanel initialSnapshot={initialSnapshot} />);
 
     await user.click(screen.getByRole("button", { name: "终止任务" }));
 

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { FilterSelect } from "@/components/ui/filter-select";
 import { ModalShell } from "@/components/ui/modal-shell";
 import { StatusTag } from "@/components/ui/status-tag";
+import { useToast } from "@/components/ui/toast";
 import { IconButton } from "@/components/ui/icon-button";
 import { IconRotateCw, IconSquare, IconEye } from "@/components/ui/icons";
 import type {
@@ -304,6 +305,7 @@ export function TaskMonitorPanel({
   runningTasks,
   recentTasks,
 }: TaskMonitorPanelProps) {
+  const { showToast } = useToast();
   const [statusFilter, setStatusFilter] = useState<TaskStatusFilter>("");
   const [kindFilter, setKindFilter] = useState<TaskKindFilter>("");
   const [timeRangeFilter, setTimeRangeFilter] = useState<TimeRangeFilter>("");
@@ -321,7 +323,6 @@ export function TaskMonitorPanel({
   const [cancellingTaskId, setCancellingTaskId] = useState<string | null>(
     null
   );
-  const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [confirmTask, setConfirmTask] = useState<TaskRunSnapshot | null>(null);
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const [confirmAction, setConfirmAction] = useState<"retrigger" | "cancel">("retrigger");
@@ -397,7 +398,6 @@ export function TaskMonitorPanel({
 
   const handleRetrigger = async (taskId: string) => {
     setRetriggeringTaskId(taskId);
-    setFeedback(null);
 
     try {
       const response = await fetch(`/api/admin/monitor/tasks/${taskId}/retrigger`, {
@@ -407,27 +407,18 @@ export function TaskMonitorPanel({
       const data = await response.json();
 
       if (!response.ok || data.error) {
-        setFeedback({
-          type: "error",
-          message: data.error || "重新触发任务失败",
-        });
+        showToast(data.error || "重新触发任务失败", "error");
         return;
       }
 
-      setFeedback({
-        type: "success",
-        message: "任务已重新触发",
-      });
+      showToast("任务已重新触发", "success");
 
       // Refresh the task list after a short delay
       setTimeout(() => {
         handleRefresh();
       }, 500);
     } catch {
-      setFeedback({
-        type: "error",
-        message: "重新触发任务失败",
-      });
+      showToast("重新触发任务失败", "error");
     } finally {
       setRetriggeringTaskId(null);
     }
@@ -435,7 +426,6 @@ export function TaskMonitorPanel({
 
   const handleCancel = async (taskId: string) => {
     setCancellingTaskId(taskId);
-    setFeedback(null);
 
     try {
       const response = await fetch(`/api/admin/monitor/tasks/${taskId}/cancel`, {
@@ -445,27 +435,18 @@ export function TaskMonitorPanel({
       const data = await response.json();
 
       if (!response.ok || data.error) {
-        setFeedback({
-          type: "error",
-          message: data.error || "停止任务失败",
-        });
+        showToast(data.error || "停止任务失败", "error");
         return;
       }
 
-      setFeedback({
-        type: "success",
-        message: "任务已停止",
-      });
+      showToast("任务已停止", "success");
 
       // Refresh the task list after a short delay
       setTimeout(() => {
         handleRefresh();
       }, 500);
     } catch {
-      setFeedback({
-        type: "error",
-        message: "停止任务失败",
-      });
+      showToast("停止任务失败", "error");
     } finally {
       setCancellingTaskId(null);
     }
@@ -473,20 +454,6 @@ export function TaskMonitorPanel({
 
   return (
     <div className="space-y-6">
-      {/* Feedback Banner */}
-      {feedback && (
-        <div
-          className={cx(
-            "rounded-sm border px-4 py-3 text-sm",
-            feedback.type === "success"
-              ? "border-[var(--success-line)] bg-[var(--success-surface)] text-[var(--success-ink)]"
-              : "border-[var(--danger-line)] bg-[var(--danger-surface)] text-[var(--danger-ink)]"
-          )}
-        >
-          {feedback.message}
-        </div>
-      )}
-
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1">

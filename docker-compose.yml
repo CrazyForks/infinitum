@@ -16,7 +16,6 @@ services:
       - "3001:3000"
     volumes:
       - infinitum-data:/app/data
-      - ./config:/app/config:ro
   worker:
     build:
       context: .
@@ -31,7 +30,6 @@ services:
     command: ["sh", "./scripts/worker-entrypoint.sh"]
     volumes:
       - infinitum-data:/app/data
-      - ./config:/app/config:ro
 
 volumes:
   infinitum-data:

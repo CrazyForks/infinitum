@@ -287,9 +287,9 @@ export async function executeClusterSummaryTask(
     const trackedAiProvider = aiUsage.wrapProvider(
       options?.aiProvider ??
         createAiProvider(runtimeConfig!.modelApi, {
-          itemAnalysisPrompt: runtimeConfig!.prompts.itemAnalysis,
-          clusterSummaryPrompt: runtimeConfig!.prompts.clusterSummary,
-          clusterMatchPrompt: runtimeConfig!.prompts.clusterMatch,
+          itemAnalysis: runtimeConfig!.selectedPromptConfigs?.itemAnalysis,
+          clusterSummary: runtimeConfig!.selectedPromptConfigs?.clusterSummary,
+          clusterMatch: runtimeConfig!.selectedPromptConfigs?.clusterMatch,
         }),
       {
         summarizeClusterEstimated: false,

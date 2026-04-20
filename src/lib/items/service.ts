@@ -29,9 +29,9 @@ async function resolveAiProvider(aiProvider?: AiProvider) {
 
   const runtimeConfig = await getIngestionRuntimeConfig();
   return createAiProvider(runtimeConfig.modelApi, {
-    itemAnalysisPrompt: runtimeConfig.prompts.itemAnalysis,
-    clusterSummaryPrompt: runtimeConfig.prompts.clusterSummary,
-    clusterMatchPrompt: runtimeConfig.prompts.clusterMatch,
+    itemAnalysis: runtimeConfig.selectedPromptConfigs?.itemAnalysis,
+    clusterSummary: runtimeConfig.selectedPromptConfigs?.clusterSummary,
+    clusterMatch: runtimeConfig.selectedPromptConfigs?.clusterMatch,
   });
 }
 

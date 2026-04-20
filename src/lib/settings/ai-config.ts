@@ -1,0 +1,41 @@
+import {
+  DEFAULT_CLUSTER_MATCH_USER_PROMPT_TEMPLATE,
+  DEFAULT_CLUSTER_SUMMARY_USER_PROMPT_TEMPLATE,
+  DEFAULT_ITEM_ANALYSIS_USER_PROMPT_TEMPLATE,
+} from "@/config/prompts";
+import type { PromptConfigType } from "@/lib/settings/types";
+
+export const PROMPT_TYPE_OPTIONS: Array<{
+  value: PromptConfigType;
+  label: string;
+}> = [
+  { value: "item_analysis", label: "内容分析" },
+  { value: "cluster_summary", label: "聚合摘要" },
+  { value: "cluster_match", label: "归组判定" },
+];
+
+export function getPromptTypeLabel(type: PromptConfigType): string {
+  return PROMPT_TYPE_OPTIONS.find((option) => option.value === type)?.label ?? type;
+}
+
+export function getDefaultPromptConfigName(type: PromptConfigType): string {
+  switch (type) {
+    case "item_analysis":
+      return "默认内容分析提示词";
+    case "cluster_summary":
+      return "默认聚合摘要提示词";
+    case "cluster_match":
+      return "默认归组判定提示词";
+  }
+}
+
+export function getDefaultPromptTemplate(type: PromptConfigType): string {
+  switch (type) {
+    case "item_analysis":
+      return DEFAULT_ITEM_ANALYSIS_USER_PROMPT_TEMPLATE;
+    case "cluster_summary":
+      return DEFAULT_CLUSTER_SUMMARY_USER_PROMPT_TEMPLATE;
+    case "cluster_match":
+      return DEFAULT_CLUSTER_MATCH_USER_PROMPT_TEMPLATE;
+  }
+}

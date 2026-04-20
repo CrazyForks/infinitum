@@ -2,8 +2,11 @@ import OpenAI from "openai";
 
 import {
   DEFAULT_CLUSTER_MATCH_PROMPT,
+  DEFAULT_CLUSTER_MATCH_USER_PROMPT_TEMPLATE,
   DEFAULT_CLUSTER_SUMMARY_PROMPT,
+  DEFAULT_CLUSTER_SUMMARY_USER_PROMPT_TEMPLATE,
   DEFAULT_ITEM_ANALYSIS_PROMPT,
+  DEFAULT_ITEM_ANALYSIS_USER_PROMPT_TEMPLATE,
 } from "@/config/prompts";
 import type { RuntimeConfig } from "@/config/runtime";
 
@@ -42,16 +45,34 @@ export type AiProvider = {
   ): Promise<string | null>;
 };
 
-type OpenAICompatibleClient = Pick<OpenAI, "chat">;
-type PromptOverrides = {
-  itemAnalysisPrompt?: string;
-  clusterSummaryPrompt?: string;
-  clusterMatchPrompt?: string;
+type OpenAICompatibleClient = {
+  chat: {
+    completions: {
+      create: (payload: Record<string, unknown>) => Promise<{
+        choices?: Array<{
+          message?: {
+            content?: string | null;
+          };
+        }>;
+      }>;
+    };
+  };
 };
 
-function isClientOverride(value: PromptOverrides | OpenAICompatibleClient | null | undefined): value is OpenAICompatibleClient {
-  return Boolean(value && typeof value === "object" && "chat" in value);
-}
+type PromptRuntimeConfig = {
+  systemPrompt: string;
+  promptTemplate: string;
+  temperature?: number | null;
+  maxTokens?: number | null;
+  topP?: number | null;
+  modelApi?: RuntimeConfig["modelApi"] | null;
+};
+
+type PromptOverrides = {
+  itemAnalysis?: PromptRuntimeConfig;
+  clusterSummary?: PromptRuntimeConfig;
+  clusterMatch?: PromptRuntimeConfig;
+};
 
 function getClient(config: RuntimeConfig["modelApi"]): OpenAICompatibleClient | null {
   const apiKey = config.apiKey;
@@ -60,14 +81,39 @@ function getClient(config: RuntimeConfig["modelApi"]): OpenAICompatibleClient | 
     return null;
   }
 
+  // The official SDK uses overloaded method signatures that are wider than our
+  // lightweight compatibility interface, so we narrow it at the boundary.
   return new OpenAI({
     apiKey,
     baseURL: config.baseURL || undefined,
-  });
+  }) as unknown as OpenAICompatibleClient;
+}
+
+function getClientForConfig(
+  config: RuntimeConfig["modelApi"],
+  cache: Map<string, OpenAICompatibleClient | null>,
+): OpenAICompatibleClient | null {
+  const cacheKey = [
+    config.apiKey,
+    config.baseURL,
+    config.model,
+  ].join("|");
+
+  if (cache.has(cacheKey)) {
+    return cache.get(cacheKey) ?? null;
+  }
+
+  const client = getClient(config);
+  cache.set(cacheKey, client);
+  return client;
 }
 
 function truncate(text: string, maxLength: number): string {
   return text.length <= maxLength ? text : `${text.slice(0, maxLength).trim()}...`;
+}
+
+function renderPromptTemplate(template: string, values: Record<string, string>): string {
+  return template.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, key: string) => values[key] ?? "");
 }
 
 function getFallbackEnrichment(
@@ -122,40 +168,38 @@ function parseJsonLikeEnrichment(
     // Fall through to tolerant parsing below.
   }
 
-  {
-    const translatedTitleMatch = normalized.match(
-      /"?translatedTitle"?\s*:\s*(?:"([^"]*)"|'([^']*)'|([^,\n}]+))/i,
-    );
-    const summaryMatch = normalized.match(/"?summary"?\s*:\s*(?:"([^"]*)"|'([^']*)'|([^,\n}]+))/i);
+  const translatedTitleMatch = normalized.match(
+    /"?translatedTitle"?\s*:\s*(?:"([^"]*)"|'([^']*)'|([^,\n}]+))/i,
+  );
+  const summaryMatch = normalized.match(/"?summary"?\s*:\s*(?:"([^"]*)"|'([^']*)'|([^,\n}]+))/i);
 
-    if (!summaryMatch) {
-      return {
-        ok: false,
-        reason: `Unable to parse model response: ${normalized.slice(0, 200)}`,
-      };
-    }
-
-    const translatedCandidate = translatedTitleMatch
-      ? translatedTitleMatch[1] ?? translatedTitleMatch[2] ?? translatedTitleMatch[3] ?? ""
-      : "";
-    const summaryCandidate = summaryMatch[1] ?? summaryMatch[2] ?? summaryMatch[3] ?? "";
-
+  if (!summaryMatch) {
     return {
-      ok: true,
-      recovered: true,
-      value: {
-        translatedTitle: translateTitle ? translatedCandidate.trim() || fallback.translatedTitle : null,
-        summary: summaryCandidate.trim() || fallback.summary,
-        moderationStatus: fallback.moderationStatus,
-        moderationReason: fallback.moderationReason,
-        moderationDetail: fallback.moderationDetail,
-        qualityScore: fallback.qualityScore,
-        qualityRationale: fallback.qualityRationale,
-        topicLabel: fallback.topicLabel,
-        clusterHint: fallback.clusterHint,
-      },
+      ok: false,
+      reason: `Unable to parse model response: ${normalized.slice(0, 200)}`,
     };
   }
+
+  const translatedCandidate = translatedTitleMatch
+    ? translatedTitleMatch[1] ?? translatedTitleMatch[2] ?? translatedTitleMatch[3] ?? ""
+    : "";
+  const summaryCandidate = summaryMatch[1] ?? summaryMatch[2] ?? summaryMatch[3] ?? "";
+
+  return {
+    ok: true,
+    recovered: true,
+    value: {
+      translatedTitle: translateTitle ? translatedCandidate.trim() || fallback.translatedTitle : null,
+      summary: summaryCandidate.trim() || fallback.summary,
+      moderationStatus: fallback.moderationStatus,
+      moderationReason: fallback.moderationReason,
+      moderationDetail: fallback.moderationDetail,
+      qualityScore: fallback.qualityScore,
+      qualityRationale: fallback.qualityRationale,
+      topicLabel: fallback.topicLabel,
+      clusterHint: fallback.clusterHint,
+    },
+  };
 }
 
 function normalizeModerationStatus(value: string | null | undefined): AiEnrichment["moderationStatus"] {
@@ -230,56 +274,116 @@ function parseClusterMatchCandidateId(rawContent: string, candidateIds: string[]
   return clusterId && candidateIds.includes(clusterId) ? clusterId : null;
 }
 
-async function completeChat(
+function resolvePromptConfig(
+  defaultSystemPrompt: string,
+  defaultPromptTemplate: string,
+  runtimeOverride: PromptRuntimeConfig | undefined,
+): PromptRuntimeConfig {
+  if (runtimeOverride) {
+    return {
+      systemPrompt: runtimeOverride.systemPrompt || defaultSystemPrompt,
+      promptTemplate: runtimeOverride.promptTemplate || defaultPromptTemplate,
+      temperature: runtimeOverride.temperature,
+      maxTokens: runtimeOverride.maxTokens,
+      topP: runtimeOverride.topP,
+      modelApi: runtimeOverride.modelApi,
+    };
+  }
+
+  return {
+    systemPrompt: defaultSystemPrompt,
+    promptTemplate: defaultPromptTemplate,
+  };
+}
+
+async function completeText(
   client: OpenAICompatibleClient,
-  model: string,
-  messages: Array<{ role: "system" | "user"; content: string }>,
+  config: RuntimeConfig["modelApi"],
+  promptConfig: PromptRuntimeConfig,
+  userContent: string,
 ): Promise<string> {
   const response = await client.chat.completions.create({
-    model,
-    messages,
+    model: config.model,
+    messages: [
+      {
+        role: "system",
+        content: promptConfig.systemPrompt,
+      },
+      {
+        role: "user",
+        content: userContent,
+      },
+    ],
+    max_tokens: promptConfig.maxTokens ?? undefined,
+    temperature: promptConfig.temperature ?? undefined,
+    top_p: promptConfig.topP ?? undefined,
   });
 
-  return response.choices[0]?.message?.content?.trim() || "";
+  return response.choices?.[0]?.message?.content?.trim() || "";
 }
 
 export function createAiProvider(
   config: RuntimeConfig["modelApi"],
-  promptOverridesOrClient?: PromptOverrides | OpenAICompatibleClient | null,
+  promptOverrides?: PromptOverrides | null,
   clientOverrideArg?: OpenAICompatibleClient | null,
 ): AiProvider {
-  const promptOverrides = isClientOverride(promptOverridesOrClient) ? undefined : promptOverridesOrClient;
-  const client =
-    clientOverrideArg ?? (isClientOverride(promptOverridesOrClient) ? promptOverridesOrClient : null) ?? getClient(config);
-  const model = config.model || "gpt-4.1-mini";
-  const itemAnalysisPrompt = promptOverrides?.itemAnalysisPrompt ?? DEFAULT_ITEM_ANALYSIS_PROMPT;
-  const clusterSummaryPrompt = promptOverrides?.clusterSummaryPrompt ?? DEFAULT_CLUSTER_SUMMARY_PROMPT;
-  const clusterMatchPrompt = promptOverrides?.clusterMatchPrompt ?? DEFAULT_CLUSTER_MATCH_PROMPT;
+  const globalClient = clientOverrideArg ?? getClient(config);
+  const clientCache = new Map<string, OpenAICompatibleClient | null>();
+  const itemAnalysisConfig = resolvePromptConfig(
+    DEFAULT_ITEM_ANALYSIS_PROMPT,
+    DEFAULT_ITEM_ANALYSIS_USER_PROMPT_TEMPLATE,
+    promptOverrides?.itemAnalysis,
+  );
+  const clusterSummaryConfig = resolvePromptConfig(
+    DEFAULT_CLUSTER_SUMMARY_PROMPT,
+    DEFAULT_CLUSTER_SUMMARY_USER_PROMPT_TEMPLATE,
+    promptOverrides?.clusterSummary,
+  );
+  const clusterMatchConfig = resolvePromptConfig(
+    DEFAULT_CLUSTER_MATCH_PROMPT,
+    DEFAULT_CLUSTER_MATCH_USER_PROMPT_TEMPLATE,
+    promptOverrides?.clusterMatch,
+  );
+
+  const getExecutionConfig = (promptConfig: PromptRuntimeConfig) => promptConfig.modelApi ?? config;
+  const getExecutionClient = (promptConfig: PromptRuntimeConfig) => {
+    const executionConfig = getExecutionConfig(promptConfig);
+    if (
+      executionConfig.apiKey === config.apiKey &&
+      executionConfig.baseURL === config.baseURL &&
+      executionConfig.model === config.model
+    ) {
+      return globalClient;
+    }
+    return getClientForConfig(executionConfig, clientCache);
+  };
 
   return {
     async enrichContent(inputText, metadata) {
       const fallback = getFallbackEnrichment(inputText, metadata);
+      const executionClient = getExecutionClient(itemAnalysisConfig);
+      const executionConfig = getExecutionConfig(itemAnalysisConfig);
 
-      if (!client) {
+      if (!executionClient) {
         return fallback;
       }
 
       let lastFailureReason = "Unknown invalid ai enrichment response";
       let recoveredFallback: AiEnrichment | null = null;
+      const userContent = renderPromptTemplate(itemAnalysisConfig.promptTemplate, {
+        title: metadata.title,
+        sourceName: metadata.sourceName ?? "未知来源",
+        translateTitle: metadata.translateTitle ? "是" : "否",
+        inputText: truncate(inputText, 4000),
+      });
 
       for (let attempt = 0; attempt < 2; attempt += 1) {
-        const output = await completeChat(client, model, [
-          {
-            role: "system",
-            content: itemAnalysisPrompt,
-          },
-          {
-            role: "user",
-            content: `标题：${metadata.title}\n来源：${metadata.sourceName ?? "未知来源"}\n是否需要翻译标题：${
-              metadata.translateTitle ? "是" : "否"
-            }\n正文：${truncate(inputText, 4000)}`,
-          },
-        ]);
+        const output = await completeText(
+          executionClient,
+          executionConfig,
+          itemAnalysisConfig,
+          userContent,
+        );
 
         const parsed = parseJsonLikeEnrichment(output, fallback, metadata.translateTitle);
 
@@ -303,20 +407,22 @@ export function createAiProvider(
       throw new Error(`Invalid AI enrichment response after retry. ${lastFailureReason}`);
     },
     async summarizeCluster(inputText, metadata) {
-      if (!client) {
+      const executionClient = getExecutionClient(clusterSummaryConfig);
+      const executionConfig = getExecutionConfig(clusterSummaryConfig);
+
+      if (!executionClient) {
         return truncate(inputText.trim(), 180);
       }
 
-      const output = await completeChat(client, model, [
-        {
-          role: "system",
-          content: clusterSummaryPrompt,
-        },
-        {
-          role: "user",
-          content: `主题：${metadata.title}\n候选内容：${truncate(inputText, 4000)}`,
-        },
-      ]);
+      const output = await completeText(
+        executionClient,
+        executionConfig,
+        clusterSummaryConfig,
+        renderPromptTemplate(clusterSummaryConfig.promptTemplate, {
+          title: metadata.title,
+          inputText: truncate(inputText, 4000),
+        }),
+      );
 
       const normalized = stripCodeFence(output);
 
@@ -332,22 +438,23 @@ export function createAiProvider(
       return normalized || truncate(inputText.trim(), 180);
     },
     async matchClusterCandidate(inputText, metadata) {
-      if (!client || metadata.candidates.length === 0) {
+      const executionClient = getExecutionClient(clusterMatchConfig);
+      const executionConfig = getExecutionConfig(clusterMatchConfig);
+
+      if (!executionClient || metadata.candidates.length === 0) {
         return null;
       }
 
-      const output = await completeChat(client, model, [
-        {
-          role: "system",
-          content: clusterMatchPrompt,
-        },
-        {
-          role: "user",
-          content: `当前内容标题：${metadata.title}\n当前内容线索：${truncate(inputText, 2000)}\n候选聚合组：${JSON.stringify(
-            metadata.candidates,
-          )}`,
-        },
-      ]);
+      const output = await completeText(
+        executionClient,
+        executionConfig,
+        clusterMatchConfig,
+        renderPromptTemplate(clusterMatchConfig.promptTemplate, {
+          title: metadata.title,
+          inputText: truncate(inputText, 2000),
+          candidatesJson: JSON.stringify(metadata.candidates),
+        }),
+      );
 
       return parseClusterMatchCandidateId(
         output,

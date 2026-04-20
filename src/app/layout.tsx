@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
 
+import { ToastProvider } from "@/components/ui/toast";
+
 import "./globals.css";
 
 const brandFont = localFont({
@@ -24,7 +26,9 @@ export default function RootLayout({
 }>) {
   return (
     <html className={brandFont.variable} lang="zh-CN">
-      <body>{children}</body>
+      <body>
+        <ToastProvider>{children}</ToastProvider>
+      </body>
     </html>
   );
 }

@@ -1,18 +1,46 @@
+export type PromptConfigType =
+  | "item_analysis"
+  | "cluster_summary"
+  | "cluster_match";
+
+export type AdminModelApiConfig = {
+  id: string;
+  name: string;
+  baseUrl: string;
+  modelName: string;
+  ingestionItemConcurrency: number;
+  apiKeyMasked: string;
+  hasApiKey: boolean;
+  isEnabled: boolean;
+  isDefault: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AdminModelApiConfigDetail = AdminModelApiConfig & {
+  apiKeyRaw: string;
+};
+
+export type AdminPromptConfig = {
+  id: string;
+  name: string;
+  type: PromptConfigType;
+  prompt: string;
+  systemPrompt: string | null;
+  temperature: number | null;
+  maxTokens: number | null;
+  topP: number | null;
+  modelApiConfigId: string | null;
+  modelApiConfigName: string | null;
+  isEnabled: boolean;
+  isDefault: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type AdminSettingsSnapshot = {
-  appConfig: {
-    ingestionItemConcurrency: number;
-    modelApi: {
-      baseURL: string;
-      model: string;
-      apiKeyMasked: string;
-      hasApiKey: boolean;
-    };
-    prompts: {
-      itemAnalysis: string;
-      clusterSummary: string;
-      clusterMatch: string;
-    };
-  };
+  modelApiConfigs: AdminModelApiConfig[];
+  promptConfigs: AdminPromptConfig[];
   blacklistKeywords: string[];
   groups: Array<{
     id: string;

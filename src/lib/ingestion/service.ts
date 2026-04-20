@@ -172,11 +172,11 @@ async function resolveRunOptions(options?: Partial<RunIngestionOptions>): Promis
       options?.aiProvider ??
       createAiProvider(
         runtimeConfig?.modelApi ?? { apiKey: "", baseURL: "", model: "gpt-4.1-mini" },
-        runtimeConfig?.prompts
+        runtimeConfig?.selectedPromptConfigs
           ? {
-              itemAnalysisPrompt: runtimeConfig.prompts.itemAnalysis,
-              clusterSummaryPrompt: runtimeConfig.prompts.clusterSummary,
-              clusterMatchPrompt: runtimeConfig.prompts.clusterMatch,
+              itemAnalysis: runtimeConfig.selectedPromptConfigs.itemAnalysis,
+              clusterSummary: runtimeConfig.selectedPromptConfigs.clusterSummary,
+              clusterMatch: runtimeConfig.selectedPromptConfigs.clusterMatch,
             }
           : undefined,
       ),

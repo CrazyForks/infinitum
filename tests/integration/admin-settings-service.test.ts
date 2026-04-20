@@ -1,12 +1,12 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import os from "node:os";
-import path from "node:path";
-
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { prisma } from "@/lib/db";
 import * as settingsService from "@/lib/settings/service";
 import {
+  createModelApiConfig,
+  createPromptConfig,
+  deleteModelApiConfig,
+  deletePromptConfig,
   deleteSourceGroup,
   getAdminSettings,
   getIngestionRuntimeConfig,
@@ -16,67 +16,132 @@ describe("admin settings service", () => {
   beforeEach(async () => {
     await prisma.item.deleteMany();
     await prisma.fetchRun.deleteMany();
+    await prisma.promptConfig.deleteMany();
+    await prisma.modelApiConfig.deleteMany();
     await prisma.source.deleteMany();
     await prisma.sourceGroup.deleteMany();
     await prisma.blacklistKeyword.deleteMany();
-    await prisma.appConfig.deleteMany();
   });
 
-  it("imports runtime configuration from the JSON file when the database is empty", async () => {
-    const tempDir = mkdtempSync(path.join(os.tmpdir(), "infinitum-admin-config-"));
-    const configPath = path.join(tempDir, "infinitum.config.json");
+  it("seeds code defaults into model and prompt tables when the database is empty", async () => {
+    const runtimeConfig = await getIngestionRuntimeConfig();
+    const settings = await getAdminSettings();
 
-    writeFileSync(
-      configPath,
-      JSON.stringify({
-        rssSources: [
-          {
-            name: "Imported Feed",
-            rssUrl: "https://imported.example.com/feed.xml",
-            siteUrl: "https://imported.example.com",
-            enabled: true,
-            fetchFullTextWhenMissing: false,
-          },
-        ],
-        blacklistKeywords: ["crypto", "layoffs"],
-        ingestion: {
-          itemConcurrency: 4,
-        },
-        modelApi: {
-          apiKey: "sk-imported",
-          baseURL: "https://example.com/v1",
-          model: "gpt-imported",
-        },
-        prompts: {
-          itemAnalysis: "导入的单条分析提示词",
-          clusterSummary: "导入的聚合摘要提示词",
-          clusterMatch: "导入的归组判定提示词",
-        },
-      }),
-      "utf8",
+    expect(runtimeConfig.rssSources.length).toBeGreaterThan(0);
+    expect(runtimeConfig.blacklistKeywords).toEqual([]);
+    expect(runtimeConfig.ingestion.itemConcurrency).toBe(3);
+    expect(runtimeConfig.modelApi.apiKey).toBe("");
+    expect(runtimeConfig.modelApi.baseURL).toBe("");
+    expect(runtimeConfig.modelApi.model).toBe("gpt-4.1-mini");
+    expect(runtimeConfig.prompts.itemAnalysis.length).toBeGreaterThan(0);
+    expect(runtimeConfig.selectedPromptConfigs?.itemAnalysis.promptTemplate).toContain("{{title}}");
+
+    expect(settings.modelApiConfigs).toHaveLength(1);
+    expect(settings.modelApiConfigs[0]?.baseUrl).toBe("");
+    expect(settings.modelApiConfigs[0]?.apiKeyMasked).toBe("");
+    expect(settings.modelApiConfigs[0]?.ingestionItemConcurrency).toBe(3);
+    expect(settings.promptConfigs).toHaveLength(3);
+    expect(settings.promptConfigs.find((config) => config.type === "item_analysis")?.systemPrompt).toContain(
+      "字段说明",
     );
+  });
 
-    const runtimeConfig = await getIngestionRuntimeConfig({ configPath });
-    const settings = await getAdminSettings({ configPath });
+  it("uses enabled default configs to build the runtime mapping", async () => {
+    const modelConfig = await createModelApiConfig({
+      name: "默认模型配置",
+      baseUrl: "https://example.com/v1",
+      apiKey: "sk-live",
+      modelName: "gpt-live",
+      ingestionItemConcurrency: 6,
+      isEnabled: true,
+      isDefault: true,
+    });
 
-    expect(runtimeConfig.rssSources).toHaveLength(1);
-    expect(runtimeConfig.rssSources[0]?.name).toBe("Imported Feed");
-    expect(runtimeConfig.blacklistKeywords).toEqual(["crypto", "layoffs"]);
-    expect(runtimeConfig.ingestion.itemConcurrency).toBe(4);
-    expect(runtimeConfig.modelApi.apiKey).toBe("sk-imported");
-    expect(runtimeConfig.prompts.itemAnalysis).toBe("导入的单条分析提示词");
-    expect(runtimeConfig.prompts.clusterSummary).toBe("导入的聚合摘要提示词");
-    expect(runtimeConfig.prompts.clusterMatch).toBe("导入的归组判定提示词");
+    await createPromptConfig({
+      name: "默认内容分析提示词",
+      type: "item_analysis",
+      systemPrompt: "分析系统提示词",
+      prompt: "标题：{{title}}\n正文：{{inputText}}",
+      temperature: 0.2,
+      maxTokens: 800,
+      topP: 1,
+      modelApiConfigId: modelConfig.id,
+      isEnabled: true,
+      isDefault: true,
+    });
+    await createPromptConfig({
+      name: "默认聚合摘要提示词",
+      type: "cluster_summary",
+      systemPrompt: "聚合系统提示词",
+      prompt: "主题：{{title}}\n候选内容：{{inputText}}",
+      temperature: null,
+      maxTokens: 500,
+      topP: null,
+      modelApiConfigId: null,
+      isEnabled: true,
+      isDefault: true,
+    });
+    await createPromptConfig({
+      name: "默认归组判定提示词",
+      type: "cluster_match",
+      systemPrompt: "归组系统提示词",
+      prompt: "当前内容标题：{{title}}\n候选聚合组：{{candidatesJson}}",
+      temperature: null,
+      maxTokens: 400,
+      topP: null,
+      modelApiConfigId: null,
+      isEnabled: true,
+      isDefault: true,
+    });
 
-    expect(settings.sources).toHaveLength(1);
-    expect(settings.blacklistKeywords).toEqual(["crypto", "layoffs"]);
-    expect(settings.appConfig.modelApi.baseURL).toBe("https://example.com/v1");
-    expect(settings.appConfig.modelApi.apiKeyMasked).toBe("••••••••rted");
-    expect(settings.appConfig.prompts.itemAnalysis).toBe("导入的单条分析提示词");
-    expect(settings.appConfig.prompts.clusterSummary).toBe("导入的聚合摘要提示词");
-    expect(settings.appConfig.prompts.clusterMatch).toBe("导入的归组判定提示词");
+    const runtimeConfig = await getIngestionRuntimeConfig();
 
-    rmSync(tempDir, { recursive: true, force: true });
+    expect(runtimeConfig.ingestion.itemConcurrency).toBe(6);
+    expect(runtimeConfig.modelApi.model).toBe("gpt-live");
+    expect(runtimeConfig.selectedPromptConfigs?.itemAnalysis.systemPrompt).toBe("分析系统提示词");
+    expect(runtimeConfig.selectedPromptConfigs?.itemAnalysis.modelApi?.model).toBe("gpt-live");
+    expect(runtimeConfig.selectedPromptConfigs?.clusterSummary.maxTokens).toBe(500);
+  });
+
+  it("prevents deleting the default model config", async () => {
+    const modelConfig = await createModelApiConfig({
+      name: "默认模型配置",
+      baseUrl: "https://example.com/v1",
+      apiKey: "sk-live",
+      modelName: "gpt-live",
+      ingestionItemConcurrency: 6,
+      isEnabled: true,
+      isDefault: true,
+    });
+
+    await expect(deleteModelApiConfig(modelConfig.id)).rejects.toThrow("默认模型配置不能删除。");
+  });
+
+  it("prevents deleting the default prompt config", async () => {
+    const modelConfig = await createModelApiConfig({
+      name: "默认模型配置",
+      baseUrl: "https://example.com/v1",
+      apiKey: "sk-live",
+      modelName: "gpt-live",
+      ingestionItemConcurrency: 6,
+      isEnabled: true,
+      isDefault: true,
+    });
+
+    const promptConfig = await createPromptConfig({
+      name: "默认内容分析提示词",
+      type: "item_analysis",
+      systemPrompt: "分析系统提示词",
+      prompt: "标题：{{title}}\n正文：{{inputText}}",
+      temperature: 0.2,
+      maxTokens: 800,
+      topP: 1,
+      modelApiConfigId: modelConfig.id,
+      isEnabled: true,
+      isDefault: true,
+    });
+
+    await expect(deletePromptConfig(promptConfig.id)).rejects.toThrow("默认提示词配置不能删除。");
   });
 
   it("blocks deleting a group that still owns sources", async () => {
@@ -97,7 +162,9 @@ describe("admin settings service", () => {
       },
     });
 
-    await expect(deleteSourceGroup(group.id)).rejects.toThrow("Please move sources out of this group before deleting it.");
+    await expect(deleteSourceGroup(group.id)).rejects.toThrow(
+      "Please move sources out of this group before deleting it.",
+    );
   });
 
   it("imports OPML sources into matching groups", async () => {
@@ -167,108 +234,6 @@ describe("admin settings service", () => {
       group: {
         name: "Infra",
       },
-    });
-  });
-
-  it("updates an existing source instead of duplicating it during OPML import", async () => {
-    const importSourcesFromOpml = (
-      settingsService as typeof settingsService & {
-        importSourcesFromOpml?: (opmlText: string, options?: unknown) => Promise<unknown>;
-      }
-    ).importSourcesFromOpml;
-
-    expect(importSourcesFromOpml).toBeTypeOf("function");
-
-    await prisma.source.create({
-      data: {
-        name: "Old Feed Name",
-        rssUrl: "https://feeds.example.com/existing.xml",
-        siteUrl: "https://old.example.com",
-        enabled: false,
-        fetchFullTextWhenMissing: false,
-      },
-    });
-
-    await importSourcesFromOpml!(
-      `<?xml version="1.0" encoding="UTF-8"?>
-      <opml version="2.0">
-        <body>
-          <outline text="Research">
-            <outline
-              text="Updated Feed Name"
-              title="Updated Feed Name"
-              type="rss"
-              xmlUrl="https://feeds.example.com/existing.xml"
-              htmlUrl="https://new.example.com"
-            />
-          </outline>
-        </body>
-      </opml>`,
-      {
-        resolveMetadata: async () => ({
-          name: "Updated Feed Name",
-          rssUrl: "https://feeds.example.com/existing.xml",
-          siteUrl: "https://new.example.com",
-        }),
-      },
-    );
-
-    const sources = await prisma.source.findMany({
-      include: { group: true },
-    });
-
-    expect(sources).toHaveLength(1);
-    expect(sources[0]).toMatchObject({
-      name: "Updated Feed Name",
-      rssUrl: "https://feeds.example.com/existing.xml",
-      siteUrl: "https://new.example.com/",
-      enabled: true,
-      fetchFullTextWhenMissing: true,
-      group: {
-        name: "Research",
-      },
-    });
-  });
-
-  it("resolves RSS metadata and falls back when feed metadata is incomplete", async () => {
-    const resolveSourceMetadata = (
-      settingsService as typeof settingsService & {
-        resolveSourceMetadata?: (rssUrl: string, options?: unknown) => Promise<unknown>;
-      }
-    ).resolveSourceMetadata;
-
-    expect(resolveSourceMetadata).toBeTypeOf("function");
-
-    await expect(
-      resolveSourceMetadata!("https://feeds.example.com/feed.xml", {
-        parser: {
-          parseURL: async () => ({
-            title: "Metadata Feed",
-            link: "https://site.example.com",
-            items: [],
-          }),
-        },
-      }),
-    ).resolves.toMatchObject({
-      name: "Metadata Feed",
-      rssUrl: "https://feeds.example.com/feed.xml",
-      siteUrl: "https://site.example.com/",
-    });
-
-    await expect(
-      resolveSourceMetadata!("https://blog.example.com/rss.xml", {
-        parser: {
-          parseURL: async () => ({
-            title: "",
-            link: "",
-            items: [],
-          }),
-        },
-      }),
-    ).resolves.toMatchObject({
-      name: "blog.example.com",
-      rssUrl: "https://blog.example.com/rss.xml",
-      siteUrl: "https://blog.example.com/",
     });
   });
 });

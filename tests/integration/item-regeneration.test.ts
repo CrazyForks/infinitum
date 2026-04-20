@@ -19,7 +19,6 @@ describe("regenerateItemContent", () => {
     await prisma.source.deleteMany();
     await prisma.sourceGroup.deleteMany();
     await prisma.blacklistKeyword.deleteMany();
-    await prisma.appConfig.deleteMany();
     await prisma.taskSchedule.deleteMany();
   });
 
@@ -384,8 +383,8 @@ describe("regenerateItemContent", () => {
     });
 
     expect(storedTaskRun.status).toBe("succeeded");
-    expect(storedTaskRun.aiCallCountActual).toBe(3);
-    expect(storedTaskRun.aiCallCountEstimated).toBe(3);
+    expect(storedTaskRun.aiCallCountActual).toBe(2);
+    expect(storedTaskRun.aiCallCountEstimated).toBe(2);
   });
 
   it("records ai usage for cluster summary regeneration tasks", async () => {

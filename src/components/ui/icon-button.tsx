@@ -14,7 +14,7 @@ interface IconButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const variantClassName: Record<IconButtonVariant, string> = {
   ghost: "text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--bg-muted)]",
-  secondary: "text-[var(--text-2)] hover:text-[var(--text-1)] hover:bg-[var(--bg-muted)] border border-[color:var(--line)]",
+  secondary: "border border-transparent text-[var(--text-2)] hover:text-[var(--text-1)] hover:bg-[var(--bg-muted)]",
 };
 
 const sizeClassName: Record<IconButtonSize, string> = {

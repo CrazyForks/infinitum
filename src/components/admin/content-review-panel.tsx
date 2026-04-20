@@ -3,13 +3,13 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 
 import { PageShell } from "@/components/ui/page-shell";
-import { StatusBanner } from "@/components/ui/status-banner";
 import { FilterInput } from "@/components/ui/filter-input";
 import { FilterSelect } from "@/components/ui/filter-select";
 import { ModalShell } from "@/components/ui/modal-shell";
 import { IconButton } from "@/components/ui/icon-button";
 import { Button } from "@/components/ui/button";
 import { StatusTag } from "@/components/ui/status-tag";
+import { useToast } from "@/components/ui/toast";
 import {
   IconRotateCw,
   IconCheck,
@@ -23,11 +23,6 @@ import type { ClusterDTO, ReviewItemDTO } from "@/lib/feed/types";
 import { cx } from "@/lib/ui/cx";
 
 type ReviewTab = "filtered" | "clusters";
-type FeedbackTone = "error" | "info" | "success";
-type FeedbackState = {
-  tone: FeedbackTone;
-  text: string;
-} | null;
 type RequiredActionField = "cluster" | "taskRun";
 
 type ActionPayload = {
@@ -439,6 +434,7 @@ interface ContentReviewContentProps {
 }
 
 function ContentReviewContent({ initialTab = "filtered" }: ContentReviewContentProps) {
+  const { showToast } = useToast();
   const [activeTab, setActiveTab] = useState<ReviewTab>(initialTab);
   const [filteredItems, setFilteredItems] = useState<ReviewItemDTO[]>([]);
   const [clusters, setClusters] = useState<ClusterDTO[]>([]);
@@ -448,7 +444,6 @@ function ContentReviewContent({ initialTab = "filtered" }: ContentReviewContentP
   const [clusterSearch, setClusterSearch] = useState("");
   const [clusterStatus, setClusterStatus] = useState<ClusterDTO["status"] | "">("");
   const [clusterTimeRange, setClusterTimeRange] = useState<TimeRangeFilter>("");
-  const [feedback, setFeedback] = useState<FeedbackState>(null);
   const [isPending, startTransition] = useTransition();
 
   // Sync activeTab with initialTab prop and reset page
@@ -509,19 +504,19 @@ function ContentReviewContent({ initialTab = "filtered" }: ContentReviewContentP
         const clusterError = getResponseError(clusterResponse, clusterPayload, "审核数据加载失败。");
 
         if (filteredError) {
-          setFeedback({ tone: "error", text: filteredError });
+          showToast(filteredError, "error");
         } else {
           setFilteredItems(filteredPayload.items ?? []);
         }
 
         if (clusterError) {
-          setFeedback({ tone: "error", text: clusterError });
+          showToast(clusterError, "error");
         } else {
           setClusters(clusterPayload.clusters ?? []);
         }
       } catch {
         if (!cancelled) {
-          setFeedback({ tone: "error", text: "审核数据加载失败。" });
+          showToast("审核数据加载失败。", "error");
         }
       }
     });
@@ -534,7 +529,7 @@ function ContentReviewContent({ initialTab = "filtered" }: ContentReviewContentP
   useEffect(() => {
     const cleanup = fetchData();
     return cleanup;
-  }, []);
+  }, [showToast]);
 
   const postAction = (
     url: string,
@@ -551,19 +546,19 @@ function ContentReviewContent({ initialTab = "filtered" }: ContentReviewContentP
         const responseError = getResponseError(response, payload, "操作失败");
 
         if (responseError) {
-          setFeedback({ tone: "error", text: responseError });
+          showToast(responseError, "error");
           return;
         }
 
         if (options?.requiredField && !payload[options.requiredField]) {
-          setFeedback({ tone: "error", text: "操作失败" });
+          showToast("操作失败", "error");
           return;
         }
 
         options?.onSuccess?.(payload);
-        setFeedback({ tone: "success", text: successMessage });
+        showToast(successMessage, "success");
       } catch {
-        setFeedback({ tone: "error", text: "操作失败" });
+        showToast("操作失败", "error");
       }
     });
   };
@@ -822,16 +817,6 @@ function ContentReviewContent({ initialTab = "filtered" }: ContentReviewContentP
 
   return (
     <div className="space-y-6">
-      {/* Feedback Banner */}
-      {feedback && (
-        <StatusBanner
-          className="rounded-sm border px-4 py-3 text-sm"
-          tone={feedback.tone}
-        >
-          {feedback.text}
-        </StatusBanner>
-      )}
-
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1">

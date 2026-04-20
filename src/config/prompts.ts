@@ -64,3 +64,15 @@ export const DEFAULT_CLUSTER_SUMMARY_PROMPT =
 
 export const DEFAULT_CLUSTER_MATCH_PROMPT =
   '你是内容归组助手。请判断当前内容是否属于给定候选聚合组中的某一个。只返回 JSON，格式为 {"clusterId":"候选组ID"} 或 {"clusterId":null}。只有当候选组与当前内容描述的是同一具体事件、同一发布、同一公告、同一收购、同一融资、同一漏洞披露、同一论文或同一产品上线时才匹配。不要因为主题接近、赛道相同、公司相同、产品类别相近、方法论相似或都属于同一抽象话题就匹配；宁可返回 null，也不要做主题聚合。';
+
+export const DEFAULT_ITEM_ANALYSIS_USER_PROMPT_TEMPLATE = `标题：{{title}}
+来源：{{sourceName}}
+是否需要翻译标题：{{translateTitle}}
+正文：{{inputText}}`;
+
+export const DEFAULT_CLUSTER_SUMMARY_USER_PROMPT_TEMPLATE = `主题：{{title}}
+候选内容：{{inputText}}`;
+
+export const DEFAULT_CLUSTER_MATCH_USER_PROMPT_TEMPLATE = `当前内容标题：{{title}}
+当前内容线索：{{inputText}}
+候选聚合组：{{candidatesJson}}`;
