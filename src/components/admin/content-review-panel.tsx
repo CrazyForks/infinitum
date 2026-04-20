@@ -1,12 +1,24 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 
 import { PageShell } from "@/components/ui/page-shell";
 import { StatusBanner } from "@/components/ui/status-banner";
 import { FilterInput } from "@/components/ui/filter-input";
 import { FilterSelect } from "@/components/ui/filter-select";
-import { FilterSummary } from "@/components/ui/filter-summary";
+import { ModalShell } from "@/components/ui/modal-shell";
+import { IconButton } from "@/components/ui/icon-button";
+import { Button } from "@/components/ui/button";
+import { StatusTag } from "@/components/ui/status-tag";
+import {
+  IconRotateCw,
+  IconCheck,
+  IconX,
+  IconFilter,
+  IconGlobe,
+  IconExternalLink,
+  IconTrash,
+} from "@/components/ui/icons";
 import type { ClusterDTO, ReviewItemDTO } from "@/lib/feed/types";
 import { cx } from "@/lib/ui/cx";
 
@@ -31,20 +43,6 @@ type CollectionPayload = {
   items?: ReviewItemDTO[];
 };
 
-const tabConfig: Array<{
-  key: ReviewTab;
-  label: string;
-}> = [
-  {
-    key: "filtered",
-    label: "过滤内容",
-  },
-  {
-    key: "clusters",
-    label: "聚合管理",
-  },
-];
-
 const reviewReasonLabels: Record<NonNullable<ReviewItemDTO["moderationReason"]>, string> = {
   marketing: "营销内容",
   low_quality: "低质量",
@@ -53,10 +51,33 @@ const reviewReasonLabels: Record<NonNullable<ReviewItemDTO["moderationReason"]>,
   other: "其他原因",
 };
 
+const reviewReasonTone: Record<NonNullable<ReviewItemDTO["moderationReason"]>, "neutral" | "warning" | "danger"> = {
+  marketing: "warning",
+  low_quality: "neutral",
+  duplicate_noise: "neutral",
+  rule_blacklist: "danger",
+  other: "neutral",
+};
+
 const clusterStatusLabels: Record<ClusterDTO["status"], string> = {
   active: "显示中",
   hidden: "已隐藏",
 };
+
+const clusterStatusTone: Record<ClusterDTO["status"], "success" | "neutral"> = {
+  active: "success",
+  hidden: "neutral",
+};
+
+// Time range filter options
+const timeRangeOptions: Array<{ value: TimeRangeFilter; label: string }> = [
+  { value: "", label: "全部时间" },
+  { value: "today", label: "今天" },
+  { value: "week", label: "最近7天" },
+  { value: "month", label: "最近30天" },
+];
+
+type TimeRangeFilter = "" | "today" | "week" | "month";
 
 const surfaceCardClassName =
   "rounded-[1.1rem] border border-[color:var(--line)] bg-white/96 shadow-[var(--shadow-sm)]";
@@ -67,19 +88,66 @@ const secondaryButtonClassName =
 const primaryButtonClassName =
   "inline-flex min-h-8 items-center justify-center rounded-[0.8rem] bg-[var(--accent)] px-2.5 py-1.5 text-[13px] font-semibold text-white shadow-[0_14px_24px_rgba(37,99,235,0.16)] transition hover:bg-[var(--accent-strong)] disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:bg-[var(--accent)]";
 
+const dateTimeFormatter = new Intl.DateTimeFormat("zh-CN", {
+  dateStyle: "medium",
+  timeStyle: "short",
+  timeZone: "Asia/Shanghai",
+});
+
+const dateFormatter = new Intl.DateTimeFormat("zh-CN", {
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  timeZone: "Asia/Shanghai",
+});
+
 function formatDateTime(value: string) {
-  return new Intl.DateTimeFormat("zh-CN", {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone: "Asia/Shanghai",
-  }).format(new Date(value));
+  return dateTimeFormatter.format(new Date(value));
+}
+
+function formatDate(value: string) {
+  return dateFormatter.format(new Date(value));
+}
+
+function getLocalDateString(date: Date): string {
+  // Use browser's local timezone and return YYYY-MM-DD format
+  return date.toLocaleDateString("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+}
+
+function isWithinTimeRange(dateValue: string, timeRange: TimeRangeFilter): boolean {
+  if (!timeRange) return true;
+
+  const date = new Date(dateValue);
+  const now = new Date();
+
+  // Get local timezone dates
+  const dateLocalDate = getLocalDateString(date);
+  const nowLocalDate = getLocalDateString(now);
+
+  // Parse dates for comparison
+  const [dateYear, dateMonth, dateDay] = dateLocalDate.split("/").map(Number);
+  const [nowYear, nowMonth, nowDay] = nowLocalDate.split("/").map(Number);
+
+  // Calculate days difference based on local dates
+  const dateLocalTime = new Date(dateYear, dateMonth - 1, dateDay).getTime();
+  const nowLocalTime = new Date(nowYear, nowMonth - 1, nowDay).getTime();
+  const diffDays = (nowLocalTime - dateLocalTime) / (1000 * 60 * 60 * 24);
+
+  if (timeRange === "today") return diffDays === 0;
+  if (timeRange === "week") return diffDays >= 0 && diffDays <= 6;
+  if (timeRange === "month") return diffDays >= 0 && diffDays <= 29;
+  return true;
 }
 
 function getReviewReasonLabel(reason: ReviewItemDTO["moderationReason"]) {
   if (!reason) {
     return "待复核";
   }
-
   return reviewReasonLabels[reason];
 }
 
@@ -93,7 +161,6 @@ function getResponseError(
   if (!response.ok) {
     return payload.error ?? fallbackMessage;
   }
-
   return payload.error ?? null;
 }
 
@@ -101,16 +168,278 @@ function truncateText(value: string | null | undefined, maxLength: number) {
   if (!value) {
     return "暂无摘要。";
   }
-
   if (value.length <= maxLength) {
     return value;
   }
-
   return `${value.slice(0, maxLength).trimEnd()}...`;
 }
 
-function ContentReviewContent() {
-  const [activeTab, setActiveTab] = useState<ReviewTab>("filtered");
+// Filtered Item Detail Modal
+interface FilteredItemDetailModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  item: ReviewItemDTO | null;
+  onRestore?: () => void;
+  onReanalyze?: () => void;
+  isRestoring?: boolean;
+  isReanalyzing?: boolean;
+}
+
+function FilteredItemDetailModal({
+  isOpen,
+  onClose,
+  item,
+  onRestore,
+  onReanalyze,
+  isRestoring,
+  isReanalyzing,
+}: FilteredItemDetailModalProps) {
+  if (!item) return null;
+
+  return (
+    <ModalShell
+      isOpen={isOpen}
+      onClose={onClose}
+      title="过滤内容详情"
+      widthClassName="max-w-2xl"
+      headerClassName="border-b border-[color:var(--line)] p-6"
+      bodyClassName="space-y-4 p-6"
+      footerClassName="border-t border-[color:var(--line)] bg-[var(--bg-muted)] p-6"
+      footer={
+        <div className="flex justify-end gap-2">
+          {onRestore && (
+            <Button onClick={onRestore} variant="primary" disabled={isRestoring}>
+              <IconCheck className={cx("h-4 w-4 mr-1", isRestoring && "animate-pulse")} />
+              恢复内容
+            </Button>
+          )}
+          {onReanalyze && (
+            <Button onClick={onReanalyze} variant="secondary" disabled={isReanalyzing}>
+              <IconRotateCw className={cx("h-4 w-4 mr-1", isReanalyzing && "animate-spin")} />
+              重新 AI 判定
+            </Button>
+          )}
+          <Button onClick={onClose} variant="secondary">
+            关闭
+          </Button>
+        </div>
+      }
+    >
+      <div className="space-y-4">
+        {/* Basic Info */}
+        <div className="rounded-lg border border-[color:var(--line)] bg-[var(--bg-muted)] p-4 text-sm text-[var(--text-2)]">
+          <div className="font-medium text-[var(--text-1)] mb-2">{item.title}</div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <span className="text-[var(--text-3)]">来源:</span> {item.sourceName}
+            </div>
+            <div>
+              <span className="text-[var(--text-3)]">发布时间:</span> {formatDateTime(item.publishedAt)}
+            </div>
+            <div>
+              <span className="text-[var(--text-3)]">过滤原因:</span>{" "}
+              <StatusTag tone={reviewReasonTone[item.moderationReason ?? "other"]}>
+                {getReviewReasonLabel(item.moderationReason)}
+              </StatusTag>
+            </div>
+            <div>
+              <span className="text-[var(--text-3)]">质量分:</span> {item.qualityScore}
+            </div>
+            <div>
+              <span className="text-[var(--text-3)]">主题:</span> {item.topicLabel ?? "未归类"}
+            </div>
+          </div>
+        </div>
+
+        {/* Summary */}
+        <div className="space-y-2">
+          <h4 className="text-sm font-semibold text-[var(--text-1)]">内容摘要</h4>
+          <p className="text-sm text-[var(--text-2)] leading-6">{item.summary || "暂无摘要"}</p>
+        </div>
+
+        {/* Moderation Detail */}
+        {(item.moderationDetail || item.qualityRationale) && (
+          <div className="space-y-2">
+            <h4 className="text-sm font-semibold text-[var(--text-1)]">审核说明</h4>
+            <p className="text-sm text-[var(--text-2)] leading-6">
+              {item.moderationDetail || item.qualityRationale}
+            </p>
+          </div>
+        )}
+
+        {/* External Link */}
+        <div className="space-y-2">
+          <h4 className="text-sm font-semibold text-[var(--text-1)]">原文链接</h4>
+          <a
+            href={item.originalUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 text-sm text-[var(--accent)] hover:underline"
+          >
+            {item.originalUrl}
+            <IconExternalLink className="h-3.5 w-3.5" />
+          </a>
+        </div>
+      </div>
+    </ModalShell>
+  );
+}
+
+// Cluster Detail Modal
+interface ClusterDetailModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  cluster: ClusterDTO | null;
+  onRegenerateSummary?: () => void;
+  onToggleStatus?: () => void;
+  onDetachItem?: (itemId: string) => void;
+  isRegenerating?: boolean;
+  isTogglingStatus?: boolean;
+}
+
+function ClusterDetailModal({
+  isOpen,
+  onClose,
+  cluster,
+  onRegenerateSummary,
+  onToggleStatus,
+  onDetachItem,
+  isRegenerating,
+  isTogglingStatus,
+}: ClusterDetailModalProps) {
+  if (!cluster) return null;
+
+  const isHidden = cluster.status === "hidden";
+
+  return (
+    <ModalShell
+      isOpen={isOpen}
+      onClose={onClose}
+      title="聚合详情"
+      widthClassName="max-w-3xl"
+      headerClassName="border-b border-[color:var(--line)] p-6"
+      bodyClassName="space-y-4 p-6 max-h-[70vh] overflow-y-auto"
+      footerClassName="border-t border-[color:var(--line)] bg-[var(--bg-muted)] p-6"
+      footer={
+        <div className="flex justify-end gap-2">
+          {onRegenerateSummary && (
+            <Button onClick={onRegenerateSummary} variant="secondary" disabled={isRegenerating}>
+              <IconRotateCw className={cx("h-4 w-4 mr-1", isRegenerating && "animate-spin")} />
+              重新生成摘要
+            </Button>
+          )}
+          {onToggleStatus && (
+            <Button
+              onClick={onToggleStatus}
+              variant={isHidden ? "primary" : "secondary"}
+              disabled={isTogglingStatus}
+            >
+              {isHidden ? (
+                <>
+                  <IconCheck className="h-4 w-4 mr-1" />
+                  恢复显示
+                </>
+              ) : (
+                <>
+                  <IconX className="h-4 w-4 mr-1" />
+                  隐藏聚合
+                </>
+              )}
+            </Button>
+          )}
+          <Button onClick={onClose} variant="secondary">
+            关闭
+          </Button>
+        </div>
+      }
+    >
+      <div className="space-y-4">
+        {/* Basic Info */}
+        <div className="rounded-lg border border-[color:var(--line)] bg-[var(--bg-muted)] p-4 text-sm text-[var(--text-2)]">
+          <div className="font-medium text-[var(--text-1)] mb-2">{cluster.title}</div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <span className="text-[var(--text-3)]">内容数:</span> {cluster.itemCount} 条
+            </div>
+            <div>
+              <span className="text-[var(--text-3)]">最新发布:</span>{" "}
+              {formatDateTime(cluster.latestPublishedAt)}
+            </div>
+            <div>
+              <span className="text-[var(--text-3)]">状态:</span>{" "}
+              <StatusTag tone={clusterStatusTone[cluster.status]}>
+                {clusterStatusLabels[cluster.status]}
+              </StatusTag>
+            </div>
+            <div>
+              <span className="text-[var(--text-3)]">质量分:</span> {cluster.score}
+            </div>
+          </div>
+        </div>
+
+        {/* Summary */}
+        <div className="space-y-2">
+          <h4 className="text-sm font-semibold text-[var(--text-1)]">聚合摘要</h4>
+          <p className="text-sm text-[var(--text-2)] leading-6">
+            {cluster.summary || "暂无摘要"}
+          </p>
+        </div>
+
+        {/* Items List */}
+        <div className="space-y-2">
+          <h4 className="text-sm font-semibold text-[var(--text-1)]">
+            包含内容 ({cluster.items.length})
+          </h4>
+          <div className="space-y-2 max-h-[300px] overflow-y-auto">
+            {cluster.items.map((item) => (
+              <div
+                key={item.id}
+                className={cx(subtleCardClassName, "p-3 flex items-start justify-between gap-3")}
+              >
+                <div className="min-w-0 flex-1 space-y-1">
+                  <div className="font-medium text-sm text-[var(--foreground)] truncate">
+                    {item.title}
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-[var(--muted)]">
+                    <span>{item.sourceName}</span>
+                    <span>{formatDate(item.publishedAt)}</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <IconButton
+                    onClick={() => window.open(item.originalUrl, "_blank")}
+                    variant="ghost"
+                    size="sm"
+                    title="查看原文"
+                  >
+                    <IconExternalLink className="h-4 w-4" />
+                  </IconButton>
+                  {onDetachItem && (
+                    <IconButton
+                      onClick={() => onDetachItem(item.id)}
+                      variant="ghost"
+                      size="sm"
+                      title="移出聚合"
+                    >
+                      <IconTrash className="h-4 w-4" />
+                    </IconButton>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </ModalShell>
+  );
+}
+
+interface ContentReviewContentProps {
+  initialTab?: ReviewTab;
+}
+
+function ContentReviewContent({ initialTab = "filtered" }: ContentReviewContentProps) {
+  const [activeTab, setActiveTab] = useState<ReviewTab>(initialTab);
   const [filteredItems, setFilteredItems] = useState<ReviewItemDTO[]>([]);
   const [clusters, setClusters] = useState<ClusterDTO[]>([]);
   const [filteredSearch, setFilteredSearch] = useState("");
@@ -118,10 +447,48 @@ function ContentReviewContent() {
   const [filteredReason, setFilteredReason] = useState("");
   const [clusterSearch, setClusterSearch] = useState("");
   const [clusterStatus, setClusterStatus] = useState<ClusterDTO["status"] | "">("");
+  const [clusterTimeRange, setClusterTimeRange] = useState<TimeRangeFilter>("");
   const [feedback, setFeedback] = useState<FeedbackState>(null);
   const [isPending, startTransition] = useTransition();
 
+  // Sync activeTab with initialTab prop and reset page
   useEffect(() => {
+    setActiveTab(initialTab);
+    setPage(1);
+  }, [initialTab]);
+
+  // Pagination states
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
+  // Detail modal states
+  const [selectedFilteredItem, setSelectedFilteredItem] = useState<ReviewItemDTO | null>(null);
+  const [selectedCluster, setSelectedCluster] = useState<ClusterDTO | null>(null);
+  const [isFilteredDetailOpen, setIsFilteredDetailOpen] = useState(false);
+  const [isClusterDetailOpen, setIsClusterDetailOpen] = useState(false);
+
+  // Action states
+  const [restoringItemId, setRestoringItemId] = useState<string | null>(null);
+  const [reanalyzingItemId, setReanalyzingItemId] = useState<string | null>(null);
+  const [regeneratingClusterId, setRegeneratingClusterId] = useState<string | null>(null);
+  const [togglingClusterId, setTogglingClusterId] = useState<string | null>(null);
+
+  // Confirmation modal states
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+    confirmText?: string;
+    variant?: "danger" | "primary";
+  }>({
+    isOpen: false,
+    title: "",
+    message: "",
+    onConfirm: () => {},
+  });
+
+  const fetchData = () => {
     let cancelled = false;
 
     startTransition(async () => {
@@ -162,6 +529,11 @@ function ContentReviewContent() {
     return () => {
       cancelled = true;
     };
+  };
+
+  useEffect(() => {
+    const cleanup = fetchData();
+    return cleanup;
   }, []);
 
   const postAction = (
@@ -196,436 +568,626 @@ function ContentReviewContent() {
     });
   };
 
-  const filteredCount = filteredItems.length;
-  const clusterCount = clusters.length;
-  const filteredSources = Array.from(new Set(filteredItems.map((item) => item.sourceName))).sort((left, right) =>
-    left.localeCompare(right),
+  const filteredSources = useMemo(
+    () => Array.from(new Set(filteredItems.map((item) => item.sourceName))).sort((a, b) => a.localeCompare(b)),
+    [filteredItems]
   );
-  const visibleFilteredItems = filteredItems.filter((item) => {
+
+  const filteredSourceOptions = useMemo(
+    () => [
+      { value: "", label: "全部来源" },
+      ...filteredSources.map((source) => ({
+        value: source,
+        label: source,
+      })),
+    ],
+    [filteredSources]
+  );
+
+  const reviewReasonOptions = useMemo(
+    () => [
+      { value: "", label: "全部原因" },
+      ...Object.entries(reviewReasonLabels).map(([reason, label]) => ({
+        value: reason,
+        label,
+      })),
+    ],
+    []
+  );
+
+  const visibleFilteredItems = useMemo(() => {
     const keyword = filteredSearch.trim().toLowerCase();
-    const matchesKeyword =
-      !keyword ||
-      item.title.toLowerCase().includes(keyword) ||
-      (item.summary ?? "").toLowerCase().includes(keyword) ||
-      (item.moderationDetail ?? "").toLowerCase().includes(keyword);
-    const matchesSource = !filteredSource || item.sourceName === filteredSource;
-    const matchesReason = !filteredReason || item.moderationReason === filteredReason;
+    return filteredItems.filter((item) => {
+      const matchesKeyword =
+        !keyword ||
+        item.title.toLowerCase().includes(keyword) ||
+        (item.summary ?? "").toLowerCase().includes(keyword) ||
+        (item.moderationDetail ?? "").toLowerCase().includes(keyword);
+      const matchesSource = !filteredSource || item.sourceName === filteredSource;
+      const matchesReason = !filteredReason || item.moderationReason === filteredReason;
+      return matchesKeyword && matchesSource && matchesReason;
+    });
+  }, [filteredItems, filteredSearch, filteredSource, filteredReason]);
 
-    return matchesKeyword && matchesSource && matchesReason;
-  });
-  const visibleClusters = clusters.filter((cluster) => {
+  const visibleClusters = useMemo(() => {
     const keyword = clusterSearch.trim().toLowerCase();
-    const matchesKeyword =
-      !keyword ||
-      cluster.title.toLowerCase().includes(keyword) ||
-      (cluster.summary ?? "").toLowerCase().includes(keyword) ||
-      cluster.items.some(
-        (item) =>
-          item.title.toLowerCase().includes(keyword) ||
-          (item.summary ?? "").toLowerCase().includes(keyword) ||
-          item.sourceName.toLowerCase().includes(keyword),
-      );
-    const matchesStatus = !clusterStatus || cluster.status === clusterStatus;
+    return clusters.filter((cluster) => {
+      // Only show clusters with more than 1 item
+      if (cluster.itemCount <= 1) return false;
+      const matchesKeyword =
+        !keyword ||
+        cluster.title.toLowerCase().includes(keyword) ||
+        (cluster.summary ?? "").toLowerCase().includes(keyword) ||
+        cluster.items.some(
+          (item) =>
+            item.title.toLowerCase().includes(keyword) ||
+            (item.summary ?? "").toLowerCase().includes(keyword) ||
+            item.sourceName.toLowerCase().includes(keyword),
+        );
+      const matchesStatus = !clusterStatus || cluster.status === clusterStatus;
+      const matchesTimeRange = isWithinTimeRange(cluster.latestPublishedAt, clusterTimeRange);
+      return matchesKeyword && matchesStatus && matchesTimeRange;
+    });
+  }, [clusters, clusterSearch, clusterStatus, clusterTimeRange]);
 
-    return matchesKeyword && matchesStatus;
-  });
-  const currentResultCount = activeTab === "filtered" ? visibleFilteredItems.length : visibleClusters.length;
-  const activeFilterSummary =
+  // Pagination
+  const { currentItems, totalPages, paginatedItems } = useMemo(() => {
+    const currentItems = activeTab === "filtered" ? visibleFilteredItems : visibleClusters;
+    const totalPages = Math.ceil(currentItems.length / pageSize) || 1;
+    const paginatedItems = currentItems.slice((page - 1) * pageSize, page * pageSize);
+    return { currentItems, totalPages, paginatedItems };
+  }, [activeTab, visibleFilteredItems, visibleClusters, page, pageSize]);
+
+  const hasFilters =
     activeTab === "filtered"
-      ? [
-          filteredSearch.trim() ? `关键词：${filteredSearch.trim()}` : null,
-          filteredSource ? `来源：${filteredSource}` : null,
-          filteredReason ? `原因：${reviewReasonLabels[filteredReason as keyof typeof reviewReasonLabels]}` : null,
-        ].filter((item): item is string => Boolean(item))
-      : [
-          clusterSearch.trim() ? `关键词：${clusterSearch.trim()}` : null,
-          clusterStatus ? `状态：${clusterStatusLabels[clusterStatus]}` : null,
-        ].filter((item): item is string => Boolean(item));
-  const clearActiveFilters = () => {
+      ? filteredSearch || filteredSource || filteredReason
+      : clusterSearch || clusterStatus || clusterTimeRange;
+
+  const handleClearFilters = () => {
     if (activeTab === "filtered") {
       setFilteredSearch("");
       setFilteredSource("");
       setFilteredReason("");
-      return;
+    } else {
+      setClusterSearch("");
+      setClusterStatus("");
+      setClusterTimeRange("");
     }
+    setPage(1);
+  };
 
-    setClusterSearch("");
-    setClusterStatus("");
+  const handleOpenFilteredDetail = (item: ReviewItemDTO) => {
+    setSelectedFilteredItem(item);
+    setIsFilteredDetailOpen(true);
+  };
+
+  const handleCloseFilteredDetail = () => {
+    setIsFilteredDetailOpen(false);
+    setSelectedFilteredItem(null);
+  };
+
+  const handleOpenClusterDetail = (cluster: ClusterDTO) => {
+    setSelectedCluster(cluster);
+    setIsClusterDetailOpen(true);
+  };
+
+  const handleCloseClusterDetail = () => {
+    setIsClusterDetailOpen(false);
+    setSelectedCluster(null);
+  };
+
+  const handleRestoreItem = (itemId: string) => {
+    setRestoringItemId(itemId);
+    postAction(`/api/admin/items/${itemId}/restore`, "内容已恢复。", {
+      onSuccess: () => {
+        setFilteredItems((current) => current.filter((entry) => entry.id !== itemId));
+        handleCloseFilteredDetail();
+      },
+    });
+    setRestoringItemId(null);
+  };
+
+  const handleReanalyzeItem = (itemId: string) => {
+    setReanalyzingItemId(itemId);
+    postAction(`/api/admin/items/${itemId}/reanalyze`, "已创建后台任务，正在处理中。", {
+      requiredField: "taskRun",
+    });
+    setReanalyzingItemId(null);
+  };
+
+  const handleRegenerateSummary = (clusterId: string) => {
+    setRegeneratingClusterId(clusterId);
+    postAction(`/api/admin/clusters/${clusterId}/regenerate-summary`, "已创建后台任务，正在处理中。", {
+      requiredField: "taskRun",
+    });
+    setRegeneratingClusterId(null);
+  };
+
+  const handleToggleClusterStatus = (clusterId: string, currentStatus: ClusterDTO["status"]) => {
+    setTogglingClusterId(clusterId);
+    const action = currentStatus === "hidden" ? "restore" : "hide";
+    const message = currentStatus === "hidden" ? "聚合组已恢复。" : "聚合组已隐藏。";
+    postAction(`/api/admin/clusters/${clusterId}/${action}`, message, {
+      requiredField: "cluster",
+      onSuccess: (payload) => {
+        setClusters((current) =>
+          current.map((entry) => (entry.id === clusterId ? payload.cluster ?? entry : entry)),
+        );
+        // Update selected cluster if open
+        if (selectedCluster?.id === clusterId && payload.cluster) {
+          setSelectedCluster(payload.cluster);
+        }
+      },
+    });
+    setTogglingClusterId(null);
+  };
+
+  const handleDetachItem = (clusterId: string, itemId: string) => {
+    postAction(`/api/admin/clusters/${clusterId}/items/${itemId}/detach`, "已移出聚合组。", {
+      requiredField: "cluster",
+      onSuccess: (payload) => {
+        setClusters((current) =>
+          current.map((entry) => (entry.id === clusterId ? payload.cluster ?? entry : entry)),
+        );
+        if (selectedCluster?.id === clusterId && payload.cluster) {
+          setSelectedCluster(payload.cluster);
+        }
+      },
+    });
+  };
+
+  // Confirmation handlers
+  const openConfirmRestore = (itemId: string) => {
+    const item = filteredItems.find((i) => i.id === itemId);
+    setConfirmModal({
+      isOpen: true,
+      title: "确认恢复内容",
+      message: `确定要恢复内容 "${item?.title ?? ""}" 吗？`,
+      confirmText: "恢复",
+      variant: "primary",
+      onConfirm: () => {
+        handleRestoreItem(itemId);
+        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+      },
+    });
+  };
+
+  const openConfirmReanalyze = (itemId: string) => {
+    const item = filteredItems.find((i) => i.id === itemId);
+    setConfirmModal({
+      isOpen: true,
+      title: "确认重新 AI 判定",
+      message: `确定要重新 AI 判定内容 "${item?.title ?? ""}" 吗？`,
+      confirmText: "重新判定",
+      variant: "primary",
+      onConfirm: () => {
+        handleReanalyzeItem(itemId);
+        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+      },
+    });
+  };
+
+  const openConfirmRegenerate = (clusterId: string) => {
+    const cluster = clusters.find((c) => c.id === clusterId);
+    setConfirmModal({
+      isOpen: true,
+      title: "确认重新生成摘要",
+      message: `确定要重新生成聚合 "${cluster?.title ?? ""}" 的摘要吗？`,
+      confirmText: "重新生成",
+      variant: "primary",
+      onConfirm: () => {
+        handleRegenerateSummary(clusterId);
+        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+      },
+    });
+  };
+
+  const openConfirmToggleStatus = (clusterId: string, currentStatus: ClusterDTO["status"]) => {
+    const cluster = clusters.find((c) => c.id === clusterId);
+    const isHidden = currentStatus === "hidden";
+    setConfirmModal({
+      isOpen: true,
+      title: isHidden ? "确认恢复聚合" : "确认隐藏聚合",
+      message: isHidden
+        ? `确定要恢复显示聚合 "${cluster?.title ?? ""}" 吗？`
+        : `确定要隐藏聚合 "${cluster?.title ?? ""}" 吗？`,
+      confirmText: isHidden ? "恢复" : "隐藏",
+      variant: isHidden ? "primary" : "danger",
+      onConfirm: () => {
+        handleToggleClusterStatus(clusterId, currentStatus);
+        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+      },
+    });
+  };
+
+  const openConfirmDetach = (clusterId: string, itemId: string) => {
+    const cluster = clusters.find((c) => c.id === clusterId);
+    const item = cluster?.items.find((i) => i.id === itemId);
+    setConfirmModal({
+      isOpen: true,
+      title: "确认移出条目",
+      message: `确定要将内容 "${item?.title ?? ""}" 移出聚合组吗？`,
+      confirmText: "移出",
+      variant: "danger",
+      onConfirm: () => {
+        handleDetachItem(clusterId, itemId);
+        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+      },
+    });
+  };
+
+  const closeConfirmModal = () => {
+    setConfirmModal((prev) => ({ ...prev, isOpen: false }));
   };
 
   return (
-    <>
-      {feedback ? (
-        <StatusBanner className="rounded-[1.25rem] px-4 py-3" tone={feedback.tone}>
+    <div className="space-y-6">
+      {/* Feedback Banner */}
+      {feedback && (
+        <StatusBanner
+          className="rounded-sm border px-4 py-3 text-sm"
+          tone={feedback.tone}
+        >
           {feedback.text}
         </StatusBanner>
-      ) : null}
+      )}
 
-      <section className={cx(surfaceCardClassName, "px-3 py-2.5")}>
-        <div role="toolbar" aria-label="审核工具条" className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <div
-              role="tablist"
-              aria-label="内容审核视图"
-              className="inline-flex flex-wrap gap-1.5 rounded-[0.9rem] border border-[color:var(--line)] bg-[var(--surface-muted)]/80 p-1"
-            >
-              {tabConfig.map((tab) => {
-                const tabId = `content-review-tab-${tab.key}`;
-                const panelId = `content-review-panel-${tab.key}`;
-                const isActive = activeTab === tab.key;
-
-                return (
-                  <button
-                    key={tab.key}
-                    id={tabId}
-                    role="tab"
-                    aria-controls={panelId}
-                    aria-selected={isActive}
-                    className={cx(
-                      "inline-flex min-h-8 items-center justify-center rounded-[0.75rem] px-2.5 py-1.5 text-sm font-medium transition",
-                      isActive
-                        ? "bg-[var(--accent)] text-white shadow-[0_10px_18px_rgba(37,99,235,0.14)]"
-                        : "bg-white text-[var(--foreground)] shadow-[var(--shadow-sm)] hover:bg-[var(--surface)]",
-                    )}
-                    type="button"
-                    onClick={() => setActiveTab(tab.key)}
-                  >
-                    {tab.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-1.5 text-xs text-[var(--muted)]">
-            <span className="rounded-full border border-[color:var(--line)] bg-[var(--surface-muted)]/72 px-2.5 py-1">
-              过滤 {filteredCount}
-            </span>
-            <span className="rounded-full border border-[color:var(--line)] bg-[var(--surface-muted)]/72 px-2.5 py-1">
-              聚合 {clusterCount}
-            </span>
-          </div>
+      {/* Header */}
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="space-y-1">
+          <h2 className="text-lg font-semibold text-[var(--foreground)]">
+            {activeTab === "filtered" ? "过滤内容" : "聚合管理"}
+          </h2>
+          <p className="text-sm text-[var(--muted)]">
+            {activeTab === "filtered"
+              ? "查看和管理被过滤的内容"
+              : "管理内容聚合组"}
+          </p>
         </div>
-      </section>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button onClick={handleClearFilters} variant="secondary" disabled={!hasFilters}>
+            清空筛选
+          </Button>
+          <Button onClick={fetchData} variant="secondary" disabled={isPending}>
+            刷新
+          </Button>
+        </div>
+      </div>
 
-      <section
-        role="region"
-        aria-label="审核筛选"
-        className="panel-raised rounded-sm border border-[color:var(--line)] p-4 sm:p-6"
-      >
-        <div className="flex flex-col gap-4">
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.9fr)]">
-            <FilterInput
-              id="content-review-keyword"
-              label="关键词"
-              ariaLabel="审核关键词"
-              placeholder={activeTab === "filtered" ? "搜索标题、摘要或复核说明" : "搜索聚合标题、摘要或子项"}
-              value={activeTab === "filtered" ? filteredSearch : clusterSearch}
+      {/* Filters */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <FilterInput
+          id="content-review-keyword"
+          label="关键词"
+          ariaLabel="审核关键词"
+          placeholder={activeTab === "filtered" ? "搜索标题、摘要或复核说明" : "搜索聚合标题、摘要或子项"}
+          value={activeTab === "filtered" ? filteredSearch : clusterSearch}
+          onChange={(value) => {
+            if (activeTab === "filtered") {
+              setFilteredSearch(value);
+            } else {
+              setClusterSearch(value);
+            }
+            setPage(1);
+          }}
+        />
+
+        {activeTab === "filtered" ? (
+          <>
+            <FilterSelect
+              id="content-review-source"
+              label="来源"
+              ariaLabel="审核来源"
+              value={filteredSource}
               onChange={(value) => {
-                if (activeTab === "filtered") {
-                  setFilteredSearch(value);
-                } else {
-                  setClusterSearch(value);
-                }
+                setFilteredSource(value);
+                setPage(1);
               }}
+              showSearch={false}
+              options={filteredSourceOptions}
             />
 
-            {activeTab === "filtered" ? (
-              <div className="grid gap-4 sm:grid-cols-2">
-                <FilterSelect
-                  id="content-review-source"
-                  label="来源"
-                  ariaLabel="审核来源"
-                  value={filteredSource}
-                  onChange={setFilteredSource}
-                  showSearch={false}
-                  options={[
-                    { value: "", label: "全部来源" },
-                    ...filteredSources.map((source) => ({
-                      value: source,
-                      label: source,
-                    })),
-                  ]}
-                />
+            <FilterSelect
+              id="content-review-reason"
+              label="原因"
+              ariaLabel="过滤原因"
+              value={filteredReason}
+              onChange={(value) => {
+                setFilteredReason(value);
+                setPage(1);
+              }}
+              showSearch={false}
+              options={reviewReasonOptions}
+            />
+          </>
+        ) : (
+          <>
+            <FilterSelect
+              id="content-review-status"
+              label="状态"
+              ariaLabel="聚合状态"
+              value={clusterStatus}
+              onChange={(value) => {
+                setClusterStatus(value as ClusterDTO["status"] | "");
+                setPage(1);
+              }}
+              showSearch={false}
+              options={[
+                { value: "", label: "全部状态" },
+                { value: "active", label: "显示中" },
+                { value: "hidden", label: "已隐藏" },
+              ]}
+            />
 
-                <FilterSelect
-                  id="content-review-reason"
-                  label="原因"
-                  ariaLabel="过滤原因"
-                  value={filteredReason}
-                  onChange={setFilteredReason}
-                  showSearch={false}
-                  options={[
-                    { value: "", label: "全部原因" },
-                    ...Object.entries(reviewReasonLabels).map(([reason, label]) => ({
-                      value: reason,
-                      label,
-                    })),
-                  ]}
-                />
-              </div>
-            ) : (
-              <FilterSelect
-                id="content-review-status"
-                label="状态"
-                ariaLabel="聚合状态"
-                value={clusterStatus}
-                onChange={(value) => setClusterStatus(value as ClusterDTO["status"] | "")}
-                showSearch={false}
-                options={[
-                  { value: "", label: "全部状态" },
-                  { value: "active", label: "显示中" },
-                  { value: "hidden", label: "已隐藏" },
-                ]}
-              />
-            )}
-          </div>
+            <FilterSelect
+              id="content-review-time-range"
+              label="最新发布时间"
+              ariaLabel="最新发布时间范围"
+              value={clusterTimeRange}
+              onChange={(value) => {
+                setClusterTimeRange(value as TimeRangeFilter);
+                setPage(1);
+              }}
+              showSearch={false}
+              options={timeRangeOptions}
+            />
+          </>
+        )}
+      </div>
 
-          <FilterSummary
-            items={activeFilterSummary}
-            onClear={clearActiveFilters}
-            canClear={activeFilterSummary.length > 0}
-            clearLabel="清空筛选"
-            details={<span>结果 {currentResultCount}</span>}
-          />
+      {/* List */}
+      {isPending ? (
+        <div className="rounded-sm border border-[color:var(--line)] bg-[var(--bg-muted)] px-4 py-8 text-center text-sm text-[var(--muted)]">
+          加载中...
         </div>
-      </section>
-
-      {activeTab === "filtered" ? (
-        <section
-          id="content-review-panel-filtered"
-          role="tabpanel"
-          aria-labelledby="content-review-tab-filtered"
-          aria-busy={isPending}
-          className="space-y-2.5"
-        >
-          <section role="region" aria-label="过滤内容列表" className="grid gap-2">
-            {visibleFilteredItems.map((item) => (
-              <article key={item.id} className={cx(surfaceCardClassName, "overflow-hidden px-3.5 py-3")}>
-                <div className="flex flex-col gap-2.5 lg:flex-row lg:items-start lg:justify-between">
-                  <div className="min-w-0 flex-1 space-y-2">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="rounded-full border border-[color:var(--line)] bg-[var(--surface-muted)] px-2.5 py-1 text-xs font-medium text-[var(--foreground)]">
-                        {item.sourceName}
-                      </span>
-                      <span className="font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--muted)]">
-                        {formatDateTime(item.publishedAt)}
-                      </span>
-                      <span className="rounded-full border border-[color:var(--line-strong)] bg-[var(--accent-soft)] px-2.5 py-1 font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--accent-strong)]">
-                        {getReviewReasonLabel(item.moderationReason)}
-                      </span>
-                      <span className="rounded-full border border-[color:var(--line)] bg-[var(--surface-muted)] px-2.5 py-1 font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--muted)]">
-                        质量 {item.qualityScore}
-                      </span>
-                      <span className="rounded-full border border-[color:var(--line)] bg-white px-2.5 py-1 text-xs text-[var(--muted)]">
-                        {item.topicLabel ?? "未归类主题"}
-                      </span>
-                    </div>
-
-                    <div className="space-y-1">
-                      <h3 className="text-[1rem] font-semibold tracking-[-0.03em] text-[var(--foreground)]">{item.title}</h3>
-                      <p className="text-sm leading-6 text-[var(--foreground)]/84">{truncateText(item.summary, 88)}</p>
-                    </div>
-
-                    <div className="grid gap-2 text-sm leading-6 text-[var(--muted)] xl:grid-cols-[minmax(0,1fr)_auto] xl:items-center">
-                      <p>{item.moderationDetail || item.qualityRationale || "暂无复核说明。"}</p>
-                      <a
-                        aria-label={`查看原文：${item.title}`}
-                        className="inline-flex max-w-full truncate text-[var(--accent)] underline decoration-[rgba(37,99,235,0.28)] underline-offset-4"
-                        href={item.originalUrl}
-                        rel="noreferrer"
-                        target="_blank"
+      ) : paginatedItems.length === 0 ? (
+        <div className="rounded-sm border border-[color:var(--line)] bg-[var(--bg-muted)] px-4 py-8 text-center text-sm text-[var(--muted)]">
+          {hasFilters ? "暂无匹配内容" : activeTab === "filtered" ? "当前没有待处理的过滤内容" : "当前没有可管理的聚合结果"}
+        </div>
+      ) : activeTab === "filtered" ? (
+        <div className="w-full overflow-x-auto">
+          <table className="w-full table-auto text-sm">
+            <thead className="bg-[var(--bg-muted)] text-[var(--muted)]">
+              <tr>
+                <th className="w-[35%] text-left px-4 py-3">标题</th>
+                <th className="w-[12%] whitespace-nowrap text-left px-4 py-3">来源</th>
+                <th className="w-[12%] whitespace-nowrap text-left px-4 py-3">原因</th>
+                <th className="w-[10%] whitespace-nowrap text-left px-4 py-3">质量</th>
+                <th className="w-[15%] whitespace-nowrap text-left px-4 py-3">时间</th>
+                <th className="w-[16%] whitespace-nowrap text-right px-4 py-3">操作</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[color:var(--line)]">
+              {(paginatedItems as ReviewItemDTO[]).map((item) => (
+                <tr key={item.id} className="hover:bg-[var(--bg-muted)] transition-colors">
+                  <td className="px-4 py-3">
+                    <button
+                      type="button"
+                      onClick={() => handleOpenFilteredDetail(item)}
+                      className="w-full text-left group"
+                    >
+                      <div className="font-medium text-[var(--foreground)] group-hover:text-[var(--accent)] transition-colors truncate max-w-[280px]">
+                        {item.title}
+                      </div>
+                      <div className="text-xs text-[var(--muted)] truncate max-w-[280px]">
+                        {truncateText(item.summary, 50)}
+                      </div>
+                    </button>
+                  </td>
+                  <td className="px-4 py-3 text-[var(--text-2)]">{item.sourceName}</td>
+                  <td className="px-4 py-3">
+                    <StatusTag tone={reviewReasonTone[item.moderationReason ?? "other"]}>
+                      {getReviewReasonLabel(item.moderationReason)}
+                    </StatusTag>
+                  </td>
+                  <td className="px-4 py-3 text-[var(--text-2)]">{item.qualityScore}</td>
+                  <td className="px-4 py-3 text-[var(--text-3)] text-xs">{formatDate(item.publishedAt)}</td>
+                  <td className="px-4 py-3 text-right">
+                    <div className="flex items-center justify-end gap-1">
+                      <IconButton
+                        onClick={() => openConfirmRestore(item.id)}
+                        variant="ghost"
+                        size="sm"
+                        title="恢复内容"
+                        disabled={restoringItemId === item.id}
                       >
-                        查看原文
-                      </a>
+                        <IconCheck className={cx("h-4 w-4 text-[var(--success-ink)]", restoringItemId === item.id && "animate-pulse")} />
+                      </IconButton>
+                      <IconButton
+                        onClick={() => openConfirmReanalyze(item.id)}
+                        variant="ghost"
+                        size="sm"
+                        title="重新 AI 判定"
+                        disabled={reanalyzingItemId === item.id}
+                      >
+                        <IconRotateCw className={cx("h-4 w-4", reanalyzingItemId === item.id && "animate-spin")} />
+                      </IconButton>
                     </div>
-                  </div>
-
-                  <div className="flex shrink-0 flex-wrap items-center gap-1.5 rounded-[0.95rem] border border-[color:var(--line)] bg-[var(--surface-muted)]/72 p-1 lg:w-auto lg:justify-end">
-                    <button
-                      className={primaryButtonClassName}
-                      type="button"
-                      disabled={isPending}
-                      onClick={() =>
-                        postAction(`/api/admin/items/${item.id}/restore`, "内容已恢复。", {
-                          onSuccess: () => {
-                            setFilteredItems((current) => current.filter((entry) => entry.id !== item.id));
-                          },
-                        })
-                      }
-                    >
-                      恢复内容
-                    </button>
-                    <button
-                      className={secondaryButtonClassName}
-                      type="button"
-                      disabled={isPending}
-                      onClick={() =>
-                        postAction(`/api/admin/items/${item.id}/reanalyze`, "已创建后台任务，正在处理中。", {
-                          requiredField: "taskRun",
-                        })
-                      }
-                    >
-                      重新 AI 判定
-                    </button>
-                    <button
-                      className={secondaryButtonClassName}
-                      type="button"
-                      onClick={() => setFeedback({ tone: "info", text: "已保持当前过滤状态。" })}
-                    >
-                      保持过滤
-                    </button>
-                  </div>
-                </div>
-              </article>
-            ))}
-
-            {filteredCount === 0 ? (
-              <div className="rounded-[1.25rem] border border-dashed border-[color:var(--line)] bg-[var(--surface)] px-4 py-6 text-sm leading-6 text-[var(--muted)]">
-                当前没有待处理的过滤内容。
-              </div>
-            ) : visibleFilteredItems.length === 0 ? (
-              <div className="rounded-[1.25rem] border border-dashed border-[color:var(--line)] bg-[var(--surface)] px-4 py-6 text-sm leading-6 text-[var(--muted)]">
-                当前筛选条件下没有匹配内容。
-              </div>
-            ) : null}
-          </section>
-        </section>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       ) : (
-        <section
-          id="content-review-panel-clusters"
-          role="tabpanel"
-          aria-labelledby="content-review-tab-clusters"
-          aria-busy={isPending}
-          className="space-y-2.5"
-        >
-          <section role="region" aria-label="聚合管理列表" className="grid gap-2">
-            {visibleClusters.map((cluster) => (
-              <article key={cluster.id} className={cx(surfaceCardClassName, "px-3.5 py-3")}>
-                <div className="flex flex-col gap-2.5">
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="rounded-full border border-[color:var(--line)] bg-[var(--surface-muted)] px-2.5 py-1 text-xs font-medium text-[var(--foreground)]">
-                      {cluster.itemCount} 条内容
-                    </span>
-                    <span className="font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--muted)]">
-                      {formatDateTime(cluster.latestPublishedAt)}
-                    </span>
-                    <span className="rounded-full border border-[color:var(--line-strong)] bg-[var(--accent-soft)] px-2.5 py-1 font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--accent-strong)]">
+        <div className="w-full overflow-x-auto">
+          <table className="w-full table-auto text-sm">
+            <thead className="bg-[var(--bg-muted)] text-[var(--muted)]">
+              <tr>
+                <th className="w-[35%] text-left px-4 py-3">标题</th>
+                <th className="w-[10%] whitespace-nowrap text-left px-4 py-3">内容数</th>
+                <th className="w-[12%] whitespace-nowrap text-left px-4 py-3">状态</th>
+                <th className="w-[10%] whitespace-nowrap text-left px-4 py-3">质量</th>
+                <th className="w-[15%] whitespace-nowrap text-left px-4 py-3">最新发布</th>
+                <th className="w-[18%] whitespace-nowrap text-right px-4 py-3">操作</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[color:var(--line)]">
+              {(paginatedItems as ClusterDTO[]).map((cluster) => (
+                <tr key={cluster.id} className="hover:bg-[var(--bg-muted)] transition-colors">
+                  <td className="px-4 py-3">
+                    <button
+                      type="button"
+                      onClick={() => handleOpenClusterDetail(cluster)}
+                      className="w-full text-left group"
+                    >
+                      <div className="font-medium text-[var(--foreground)] group-hover:text-[var(--accent)] transition-colors truncate max-w-[320px]">
+                        {cluster.title}
+                      </div>
+                    </button>
+                  </td>
+                  <td className="px-4 py-3 text-[var(--text-2)]">{cluster.itemCount} 条</td>
+                  <td className="px-4 py-3">
+                    <StatusTag tone={clusterStatusTone[cluster.status]}>
                       {clusterStatusLabels[cluster.status]}
-                    </span>
-                    <span className="rounded-full border border-[color:var(--line)] bg-[var(--surface-muted)] px-2.5 py-1 font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--muted)]">
-                      质量 {cluster.score}
-                    </span>
-                  </div>
-
-                  <div className="space-y-1">
-                    <h3 className="text-[1rem] font-semibold tracking-[-0.03em] text-[var(--foreground)]">{cluster.title}</h3>
-                    <p className="text-sm leading-6 text-[var(--foreground)]/84">{truncateText(cluster.summary, 96)}</p>
-                  </div>
-
-                  <div className="grid gap-2">
-                    {cluster.items.map((item) => (
-                      <div key={item.id} className={cx(subtleCardClassName, "grid gap-2 p-3")}>
-                        <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
-                          <div className="min-w-0 space-y-1">
-                            <strong className="block text-sm font-semibold text-[var(--foreground)]">{item.title}</strong>
-                            <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--muted)]">
-                              <span>{item.sourceName}</span>
-                              <span className="font-mono uppercase tracking-[0.16em]">{formatDateTime(item.publishedAt)}</span>
-                            </div>
-                            <p className="text-sm leading-6 text-[var(--muted)]">{truncateText(item.summary, 72)}</p>
-                          </div>
-                          <button
-                            className={secondaryButtonClassName}
-                            type="button"
-                            disabled={isPending}
-                            onClick={() =>
-                              postAction(`/api/admin/clusters/${cluster.id}/items/${item.id}/detach`, "已移出聚合组。", {
-                                requiredField: "cluster",
-                                onSuccess: (payload) => {
-                                  setClusters((current) =>
-                                    current.map((entry) => (entry.id === cluster.id ? payload.cluster ?? entry : entry)),
-                                  );
-                                },
-                              })
-                            }
-                          >
-                            移出条目
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-
-                    {cluster.items.length === 0 ? (
-                      <div className={cx(subtleCardClassName, "px-3 py-3 text-sm leading-6 text-[var(--muted)]")}>
-                        聚合组当前没有子项预览。
-                      </div>
-                    ) : null}
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-1.5 rounded-[0.95rem] border border-[color:var(--line)] bg-[var(--surface-muted)]/72 p-1">
-                    <button
-                      className={secondaryButtonClassName}
-                      type="button"
-                      disabled={isPending}
-                      onClick={() =>
-                        postAction(`/api/admin/clusters/${cluster.id}/regenerate-summary`, "已创建后台任务，正在处理中。", {
-                          requiredField: "taskRun",
-                        })
-                      }
-                    >
-                      重新生成聚合摘要
-                    </button>
-                    <button
-                      className={secondaryButtonClassName}
-                      type="button"
-                      disabled={isPending}
-                      onClick={() =>
-                        postAction(
-                          `/api/admin/clusters/${cluster.id}/${cluster.status === "hidden" ? "restore" : "hide"}`,
-                          cluster.status === "hidden" ? "聚合组已恢复。" : "聚合组已隐藏。",
-                          {
-                            requiredField: "cluster",
-                            onSuccess: (payload) => {
-                              setClusters((current) =>
-                                current.map((entry) => (entry.id === cluster.id ? payload.cluster ?? entry : entry)),
-                              );
-                            },
-                          },
-                        )
-                      }
-                    >
-                      {cluster.status === "hidden" ? "恢复聚合组" : "隐藏聚合组"}
-                    </button>
-                  </div>
-                </div>
-              </article>
-            ))}
-
-            {clusterCount === 0 ? (
-              <div className="rounded-[1.25rem] border border-dashed border-[color:var(--line)] bg-[var(--surface)] px-4 py-6 text-sm leading-6 text-[var(--muted)]">
-                当前没有可管理的聚合结果。
-              </div>
-            ) : visibleClusters.length === 0 ? (
-              <div className="rounded-[1.25rem] border border-dashed border-[color:var(--line)] bg-[var(--surface)] px-4 py-6 text-sm leading-6 text-[var(--muted)]">
-                当前筛选条件下没有匹配内容。
-              </div>
-            ) : null}
-          </section>
-        </section>
+                    </StatusTag>
+                  </td>
+                  <td className="px-4 py-3 text-[var(--text-2)]">{cluster.score}</td>
+                  <td className="px-4 py-3 text-[var(--text-3)] text-xs">
+                    {formatDate(cluster.latestPublishedAt)}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <div className="flex items-center justify-end gap-1">
+                      <IconButton
+                        onClick={() => openConfirmRegenerate(cluster.id)}
+                        variant="ghost"
+                        size="sm"
+                        title="重新生成摘要"
+                        disabled={regeneratingClusterId === cluster.id}
+                      >
+                        <IconRotateCw className={cx("h-4 w-4", regeneratingClusterId === cluster.id && "animate-spin")} />
+                      </IconButton>
+                      <IconButton
+                        onClick={() => openConfirmToggleStatus(cluster.id, cluster.status)}
+                        variant="ghost"
+                        size="sm"
+                        title={cluster.status === "hidden" ? "恢复显示" : "隐藏聚合"}
+                        disabled={togglingClusterId === cluster.id}
+                      >
+                        {cluster.status === "hidden" ? (
+                          <IconCheck className={cx("h-4 w-4 text-[var(--success-ink)]", togglingClusterId === cluster.id && "animate-pulse")} />
+                        ) : (
+                          <IconX className={cx("h-4 w-4 text-[var(--danger-ink)]", togglingClusterId === cluster.id && "animate-pulse")} />
+                        )}
+                      </IconButton>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
-    </>
+
+      {/* Pagination */}
+      {currentItems.length > 0 && (
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-sm text-[var(--muted)]">
+            <span>每页显示</span>
+            <select
+              value={pageSize}
+              onChange={(e) => {
+                setPageSize(Number(e.target.value));
+                setPage(1);
+              }}
+              className="rounded-sm border border-[color:var(--line)] bg-[var(--surface)] px-2 py-1 text-sm"
+            >
+              <option value={10}>10</option>
+              <option value={20}>20</option>
+              <option value={50}>50</option>
+            </select>
+            <span>条，共 {currentItems.length} 条</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              className={secondaryButtonClassName}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page === 1}
+            >
+              上一页
+            </button>
+            <span className="min-w-[100px] px-4 py-2 text-center text-sm bg-[var(--surface)] border border-[color:var(--line)] rounded-sm text-[var(--muted)]">
+              第 {page} / {totalPages} 页
+            </span>
+            <button
+              className={secondaryButtonClassName}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages}
+            >
+              下一页
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Detail Modals */}
+      {selectedFilteredItem && (
+        <FilteredItemDetailModal
+          isOpen={isFilteredDetailOpen}
+          onClose={handleCloseFilteredDetail}
+          item={selectedFilteredItem}
+          onRestore={() => openConfirmRestore(selectedFilteredItem.id)}
+          onReanalyze={() => openConfirmReanalyze(selectedFilteredItem.id)}
+          isRestoring={restoringItemId === selectedFilteredItem?.id}
+          isReanalyzing={reanalyzingItemId === selectedFilteredItem?.id}
+        />
+      )}
+
+      {selectedCluster && (
+        <ClusterDetailModal
+          isOpen={isClusterDetailOpen}
+          onClose={handleCloseClusterDetail}
+          cluster={selectedCluster}
+          onRegenerateSummary={() => openConfirmRegenerate(selectedCluster.id)}
+          onToggleStatus={() => openConfirmToggleStatus(selectedCluster.id, selectedCluster.status)}
+          onDetachItem={(itemId) => openConfirmDetach(selectedCluster.id, itemId)}
+          isRegenerating={regeneratingClusterId === selectedCluster?.id}
+          isTogglingStatus={togglingClusterId === selectedCluster?.id}
+        />
+      )}
+
+      {/* Confirmation Modal */}
+      <ModalShell
+        isOpen={confirmModal.isOpen}
+        onClose={closeConfirmModal}
+        title={confirmModal.title}
+        widthClassName="max-w-md"
+        headerClassName="border-b border-[color:var(--line)] p-4"
+        bodyClassName="p-4"
+        footerClassName="border-t border-[color:var(--line)] bg-[var(--bg-muted)] p-4"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button onClick={closeConfirmModal} variant="secondary">
+              取消
+            </Button>
+            <Button
+              onClick={confirmModal.onConfirm}
+              variant={confirmModal.variant === "danger" ? "danger" : "primary"}
+            >
+              {confirmModal.confirmText ?? "确认"}
+            </Button>
+          </div>
+        }
+      >
+        <p className="text-sm text-[var(--text-2)]">{confirmModal.message}</p>
+      </ModalShell>
+    </div>
   );
 }
 
-export function ContentReviewPanel({ embedMode }: { embedMode?: boolean }) {
+interface ContentReviewPanelProps {
+  embedMode?: boolean;
+  activeTab?: ReviewTab;
+}
+
+export function ContentReviewPanel({ embedMode, activeTab = "filtered" }: ContentReviewPanelProps) {
   if (embedMode) {
-    return <ContentReviewContent />;
+    return <ContentReviewContent initialTab={activeTab} />;
   }
 
   return (
     <PageShell header={{ activeNav: null, isAdmin: true }} contentClassName="gap-3">
-      <ContentReviewContent />
+      <ContentReviewContent initialTab={activeTab} />
     </PageShell>
   );
 }

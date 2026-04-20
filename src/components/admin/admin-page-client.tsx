@@ -21,10 +21,12 @@ import {
   IconClock,
   IconArrowUp,
   IconArrowDown,
+  IconFilter,
 } from "@/components/ui/icons";
 
 type PrimaryTab = "monitoring" | "settings";
 type MonitorSubSection = "content" | "tasks";
+type ContentSubSection = "filtered" | "clusters";
 type SettingsSection = "basic" | "blacklist" | "groups" | "sources" | "ai";
 type AISubSection = "model-api" | "prompt";
 
@@ -40,12 +42,15 @@ export function AdminPageClient({
   const [primaryTab, setPrimaryTab] = useState<PrimaryTab>("monitoring");
   const [monitoringSubSection, setMonitoringSubSection] =
     useState<MonitorSubSection>("content");
+  const [contentSubSection, setContentSubSection] = useState<ContentSubSection>("filtered");
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("basic");
   const [aiSubSection, setAiSubSection] = useState<AISubSection>("model-api");
   const [collapsedSections, setCollapsedSections] = useState<{
     ai: boolean;
+    content: boolean;
   }>({
     ai: true,
+    content: false,
   });
 
   const handleToggleAISection = useCallback(() => {
@@ -59,10 +64,21 @@ export function AdminPageClient({
     }
   }, [collapsedSections.ai]);
 
+  const handleToggleContentSection = useCallback(() => {
+    const nextCollapsed = !collapsedSections.content;
+    setCollapsedSections((prev) => ({
+      ...prev,
+      content: nextCollapsed,
+    }));
+    if (!nextCollapsed) {
+      setMonitoringSubSection("content");
+    }
+  }, [collapsedSections.content]);
+
   const renderMainContent = () => {
     // Monitoring - Content Review
     if (primaryTab === "monitoring" && monitoringSubSection === "content") {
-      return <ContentReviewPanel embedMode />;
+      return <ContentReviewPanel embedMode activeTab={contentSubSection} />;
     }
 
     // Monitoring - Tasks
@@ -150,18 +166,55 @@ export function AdminPageClient({
                 <div className="space-y-2">
                   {primaryTab === "monitoring" ? (
                     <>
-                      <SelectableButton
-                        onClick={() => {
-                          setMonitoringSubSection("content");
-                        }}
+                      <SectionToggleButton
+                        label="内容审核"
                         active={monitoringSubSection === "content"}
-                        variant="menu"
-                      >
-                        <span className="inline-flex items-center gap-2">
-                          <IconShield className="h-4 w-4" />
-                          <span>内容审核</span>
-                        </span>
-                      </SelectableButton>
+                        expanded={!collapsedSections.content}
+                        onMainClick={handleToggleContentSection}
+                        onToggle={handleToggleContentSection}
+                        toggleAriaLabel={collapsedSections.content ? "展开" : "收起"}
+                        icon={<IconShield className="h-4 w-4" />}
+                        expandedIndicator={<IconArrowUp className="h-4 w-4" />}
+                        collapsedIndicator={<IconArrowDown className="h-4 w-4" />}
+                      />
+
+                      {!collapsedSections.content && (
+                        <>
+                          <SelectableButton
+                            onClick={() => {
+                              setMonitoringSubSection("content");
+                              setContentSubSection("filtered");
+                            }}
+                            active={
+                              monitoringSubSection === "content" &&
+                              contentSubSection === "filtered"
+                            }
+                            variant="submenu"
+                          >
+                            <span className="inline-flex items-center gap-2">
+                              <IconFilter className="h-4 w-4" />
+                              <span>过滤内容</span>
+                            </span>
+                          </SelectableButton>
+                          <SelectableButton
+                            onClick={() => {
+                              setMonitoringSubSection("content");
+                              setContentSubSection("clusters");
+                            }}
+                            active={
+                              monitoringSubSection === "content" &&
+                              contentSubSection === "clusters"
+                            }
+                            variant="submenu"
+                          >
+                            <span className="inline-flex items-center gap-2">
+                              <IconGlobe className="h-4 w-4" />
+                              <span>聚合管理</span>
+                            </span>
+                          </SelectableButton>
+                        </>
+                      )}
+
                       <SelectableButton
                         onClick={() => {
                           setMonitoringSubSection("tasks");
