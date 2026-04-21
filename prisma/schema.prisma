@@ -187,6 +187,7 @@ model TaskSchedule {
   cronExpression    String                @default("0 * * * *")
   sourceConcurrency Int                   @default(2)
   fullTextFetchThreshold Int              @default(80)
+  perSourceItemLimit Int                  @default(20)
   timezone          String
   lastHeartbeatAt   DateTime?
   lastRunStartedAt  DateTime?

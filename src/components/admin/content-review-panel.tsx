@@ -486,31 +486,37 @@ function ContentReviewContent({ initialTab = "filtered" }: ContentReviewContentP
 
     startTransition(async () => {
       try {
-        const [filteredResponse, clusterResponse] = await Promise.all([
-          fetch("/api/admin/items?moderationStatus=filtered"),
-          fetch("/api/admin/clusters"),
-        ]);
+        // Only fetch data needed for current tab
+        if (activeTab === "filtered") {
+          const filteredResponse = await fetch("/api/admin/items?moderationStatus=filtered");
+          const filteredPayload = (await filteredResponse.json()) as CollectionPayload;
 
-        const filteredPayload = (await filteredResponse.json()) as CollectionPayload;
-        const clusterPayload = (await clusterResponse.json()) as CollectionPayload;
+          if (cancelled) {
+            return;
+          }
 
-        if (cancelled) {
-          return;
-        }
+          const filteredError = getResponseError(filteredResponse, filteredPayload, "审核数据加载失败。");
 
-        const filteredError = getResponseError(filteredResponse, filteredPayload, "审核数据加载失败。");
-        const clusterError = getResponseError(clusterResponse, clusterPayload, "审核数据加载失败。");
-
-        if (filteredError) {
-          showToast(filteredError, "error");
+          if (filteredError) {
+            showToast(filteredError, "error");
+          } else {
+            setFilteredItems(filteredPayload.items ?? []);
+          }
         } else {
-          setFilteredItems(filteredPayload.items ?? []);
-        }
+          const clusterResponse = await fetch("/api/admin/clusters");
+          const clusterPayload = (await clusterResponse.json()) as CollectionPayload;
 
-        if (clusterError) {
-          showToast(clusterError, "error");
-        } else {
-          setClusters(clusterPayload.clusters ?? []);
+          if (cancelled) {
+            return;
+          }
+
+          const clusterError = getResponseError(clusterResponse, clusterPayload, "审核数据加载失败。");
+
+          if (clusterError) {
+            showToast(clusterError, "error");
+          } else {
+            setClusters(clusterPayload.clusters ?? []);
+          }
         }
       } catch {
         if (!cancelled) {
@@ -522,7 +528,7 @@ function ContentReviewContent({ initialTab = "filtered" }: ContentReviewContentP
     return () => {
       cancelled = true;
     };
-  }, [showToast]);
+  }, [activeTab, showToast]);
 
   useEffect(() => {
     const cleanup = fetchData();

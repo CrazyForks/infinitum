@@ -6,7 +6,10 @@ import {
 } from "@/config/prompts";
 import { DEFAULT_SOURCE_CONFIGS } from "@/config/sources";
 import type { SourceConfig } from "@/lib/feed/types";
-import { DEFAULT_FULL_TEXT_FETCH_THRESHOLD } from "@/lib/tasks/scheduler";
+import {
+  DEFAULT_FULL_TEXT_FETCH_THRESHOLD,
+  DEFAULT_PER_SOURCE_ITEM_LIMIT,
+} from "@/lib/tasks/scheduler";
 
 export type RuntimeConfig = {
   rssSources: SourceConfig[];
@@ -15,6 +18,7 @@ export type RuntimeConfig = {
     itemConcurrency: number;
     sourceConcurrency: number;
     fullTextFetchThreshold: number;
+    perSourceItemLimit: number;
   };
   modelApi: {
     apiKey: string;
@@ -65,6 +69,7 @@ export function getRuntimeConfig(): RuntimeConfig {
       itemConcurrency: 3,
       sourceConcurrency: 2,
       fullTextFetchThreshold: DEFAULT_FULL_TEXT_FETCH_THRESHOLD,
+      perSourceItemLimit: DEFAULT_PER_SOURCE_ITEM_LIMIT,
     },
     modelApi: {
       apiKey: "",

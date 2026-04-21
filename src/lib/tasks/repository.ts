@@ -5,6 +5,7 @@ import {
   DEFAULT_FULL_TEXT_FETCH_THRESHOLD,
   DEFAULT_SCHEDULE_TIMEZONE,
   DEFAULT_SOURCE_CONCURRENCY,
+  DEFAULT_PER_SOURCE_ITEM_LIMIT,
 } from "@/lib/tasks/scheduler";
 import { DEFAULT_INGESTION_SCHEDULE_KEY, type EnqueueTaskRunInput } from "@/lib/tasks/types";
 
@@ -20,6 +21,7 @@ export async function upsertDefaultIngestionSchedule() {
       cronExpression: DEFAULT_SCHEDULE_CRON_EXPRESSION,
       sourceConcurrency: DEFAULT_SOURCE_CONCURRENCY,
       fullTextFetchThreshold: DEFAULT_FULL_TEXT_FETCH_THRESHOLD,
+      perSourceItemLimit: DEFAULT_PER_SOURCE_ITEM_LIMIT,
       timezone: DEFAULT_SCHEDULE_TIMEZONE,
       nextRunAt: computeNextRunAt({
         cronExpression: DEFAULT_SCHEDULE_CRON_EXPRESSION,

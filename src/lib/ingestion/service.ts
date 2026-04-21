@@ -293,6 +293,8 @@ async function resolveRunOptions(options?: Partial<RunIngestionOptions>): Promis
       options?.fullTextFetchThreshold ??
       runtimeConfig?.ingestion.fullTextFetchThreshold ??
       DEFAULT_FULL_TEXT_FETCH_THRESHOLD,
+    perSourceItemLimit:
+      options?.perSourceItemLimit ?? runtimeConfig?.ingestion.perSourceItemLimit ?? 20,
     now,
   };
 }
@@ -630,6 +632,7 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
     itemConcurrency,
     sourceConcurrency,
     fullTextFetchThreshold,
+    perSourceItemLimit,
     now,
   } = options;
   const stageTracker = createIngestionStageTracker();
@@ -689,8 +692,9 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
 
         try {
           const feed = await parser.parseURL(source.rssUrl);
+          const items = (feed.items ?? []).slice(0, perSourceItemLimit);
 
-          for (const item of feed.items ?? []) {
+          for (const item of items) {
             preparedItems.push({
               item,
               sourceId: source.id,

@@ -32,6 +32,7 @@ export type AdminPromptConfig = {
   topP: number | null;
   modelApiConfigId: string | null;
   modelApiConfigName: string | null;
+  isUsingDefaultModel: boolean; // true if modelApiConfigId is null in database
   isEnabled: boolean;
   isDefault: boolean;
   createdAt: string;
@@ -48,6 +49,7 @@ export type AdminSettingsSnapshot = {
     cronExpression: string;
     sourceConcurrency: number;
     fullTextFetchThreshold: number;
+    perSourceItemLimit: number;
     timezone: string;
     lastHeartbeatAt: string | null;
     lastRunStartedAt: string | null;

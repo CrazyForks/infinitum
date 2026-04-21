@@ -49,6 +49,7 @@ export type RunIngestionOptions = {
   itemConcurrency: number;
   sourceConcurrency: number;
   fullTextFetchThreshold: number;
+  perSourceItemLimit: number;
   now?: Date;
   onProgress?: (snapshot: {
     status: "running" | "succeeded" | "failed" | "partial";

@@ -254,6 +254,7 @@ describe("background task persistence", () => {
       cronExpression: "*/15 * * * *",
       sourceConcurrency: 4,
       fullTextFetchThreshold: 120,
+      perSourceItemLimit: 20,
     });
 
     expect(updated.enabled).toBe(false);

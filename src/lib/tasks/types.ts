@@ -19,6 +19,7 @@ export type ScheduleUpdateInput = {
   cronExpression: string;
   sourceConcurrency: number;
   fullTextFetchThreshold: number;
+  perSourceItemLimit: number;
 };
 
 export type EnqueueTaskRunInput = {
@@ -76,6 +77,7 @@ export type TaskScheduleSnapshot = {
   cronExpression: string;
   sourceConcurrency: number;
   fullTextFetchThreshold: number;
+  perSourceItemLimit: number;
   timezone: string;
   lastHeartbeatAt: string | null;
   lastRunStartedAt: string | null;

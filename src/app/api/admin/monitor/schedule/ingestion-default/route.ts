@@ -7,6 +7,8 @@ import {
   MAX_SOURCE_CONCURRENCY,
   MIN_FULL_TEXT_FETCH_THRESHOLD,
   MIN_SOURCE_CONCURRENCY,
+  MAX_PER_SOURCE_ITEM_LIMIT,
+  MIN_PER_SOURCE_ITEM_LIMIT,
 } from "@/lib/tasks/scheduler";
 import { toTaskScheduleSnapshot, updateDefaultIngestionSchedule } from "@/lib/tasks/service";
 
@@ -19,6 +21,7 @@ const scheduleUpdateSchema = z.object({
     .int()
     .min(MIN_FULL_TEXT_FETCH_THRESHOLD)
     .max(MAX_FULL_TEXT_FETCH_THRESHOLD),
+  perSourceItemLimit: z.number().int().min(MIN_PER_SOURCE_ITEM_LIMIT).max(MAX_PER_SOURCE_ITEM_LIMIT),
 });
 
 export async function PATCH(request: Request) {

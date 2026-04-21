@@ -19,6 +19,7 @@ function buildMonitorSnapshot(): BackgroundTaskMonitorSnapshot {
       cronExpression: "0 * * * *",
       sourceConcurrency: 2,
       fullTextFetchThreshold: 80,
+      perSourceItemLimit: 20,
       timezone: "Asia/Shanghai",
       lastHeartbeatAt: null,
       lastRunStartedAt: null,

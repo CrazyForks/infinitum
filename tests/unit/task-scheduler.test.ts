@@ -25,12 +25,14 @@ describe("task scheduler", () => {
         cronExpression: " */15 * * * * ",
         sourceConcurrency: 4,
         fullTextFetchThreshold: 120,
+        perSourceItemLimit: 20,
       }),
     ).toEqual({
       enabled: true,
       cronExpression: "*/15 * * * *",
       sourceConcurrency: 4,
       fullTextFetchThreshold: 120,
+      perSourceItemLimit: 20,
     });
   });
 

@@ -87,6 +87,7 @@ describe("/api/admin/monitor", () => {
           cronExpression: "*/15 * * * *",
           sourceConcurrency: 4,
           fullTextFetchThreshold: 120,
+          perSourceItemLimit: 50,
         }),
         headers: { "content-type": "application/json" },
       }),
@@ -99,6 +100,7 @@ describe("/api/admin/monitor", () => {
       cronExpression: "*/15 * * * *",
       sourceConcurrency: 4,
       fullTextFetchThreshold: 120,
+      perSourceItemLimit: 50,
     });
     expect(json.schedule.enabled).toBe(false);
     expect(json.schedule.cronExpression).toBe("*/15 * * * *");

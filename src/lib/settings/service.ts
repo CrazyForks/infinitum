@@ -224,24 +224,38 @@ function serializeRuntimeModelApi(config: {
   };
 }
 
-function serializeAdminPromptConfig(config: {
-  id: string;
-  name: string;
-  type: PromptConfigType;
-  prompt: string;
-  systemPrompt: string | null;
-  temperature: number | null;
-  maxTokens: number | null;
-  topP: number | null;
-  modelApiConfigId: string | null;
-  isEnabled: boolean;
-  isDefault: boolean;
-  createdAt: Date;
-  updatedAt: Date;
-  modelApiConfig?: {
+function serializeAdminPromptConfig(
+  config: {
+    id: string;
     name: string;
-  } | null;
-}): AdminPromptConfig {
+    type: PromptConfigType;
+    prompt: string;
+    systemPrompt: string | null;
+    temperature: number | null;
+    maxTokens: number | null;
+    topP: number | null;
+    modelApiConfigId: string | null;
+    isEnabled: boolean;
+    isDefault: boolean;
+    createdAt: Date;
+    updatedAt: Date;
+    modelApiConfig?: {
+      name: string;
+    } | null;
+  },
+  defaultModelConfig?: {
+    id: string;
+    name: string;
+  } | null,
+): AdminPromptConfig {
+  // Determine if this config is using the default model (stored as null in DB)
+  const isUsingDefaultModel = config.modelApiConfigId === null;
+
+  // For display purposes, use the effective model config name
+  const effectiveModelConfigName = isUsingDefaultModel
+    ? defaultModelConfig?.name
+    : config.modelApiConfig?.name;
+
   return {
     id: config.id,
     name: config.name,
@@ -251,8 +265,11 @@ function serializeAdminPromptConfig(config: {
     temperature: config.temperature,
     maxTokens: config.maxTokens,
     topP: config.topP,
+    // Keep the original modelApiConfigId (null means using default)
     modelApiConfigId: config.modelApiConfigId,
-    modelApiConfigName: config.modelApiConfig?.name ?? null,
+    // But provide effective name for display
+    modelApiConfigName: effectiveModelConfigName ?? null,
+    isUsingDefaultModel,
     isEnabled: config.isEnabled,
     isDefault: config.isDefault,
     createdAt: toIsoString(config.createdAt),
@@ -429,7 +446,8 @@ async function ensureModelAndPromptConfigsSeeded(
             temperature: sampling.temperature,
             maxTokens: sampling.maxTokens,
             topP: sampling.topP,
-            modelApiConfigId: defaultGeneralModel?.id ?? null,
+            // Default prompt configs use null to always follow the system default model
+            modelApiConfigId: null,
             isEnabled: true,
             isDefault: true,
           };
@@ -567,6 +585,7 @@ export async function getIngestionRuntimeConfig(): Promise<RuntimeConfig> {
       itemConcurrency: defaultModelConfig.ingestionItemConcurrency,
       sourceConcurrency: taskSchedule.sourceConcurrency,
       fullTextFetchThreshold: taskSchedule.fullTextFetchThreshold,
+      perSourceItemLimit: taskSchedule.perSourceItemLimit,
     },
     modelApi: serializeRuntimeModelApi(defaultModelConfig),
     prompts: {
@@ -612,9 +631,12 @@ export async function getAdminSettings(): Promise<AdminSettingsSnapshot> {
     ensureDefaultIngestionSchedule(),
   ]);
 
+  // Get the current default model config
+  const defaultModelConfig = modelApiConfigs.find((config) => config.isDefault);
+
   return {
     modelApiConfigs: modelApiConfigs.map(serializeAdminModelApiConfig),
-    promptConfigs: promptConfigs.map(serializeAdminPromptConfig),
+    promptConfigs: promptConfigs.map((config) => serializeAdminPromptConfig(config, defaultModelConfig)),
     blacklistKeywords: blacklist.map((entry) => entry.keyword),
     taskSchedule: toTaskScheduleSnapshot(taskSchedule),
     groups: groups.map((group) => ({
@@ -1037,39 +1059,51 @@ export async function testModelApiConfig(
 export async function listPromptConfigs() {
   await ensureRuntimeConfigSeeded();
 
-  const configs = await prisma.promptConfig.findMany({
-    include: {
-      modelApiConfig: {
-        select: {
-          name: true,
+  const [configs, defaultModelConfig] = await Promise.all([
+    prisma.promptConfig.findMany({
+      include: {
+        modelApiConfig: {
+          select: {
+            name: true,
+          },
         },
       },
-    },
-    orderBy: [{ type: "asc" }, { isDefault: "desc" }, { createdAt: "desc" }],
-  });
+      orderBy: [{ type: "asc" }, { isDefault: "desc" }, { createdAt: "desc" }],
+    }),
+    prisma.modelApiConfig.findFirst({
+      where: { isDefault: true, isEnabled: true },
+      select: { id: true, name: true },
+    }),
+  ]);
 
-  return configs.map(serializeAdminPromptConfig);
+  return configs.map((config) => serializeAdminPromptConfig(config, defaultModelConfig));
 }
 
 export async function getPromptConfig(id: string) {
   await ensureRuntimeConfigSeeded();
 
-  const config = await prisma.promptConfig.findUnique({
-    where: { id },
-    include: {
-      modelApiConfig: {
-        select: {
-          name: true,
+  const [config, defaultModelConfig] = await Promise.all([
+    prisma.promptConfig.findUnique({
+      where: { id },
+      include: {
+        modelApiConfig: {
+          select: {
+            name: true,
+          },
         },
       },
-    },
-  });
+    }),
+    prisma.modelApiConfig.findFirst({
+      where: { isDefault: true, isEnabled: true },
+      select: { id: true, name: true },
+    }),
+  ]);
 
   if (!config) {
     throw new Error("提示词配置不存在。");
   }
 
-  return serializeAdminPromptConfig(config);
+  return serializeAdminPromptConfig(config, defaultModelConfig);
 }
 
 export async function createPromptConfig(input: SavePromptConfigInput) {
@@ -1111,7 +1145,12 @@ export async function createPromptConfig(input: SavePromptConfigInput) {
       },
     });
 
-    return serializeAdminPromptConfig(config);
+    const defaultModelConfig = await tx.modelApiConfig.findFirst({
+      where: { isDefault: true, isEnabled: true },
+      select: { id: true, name: true },
+    });
+
+    return serializeAdminPromptConfig(config, defaultModelConfig);
   });
 }
 
@@ -1165,7 +1204,12 @@ export async function updatePromptConfig(id: string, input: SavePromptConfigInpu
       },
     });
 
-    return serializeAdminPromptConfig(config);
+    const defaultModelConfig = await tx.modelApiConfig.findFirst({
+      where: { isDefault: true, isEnabled: true },
+      select: { id: true, name: true },
+    });
+
+    return serializeAdminPromptConfig(config, defaultModelConfig);
   });
 }
 

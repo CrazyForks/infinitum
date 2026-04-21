@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { FilterSelect } from "@/components/ui/filter-select";
@@ -456,7 +456,6 @@ export function TaskMonitorPanel({
   const [timeRangeFilter, setTimeRangeFilter] = useState<TimeRangeFilter>("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
-  const [isPending, startTransition] = useTransition();
   const [isRefreshingSnapshot, setIsRefreshingSnapshot] = useState(false);
   const [selectedTask, setSelectedTask] = useState<TaskRunSnapshot | null>(
     null
@@ -557,10 +556,13 @@ export function TaskMonitorPanel({
     }
   };
 
-  const handleRefresh = () => {
-    startTransition(() => {
-      void refreshSnapshot();
-    });
+  const handleRefresh = async () => {
+    setIsRefreshingSnapshot(true);
+    try {
+      await refreshSnapshot();
+    } finally {
+      setIsRefreshingSnapshot(false);
+    }
   };
 
   const handleClearFilters = () => {
@@ -680,7 +682,7 @@ export function TaskMonitorPanel({
           <Button
             onClick={handleRefresh}
             variant="secondary"
-            disabled={isPending || isRefreshingSnapshot}
+            disabled={isRefreshingSnapshot}
           >
             刷新
           </Button>
@@ -722,7 +724,7 @@ export function TaskMonitorPanel({
       </div>
 
       {/* Task List */}
-      {isPending ? (
+      {isRefreshingSnapshot ? (
         <div className="rounded-sm border border-[color:var(--line)] bg-[var(--bg-muted)] px-4 py-8 text-center text-sm text-[var(--muted)]">
           加载中...
         </div>

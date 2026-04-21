@@ -156,11 +156,6 @@ export function AiSettingsPanel({ initialSettings, mode }: AiSettingsPanelProps)
     return promptConfigs.filter((config) => config.type === selectedPromptType);
   }, [promptConfigs, selectedPromptType]);
 
-  const defaultModelConfigId = useMemo(
-    () => modelConfigs.find((config) => config.isDefault)?.id ?? null,
-    [modelConfigs],
-  );
-
   const promptModelOptions = useMemo(() => {
     return modelConfigs
       .map((config) => ({
@@ -172,9 +167,13 @@ export function AiSettingsPanel({ initialSettings, mode }: AiSettingsPanelProps)
       .sort((left, right) => left.label.localeCompare(right.label, "zh-Hans-CN"));
   }, [modelConfigs]);
 
+  const defaultModelConfigName = useMemo(() => {
+    return modelConfigs.find((config) => config.isDefault)?.name ?? "默认模型";
+  }, [modelConfigs]);
+
   const promptSelectOptions = useMemo(
-    () => [{ value: "", label: "使用默认" }, ...promptModelOptions],
-    [promptModelOptions],
+    () => [{ value: "", label: `${defaultModelConfigName}（默认）` }, ...promptModelOptions],
+    [defaultModelConfigName, promptModelOptions],
   );
 
   const submitJson = async <T,>(
@@ -430,7 +429,8 @@ export function AiSettingsPanel({ initialSettings, mode }: AiSettingsPanelProps)
       temperature: config.temperature == null ? "" : String(config.temperature),
       maxTokens: config.maxTokens == null ? "" : String(config.maxTokens),
       topP: config.topP == null ? "" : String(config.topP),
-      modelApiConfigId: config.modelApiConfigId ?? "",
+      // If using default model, set to empty string so "使用默认" is selected
+      modelApiConfigId: config.isUsingDefaultModel ? "" : config.modelApiConfigId ?? "",
       isEnabled: config.isEnabled,
       isDefault: config.isDefault,
     });
@@ -453,7 +453,8 @@ export function AiSettingsPanel({ initialSettings, mode }: AiSettingsPanelProps)
       temperature: config.temperature == null ? "" : String(config.temperature),
       maxTokens: config.maxTokens == null ? "" : String(config.maxTokens),
       topP: config.topP == null ? "" : String(config.topP),
-      modelApiConfigId: config.modelApiConfigId ?? "",
+      // If original uses default model, also use empty string (default)
+      modelApiConfigId: config.isUsingDefaultModel ? "" : config.modelApiConfigId ?? "",
       isEnabled: config.isEnabled,
       isDefault: false,
     });
@@ -1015,9 +1016,7 @@ export function AiSettingsPanel({ initialSettings, mode }: AiSettingsPanelProps)
                       </div>
 
                       <div className="space-y-1 text-sm text-[var(--text-2)]">
-                        {config.modelApiConfigName &&
-                        config.modelApiConfigId &&
-                        config.modelApiConfigId !== defaultModelConfigId ? (
+                        {config.modelApiConfigName && !config.isUsingDefaultModel ? (
                           <div>
                             <span className="font-medium">关联模型API：</span>
                             <span>{config.modelApiConfigName}</span>
@@ -1308,6 +1307,7 @@ export function AiSettingsPanel({ initialSettings, mode }: AiSettingsPanelProps)
               {showPromptPreview.modelApiConfigName ? (
                 <StatusTag tone="info">
                   模型: {showPromptPreview.modelApiConfigName}
+                  {showPromptPreview.isUsingDefaultModel ? " (默认)" : ""}
                 </StatusTag>
               ) : null}
             </div>

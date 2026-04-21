@@ -48,6 +48,7 @@ function buildInitialSettings(): AdminSettingsSnapshot {
         topP: 1,
         modelApiConfigId: "model-1",
         modelApiConfigName: "默认模型配置",
+        isUsingDefaultModel: false,
         isEnabled: true,
         isDefault: true,
         createdAt: "2026-04-20T10:00:00.000Z",
@@ -61,6 +62,7 @@ function buildInitialSettings(): AdminSettingsSnapshot {
       cronExpression: "0 * * * *",
       sourceConcurrency: 2,
       fullTextFetchThreshold: 80,
+      perSourceItemLimit: 20,
       timezone: "Asia/Shanghai",
       lastHeartbeatAt: "2026-04-20T10:00:00.000Z",
       lastRunStartedAt: "2026-04-20T10:00:00.000Z",
@@ -614,6 +616,7 @@ describe("AdminSettingsPanel", () => {
           cronExpression: "*/15 * * * *",
           sourceConcurrency: 4,
           fullTextFetchThreshold: 120,
+          perSourceItemLimit: 20,
         }),
       });
     });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { GlobalHeader } from "@/components/ui/global-header";
@@ -123,6 +123,14 @@ export function AdminPageClient({
     ai: !(routeState.primaryTab === "settings" && routeState.settingsSection === "ai"),
     content: !(routeState.primaryTab === "monitoring" && routeState.monitoringSubSection === "content"),
   }));
+
+  // Auto-expand sections when tab changes
+  useEffect(() => {
+    setCollapsedSections((prev) => ({
+      ai: !(primaryTab === "settings" && settingsSection === "ai") ? prev.ai : false,
+      content: !(primaryTab === "monitoring" && monitoringSubSection === "content") ? prev.content : false,
+    }));
+  }, [primaryTab, settingsSection, monitoringSubSection]);
 
   const navigateAdmin = useCallback((nextState: Partial<AdminRouteState>) => {
     const resolvedPrimaryTab = nextState.primaryTab ?? primaryTab;

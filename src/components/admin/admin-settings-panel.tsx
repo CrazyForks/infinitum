@@ -20,6 +20,8 @@ import {
   MAX_SOURCE_CONCURRENCY,
   MIN_FULL_TEXT_FETCH_THRESHOLD,
   MIN_SOURCE_CONCURRENCY,
+  MAX_PER_SOURCE_ITEM_LIMIT,
+  MIN_PER_SOURCE_ITEM_LIMIT,
 } from "@/lib/tasks/scheduler";
 import { cx } from "@/lib/ui/cx";
 
@@ -130,6 +132,8 @@ export function AdminSettingsPanel({
     useState(String(initialSettings.taskSchedule.sourceConcurrency));
   const [taskScheduleFullTextFetchThreshold, setTaskScheduleFullTextFetchThreshold] =
     useState(String(initialSettings.taskSchedule.fullTextFetchThreshold));
+  const [taskSchedulePerSourceItemLimit, setTaskSchedulePerSourceItemLimit] =
+    useState(String(initialSettings.taskSchedule.perSourceItemLimit));
   const [taskScheduleSnapshot, setTaskScheduleSnapshot] = useState(
     initialSettings.taskSchedule,
   );
@@ -382,6 +386,10 @@ export function AdminSettingsPanel({
       taskScheduleFullTextFetchThreshold.trim(),
       10,
     );
+    const parsedPerSourceItemLimit = Number.parseInt(
+      taskSchedulePerSourceItemLimit.trim(),
+      10,
+    );
 
     if (
       !Number.isInteger(parsedSourceConcurrency) ||
@@ -407,6 +415,18 @@ export function AdminSettingsPanel({
       return;
     }
 
+    if (
+      !Number.isInteger(parsedPerSourceItemLimit) ||
+      parsedPerSourceItemLimit < MIN_PER_SOURCE_ITEM_LIMIT ||
+      parsedPerSourceItemLimit > MAX_PER_SOURCE_ITEM_LIMIT
+    ) {
+      showToast(
+        `每源处理上限需为 ${MIN_PER_SOURCE_ITEM_LIMIT}-${MAX_PER_SOURCE_ITEM_LIMIT} 的整数。`,
+        "error",
+      );
+      return;
+    }
+
     startTransition(async () => {
       try {
         const response = await fetch("/api/admin/monitor/schedule/ingestion-default", {
@@ -419,6 +439,7 @@ export function AdminSettingsPanel({
             cronExpression: taskScheduleCronExpression,
             sourceConcurrency: parsedSourceConcurrency,
             fullTextFetchThreshold: parsedFullTextFetchThreshold,
+            perSourceItemLimit: parsedPerSourceItemLimit,
           }),
         });
         const payload = (await response.json()) as {
@@ -436,6 +457,7 @@ export function AdminSettingsPanel({
         setTaskScheduleCronExpression(payload.schedule.cronExpression);
         setTaskScheduleSourceConcurrency(String(payload.schedule.sourceConcurrency));
         setTaskScheduleFullTextFetchThreshold(String(payload.schedule.fullTextFetchThreshold));
+        setTaskSchedulePerSourceItemLimit(String(payload.schedule.perSourceItemLimit));
         showToast("任务配置已保存。", "success");
       } catch {
         showToast("任务配置保存失败。", "error");
@@ -446,7 +468,8 @@ export function AdminSettingsPanel({
     taskScheduleEnabled !== taskScheduleSnapshot.enabled ||
     taskScheduleCronExpression.trim() !== taskScheduleSnapshot.cronExpression ||
     taskScheduleSourceConcurrency.trim() !== String(taskScheduleSnapshot.sourceConcurrency) ||
-    taskScheduleFullTextFetchThreshold.trim() !== String(taskScheduleSnapshot.fullTextFetchThreshold);
+    taskScheduleFullTextFetchThreshold.trim() !== String(taskScheduleSnapshot.fullTextFetchThreshold) ||
+    taskSchedulePerSourceItemLimit.trim() !== String(taskScheduleSnapshot.perSourceItemLimit);
 
   const content = (
     <section aria-label="后台设置工作台" className="space-y-4">
@@ -761,7 +784,14 @@ export function AdminSettingsPanel({
                           </div>
                         </td>
                         <td className="px-4 py-3 text-xs text-[var(--text-3)]">
-                          <div>{source.siteUrl}</div>
+                          <a
+                            href={source.siteUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="hover:text-[var(--accent)] hover:underline"
+                          >
+                            {source.siteUrl}
+                          </a>
                         </td>
                         <td className="px-4 py-3 text-right">
                           <div className="flex items-center justify-end gap-1">
@@ -1025,7 +1055,8 @@ export function AdminSettingsPanel({
             </div>
 
             <div className="space-y-6">
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-[220px_minmax(0,1fr)_220px_220px] lg:items-start">
+              {/* Row 1: 任务开关 + Cron 表达式 */}
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                 <div className="space-y-1.5">
                   <div className="block text-sm text-[var(--muted)]">任务开关</div>
                   <label className="flex min-h-10 items-center gap-2 rounded-sm border border-[color:var(--line)] bg-[var(--surface)] px-3 text-sm text-[var(--text-2)]">
@@ -1054,7 +1085,10 @@ export function AdminSettingsPanel({
                     placeholder="例如 0 * * * *"
                   />
                 </div>
+              </div>
 
+              {/* Row 2: 源抓取并发 + 正文补抓阈值 + 每源处理上限 */}
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
                 <div className="space-y-1.5">
                   <label
                     htmlFor="task-schedule-source-concurrency"
@@ -1092,6 +1126,26 @@ export function AdminSettingsPanel({
                     value={taskScheduleFullTextFetchThreshold}
                     onChange={(event) => setTaskScheduleFullTextFetchThreshold(event.target.value)}
                     placeholder="例如 80"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label
+                    htmlFor="task-schedule-per-source-item-limit"
+                    className="block text-sm text-[var(--muted)]"
+                  >
+                    每源处理上限
+                  </label>
+                  <TextInput
+                    id="task-schedule-per-source-item-limit"
+                    type="number"
+                    inputMode="numeric"
+                    min={MIN_PER_SOURCE_ITEM_LIMIT}
+                    max={MAX_PER_SOURCE_ITEM_LIMIT}
+                    step={1}
+                    value={taskSchedulePerSourceItemLimit}
+                    onChange={(event) => setTaskSchedulePerSourceItemLimit(event.target.value)}
+                    placeholder="例如 20"
                   />
                 </div>
               </div>

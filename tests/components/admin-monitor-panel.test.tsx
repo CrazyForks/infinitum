@@ -39,6 +39,7 @@ describe("AdminMonitorPanel", () => {
       cronExpression: "0 * * * *",
       sourceConcurrency: 2,
       fullTextFetchThreshold: 80,
+      perSourceItemLimit: 20,
       timezone: "Asia/Shanghai",
       lastHeartbeatAt: "2026-04-12T00:00:00.000Z",
       lastRunStartedAt: null,

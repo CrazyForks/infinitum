@@ -1,7 +1,6 @@
 "use client";
 
 import { startTransition, useState } from "react";
-import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -60,13 +59,53 @@ export function GlobalHeader({ activeNav, isAdmin }: GlobalHeaderProps) {
             className="inline-flex shrink-0 items-center gap-2 text-[var(--foreground)]"
             href="/"
           >
-            <Image
-              src="/brand-mark.svg"
-              alt="Infinitum"
+            <svg
               className="logo-mark h-7 w-7"
-              width={28}
-              height={28}
-            />
+              width="28"
+              height="28"
+              viewBox="0 0 128 128"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+              aria-label="Infinitum"
+            >
+              <rect width="128" height="128" rx="28" fill="#111111" />
+              <path
+                d="M24 34C24 28.4772 28.4772 24 34 24H94C99.5228 24 104 28.4772 104 34V94C104 99.5228 99.5228 104 94 104H34C28.4772 104 24 99.5228 24 94V34Z"
+                stroke="#111111"
+                strokeWidth="2"
+              />
+              <path
+                d="M34 40H94"
+                stroke="white"
+                strokeWidth="10"
+                strokeLinecap="round"
+              />
+              <path
+                d="M42 60H86"
+                stroke="white"
+                strokeWidth="10"
+                strokeLinecap="round"
+              />
+              <path
+                d="M51 80H77"
+                stroke="white"
+                strokeWidth="10"
+                strokeLinecap="round"
+              />
+              <path
+                d="M64 92V104"
+                stroke="white"
+                strokeWidth="10"
+                strokeLinecap="round"
+              />
+              <path
+                d="M56 97L64 105L72 97"
+                stroke="white"
+                strokeWidth="10"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
             <span className="text-2xl font-bold">Infinitum</span>
           </Link>
 
@@ -107,6 +146,7 @@ export function GlobalHeader({ activeNav, isAdmin }: GlobalHeaderProps) {
           {isAdmin && (
             <Link
               href="/admin"
+              prefetch={false}
               className={headerIconButtonClass}
               aria-label="管理"
               title="管理"

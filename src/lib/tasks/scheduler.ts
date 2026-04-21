@@ -6,10 +6,13 @@ export const DEFAULT_SCHEDULE_TIMEZONE = "Asia/Shanghai";
 export const DEFAULT_SCHEDULE_CRON_EXPRESSION = "0 * * * *";
 export const DEFAULT_SOURCE_CONCURRENCY = 2;
 export const DEFAULT_FULL_TEXT_FETCH_THRESHOLD = 80;
+export const DEFAULT_PER_SOURCE_ITEM_LIMIT = 20;
 export const MIN_SOURCE_CONCURRENCY = 1;
 export const MAX_SOURCE_CONCURRENCY = 10;
 export const MIN_FULL_TEXT_FETCH_THRESHOLD = 0;
 export const MAX_FULL_TEXT_FETCH_THRESHOLD = 5000;
+export const MIN_PER_SOURCE_ITEM_LIMIT = 1;
+export const MAX_PER_SOURCE_ITEM_LIMIT = 200;
 
 export function normalizeScheduleInput(input: ScheduleUpdateInput): ScheduleUpdateInput {
   const cronExpression = input.cronExpression.trim();
@@ -43,11 +46,22 @@ export function normalizeScheduleInput(input: ScheduleUpdateInput): ScheduleUpda
     );
   }
 
+  if (
+    !Number.isInteger(input.perSourceItemLimit) ||
+    input.perSourceItemLimit < MIN_PER_SOURCE_ITEM_LIMIT ||
+    input.perSourceItemLimit > MAX_PER_SOURCE_ITEM_LIMIT
+  ) {
+    throw new Error(
+      `Per source item limit must be an integer between ${MIN_PER_SOURCE_ITEM_LIMIT} and ${MAX_PER_SOURCE_ITEM_LIMIT}.`,
+    );
+  }
+
   return {
     enabled: input.enabled,
     cronExpression,
     sourceConcurrency: input.sourceConcurrency,
     fullTextFetchThreshold: input.fullTextFetchThreshold,
+    perSourceItemLimit: input.perSourceItemLimit,
   };
 }
 
