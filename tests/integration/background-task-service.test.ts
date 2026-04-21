@@ -33,6 +33,7 @@ describe("background task persistence", () => {
         enabled: true,
         cronExpression: "0 * * * *",
         sourceConcurrency: 2,
+        fullTextFetchThreshold: 80,
         timezone: "Asia/Shanghai",
         nextRunAt: new Date("2026-04-12T01:00:00.000Z"),
       },
@@ -41,6 +42,7 @@ describe("background task persistence", () => {
     expect(schedule.key).toBe("ingestion_default");
     expect(schedule.cronExpression).toBe("0 * * * *");
     expect(schedule.sourceConcurrency).toBe(2);
+    expect(schedule.fullTextFetchThreshold).toBe(80);
   });
 
   it("links fetch runs to a background task run", async () => {
@@ -70,6 +72,7 @@ describe("background task persistence", () => {
     expect(schedule.key).toBe("ingestion_default");
     expect(schedule.cronExpression).toBe("0 * * * *");
     expect(schedule.sourceConcurrency).toBe(2);
+    expect(schedule.fullTextFetchThreshold).toBe(80);
   });
 
   it("claims a queued task only once", async () => {
@@ -222,6 +225,7 @@ describe("background task persistence", () => {
         enabled: true,
         cronExpression: "0 * * * *",
         sourceConcurrency: 2,
+        fullTextFetchThreshold: 80,
         timezone: "Asia/Shanghai",
         nextRunAt: new Date("2026-04-12T01:00:00.000Z"),
       },
@@ -249,11 +253,13 @@ describe("background task persistence", () => {
       enabled: false,
       cronExpression: "*/15 * * * *",
       sourceConcurrency: 4,
+      fullTextFetchThreshold: 120,
     });
 
     expect(updated.enabled).toBe(false);
     expect(updated.cronExpression).toBe("*/15 * * * *");
     expect(updated.sourceConcurrency).toBe(4);
+    expect(updated.fullTextFetchThreshold).toBe(120);
   });
 
   it("builds a monitor snapshot with schedule and task lists", async () => {
@@ -265,19 +271,86 @@ describe("background task persistence", () => {
     });
     await updateTaskRun(taskRun.id, {
       status: "running",
+      fullTextFetchedCount: 2,
       aiCallCountActual: 3,
       aiCallCountEstimated: 8,
+      aiCallBreakdown: [
+        {
+          key: "item_analysis",
+          label: "内容分析",
+          actual: 1,
+          estimated: 2,
+        },
+        {
+          key: "cluster_match",
+          label: "聚合匹配",
+          actual: 2,
+          estimated: 4,
+        },
+        {
+          key: "cluster_summary",
+          label: "聚合摘要",
+          actual: 0,
+          estimated: 2,
+        },
+      ],
+      stageTimings: [
+        {
+          key: "source_sync",
+          label: "信息源同步",
+          startedAt: "2026-04-12T00:00:00.000Z",
+          finishedAt: "2026-04-12T00:00:09.000Z",
+          durationMs: 9_000,
+        },
+      ],
     });
 
+    const storedTaskRun = await prisma.backgroundTaskRun.findUniqueOrThrow({
+      where: { id: taskRun.id },
+    });
     const snapshot = await getBackgroundTaskMonitorSnapshot(new Date("2026-04-12T01:00:00.000Z"));
 
+    expect(storedTaskRun.stageTimingsJson).not.toBeNull();
+    expect(storedTaskRun.stageTimingsJson).toContain("\"source_sync\"");
+    expect(storedTaskRun.aiCallBreakdownJson).not.toBeNull();
     expect(snapshot.schedule.key).toBe("ingestion_default");
     expect(snapshot.schedule.sourceConcurrency).toBe(2);
+    expect(snapshot.schedule.fullTextFetchThreshold).toBe(80);
     expect(Array.isArray(snapshot.runningTasks)).toBe(true);
     expect(Array.isArray(snapshot.recentTasks)).toBe(true);
     expect(snapshot.recentTasks[0]?.label).toBe("默认抓取任务");
+    expect(snapshot.recentTasks[0]?.fullTextFetchedCount).toBe(2);
     expect(snapshot.recentTasks[0]?.aiCallCountActual).toBe(3);
     expect(snapshot.recentTasks[0]?.aiCallCountEstimated).toBe(8);
+    expect(snapshot.recentTasks[0]?.aiCallBreakdown).toEqual([
+      {
+        key: "item_analysis",
+        label: "内容分析",
+        actual: 1,
+        estimated: 2,
+      },
+      {
+        key: "cluster_match",
+        label: "聚合匹配",
+        actual: 2,
+        estimated: 4,
+      },
+      {
+        key: "cluster_summary",
+        label: "聚合摘要",
+        actual: 0,
+        estimated: 2,
+      },
+    ]);
+    expect(snapshot.recentTasks[0]?.stageTimings).toEqual([
+      {
+        key: "source_sync",
+        label: "信息源同步",
+        startedAt: "2026-04-12T00:00:00.000Z",
+        finishedAt: "2026-04-12T00:00:09.000Z",
+        durationMs: 9_000,
+      },
+    ]);
   });
 
   it("cancels a queued task immediately", async () => {
@@ -319,6 +392,7 @@ describe("background task persistence", () => {
         enabled: true,
         cronExpression: "0 * * * *",
         sourceConcurrency: 2,
+        fullTextFetchThreshold: 80,
         timezone: "Asia/Shanghai",
         nextRunAt: new Date("2026-04-12T01:00:00.000Z"),
         lastHeartbeatAt: new Date("2026-04-12T00:00:00.000Z"),

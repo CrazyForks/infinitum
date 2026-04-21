@@ -16,8 +16,11 @@ describe("ai provider", () => {
               moderationDetail: "高信息密度内容",
               qualityScore: 88,
               qualityRationale: "信息完整且有明确事实",
-              topicLabel: "OpenAI Agent",
-              clusterHint: "OpenAI agent toolkit launch",
+              eventType: "launch",
+              eventSubject: "OpenAI",
+              eventAction: "发布",
+              eventObject: "agent toolkit",
+              eventDate: "2026-04-10",
             }),
           },
         },
@@ -54,8 +57,13 @@ describe("ai provider", () => {
       moderationDetail: "高信息密度内容",
       qualityScore: 88,
       qualityRationale: "信息完整且有明确事实",
-      topicLabel: "OpenAI Agent",
-      clusterHint: "OpenAI agent toolkit launch",
+      eventSignature: {
+        eventType: "launch",
+        eventSubject: "OpenAI",
+        eventAction: "发布",
+        eventObject: "agent toolkit",
+        eventDate: "2026-04-10",
+      },
     });
     expect(create).toHaveBeenCalledTimes(1);
   });
@@ -73,8 +81,11 @@ describe("ai provider", () => {
               moderationDetail: "解释",
               qualityScore: 88,
               qualityRationale: "评分理由",
-              topicLabel: "主题",
-              clusterHint: "聚合线索",
+              eventType: "launch",
+              eventSubject: "主体",
+              eventAction: "发布",
+              eventObject: "对象",
+              eventDate: null,
             }),
           },
         },
@@ -104,11 +115,67 @@ describe("ai provider", () => {
     });
 
     const systemPrompt = create.mock.calls[0]?.[0]?.messages?.[0]?.content as string;
-    expect(systemPrompt).toContain("字段说明");
+    expect(systemPrompt).toContain("固定输出格式");
     expect(systemPrompt).toContain("translatedTitle");
     expect(systemPrompt).toContain("moderationDetail");
     expect(systemPrompt).toContain("qualityRationale");
-    expect(systemPrompt).toContain("clusterHint");
+    expect(systemPrompt).toContain("eventType");
+    expect(systemPrompt).toContain("eventSubject");
+    expect(systemPrompt).toContain("100 到 200 字中文摘要");
+    expect(systemPrompt).toContain('"moderationStatus":"allowed|filtered"');
+    expect(systemPrompt).not.toContain("restored");
+  });
+
+  it("passes the full body text to item analysis without truncation", async () => {
+    const create = vi.fn().mockResolvedValue({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              translatedTitle: "",
+              summary: "中文摘要",
+              moderationStatus: "allowed",
+              moderationReason: null,
+              moderationDetail: "信息明确",
+              qualityScore: 80,
+              qualityRationale: "事实较完整",
+              eventType: "launch",
+              eventSubject: "OpenAI",
+              eventAction: "发布",
+              eventObject: "事件线索",
+              eventDate: null,
+            }),
+          },
+        },
+      ],
+    });
+
+    const provider = createAiProvider(
+      {
+        apiKey: "sk-test",
+        baseURL: "https://example.com/v1",
+        model: "test-model",
+      },
+      undefined,
+      {
+        chat: {
+          completions: {
+            create,
+          },
+        },
+      },
+    );
+
+    const longBody = "正文片段".repeat(1200);
+
+    await provider.enrichContent(longBody, {
+      title: "Original title",
+      sourceName: "Example Feed",
+      translateTitle: false,
+    });
+
+    const userPrompt = create.mock.calls[0]?.[0]?.messages?.[1]?.content as string;
+    expect(userPrompt).toContain(longBody);
   });
 
   it("falls back to the original title and truncated plain text when no api key is configured", async () => {
@@ -132,8 +199,13 @@ describe("ai provider", () => {
     expect(enriched.moderationStatus).toBe("allowed");
     expect(enriched.qualityScore).toBe(50);
     expect(enriched.qualityRationale).toBe("AI analysis unavailable");
-    expect(enriched.topicLabel).toBeNull();
-    expect(enriched.clusterHint).toBeNull();
+    expect(enriched.eventSignature).toEqual({
+      eventType: null,
+      eventSubject: null,
+      eventAction: null,
+      eventObject: null,
+      eventDate: null,
+    });
   });
 
   it("retries once when the provider returns invalid json before succeeding", async () => {
@@ -229,8 +301,13 @@ describe("ai provider", () => {
       moderationDetail: null,
       qualityScore: 50,
       qualityRationale: "AI analysis unavailable",
-      topicLabel: null,
-      clusterHint: null,
+      eventSignature: {
+        eventType: null,
+        eventSubject: null,
+        eventAction: null,
+        eventObject: null,
+        eventDate: null,
+      },
     });
     expect(create).toHaveBeenCalledTimes(2);
   });
@@ -419,6 +496,7 @@ describe("ai provider", () => {
 
     const systemPrompt = create.mock.calls[0]?.[0]?.messages?.[0]?.content as string;
     expect(systemPrompt).toContain("同一具体事件");
-    expect(systemPrompt).toContain("不要因为主题接近");
+    expect(systemPrompt).toContain("如果只是主题接近");
+    expect(systemPrompt).toContain("当前内容缺少明确事件线索时");
   });
 });

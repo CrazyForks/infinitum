@@ -90,6 +90,18 @@ function getSelectRoot(name: string) {
   return screen.getByRole("combobox", { name }).closest(".select-modern-antd");
 }
 
+function getFetchUrl(input: RequestInfo | URL) {
+  if (typeof input === "string") {
+    return input;
+  }
+
+  if (input instanceof Request) {
+    return input.url;
+  }
+
+  return input.toString();
+}
+
 async function selectFilterOption(user: ReturnType<typeof userEvent.setup>, name: string, optionText: string) {
   const combobox = screen.getByRole("combobox", { name });
   if (combobox instanceof HTMLSelectElement) {
@@ -788,6 +800,35 @@ describe("FeedPanel", () => {
     expect(refreshButton.className).toContain("font-medium");
   });
 
+  it("disables the admin refresh button while a refresh task is running", () => {
+    render(
+      <FeedPanel
+        initialItems={initialEntries}
+        initialRange="7d"
+        initialSort="time_desc"
+        initialStartDate={null}
+        initialEndDate={null}
+        initialNextCursor={null}
+        initialStatus={{
+          id: "run-active-1",
+          status: "running",
+          triggerType: "manual",
+          startedAt: "2026-04-10T10:00:00.000Z",
+          finishedAt: null,
+          sourceCount: 1,
+          itemCount: 2,
+          successCount: 0,
+          failureCount: 0,
+          itemsAdded: 0,
+          errorSummary: null,
+        }}
+        isAdmin
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "立即刷新" })).toBeDisabled();
+  });
+
   it("uses transplanted Lumina filter components on the homepage", () => {
     const { container } = render(
       <FeedPanel
@@ -858,7 +899,7 @@ describe("FeedPanel", () => {
   it("shows a regenerate icon for expanded cluster items and keeps the cluster refresh hint", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
-      const url = typeof input === "string" ? input : input.url;
+      const url = getFetchUrl(input);
 
       if (url === "/api/feed/clusters/cluster-1?range=7d&sort=time_desc&tzOffsetMinutes=-480") {
         return new Response(
@@ -972,7 +1013,7 @@ describe("FeedPanel", () => {
     vi.useFakeTimers();
 
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input) => {
-      const url = typeof input === "string" ? input : input.url;
+      const url = getFetchUrl(input);
 
       if (url === "/api/ingest/status") {
         return new Response(
@@ -1031,6 +1072,7 @@ describe("FeedPanel", () => {
           itemCount: 2,
           successCount: 0,
           failureCount: 0,
+          itemsAdded: 0,
           errorSummary: null,
         }}
         isAdmin
@@ -1076,6 +1118,7 @@ describe("FeedPanel", () => {
           itemCount: 2,
           successCount: 0,
           failureCount: 0,
+          itemsAdded: 0,
           errorSummary: null,
         }}
         isAdmin={false}
@@ -1133,6 +1176,7 @@ describe("FeedPanel", () => {
       expect(fetchMock).toHaveBeenCalledWith("/api/ingest/run", { method: "POST" });
     });
 
+    expect(pushMock).toHaveBeenCalledWith("/admin?tab=monitoring&section=tasks&task=task-1");
     expect(screen.getByText("抓取任务已进入队列，等待后台执行。")).toBeInTheDocument();
     expect(screen.getByText("抓取任务已进入队列，等待后台执行。").closest('[role="status"]')).not.toBeNull();
   });
@@ -1190,7 +1234,7 @@ describe("FeedPanel", () => {
   it("shows a single regenerate action and queues a summary task after choosing it in the dialog", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
-      const url = typeof input === "string" ? input : input.url;
+      const url = getFetchUrl(input);
 
       if (url === "/api/admin/items/item-1/regenerate") {
         expect(init?.method).toBe("POST");
@@ -1252,7 +1296,7 @@ describe("FeedPanel", () => {
   it("can queue both translation and summary from the regenerate dialog", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input) => {
-      const url = typeof input === "string" ? input : input.url;
+      const url = getFetchUrl(input);
 
       if (url === "/api/admin/items/item-1/regenerate") {
         return new Response(JSON.stringify({ taskRun: { id: "task-both" } }), { status: 202 });
@@ -1372,7 +1416,7 @@ describe("FeedPanel", () => {
   it("renders regenerate API errors as alerts", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input) => {
-      const url = typeof input === "string" ? input : input.url;
+      const url = getFetchUrl(input);
 
       if (url === "/api/admin/items/item-1/regenerate") {
         return new Response(
@@ -1557,7 +1601,7 @@ describe("FeedPanel", () => {
   it("switches pages and supports page size plus jump controls", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input) => {
-      const url = typeof input === "string" ? input : input.url;
+      const url = getFetchUrl(input);
 
       if (url === "/api/feed?range=7d&sort=time_desc&page=2&tzOffsetMinutes=-480") {
         return new Response(

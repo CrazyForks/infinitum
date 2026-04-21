@@ -22,6 +22,18 @@ function renderWithProviders(node: ReactNode) {
   return render(<ToastProvider>{node}</ToastProvider>);
 }
 
+function getFetchUrl(input: RequestInfo | URL) {
+  if (typeof input === "string") {
+    return input;
+  }
+
+  if (input instanceof Request) {
+    return input.url;
+  }
+
+  return input.toString();
+}
+
 async function waitForLoaded() {
   await waitFor(() => {
     expect(screen.queryByText("加载中...")).not.toBeInTheDocument();
@@ -46,7 +58,6 @@ function createFilteredItem(overrides: Partial<Record<string, unknown>> = {}) {
     moderationDetail: "营销措辞明显",
     qualityScore: 18,
     qualityRationale: "低质量",
-    topicLabel: "AI Marketing",
     canRegenerateTranslation: true,
     ...overrides,
   };
@@ -66,7 +77,6 @@ function createClusterItem(overrides: Partial<Record<string, unknown>> = {}) {
     moderationDetail: null,
     qualityScore: 80,
     qualityRationale: "高质量",
-    topicLabel: "融资",
     canRegenerateTranslation: false,
     ...overrides,
   };
@@ -97,7 +107,7 @@ describe("ContentReviewPanel", () => {
   it("loads filtered items and restores one item", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
-      const url = typeof input === "string" ? input : input.url;
+      const url = getFetchUrl(input);
 
       if (url === "/api/admin/items?moderationStatus=filtered") {
         return new Response(
@@ -164,7 +174,7 @@ describe("ContentReviewPanel", () => {
   it("filters the current review list by keyword", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input) => {
-      const url = typeof input === "string" ? input : input.url;
+      const url = getFetchUrl(input);
 
       if (url === "/api/admin/items?moderationStatus=filtered") {
         return new Response(JSON.stringify({ items: [createFilteredItem()] }));
@@ -196,7 +206,7 @@ describe("ContentReviewPanel", () => {
   it("queues reanalyze as a background task", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
-      const url = typeof input === "string" ? input : input.url;
+      const url = getFetchUrl(input);
 
       if (url === "/api/admin/items?moderationStatus=filtered") {
         return new Response(
@@ -255,7 +265,7 @@ describe("ContentReviewPanel", () => {
   it("shows an error when reanalyze returns 202 without taskRun", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
-      const url = typeof input === "string" ? input : input.url;
+      const url = getFetchUrl(input);
 
       if (url === "/api/admin/items?moderationStatus=filtered") {
         return new Response(JSON.stringify({ items: [createFilteredItem()] }));
@@ -300,7 +310,7 @@ describe("ContentReviewPanel", () => {
   it("updates cluster preview after detaching an item", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
-      const url = typeof input === "string" ? input : input.url;
+      const url = getFetchUrl(input);
 
       if (url === "/api/admin/items?moderationStatus=filtered") {
         return new Response(JSON.stringify({ items: [] }));
@@ -363,7 +373,7 @@ describe("ContentReviewPanel", () => {
   it("shows an error when detaching an item returns 200 without cluster", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
-      const url = typeof input === "string" ? input : input.url;
+      const url = getFetchUrl(input);
 
       if (url === "/api/admin/items?moderationStatus=filtered") {
         return new Response(JSON.stringify({ items: [] }));
@@ -414,7 +424,7 @@ describe("ContentReviewPanel", () => {
   it("shows an error when regenerating a summary returns 202 without taskRun", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
-      const url = typeof input === "string" ? input : input.url;
+      const url = getFetchUrl(input);
 
       if (url === "/api/admin/items?moderationStatus=filtered") {
         return new Response(JSON.stringify({ items: [] }));
@@ -481,7 +491,7 @@ describe("ContentReviewPanel", () => {
   ])("shows an error when $buttonLabel returns 200 without cluster", async ({ buttonLabel, cluster, requestUrl }) => {
     const user = userEvent.setup();
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
-      const url = typeof input === "string" ? input : input.url;
+      const url = getFetchUrl(input);
 
       if (url === "/api/admin/items?moderationStatus=filtered") {
         return new Response(JSON.stringify({ items: [] }));
@@ -537,7 +547,7 @@ describe("ContentReviewPanel", () => {
     },
   ])("shows a load failure when $name", async ({ failingUrl, okUrl, okBody }) => {
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input) => {
-      const url = typeof input === "string" ? input : input.url;
+      const url = getFetchUrl(input);
 
       if (url === failingUrl) {
         return new Response(JSON.stringify({}), { status: 500 });

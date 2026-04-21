@@ -217,7 +217,6 @@ export function mapItemToReviewItem(item: ItemWithSource): ReviewItemDTO {
     moderationDetail: item.moderationDetail,
     qualityScore: item.qualityScore,
     qualityRationale: item.qualityRationale,
-    topicLabel: item.topicLabel,
     canRegenerateTranslation: shouldTranslateTitle(item.originalTitle),
   };
 }

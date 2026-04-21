@@ -10,6 +10,25 @@ import {
 } from "@/config/prompts";
 import type { RuntimeConfig } from "@/config/runtime";
 
+export type AiEventSignature = {
+  eventType:
+    | "release"
+    | "launch"
+    | "update"
+    | "funding"
+    | "acquisition"
+    | "partnership"
+    | "policy"
+    | "research"
+    | "security"
+    | "other"
+    | null;
+  eventSubject: string | null;
+  eventAction: string | null;
+  eventObject: string | null;
+  eventDate: string | null;
+};
+
 export type AiEnrichment = {
   translatedTitle: string | null;
   summary: string;
@@ -18,8 +37,7 @@ export type AiEnrichment = {
   moderationDetail: string | null;
   qualityScore: number;
   qualityRationale: string;
-  topicLabel: string | null;
-  clusterHint: string | null;
+  eventSignature: AiEventSignature;
 };
 
 type ParsedEnrichmentResult =
@@ -128,8 +146,13 @@ function getFallbackEnrichment(
     moderationDetail: null,
     qualityScore: 50,
     qualityRationale: "AI analysis unavailable",
-    topicLabel: null,
-    clusterHint: null,
+    eventSignature: {
+      eventType: null,
+      eventSubject: null,
+      eventAction: null,
+      eventObject: null,
+      eventDate: null,
+    },
   };
 }
 
@@ -153,8 +176,18 @@ function parseJsonLikeEnrichment(
       moderationDetail?: string | null;
       qualityScore?: number | string | null;
       qualityRationale?: string | null;
-      topicLabel?: string | null;
-      clusterHint?: string | null;
+      eventType?: string | null;
+      eventSubject?: string | null;
+      eventAction?: string | null;
+      eventObject?: string | null;
+      eventDate?: string | null;
+      eventSignature?: {
+        eventType?: string | null;
+        eventSubject?: string | null;
+        eventAction?: string | null;
+        eventObject?: string | null;
+        eventDate?: string | null;
+      } | null;
     };
 
     if (parsed.summary?.trim()) {
@@ -196,8 +229,7 @@ function parseJsonLikeEnrichment(
       moderationDetail: fallback.moderationDetail,
       qualityScore: fallback.qualityScore,
       qualityRationale: fallback.qualityRationale,
-      topicLabel: fallback.topicLabel,
-      clusterHint: fallback.clusterHint,
+      eventSignature: fallback.eventSignature,
     },
   };
 }
@@ -226,6 +258,59 @@ function normalizeScore(value: number | string | null | undefined, fallback: num
   return Math.max(0, Math.min(100, Math.round(numeric)));
 }
 
+function normalizeEventType(value: string | null | undefined): AiEventSignature["eventType"] {
+  return value === "release" ||
+    value === "launch" ||
+    value === "update" ||
+    value === "funding" ||
+    value === "acquisition" ||
+    value === "partnership" ||
+    value === "policy" ||
+    value === "research" ||
+    value === "security" ||
+    value === "other"
+    ? value
+    : null;
+}
+
+function normalizeEventDate(value: string | null | undefined): string | null {
+  const trimmed = value?.trim() ?? "";
+  return /^\d{4}-\d{2}-\d{2}$/.test(trimmed) ? trimmed : null;
+}
+
+function normalizeOptionalText(value: string | null | undefined, fallback: string | null): string | null {
+  const trimmed = value?.trim() ?? "";
+  return trimmed || fallback;
+}
+
+function buildEventSignatureFromParsed(
+  parsed: {
+    eventType?: string | null;
+    eventSubject?: string | null;
+    eventAction?: string | null;
+    eventObject?: string | null;
+    eventDate?: string | null;
+    eventSignature?: {
+      eventType?: string | null;
+      eventSubject?: string | null;
+      eventAction?: string | null;
+      eventObject?: string | null;
+      eventDate?: string | null;
+    } | null;
+  },
+  fallback: AiEventSignature,
+): AiEventSignature {
+  const parsedSignature = parsed.eventSignature ?? {};
+
+  return {
+    eventType: normalizeEventType(parsed.eventType ?? parsedSignature.eventType) ?? fallback.eventType,
+    eventSubject: normalizeOptionalText(parsed.eventSubject ?? parsedSignature.eventSubject, fallback.eventSubject),
+    eventAction: normalizeOptionalText(parsed.eventAction ?? parsedSignature.eventAction, fallback.eventAction),
+    eventObject: normalizeOptionalText(parsed.eventObject ?? parsedSignature.eventObject, fallback.eventObject),
+    eventDate: normalizeEventDate(parsed.eventDate ?? parsedSignature.eventDate) ?? fallback.eventDate,
+  };
+}
+
 function buildEnrichmentFromParsed(
   parsed: {
     translatedTitle?: string | null;
@@ -235,8 +320,18 @@ function buildEnrichmentFromParsed(
     moderationDetail?: string | null;
     qualityScore?: number | string | null;
     qualityRationale?: string | null;
-    topicLabel?: string | null;
-    clusterHint?: string | null;
+    eventType?: string | null;
+    eventSubject?: string | null;
+    eventAction?: string | null;
+    eventObject?: string | null;
+    eventDate?: string | null;
+    eventSignature?: {
+      eventType?: string | null;
+      eventSubject?: string | null;
+      eventAction?: string | null;
+      eventObject?: string | null;
+      eventDate?: string | null;
+    } | null;
   },
   fallback: AiEnrichment,
   translateTitle: boolean,
@@ -249,8 +344,7 @@ function buildEnrichmentFromParsed(
     moderationDetail: parsed.moderationDetail?.trim() || fallback.moderationDetail,
     qualityScore: normalizeScore(parsed.qualityScore, fallback.qualityScore),
     qualityRationale: parsed.qualityRationale?.trim() || fallback.qualityRationale,
-    topicLabel: parsed.topicLabel?.trim() || fallback.topicLabel,
-    clusterHint: parsed.clusterHint?.trim() || fallback.clusterHint,
+    eventSignature: buildEventSignatureFromParsed(parsed, fallback.eventSignature),
   };
 }
 
@@ -374,7 +468,7 @@ export function createAiProvider(
         title: metadata.title,
         sourceName: metadata.sourceName ?? "未知来源",
         translateTitle: metadata.translateTitle ? "是" : "否",
-        inputText: truncate(inputText, 4000),
+        inputText,
       });
 
       for (let attempt = 0; attempt < 2; attempt += 1) {

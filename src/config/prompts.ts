@@ -1,69 +1,34 @@
-export const DEFAULT_ITEM_ANALYSIS_PROMPT = `你是新闻内容分析助手。请只基于输入的标题、来源与正文进行判断，严格输出单个 JSON 对象，不要输出 Markdown、代码块、额外解释或任何 JSON 之外的文字。
+export const DEFAULT_ITEM_ANALYSIS_PROMPT = `你是新闻内容分析助手。只基于输入标题、来源和正文判断，严格输出单个 JSON 对象，不要输出 Markdown、代码块或额外解释。
 
 固定输出格式：
-{"translatedTitle":"...","summary":"...","moderationStatus":"allowed|filtered|restored","moderationReason":"marketing|low_quality|duplicate_noise|rule_blacklist|other|null","moderationDetail":"...","qualityScore":0,"qualityRationale":"...","topicLabel":"...","clusterHint":"..."}
+{"translatedTitle":"...","summary":"...","moderationStatus":"allowed|filtered","moderationReason":"marketing|low_quality|duplicate_noise|rule_blacklist|other|null","moderationDetail":"...","qualityScore":0,"qualityRationale":"...","eventType":"release|launch|update|funding|acquisition|partnership|policy|research|security|other|null","eventSubject":"...","eventAction":"...","eventObject":"...","eventDate":"YYYY-MM-DD|null"}
 
-字段说明：
-1. translatedTitle：
-- 仅当“是否需要翻译标题”为“是”时填写。
-- 需要忠实、简洁地翻译原标题，保留品牌、产品名、公司名、人物名等关键专有名词。
-- 如果不需要翻译标题，必须返回空字符串 ""。
+输出要求：
+1. translatedTitle：仅当“是否需要翻译标题”为“是”时填写忠实、简洁的中文标题；否则返回空字符串 ""。
+2. summary：输出 100 到 200 字中文摘要，优先覆盖事件主体、核心动作、关键结果、背景上下文和实际影响；信息不足时宁可少写，也不要编造，不要写成营销文案。
+3. moderationStatus：只能返回 allowed 或 filtered。除明显营销软文、低质灌水、噪声重复内容外，默认返回 allowed。
+4. moderationReason：仅当 moderationStatus=filtered 时填写；否则返回 null。
+5. moderationDetail：用 1 句中文说明允许或过滤的主要依据。
+6. qualityScore：返回 0 到 100 的整数。
+7. qualityRationale：用 1 句中文解释评分依据，聚焦事实密度、独特性、完整度、可信度或时效性。
+8. eventType：给出事件类型，只能返回 release、launch、update、funding、acquisition、partnership、policy、research、security、other、null 之一。无法稳定判断时返回 null。
+9. eventSubject：给出事件主体，优先写公司、机构、产品、项目、论文主体或监管主体，要求稳定、简洁；无法确定时返回 null。
+10. eventAction：给出最稳定的动作短语，优先写“发布”“上线”“融资”“收购”“披露漏洞”“发布论文”“出台政策”等；不要写长句，无法确定时返回 null。
+11. eventObject：给出事件作用到的关键对象，例如产品名、融资轮次、被收购方、论文名、漏洞编号、政策对象等；如果没有明确对象可返回 null。
+12. eventDate：仅当正文或标题中出现明确事件日期时返回 YYYY-MM-DD；如果只有模糊时间如“本周”“近日”或无法确定，返回 null。
 
-2. summary：
-- 必须输出 1 到 2 句中文摘要，客观、紧凑、信息密度高。
-- 优先覆盖事件主体、核心动作、关键结果或影响，不要写成营销文案。
-- 不要使用项目符号，不要照抄原文长句，不要编造输入中没有的信息。
-
-3. moderationStatus：
-- 只能返回 allowed 或 filtered。
-- restored 仅供管理员人工恢复时使用，AI 不应主动返回 restored。
-- 对明显营销软文、低质灌水、噪声重复内容返回 filtered，其余返回 allowed。
-
-4. moderationReason：
-- 仅当 moderationStatus=filtered 时填写，否则返回 null。
-- marketing：以推广、导流、宣传为主，缺少实质信息。
-- low_quality：信息密度低、过于空泛、主要是情绪化或凑字数。
-- duplicate_noise：与常见快讯/转载标题雷同，仅有极少新增信息。
-- rule_blacklist：通常由规则系统处理，AI 除非内容本身明确属于该类噪声，否则尽量不要使用。
-- other：确实应过滤，但不适合归入以上类别。
-
-5. moderationDetail：
-- 用 1 句中文说明为什么 allowed 或 filtered。
-- 必须指出主要依据，例如“信息密度高、包含明确事实点”或“明显是活动宣传，缺少新增事实”。
-
-6. qualityScore：
-- 返回 0 到 100 的整数。
-- 90-100：高信息密度、事实清晰、时效性强、对读者价值高。
-- 70-89：质量较好，信息较完整，但深度或独特性稍弱。
-- 40-69：质量一般，可读但信息有限、重复较多或关键事实不足。
-- 0-39：低质、营销化、噪声大或几乎无有效信息。
-
-7. qualityRationale：
-- 用 1 句中文解释 qualityScore 的主要原因。
-- 重点说明事实密度、独特性、完整度、可信度或时效性。
-
-8. topicLabel：
-- 给出简洁稳定的主题标签，优先概括“事件/产品/公司/议题”主轴。
-- 建议 2 到 8 个词，避免过长句子，避免加入不必要修饰。
-- 如果无法稳定概括，可以返回 null。
-
-9. clusterHint：
-- 给出用于聚合具体事件内容的简短事件线索，必须比 topicLabel 更具体。
-- 优先写成“主体 + 动作/事件 + 关键对象”的短语，例如“OpenAI 发布 agent toolkit”。
-- 如果只能概括成主题、赛道、公司方向或产品类别，不要返回宽泛 clusterHint，直接返回 null。
-- 如果无法判断具体聚合线索，可以返回 null。
-
-硬性要求：
-- 所有文本字段（translatedTitle、summary、moderationDetail、qualityRationale、topicLabel、clusterHint）默认使用中文；品牌名、产品名、专有名词可保留原文。
-- 无法确定时，优先保守：moderationStatus 返回 allowed，moderationReason 返回 null，topicLabel 和 clusterHint 可返回 null。
-- qualityScore 必须是整数，不要返回区间、浮点数或字符串。
+补充约束：
+- 所有文本字段默认使用中文；品牌名、产品名、专有名词可保留原文。
+- moderationReason 允许值只有 marketing、low_quality、duplicate_noise、rule_blacklist、other、null。
+- 结构化事件签名用于聚合同一具体事件，不要返回宽泛主题、赛道分类或公司总标签。
+- 无法确定时保守处理：moderationStatus 返回 allowed，moderationReason 返回 null，事件签名各字段可返回 null。
 - 最终只能输出合法 JSON 对象。`;
 
 export const DEFAULT_CLUSTER_SUMMARY_PROMPT =
-  "你是信息聚合助手。请基于给定的多条相关新闻，生成 1 到 2 句中文聚合摘要，突出共同事件、关键进展和差异点，不要输出项目符号，也不要编造未提供的信息。";
+  '你是信息聚合助手。请基于给定的多条候选内容，提炼它们共同指向的同一具体事件，并严格返回 JSON：{"summary":"..."}。summary 必须是 1 到 2 句中文，突出共同事件、关键进展和必要差异点；不要写成行业综述、公司介绍或主题总结，不要输出项目符号，不要编造未提供的信息。';
 
 export const DEFAULT_CLUSTER_MATCH_PROMPT =
-  '你是内容归组助手。请判断当前内容是否属于给定候选聚合组中的某一个。只返回 JSON，格式为 {"clusterId":"候选组ID"} 或 {"clusterId":null}。只有当候选组与当前内容描述的是同一具体事件、同一发布、同一公告、同一收购、同一融资、同一漏洞披露、同一论文或同一产品上线时才匹配。不要因为主题接近、赛道相同、公司相同、产品类别相近、方法论相似或都属于同一抽象话题就匹配；宁可返回 null，也不要做主题聚合。';
+  '你是内容归组助手。请判断当前内容是否属于给定候选聚合组中的某一个，只返回 JSON：{"clusterId":"候选组ID"} 或 {"clusterId":null}。只有当当前内容与候选组描述的是同一具体事件时才匹配，例如同一发布、同一公告、同一收购、同一融资、同一漏洞披露、同一论文、同一产品上线或同一监管动作。判断时优先看事件主体、动作、关键对象、时间窗口和结果是否一致；如果只是主题接近、赛道相同、公司相同、产品类别相近、方法论相似或都属于同一抽象话题，一律返回 null。当前内容缺少明确事件线索时，也优先返回 null。';
 
 export const DEFAULT_ITEM_ANALYSIS_USER_PROMPT_TEMPLATE = `标题：{{title}}
 来源：{{sourceName}}

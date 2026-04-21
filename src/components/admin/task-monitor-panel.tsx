@@ -1,7 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import { Button } from "@/components/ui/button";
 import { FilterSelect } from "@/components/ui/filter-select";
@@ -11,6 +10,7 @@ import { useToast } from "@/components/ui/toast";
 import { IconButton } from "@/components/ui/icon-button";
 import { IconRotateCw, IconSquare } from "@/components/ui/icons";
 import type {
+  BackgroundTaskMonitorSnapshot,
   BackgroundTaskRunStatus,
   TaskRunSnapshot,
 } from "@/lib/tasks/types";
@@ -77,6 +77,80 @@ function formatDateTime(value: string | null) {
     minute: "2-digit",
     second: "2-digit",
   });
+}
+
+function formatDuration(durationMs: number | null) {
+  if (durationMs === null) {
+    return "进行中";
+  }
+
+  if (durationMs < 1_000) {
+    return `${durationMs}ms`;
+  }
+
+  if (durationMs < 60_000) {
+    return `${(durationMs / 1_000).toFixed(1)}s`;
+  }
+
+  const minutes = Math.floor(durationMs / 60_000);
+  const seconds = ((durationMs % 60_000) / 1_000).toFixed(1);
+  return `${minutes}分 ${seconds}s`;
+}
+
+function formatAiCallBreakdown(task: TaskRunSnapshot) {
+  const breakdownMap = new Map((task.aiCallBreakdown ?? []).map((entry) => [entry.key, entry]));
+  const itemAnalysisCount = breakdownMap.get("item_analysis")?.actual ?? 0;
+  const clusterMatchCount = breakdownMap.get("cluster_match")?.actual ?? 0;
+  const clusterSummaryCount = breakdownMap.get("cluster_summary")?.actual ?? 0;
+
+  return `内容分析 ${itemAnalysisCount} 条，聚合匹配 ${clusterMatchCount} 条，聚合摘要 ${clusterSummaryCount} 条`;
+}
+
+function buildTaskTimeline(task: TaskRunSnapshot) {
+  const timeline: Array<{
+    key: string;
+    title: string;
+    time: string | null;
+    detail: string;
+    isActive: boolean;
+  }> = [];
+
+  if (task.startedAt) {
+    timeline.push({
+      key: "task_started",
+      title: "任务开始",
+      time: task.startedAt,
+      detail: kindLabels[task.kind],
+      isActive: task.status === "running" && task.stageTimings.length === 0,
+    });
+  }
+
+  for (const stageTiming of task.stageTimings) {
+    timeline.push({
+      key: stageTiming.key,
+      title: stageTiming.finishedAt ? `${stageTiming.label}完成` : `${stageTiming.label}进行中`,
+      time: stageTiming.finishedAt ?? stageTiming.startedAt,
+      detail: `耗时 ${formatDuration(stageTiming.durationMs)}`,
+      isActive: !stageTiming.finishedAt,
+    });
+  }
+
+  if (task.finishedAt) {
+    timeline.push({
+      key: "task_finished",
+      title:
+        task.status === "cancelled"
+          ? "任务已取消"
+          : task.status === "failed"
+            ? "任务失败"
+            : "任务完成",
+      time: task.finishedAt,
+      detail: task.errorSummary ?? statusLabels[task.status],
+      isActive: false,
+    });
+  }
+
+  return timeline;
 }
 
 function getStatusTone(status: BackgroundTaskRunStatus) {
@@ -148,6 +222,8 @@ interface TaskDetailModalProps {
   isOpen: boolean;
   onClose: () => void;
   task: TaskRunSnapshot | null;
+  onRefresh?: () => void;
+  isRefreshing?: boolean;
   onRetrigger?: (taskId: string) => void;
   isRetriggering?: boolean;
   onCancel?: (taskId: string) => void;
@@ -158,6 +234,8 @@ function TaskDetailModal({
   isOpen,
   onClose,
   task,
+  onRefresh,
+  isRefreshing,
   onRetrigger,
   isRetriggering,
   onCancel,
@@ -171,8 +249,9 @@ function TaskDetailModal({
       onClose={onClose}
       title="任务详情"
       widthClassName="max-w-2xl"
+      panelClassName="flex max-h-[calc(100vh-2rem)] flex-col"
       headerClassName="border-b border-[color:var(--line)] p-6"
-      bodyClassName="space-y-4 p-6"
+      bodyClassName="overflow-y-auto p-6"
       footerClassName="border-t border-[color:var(--line)] bg-[var(--bg-muted)] p-6"
       footer={
         <div className="flex justify-end gap-2">
@@ -232,9 +311,22 @@ function TaskDetailModal({
         {/* Progress */}
         {task.progressTotal > 0 && (
           <div className="space-y-2">
-            <h4 className="text-sm font-semibold text-[var(--text-1)]">
-              进度
-            </h4>
+            <div className="flex items-center justify-between gap-3">
+              <h4 className="text-sm font-semibold text-[var(--text-1)]">
+                进度
+              </h4>
+              {onRefresh ? (
+                <IconButton
+                  onClick={onRefresh}
+                  variant="secondary"
+                  size="sm"
+                  title="刷新进度"
+                  disabled={isRefreshing}
+                >
+                  <IconRotateCw className={cx("h-4 w-4", isRefreshing && "animate-spin")} />
+                </IconButton>
+              ) : null}
+            </div>
             <div className="w-full bg-[var(--surface)] rounded-full h-2">
               <div
                 className="bg-[var(--accent)] h-2 rounded-full transition-all"
@@ -247,8 +339,15 @@ function TaskDetailModal({
               {task.progressCurrent} / {task.progressTotal}
               {task.progressLabel ? ` · ${task.progressLabel}` : ""}
             </div>
-            <div className={cx("text-sm", task.itemsAdded > 0 ? "text-[var(--success-ink)]" : "text-[var(--text-3)]")}>
-              实际新增 {task.itemsAdded} 条内容
+            <div
+              className={cx(
+                "text-sm",
+                task.itemsAdded > 0 || (task.fullTextFetchedCount ?? 0) > 0
+                  ? "text-[var(--success-ink)]"
+                  : "text-[var(--text-3)]",
+              )}
+            >
+              实际新增 {task.itemsAdded} 条内容 · 正文补抓 {task.fullTextFetchedCount ?? 0} 篇
             </div>
           </div>
         )}
@@ -264,6 +363,7 @@ function TaskDetailModal({
               {task.aiCallCountEstimated > 0
                 ? ` / 预估: ${task.aiCallCountEstimated}`
                 : ""}
+              {` · ${formatAiCallBreakdown(task)}`}
             </div>
           </div>
         )}
@@ -273,11 +373,41 @@ function TaskDetailModal({
           <h4 className="text-sm font-semibold text-[var(--text-1)]">
             时间线
           </h4>
-          <div className="text-sm text-[var(--text-2)] space-y-1">
-            <div>创建: {formatDateTime(task.startedAt)}</div>
-            {task.finishedAt && (
-              <div>完成: {formatDateTime(task.finishedAt)}</div>
-            )}
+          <div className="space-y-3">
+            {buildTaskTimeline(task).length === 0 ? (
+              <div className="rounded-md border border-[color:var(--line)] bg-[var(--bg-muted)] px-3 py-2 text-sm text-[var(--text-3)]">
+                暂无时间线数据
+              </div>
+            ) : buildTaskTimeline(task).map((entry, index, entries) => (
+              <div key={entry.key} className="flex gap-3">
+                <div className="relative flex w-5 justify-center">
+                  <span
+                    className={cx(
+                      "mt-1 h-2.5 w-2.5 rounded-full border-2",
+                      entry.isActive
+                        ? "border-[var(--accent)] bg-[var(--accent)]"
+                        : "border-[color:var(--line-strong)] bg-[var(--surface)]",
+                    )}
+                  />
+                  {index < entries.length - 1 ? (
+                    <span className="absolute top-4 h-[calc(100%+0.25rem)] w-px bg-[color:var(--line)]" />
+                  ) : null}
+                </div>
+                <div className="min-w-0 flex-1 rounded-md border border-[color:var(--line)] bg-[var(--bg-muted)] px-3 py-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-sm font-medium text-[var(--text-1)]">
+                      {entry.title}
+                    </span>
+                    <span className="shrink-0 text-xs text-[var(--text-3)]">
+                      {formatDateTime(entry.time)}
+                    </span>
+                  </div>
+                  <div className="mt-1 text-sm text-[var(--text-2)]">
+                    {entry.detail}
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
 
@@ -300,20 +430,34 @@ function TaskDetailModal({
 interface TaskMonitorPanelProps {
   runningTasks: TaskRunSnapshot[];
   recentTasks: TaskRunSnapshot[];
+  initialFocusTaskId?: string | null;
+}
+
+function isTaskMonitorSnapshot(value: unknown): value is BackgroundTaskMonitorSnapshot {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  return "schedule" in value && "runningTasks" in value && "recentTasks" in value;
 }
 
 export function TaskMonitorPanel({
   runningTasks,
   recentTasks,
+  initialFocusTaskId = null,
 }: TaskMonitorPanelProps) {
-  const router = useRouter();
   const { showToast } = useToast();
+  const [taskLists, setTaskLists] = useState(() => ({
+    runningTasks,
+    recentTasks,
+  }));
   const [statusFilter, setStatusFilter] = useState<TaskStatusFilter>("");
   const [kindFilter, setKindFilter] = useState<TaskKindFilter>("");
   const [timeRangeFilter, setTimeRangeFilter] = useState<TimeRangeFilter>("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [isPending, startTransition] = useTransition();
+  const [isRefreshingSnapshot, setIsRefreshingSnapshot] = useState(false);
   const [selectedTask, setSelectedTask] = useState<TaskRunSnapshot | null>(
     null
   );
@@ -327,18 +471,52 @@ export function TaskMonitorPanel({
   const [confirmTask, setConfirmTask] = useState<TaskRunSnapshot | null>(null);
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const [confirmAction, setConfirmAction] = useState<"retrigger" | "cancel">("retrigger");
+  const hasAppliedInitialFocusRef = useRef(false);
 
   const allTasks = useMemo(() => {
     // Merge and deduplicate by task id (runningTasks takes precedence)
     const taskMap = new Map<string, TaskRunSnapshot>();
-    for (const task of recentTasks) {
+    for (const task of taskLists.recentTasks) {
       taskMap.set(task.id, task);
     }
-    for (const task of runningTasks) {
+    for (const task of taskLists.runningTasks) {
       taskMap.set(task.id, task);
     }
     return Array.from(taskMap.values());
-  }, [runningTasks, recentTasks]);
+  }, [taskLists]);
+
+  useEffect(() => {
+    setTaskLists({
+      runningTasks,
+      recentTasks,
+    });
+  }, [recentTasks, runningTasks]);
+
+  useEffect(() => {
+    if (!selectedTask) {
+      return;
+    }
+
+    const latestSelectedTask = allTasks.find((task) => task.id === selectedTask.id);
+    if (latestSelectedTask && latestSelectedTask !== selectedTask) {
+      setSelectedTask(latestSelectedTask);
+    }
+  }, [allTasks, selectedTask]);
+
+  useEffect(() => {
+    if (!initialFocusTaskId || hasAppliedInitialFocusRef.current) {
+      return;
+    }
+
+    const initialTask = allTasks.find((task) => task.id === initialFocusTaskId);
+    if (!initialTask) {
+      return;
+    }
+
+    setSelectedTask(initialTask);
+    setIsDetailOpen(true);
+    hasAppliedInitialFocusRef.current = true;
+  }, [allTasks, initialFocusTaskId]);
 
   const filteredTasks = useMemo(
     () => filterTasks(allTasks, statusFilter, kindFilter, timeRangeFilter),
@@ -353,9 +531,35 @@ export function TaskMonitorPanel({
 
   const hasFilters = statusFilter || kindFilter || timeRangeFilter;
 
+  const refreshSnapshot = async () => {
+    setIsRefreshingSnapshot(true);
+
+    try {
+      const response = await fetch("/api/admin/monitor");
+      const payload = (await response.json()) as BackgroundTaskMonitorSnapshot | { error?: string };
+
+      if (!response.ok || !isTaskMonitorSnapshot(payload)) {
+        showToast(
+          "error" in payload && payload.error ? payload.error : "刷新任务监控失败",
+          "error",
+        );
+        return;
+      }
+
+      setTaskLists({
+        runningTasks: payload.runningTasks,
+        recentTasks: payload.recentTasks,
+      });
+    } catch {
+      showToast("刷新任务监控失败", "error");
+    } finally {
+      setIsRefreshingSnapshot(false);
+    }
+  };
+
   const handleRefresh = () => {
     startTransition(() => {
-      router.refresh();
+      void refreshSnapshot();
     });
   };
 
@@ -416,7 +620,7 @@ export function TaskMonitorPanel({
 
       // Refresh the task list after a short delay
       setTimeout(() => {
-        handleRefresh();
+        void refreshSnapshot();
       }, 500);
     } catch {
       showToast("重新触发任务失败", "error");
@@ -444,7 +648,7 @@ export function TaskMonitorPanel({
 
       // Refresh the task list after a short delay
       setTimeout(() => {
-        handleRefresh();
+        void refreshSnapshot();
       }, 500);
     } catch {
       showToast("停止任务失败", "error");
@@ -473,7 +677,11 @@ export function TaskMonitorPanel({
           >
             清空筛选
           </Button>
-          <Button onClick={handleRefresh} variant="secondary" disabled={isPending}>
+          <Button
+            onClick={handleRefresh}
+            variant="secondary"
+            disabled={isPending || isRefreshingSnapshot}
+          >
             刷新
           </Button>
         </div>
@@ -658,6 +866,8 @@ export function TaskMonitorPanel({
         isOpen={isDetailOpen}
         onClose={handleCloseDetail}
         task={selectedTask}
+        onRefresh={handleRefresh}
+        isRefreshing={isRefreshingSnapshot}
         onRetrigger={handleRetrigger}
         isRetriggering={retriggeringTaskId === selectedTask?.id}
         onCancel={handleCancel}

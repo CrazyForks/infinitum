@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import {
   computeNextRunAt,
   DEFAULT_SCHEDULE_CRON_EXPRESSION,
+  DEFAULT_FULL_TEXT_FETCH_THRESHOLD,
   DEFAULT_SCHEDULE_TIMEZONE,
   DEFAULT_SOURCE_CONCURRENCY,
 } from "@/lib/tasks/scheduler";
@@ -18,6 +19,7 @@ export async function upsertDefaultIngestionSchedule() {
       enabled: true,
       cronExpression: DEFAULT_SCHEDULE_CRON_EXPRESSION,
       sourceConcurrency: DEFAULT_SOURCE_CONCURRENCY,
+      fullTextFetchThreshold: DEFAULT_FULL_TEXT_FETCH_THRESHOLD,
       timezone: DEFAULT_SCHEDULE_TIMEZONE,
       nextRunAt: computeNextRunAt({
         cronExpression: DEFAULT_SCHEDULE_CRON_EXPRESSION,

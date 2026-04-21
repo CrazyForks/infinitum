@@ -39,6 +39,7 @@ describe("/api/admin/monitor", () => {
         enabled: true,
         cronExpression: "0 * * * *",
         sourceConcurrency: 2,
+        fullTextFetchThreshold: 80,
         timezone: "Asia/Shanghai",
         lastHeartbeatAt: "2026-04-12T00:00:00.000Z",
         lastRunStartedAt: null,
@@ -68,6 +69,7 @@ describe("/api/admin/monitor", () => {
       enabled: false,
       cronExpression: "*/15 * * * *",
       sourceConcurrency: 4,
+      fullTextFetchThreshold: 120,
       timezone: "Asia/Shanghai",
       lastHeartbeatAt: null,
       lastRunStartedAt: null,
@@ -80,7 +82,12 @@ describe("/api/admin/monitor", () => {
     const response = await PATCH(
       new Request("http://localhost/api/admin/monitor/schedule/ingestion-default", {
         method: "PATCH",
-        body: JSON.stringify({ enabled: false, cronExpression: "*/15 * * * *", sourceConcurrency: 4 }),
+        body: JSON.stringify({
+          enabled: false,
+          cronExpression: "*/15 * * * *",
+          sourceConcurrency: 4,
+          fullTextFetchThreshold: 120,
+        }),
         headers: { "content-type": "application/json" },
       }),
     );
@@ -91,10 +98,12 @@ describe("/api/admin/monitor", () => {
       enabled: false,
       cronExpression: "*/15 * * * *",
       sourceConcurrency: 4,
+      fullTextFetchThreshold: 120,
     });
     expect(json.schedule.enabled).toBe(false);
     expect(json.schedule.cronExpression).toBe("*/15 * * * *");
     expect(json.schedule.sourceConcurrency).toBe(4);
+    expect(json.schedule.fullTextFetchThreshold).toBe(120);
   });
 
   it("requests cancellation for a running task", async () => {

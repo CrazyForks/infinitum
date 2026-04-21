@@ -19,10 +19,18 @@ describe("task scheduler", () => {
   });
 
   it("normalizes valid cron updates", () => {
-    expect(normalizeScheduleInput({ enabled: true, cronExpression: " */15 * * * * ", sourceConcurrency: 4 })).toEqual({
+    expect(
+      normalizeScheduleInput({
+        enabled: true,
+        cronExpression: " */15 * * * * ",
+        sourceConcurrency: 4,
+        fullTextFetchThreshold: 120,
+      }),
+    ).toEqual({
       enabled: true,
       cronExpression: "*/15 * * * *",
       sourceConcurrency: 4,
+      fullTextFetchThreshold: 120,
     });
   });
 

@@ -39,3 +39,30 @@ export function getDefaultPromptTemplate(type: PromptConfigType): string {
       return DEFAULT_CLUSTER_MATCH_USER_PROMPT_TEMPLATE;
   }
 }
+
+export function getDefaultPromptSampling(type: PromptConfigType): {
+  temperature: number | null;
+  maxTokens: number | null;
+  topP: number | null;
+} {
+  switch (type) {
+    case "item_analysis":
+      return {
+        temperature: 0.2,
+        maxTokens: 1000,
+        topP: null,
+      };
+    case "cluster_summary":
+      return {
+        temperature: 0.2,
+        maxTokens: 300,
+        topP: null,
+      };
+    case "cluster_match":
+      return {
+        temperature: 0,
+        maxTokens: 80,
+        topP: null,
+      };
+  }
+}

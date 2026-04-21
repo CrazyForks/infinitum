@@ -71,6 +71,11 @@ function normalizeAISubSection(value: string | null): AISubSection {
   return value === "prompt" ? "prompt" : "model-api";
 }
 
+function normalizeTaskId(value: string | null): string | null {
+  const normalized = value?.trim();
+  return normalized ? normalized : null;
+}
+
 function resolveRouteState(searchParams: AdminSearchParams): AdminRouteState {
   const primaryTab = normalizePrimaryTab(searchParams.get("tab"));
 
@@ -110,6 +115,7 @@ export function AdminPageClient({
     settingsSection,
     aiSubSection,
   } = routeState;
+  const focusedTaskId = normalizeTaskId(searchParams.get("task"));
   const [collapsedSections, setCollapsedSections] = useState<{
     ai: boolean;
     content: boolean;
@@ -191,6 +197,7 @@ export function AdminPageClient({
         <TaskMonitorPanel
           runningTasks={initialSnapshot.runningTasks}
           recentTasks={initialSnapshot.recentTasks}
+          initialFocusTaskId={focusedTaskId}
         />
       );
     }

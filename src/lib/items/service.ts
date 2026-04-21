@@ -23,6 +23,22 @@ function normalizeSummary(summary: string | null | undefined): string | null {
   return stripHtmlTags(summary) || null;
 }
 
+function serializeEventSignature(eventSignature?: {
+  eventType?: string | null;
+  eventSubject?: string | null;
+  eventAction?: string | null;
+  eventObject?: string | null;
+  eventDate?: string | null;
+} | null) {
+  return {
+    eventType: eventSignature?.eventType ?? null,
+    eventSubject: eventSignature?.eventSubject ?? null,
+    eventAction: eventSignature?.eventAction ?? null,
+    eventObject: eventSignature?.eventObject ?? null,
+    eventDate: eventSignature?.eventDate ?? null,
+  };
+}
+
 async function resolveAiProvider(aiProvider?: AiProvider) {
   if (aiProvider) {
     return aiProvider;
@@ -123,12 +139,14 @@ export async function executeItemRegenerationTask(
 
   const aiUsage = createTaskAiUsageTracker(1);
   const trackedAiProvider = aiUsage.wrapProvider(await resolveAiProvider(options?.aiProvider));
+  const initialAiUsage = aiUsage.snapshot();
 
   await updateTaskRun(taskRun.id, {
     status: "running",
     progressLabel: "正在读取条目",
     aiCallCountActual: 0,
-    aiCallCountEstimated: aiUsage.snapshot().estimated,
+    aiCallCountEstimated: initialAiUsage.estimated,
+    aiCallBreakdown: initialAiUsage.breakdown,
   });
 
   const item = await regenerateItemContent(taskRun.entityId, target, {
@@ -144,6 +162,7 @@ export async function executeItemRegenerationTask(
     progressLabel: succeeded ? "已完成条目更新" : "条目更新失败",
     aiCallCountActual: aiUsage.snapshot().actual,
     aiCallCountEstimated: aiUsage.snapshot().estimated,
+    aiCallBreakdown: aiUsage.snapshot().breakdown,
     finishedAt: new Date(),
     errorSummary: item.errorMessage ?? null,
   });
@@ -172,8 +191,7 @@ export async function restoreFilteredItem(itemId: string, options?: Regeneration
   });
 
   await assignItemToCluster(restored.id, {
-    topicLabel: restored.topicLabel,
-    clusterHint: null,
+    eventSignature: null,
     aiProvider: options?.aiProvider,
   });
   invalidateFeedCache();
@@ -216,7 +234,7 @@ export async function reanalyzeItem(itemId: string, options?: RegenerationOption
       moderationDetail: analysis.moderationDetail,
       qualityScore: analysis.qualityScore,
       qualityRationale: analysis.qualityRationale,
-      topicLabel: analysis.topicLabel,
+      ...serializeEventSignature(analysis.eventSignature),
       aiProcessedAt: new Date(),
       status: nextStatus,
       clusterId: moderationStatus === "filtered" ? null : item.clusterId,
@@ -231,8 +249,7 @@ export async function reanalyzeItem(itemId: string, options?: RegenerationOption
     }
   } else {
     await assignItemToCluster(updated.id, {
-      topicLabel: analysis.topicLabel,
-      clusterHint: analysis.clusterHint,
+      eventSignature: analysis.eventSignature,
       aiProvider,
     });
   }
@@ -259,12 +276,14 @@ export async function executeItemReanalyzeTask(
 
   const aiUsage = createTaskAiUsageTracker(1);
   const trackedAiProvider = aiUsage.wrapProvider(await resolveAiProvider(options?.aiProvider));
+  const initialAiUsage = aiUsage.snapshot();
 
   await updateTaskRun(taskRun.id, {
     status: "running",
     progressLabel: "正在重新 AI 判定",
     aiCallCountActual: 0,
-    aiCallCountEstimated: aiUsage.snapshot().estimated,
+    aiCallCountEstimated: initialAiUsage.estimated,
+    aiCallBreakdown: initialAiUsage.breakdown,
   });
 
   try {
@@ -280,6 +299,7 @@ export async function executeItemReanalyzeTask(
       progressLabel: "已完成重新 AI 判定",
       aiCallCountActual: aiUsage.snapshot().actual,
       aiCallCountEstimated: aiUsage.snapshot().estimated,
+      aiCallBreakdown: aiUsage.snapshot().breakdown,
       finishedAt: new Date(),
       errorSummary: null,
     });
@@ -293,6 +313,7 @@ export async function executeItemReanalyzeTask(
       progressLabel: "重新 AI 判定失败",
       aiCallCountActual: aiUsage.snapshot().actual,
       aiCallCountEstimated: aiUsage.snapshot().estimated,
+      aiCallBreakdown: aiUsage.snapshot().breakdown,
       finishedAt: new Date(),
       errorSummary: error instanceof Error ? error.message : "Unknown item reanalyze error",
     });

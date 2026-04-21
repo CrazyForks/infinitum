@@ -12,6 +12,7 @@ const toFetchRunSnapshot = vi.fn((run) => ({
   itemCount: run.itemCount,
   successCount: run.successCount,
   failureCount: run.failureCount,
+  itemsAdded: run.itemsAdded,
   errorSummary: run.errorSummary,
 }));
 const startIngestionTask = vi.fn();
@@ -52,13 +53,17 @@ describe("/api/ingest", () => {
       progressCurrent: 0,
       progressTotal: 0,
       progressLabel: null,
+      itemsAdded: 0,
+      aiCallCountActual: 0,
+      aiCallCountEstimated: 0,
+      cancelRequestedAt: null,
       startedAt: null,
       finishedAt: null,
       errorSummary: null,
     });
 
     const { POST } = await import("@/app/api/ingest/run/route");
-    const response = await POST(new Request("http://localhost/api/ingest/run", { method: "POST" }));
+    const response = await POST();
     const json = await response.json();
 
     expect(response.status).toBe(202);
@@ -72,7 +77,7 @@ describe("/api/ingest", () => {
     requireAdmin.mockRejectedValue(new Error("Unauthorized"));
 
     const { POST } = await import("@/app/api/ingest/run/route");
-    const response = await POST(new Request("http://localhost/api/ingest/run", { method: "POST" }));
+    const response = await POST();
     const json = await response.json();
 
     expect(response.status).toBe(401);
@@ -92,6 +97,7 @@ describe("/api/ingest", () => {
       itemCount: 10,
       successCount: 6,
       failureCount: 1,
+      itemsAdded: 4,
       errorSummary: null,
     });
 

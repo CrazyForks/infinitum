@@ -10,6 +10,25 @@ import {
   regenerateItemContent,
 } from "@/lib/items/service";
 
+function buildEventSignature(
+  overrides: Partial<{
+    eventType: "release" | "launch" | "update" | "funding" | "acquisition" | "partnership" | "policy" | "research" | "security" | "other" | null;
+    eventSubject: string | null;
+    eventAction: string | null;
+    eventObject: string | null;
+    eventDate: string | null;
+  }> = {},
+) {
+  return {
+    eventType: null,
+    eventSubject: null,
+    eventAction: null,
+    eventObject: null,
+    eventDate: null,
+    ...overrides,
+  };
+}
+
 describe("regenerateItemContent", () => {
   beforeEach(async () => {
     await prisma.item.deleteMany();
@@ -76,8 +95,12 @@ describe("regenerateItemContent", () => {
           moderationDetail: null,
           qualityScore: 80,
           qualityRationale: "高质量",
-          topicLabel: "OpenAI Toolkit",
-          clusterHint: "OpenAI toolkit",
+          eventSignature: buildEventSignature({
+            eventType: "launch",
+            eventSubject: "OpenAI",
+            eventAction: "发布",
+            eventObject: "toolkit",
+          }),
         }),
         summarizeCluster: vi.fn().mockResolvedValue("聚合摘要"),
         matchClusterCandidate: vi.fn().mockResolvedValue(null),
@@ -126,8 +149,12 @@ describe("regenerateItemContent", () => {
           moderationDetail: null,
           qualityScore: 80,
           qualityRationale: "高质量",
-          topicLabel: "Benchmark",
-          clusterHint: "OpenAI benchmark",
+          eventSignature: buildEventSignature({
+            eventType: "research",
+            eventSubject: "OpenAI",
+            eventAction: "发布",
+            eventObject: "benchmark",
+          }),
         }),
         summarizeCluster: vi.fn().mockResolvedValue("聚合摘要"),
         matchClusterCandidate: vi.fn().mockResolvedValue(null),
@@ -265,8 +292,12 @@ describe("regenerateItemContent", () => {
           moderationDetail: null,
           qualityScore: 80,
           qualityRationale: "高质量",
-          topicLabel: "OpenAI Toolkit",
-          clusterHint: "openai-toolkit",
+          eventSignature: buildEventSignature({
+            eventType: "launch",
+            eventSubject: "OpenAI",
+            eventAction: "发布",
+            eventObject: "toolkit",
+          }),
         }),
         summarizeCluster: vi.fn().mockResolvedValue("新的聚合摘要"),
         matchClusterCandidate: vi.fn().mockResolvedValue(null),
@@ -368,8 +399,12 @@ describe("regenerateItemContent", () => {
           moderationDetail: null,
           qualityScore: 88,
           qualityRationale: "高质量",
-          topicLabel: "OpenAI Toolkit",
-          clusterHint: "openai-toolkit-launch",
+          eventSignature: buildEventSignature({
+            eventType: "launch",
+            eventSubject: "OpenAI",
+            eventAction: "发布",
+            eventObject: "toolkit",
+          }),
         }),
         summarizeCluster: vi.fn().mockResolvedValue("重算后的聚合摘要"),
         matchClusterCandidate: vi.fn().mockImplementation(async (_input, metadata: { candidates: Array<{ id: string }> }) => {
@@ -381,13 +416,20 @@ describe("regenerateItemContent", () => {
     const storedTaskRun = await prisma.backgroundTaskRun.findUniqueOrThrow({
       where: { id: taskRun.id },
     });
+    const updatedItem = await prisma.item.findUniqueOrThrow({
+      where: { id: "reanalyze-target" },
+    });
 
     expect(storedTaskRun.status).toBe("succeeded");
     expect(storedTaskRun.aiCallCountActual).toBe(2);
     expect(storedTaskRun.aiCallCountEstimated).toBe(2);
+    expect(updatedItem.eventType).toBe("launch");
+    expect(updatedItem.eventSubject).toBe("OpenAI");
+    expect(updatedItem.eventAction).toBe("发布");
+    expect(updatedItem.eventObject).toBe("toolkit");
   });
 
-  it("records ai usage for cluster summary regeneration tasks", async () => {
+  it("uses every cluster item summary and event signature when regenerating cluster summaries", async () => {
     const source = await prisma.source.create({
       data: {
         name: "Example Feed",
@@ -429,6 +471,11 @@ describe("regenerateItemContent", () => {
           moderationStatus: "allowed",
           qualityScore: 88,
           qualityRationale: "高质量",
+          eventType: "launch",
+          eventSubject: "OpenAI",
+          eventAction: "发布",
+          eventObject: "toolkit",
+          eventDate: "2026-04-10",
           language: "en",
           fullText: "Cluster body one",
         },
@@ -448,8 +495,61 @@ describe("regenerateItemContent", () => {
           moderationStatus: "allowed",
           qualityScore: 85,
           qualityRationale: "高质量",
+          eventType: "launch",
+          eventSubject: "OpenAI",
+          eventAction: "补充",
+          eventObject: "toolkit API",
+          eventDate: "2026-04-10",
           language: "en",
           fullText: "Cluster body two",
+        },
+        {
+          id: "cluster-summary-item-3",
+          sourceId: source.id,
+          clusterId: cluster.id,
+          originalUrl: "https://example.com/posts/cluster-3",
+          canonicalUrl: "https://example.com/posts/cluster-3",
+          urlHash: "cluster-summary-3",
+          dedupeSignature: "cluster-summary|3",
+          originalTitle: "Toolkit pricing details",
+          translatedTitle: "工具包价格细节",
+          summaryText: "内容三",
+          publishedAt: new Date("2026-04-10T09:00:00.000Z"),
+          status: "processed",
+          moderationStatus: "allowed",
+          qualityScore: 83,
+          qualityRationale: "高质量",
+          eventType: "launch",
+          eventSubject: "OpenAI",
+          eventAction: "披露",
+          eventObject: "toolkit pricing",
+          eventDate: "2026-04-10",
+          language: "en",
+          fullText: "Cluster body three",
+        },
+        {
+          id: "cluster-summary-item-4",
+          sourceId: source.id,
+          clusterId: cluster.id,
+          originalUrl: "https://example.com/posts/cluster-4",
+          canonicalUrl: "https://example.com/posts/cluster-4",
+          urlHash: "cluster-summary-4",
+          dedupeSignature: "cluster-summary|4",
+          originalTitle: "Toolkit enterprise rollout",
+          translatedTitle: "工具包企业版推广",
+          summaryText: "内容四",
+          publishedAt: new Date("2026-04-10T08:30:00.000Z"),
+          status: "processed",
+          moderationStatus: "allowed",
+          qualityScore: 82,
+          qualityRationale: "高质量",
+          eventType: "launch",
+          eventSubject: "OpenAI",
+          eventAction: "上线",
+          eventObject: "toolkit enterprise",
+          eventDate: "2026-04-10",
+          language: "en",
+          fullText: "Cluster body four",
         },
       ],
     });
@@ -464,6 +564,8 @@ describe("regenerateItemContent", () => {
       },
     });
 
+    const summarizeCluster = vi.fn().mockResolvedValue("新的聚合摘要");
+
     await executeClusterSummaryTask(taskRun, {
       aiProvider: {
         enrichContent: vi.fn().mockResolvedValue({
@@ -474,10 +576,9 @@ describe("regenerateItemContent", () => {
           moderationDetail: null,
           qualityScore: 80,
           qualityRationale: "高质量",
-          topicLabel: null,
-          clusterHint: null,
+          eventSignature: buildEventSignature(),
         }),
-        summarizeCluster: vi.fn().mockResolvedValue("新的聚合摘要"),
+        summarizeCluster,
         matchClusterCandidate: vi.fn().mockResolvedValue(null),
       },
     });
@@ -489,5 +590,14 @@ describe("regenerateItemContent", () => {
     expect(storedTaskRun.status).toBe("succeeded");
     expect(storedTaskRun.aiCallCountActual).toBe(1);
     expect(storedTaskRun.aiCallCountEstimated).toBe(1);
+
+    const summarySeed = summarizeCluster.mock.calls[0]?.[0] as string;
+    expect(summarySeed).toContain("候选 1");
+    expect(summarySeed).toContain("候选 4");
+    expect(summarySeed).toContain("摘要：内容一");
+    expect(summarySeed).toContain("摘要：内容四");
+    expect(summarySeed).toContain("事件主体：OpenAI");
+    expect(summarySeed).toContain("事件动作：上线");
+    expect(summarySeed).toContain("关键对象：toolkit enterprise");
   });
 });

@@ -68,7 +68,6 @@ describe("/api/admin/items", () => {
         moderationDetail: "标题和摘要明显带有营销措辞",
         qualityScore: 18,
         qualityRationale: "营销导向且信息密度低",
-        topicLabel: "AI Marketing",
         language: "en",
       },
     });
@@ -89,6 +88,7 @@ describe("/api/admin/items", () => {
       moderationReason: "marketing",
       qualityScore: 18,
     });
+    expect(json.items[0]).not.toHaveProperty("topicLabel");
   });
 
   it("restores a filtered item for admins", async () => {

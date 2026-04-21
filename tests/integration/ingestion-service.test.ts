@@ -4,6 +4,25 @@ import { prisma } from "@/lib/db";
 import { runIngestion, runIngestionTask, startIngestionTask } from "@/lib/ingestion/service";
 import { buildDedupeKeys } from "@/lib/ingestion/dedupe";
 
+function buildEventSignature(
+  overrides: Partial<{
+    eventType: "release" | "launch" | "update" | "funding" | "acquisition" | "partnership" | "policy" | "research" | "security" | "other" | null;
+    eventSubject: string | null;
+    eventAction: string | null;
+    eventObject: string | null;
+    eventDate: string | null;
+  }> = {},
+) {
+  return {
+    eventType: null,
+    eventSubject: null,
+    eventAction: null,
+    eventObject: null,
+    eventDate: null,
+    ...overrides,
+  };
+}
+
 describe("runIngestion", () => {
   beforeEach(async () => {
     await prisma.item.deleteMany();
@@ -56,8 +75,12 @@ describe("runIngestion", () => {
         moderationDetail: "新闻价值明确",
         qualityScore: 91,
         qualityRationale: "多事实点且时效性强",
-        topicLabel: "OpenAI Agent",
-        clusterHint: "OpenAI agent toolkit launch",
+        eventSignature: buildEventSignature({
+          eventType: "launch",
+          eventSubject: "OpenAI",
+          eventAction: "发布",
+          eventObject: "agent toolkit",
+        }),
       }),
       summarizeCluster: vi.fn().mockResolvedValue("两篇报道都聚焦 OpenAI 新发布的 agent 工具能力。"),
       matchClusterCandidate: vi.fn().mockImplementation(async (_input: string, metadata: { candidates: Array<{ id: string }> }) => {
@@ -89,9 +112,29 @@ describe("runIngestion", () => {
 
     expect(storedTaskRun.progressCurrent).toBe(2);
     expect(storedTaskRun.progressTotal).toBe(2);
-    expect(storedTaskRun.progressLabel).toBe("已处理 2/2 条内容，来自 1 个源，失败 0 项");
+    expect(storedTaskRun.progressLabel).toBe("已处理 2/2 条内容，来自 1 个源，失败 0 项，正文补抓 0 篇");
     expect(storedTaskRun.aiCallCountActual).toBe(4);
     expect(storedTaskRun.aiCallCountEstimated).toBe(4);
+    expect(storedTaskRun.fullTextFetchedCount).toBe(0);
+    expect(storedTaskRun.stageTimingsJson).not.toBeNull();
+    expect(storedTaskRun.aiCallBreakdownJson).not.toBeNull();
+
+    const stageTimings = JSON.parse(storedTaskRun.stageTimingsJson ?? "[]") as Array<{ key: string; durationMs: number | null }>;
+    const aiCallBreakdown = JSON.parse(
+      storedTaskRun.aiCallBreakdownJson ?? "[]",
+    ) as Array<{ key: string; label: string; actual: number; estimated: number }>;
+
+    expect(stageTimings.map((stageTiming) => stageTiming.key)).toEqual([
+      "source_sync",
+      "item_processing",
+      "cluster_finalize",
+    ]);
+    expect(stageTimings.every((stageTiming) => typeof stageTiming.durationMs === "number" || stageTiming.durationMs === null)).toBe(true);
+    expect(aiCallBreakdown).toEqual([
+      { key: "item_analysis", label: "内容分析", actual: 2, estimated: 2 },
+      { key: "cluster_match", label: "聚合匹配", actual: 1, estimated: 1 },
+      { key: "cluster_summary", label: "聚合摘要", actual: 1, estimated: 1 },
+    ]);
   });
 
   it("stops ingestion after a cancellation request", async () => {
@@ -138,8 +181,12 @@ describe("runIngestion", () => {
           moderationDetail: "新闻价值明确",
           qualityScore: 91,
           qualityRationale: "多事实点且时效性强",
-          topicLabel: "OpenAI Agent",
-          clusterHint: "OpenAI agent toolkit launch",
+          eventSignature: buildEventSignature({
+            eventType: "launch",
+            eventSubject: "OpenAI",
+            eventAction: "发布",
+            eventObject: "agent toolkit",
+          }),
         };
       }),
       summarizeCluster: vi.fn().mockResolvedValue("不会执行到这里"),
@@ -223,8 +270,7 @@ describe("runIngestion", () => {
             moderationDetail: "内容过于宽泛且信息增量很低",
             qualityScore: 20,
             qualityRationale: "信息密度低",
-            topicLabel: "Markets",
-            clusterHint: "Generic market roundup",
+            eventSignature: buildEventSignature(),
           };
         }
 
@@ -237,8 +283,12 @@ describe("runIngestion", () => {
             moderationDetail: "与首条报道语义接近，但表述不同",
             qualityScore: 87,
             qualityRationale: "事实清晰且信息密度较高",
-            topicLabel: "Developer Agent Platform",
-            clusterHint: "OpenAI developer toolkit for agents",
+            eventSignature: buildEventSignature({
+              eventType: "launch",
+              eventSubject: "OpenAI",
+              eventAction: "发布",
+              eventObject: "agent toolkit",
+            }),
           };
         }
 
@@ -250,8 +300,12 @@ describe("runIngestion", () => {
           moderationDetail: "新闻价值明确",
           qualityScore: 91,
           qualityRationale: "多事实点且时效性强",
-          topicLabel: "OpenAI Agent",
-          clusterHint: "OpenAI agent toolkit launch",
+          eventSignature: buildEventSignature({
+            eventType: "launch",
+            eventSubject: "OpenAI",
+            eventAction: "发布",
+            eventObject: "agent toolkit",
+          }),
         };
       }),
       summarizeCluster: vi.fn().mockResolvedValue("两篇报道都聚焦 OpenAI 新发布的 agent 工具能力，一篇强调发布本身，另一篇补充开发者工具视角。"),
@@ -302,6 +356,10 @@ describe("runIngestion", () => {
     expect(primaryToolkitItem?.status).toBe("processed");
     expect(primaryToolkitItem?.moderationStatus).toBe("allowed");
     expect(primaryToolkitItem?.qualityScore).toBe(91);
+    expect(primaryToolkitItem?.eventType).toBe("launch");
+    expect(primaryToolkitItem?.eventSubject).toBe("OpenAI");
+    expect(primaryToolkitItem?.eventAction).toBe("发布");
+    expect(primaryToolkitItem?.eventObject).toBe("agent toolkit");
     expect(secondaryToolkitItem?.clusterId).toBe(primaryToolkitItem?.clusterId);
     expect(secondaryToolkitItem?.moderationStatus).toBe("allowed");
     expect(filteredItem?.status).toBe("filtered");
@@ -356,8 +414,12 @@ describe("runIngestion", () => {
             moderationDetail: "属于 AI 工具新闻，但与另一条不是同一事件",
             qualityScore: 82,
             qualityRationale: "信息完整且有明确发布动作",
-            topicLabel: "企业AI工具",
-            clusterHint: null,
+            eventSignature: buildEventSignature({
+              eventType: "launch",
+              eventSubject: "Microsoft",
+              eventAction: "发布",
+              eventObject: "agent framework",
+            }),
           };
         }
 
@@ -369,8 +431,12 @@ describe("runIngestion", () => {
           moderationDetail: "属于 AI 工具新闻，但与另一条不是同一事件",
           qualityScore: 84,
           qualityRationale: "信息完整且有明确发布动作",
-          topicLabel: "企业AI工具",
-          clusterHint: null,
+          eventSignature: buildEventSignature({
+            eventType: "launch",
+            eventSubject: "Anthropic",
+            eventAction: "推出",
+            eventObject: "managed agents",
+          }),
         };
       }),
       summarizeCluster: vi.fn().mockResolvedValue("不会被使用"),
@@ -400,13 +466,120 @@ describe("runIngestion", () => {
     });
 
     expect(storedItems).toHaveLength(2);
-    expect(storedItems[0]?.topicLabel).toBe("企业AI工具");
-    expect(storedItems[1]?.topicLabel).toBe("企业AI工具");
     expect(storedItems[0]?.clusterId).not.toBe(storedItems[1]?.clusterId);
     expect(aiProvider.matchClusterCandidate).toHaveBeenCalledTimes(1);
 
     const clusterCount = await prisma.contentCluster.count();
     expect(clusterCount).toBe(2);
+  });
+
+  it("recalls every active cluster within 7 days instead of truncating to five candidates", async () => {
+    const source = await prisma.source.create({
+      data: {
+        name: "Existing Cluster Feed",
+        rssUrl: "https://existing.example.com/feed.xml",
+        siteUrl: "https://existing.example.com",
+        enabled: true,
+        fetchFullTextWhenMissing: false,
+      },
+    });
+
+    for (let index = 0; index < 6; index += 1) {
+      const clusterId = `existing-cluster-${index + 1}`;
+      await prisma.contentCluster.create({
+        data: {
+          id: clusterId,
+          kind: "topic",
+          title: `历史聚合 ${index + 1}`,
+          summary: `历史聚合摘要 ${index + 1}`,
+          score: 70 + index,
+          itemCount: 1,
+          latestPublishedAt: new Date(`2026-04-0${index + 4}T09:00:00.000Z`),
+          status: "active",
+          fingerprint: `existing-fingerprint-${index + 1}`,
+        },
+      });
+
+      await prisma.item.create({
+        data: {
+          id: `existing-item-${index + 1}`,
+          sourceId: source.id,
+          clusterId,
+          originalUrl: `https://existing.example.com/posts/${index + 1}`,
+          canonicalUrl: `https://existing.example.com/posts/${index + 1}`,
+          urlHash: `existing-hash-${index + 1}`,
+          dedupeSignature: `existing|${index + 1}`,
+          originalTitle: `历史事件 ${index + 1}`,
+          translatedTitle: `历史事件 ${index + 1}`,
+          publishedAt: new Date(`2026-04-0${index + 4}T09:00:00.000Z`),
+          summaryText: `历史内容 ${index + 1}`,
+          status: "processed",
+          moderationStatus: "allowed",
+          qualityScore: 70 + index,
+          qualityRationale: "历史聚合候选",
+          language: "zh",
+        },
+      });
+    }
+
+    const parser = {
+      parseURL: vi.fn().mockResolvedValue({
+        items: [
+          {
+            title: "A new clusterable story",
+            link: "https://example.com/posts/new-clusterable-story",
+            isoDate: "2026-04-10T10:00:00.000Z",
+            contentSnippet: "Fresh story summary",
+            creator: "Alex",
+          },
+        ],
+      }),
+    };
+
+    const aiProvider = {
+      enrichContent: vi.fn().mockResolvedValue({
+        translatedTitle: "新的可聚合事件",
+        summary: "这是一条需要与历史聚合比较的新内容。",
+        moderationStatus: "allowed",
+        moderationReason: null,
+        moderationDetail: "需要比对全部 7 天候选聚合。",
+        qualityScore: 86,
+        qualityRationale: "事实明确",
+        eventSignature: buildEventSignature(),
+      }),
+      summarizeCluster: vi.fn().mockResolvedValue("不会被使用"),
+      matchClusterCandidate: vi.fn().mockImplementation(async (_input: string, metadata: { candidates: Array<{ id: string }> }) => {
+        expect(metadata.candidates).toHaveLength(6);
+        expect(metadata.candidates.map((candidate) => candidate.id)).toContain("existing-cluster-6");
+        return "existing-cluster-6";
+      }),
+    };
+
+    await runIngestion({
+      trigger: "manual",
+      parser,
+      articleFetcher: vi.fn(),
+      aiProvider,
+      sourceConfigs: [
+        {
+          name: "Example Feed",
+          rssUrl: "https://example.com/feed.xml",
+          siteUrl: "https://example.com",
+          enabled: true,
+          fetchFullTextWhenMissing: false,
+        },
+      ],
+      blacklist: [],
+      now: new Date("2026-04-10T10:30:00.000Z"),
+    });
+
+    expect(aiProvider.matchClusterCandidate).toHaveBeenCalledTimes(1);
+
+    const storedItem = await prisma.item.findFirstOrThrow({
+      where: { originalTitle: "A new clusterable story" },
+    });
+
+    expect(storedItem.clusterId).toBe("existing-cluster-6");
   });
 
   it("falls back to processed items when article fetch and ai enrichment fail", async () => {
@@ -494,8 +667,12 @@ describe("runIngestion", () => {
           moderationDetail: null,
           qualityScore: 80,
           qualityRationale: "高质量",
-          topicLabel: "English Headline",
-          clusterHint: "English headline cluster",
+          eventSignature: buildEventSignature({
+            eventType: "other",
+            eventSubject: "English Headline",
+            eventAction: "报道",
+            eventObject: "cluster",
+          }),
         };
       }),
       summarizeCluster: vi.fn().mockResolvedValue("聚合摘要"),
@@ -549,8 +726,12 @@ describe("runIngestion", () => {
         moderationDetail: null,
         qualityScore: 82,
         qualityRationale: "高质量",
-        topicLabel: "Token Economy",
-        clusterHint: "Token economy explainer",
+        eventSignature: buildEventSignature({
+          eventType: "research",
+          eventSubject: "Token economy",
+          eventAction: "解读",
+          eventObject: "explainer",
+        }),
       }),
       summarizeCluster: vi.fn().mockResolvedValue("聚合摘要"),
       matchClusterCandidate: vi.fn().mockResolvedValue(null),
@@ -576,6 +757,67 @@ describe("runIngestion", () => {
 
     const storedItem = await prisma.item.findFirstOrThrow();
     expect(storedItem.summaryText).toBe("Token economy summary");
+  });
+
+  it("does not call cluster summary ai for single-item clusters", async () => {
+    const parser = {
+      parseURL: vi.fn().mockResolvedValue({
+        items: [
+          {
+            title: "Solo launch coverage",
+            link: "https://example.com/posts/solo-launch",
+            isoDate: "2026-04-10T09:00:00.000Z",
+            contentSnippet: "Single item summary",
+          },
+        ],
+      }),
+    };
+
+    const summarizeCluster = vi.fn().mockResolvedValue("不应该被调用");
+    const aiProvider = {
+      enrichContent: vi.fn().mockResolvedValue({
+        translatedTitle: "单条发布报道",
+        summary: "这是单条内容的摘要。",
+        moderationStatus: "allowed",
+        moderationReason: null,
+        moderationDetail: null,
+        qualityScore: 82,
+        qualityRationale: "高质量",
+        eventSignature: buildEventSignature({
+          eventType: "launch",
+          eventSubject: "OpenAI",
+          eventAction: "发布",
+          eventObject: "solo launch",
+        }),
+      }),
+      summarizeCluster,
+      matchClusterCandidate: vi.fn().mockResolvedValue(null),
+    };
+
+    await runIngestion({
+      trigger: "manual",
+      parser,
+      articleFetcher: vi.fn(),
+      aiProvider,
+      sourceConfigs: [
+        {
+          name: "Example Feed",
+          rssUrl: "https://example.com/feed.xml",
+          siteUrl: "https://example.com",
+          enabled: true,
+          fetchFullTextWhenMissing: false,
+        },
+      ],
+      blacklist: [],
+      now: new Date("2026-04-10T10:00:00.000Z"),
+    });
+
+    expect(summarizeCluster).not.toHaveBeenCalled();
+
+    const storedCluster = await prisma.contentCluster.findFirstOrThrow();
+    expect(storedCluster.itemCount).toBe(1);
+    expect(storedCluster.summary).toBe("这是单条内容的摘要。");
+    expect(storedCluster.title).toBe("OpenAI 发布 solo launch");
   });
 
   it("reuses existing analysis when the rss title, content, and published time are unchanged", async () => {
@@ -618,7 +860,6 @@ describe("runIngestion", () => {
         moderationStatus: "allowed",
         qualityScore: 91,
         qualityRationale: "多事实点且时效性强",
-        topicLabel: "OpenAI Agent",
         aiProcessedAt: new Date("2026-04-10T09:05:00.000Z"),
       },
     });
@@ -645,8 +886,7 @@ describe("runIngestion", () => {
         moderationDetail: null,
         qualityScore: 99,
         qualityRationale: "不应该被调用",
-        topicLabel: "Should Not Run",
-        clusterHint: null,
+        eventSignature: buildEventSignature(),
       }),
       summarizeCluster: vi.fn().mockResolvedValue("不会被使用"),
       matchClusterCandidate: vi.fn().mockResolvedValue(null),
@@ -717,7 +957,6 @@ describe("runIngestion", () => {
         moderationStatus: "allowed",
         qualityScore: 70,
         qualityRationale: "旧评分",
-        topicLabel: "Old Topic",
         aiProcessedAt: new Date("2026-04-10T09:05:00.000Z"),
       },
     });
@@ -744,8 +983,12 @@ describe("runIngestion", () => {
         moderationDetail: "信息已更新",
         qualityScore: 95,
         qualityRationale: "内容更完整",
-        topicLabel: "OpenAI Agent",
-        clusterHint: "OpenAI agent toolkit launch",
+        eventSignature: buildEventSignature({
+          eventType: "launch",
+          eventSubject: "OpenAI",
+          eventAction: "发布",
+          eventObject: "agent toolkit",
+        }),
       }),
       summarizeCluster: vi.fn().mockResolvedValue("不会被使用"),
       matchClusterCandidate: vi.fn().mockResolvedValue(null),
@@ -860,8 +1103,12 @@ describe("runIngestion", () => {
         moderationDetail: null,
         qualityScore: 80,
         qualityRationale: "高质量",
-        topicLabel: "Database Story",
-        clusterHint: "Database configured story",
+        eventSignature: buildEventSignature({
+          eventType: "other",
+          eventSubject: "Database configured story",
+          eventAction: "报道",
+          eventObject: "story",
+        }),
       }),
       summarizeCluster: vi.fn().mockResolvedValue("聚合摘要"),
       matchClusterCandidate: vi.fn().mockResolvedValue(null),

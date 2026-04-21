@@ -8,8 +8,11 @@ import {
 import { computeNextRunAt, isSchedulerHeartbeatStale, normalizeScheduleInput } from "@/lib/tasks/scheduler";
 import {
   DEFAULT_INGESTION_SCHEDULE_KEY,
+  type TaskAiCallBreakdownKey,
+  type TaskAiCallBreakdownSnapshot,
   type BackgroundTaskMonitorSnapshot,
   type EnqueueTaskRunInput,
+  type TaskStageTimingSnapshot,
   type TaskRunSnapshot,
   type TaskScheduleSnapshot,
 } from "@/lib/tasks/types";
@@ -17,6 +20,147 @@ import { prisma } from "@/lib/db";
 
 export const TASK_RUN_CANCELLED_MESSAGE = "管理员手动终止任务。";
 export const TASK_RUN_CANCELLED_LABEL = "任务已终止";
+
+const TASK_AI_CALL_BREAKDOWN_LABELS: Record<TaskAiCallBreakdownKey, string> = {
+  item_analysis: "内容分析",
+  cluster_match: "聚合匹配",
+  cluster_summary: "聚合摘要",
+};
+
+function getDefaultTaskAiCallBreakdown(): TaskAiCallBreakdownSnapshot[] {
+  return (Object.keys(TASK_AI_CALL_BREAKDOWN_LABELS) as TaskAiCallBreakdownKey[]).map((key) => ({
+    key,
+    label: TASK_AI_CALL_BREAKDOWN_LABELS[key],
+    actual: 0,
+    estimated: 0,
+  }));
+}
+
+function normalizeTaskAiCallBreakdownSnapshot(value: unknown): TaskAiCallBreakdownSnapshot | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const maybeSnapshot = value as Record<string, unknown>;
+
+  if (
+    maybeSnapshot.key !== "item_analysis" &&
+    maybeSnapshot.key !== "cluster_match" &&
+    maybeSnapshot.key !== "cluster_summary"
+  ) {
+    return null;
+  }
+
+  return {
+    key: maybeSnapshot.key,
+    label:
+      typeof maybeSnapshot.label === "string"
+        ? maybeSnapshot.label
+        : TASK_AI_CALL_BREAKDOWN_LABELS[maybeSnapshot.key],
+    actual:
+      typeof maybeSnapshot.actual === "number" && Number.isFinite(maybeSnapshot.actual)
+        ? maybeSnapshot.actual
+        : 0,
+    estimated:
+      typeof maybeSnapshot.estimated === "number" && Number.isFinite(maybeSnapshot.estimated)
+        ? maybeSnapshot.estimated
+        : 0,
+  };
+}
+
+function parseTaskAiCallBreakdownJson(value: string | null | undefined): TaskAiCallBreakdownSnapshot[] {
+  const defaultBreakdown = getDefaultTaskAiCallBreakdown();
+
+  if (!value) {
+    return defaultBreakdown;
+  }
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+
+    if (!Array.isArray(parsed)) {
+      return defaultBreakdown;
+    }
+
+    const parsedEntries = parsed
+      .map(normalizeTaskAiCallBreakdownSnapshot)
+      .filter((snapshot): snapshot is TaskAiCallBreakdownSnapshot => snapshot !== null);
+    const parsedMap = new Map(parsedEntries.map((entry) => [entry.key, entry]));
+
+    return defaultBreakdown.map((entry) => parsedMap.get(entry.key) ?? entry);
+  } catch {
+    return defaultBreakdown;
+  }
+}
+
+function serializeTaskAiCallBreakdown(value: TaskAiCallBreakdownSnapshot[] | null) {
+  if (!value) {
+    return null;
+  }
+
+  return JSON.stringify(value);
+}
+
+function normalizeTaskStageTimingSnapshot(value: unknown): TaskStageTimingSnapshot | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const maybeSnapshot = value as Record<string, unknown>;
+
+  if (typeof maybeSnapshot.key !== "string" || typeof maybeSnapshot.label !== "string") {
+    return null;
+  }
+
+  const startedAt =
+    typeof maybeSnapshot.startedAt === "string" || maybeSnapshot.startedAt === null
+      ? maybeSnapshot.startedAt
+      : null;
+  const finishedAt =
+    typeof maybeSnapshot.finishedAt === "string" || maybeSnapshot.finishedAt === null
+      ? maybeSnapshot.finishedAt
+      : null;
+  const durationMs =
+    typeof maybeSnapshot.durationMs === "number" && Number.isFinite(maybeSnapshot.durationMs)
+      ? maybeSnapshot.durationMs
+      : null;
+
+  return {
+    key: maybeSnapshot.key,
+    label: maybeSnapshot.label,
+    startedAt,
+    finishedAt,
+    durationMs,
+  };
+}
+
+function parseTaskStageTimingsJson(value: string | null | undefined): TaskStageTimingSnapshot[] {
+  if (!value) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed
+      .map(normalizeTaskStageTimingSnapshot)
+      .filter((snapshot): snapshot is TaskStageTimingSnapshot => snapshot !== null);
+  } catch {
+    return [];
+  }
+}
+
+function serializeTaskStageTimings(stageTimings: TaskStageTimingSnapshot[] | null) {
+  if (!stageTimings) {
+    return null;
+  }
+
+  return JSON.stringify(stageTimings);
+}
 
 export async function ensureDefaultIngestionSchedule() {
   return upsertDefaultIngestionSchedule();
@@ -48,19 +192,29 @@ export async function updateTaskRun(
     progressTotal?: number;
     progressLabel?: string | null;
     itemsAdded?: number;
+    fullTextFetchedCount?: number;
     aiCallCountActual?: number;
     aiCallCountEstimated?: number;
+    aiCallBreakdown?: TaskAiCallBreakdownSnapshot[] | null;
     cancelRequestedAt?: Date | null;
     startedAt?: Date | null;
     finishedAt?: Date | null;
     errorSummary?: string | null;
+    stageTimings?: TaskStageTimingSnapshot[] | null;
   },
 ) {
   const now = new Date();
+  const { stageTimings, aiCallBreakdown, ...taskRunData } = data;
   const [taskRun] = await prisma.$transaction([
     prisma.backgroundTaskRun.update({
       where: { id },
-      data,
+      data: {
+        ...taskRunData,
+        aiCallBreakdownJson:
+          aiCallBreakdown === undefined ? undefined : serializeTaskAiCallBreakdown(aiCallBreakdown),
+        stageTimingsJson:
+          stageTimings === undefined ? undefined : serializeTaskStageTimings(stageTimings),
+      },
     }),
     prisma.taskSchedule.updateMany({
       where: { key: DEFAULT_INGESTION_SCHEDULE_KEY },
@@ -84,12 +238,15 @@ export function toTaskRunSnapshot(taskRun: {
   progressTotal: number;
   progressLabel: string | null;
   itemsAdded: number;
+  fullTextFetchedCount: number;
   aiCallCountActual: number;
   aiCallCountEstimated: number;
+  aiCallBreakdownJson: string | null;
   cancelRequestedAt: Date | null;
   startedAt: Date | null;
   finishedAt: Date | null;
   errorSummary: string | null;
+  stageTimingsJson: string | null;
 }): TaskRunSnapshot {
   return {
     id: taskRun.id,
@@ -102,12 +259,15 @@ export function toTaskRunSnapshot(taskRun: {
     progressTotal: taskRun.progressTotal,
     progressLabel: taskRun.progressLabel,
     itemsAdded: taskRun.itemsAdded,
+    fullTextFetchedCount: taskRun.fullTextFetchedCount,
     aiCallCountActual: taskRun.aiCallCountActual,
     aiCallCountEstimated: taskRun.aiCallCountEstimated,
+    aiCallBreakdown: parseTaskAiCallBreakdownJson(taskRun.aiCallBreakdownJson),
     cancelRequestedAt: taskRun.cancelRequestedAt?.toISOString() ?? null,
     startedAt: taskRun.startedAt?.toISOString() ?? null,
     finishedAt: taskRun.finishedAt?.toISOString() ?? null,
     errorSummary: taskRun.errorSummary,
+    stageTimings: parseTaskStageTimingsJson(taskRun.stageTimingsJson),
   };
 }
 
@@ -116,6 +276,7 @@ export function toTaskScheduleSnapshot(schedule: {
   enabled: boolean;
   cronExpression: string;
   sourceConcurrency: number;
+  fullTextFetchThreshold: number;
   timezone: string;
   lastHeartbeatAt: Date | null;
   lastRunStartedAt: Date | null;
@@ -128,6 +289,7 @@ export function toTaskScheduleSnapshot(schedule: {
     enabled: schedule.enabled,
     cronExpression: schedule.cronExpression,
     sourceConcurrency: schedule.sourceConcurrency,
+    fullTextFetchThreshold: schedule.fullTextFetchThreshold,
     timezone: schedule.timezone,
     lastHeartbeatAt: schedule.lastHeartbeatAt?.toISOString() ?? null,
     lastRunStartedAt: schedule.lastRunStartedAt?.toISOString() ?? null,
@@ -146,6 +308,7 @@ export async function updateDefaultIngestionSchedule(input: {
   enabled: boolean;
   cronExpression: string;
   sourceConcurrency: number;
+  fullTextFetchThreshold: number;
 }) {
   const normalizedInput = normalizeScheduleInput(input);
   const currentSchedule = await ensureDefaultIngestionSchedule();
@@ -163,6 +326,7 @@ export async function updateDefaultIngestionSchedule(input: {
       enabled: normalizedInput.enabled,
       cronExpression: normalizedInput.cronExpression,
       sourceConcurrency: normalizedInput.sourceConcurrency,
+      fullTextFetchThreshold: normalizedInput.fullTextFetchThreshold,
       nextRunAt,
     },
   });

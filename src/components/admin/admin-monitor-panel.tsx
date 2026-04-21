@@ -6,7 +6,9 @@ import { PageShell } from "@/components/ui/page-shell";
 import { useToast } from "@/components/ui/toast";
 import { StatusBanner } from "@/components/ui/status-banner";
 import {
+  MAX_FULL_TEXT_FETCH_THRESHOLD,
   MAX_SOURCE_CONCURRENCY,
+  MIN_FULL_TEXT_FETCH_THRESHOLD,
   MIN_SOURCE_CONCURRENCY,
 } from "@/lib/tasks/scheduler";
 import type {
@@ -254,6 +256,9 @@ export function AdminMonitorPanel({
   const [sourceConcurrency, setSourceConcurrency] = useState(
     String(initialSnapshot.schedule.sourceConcurrency),
   );
+  const [fullTextFetchThreshold, setFullTextFetchThreshold] = useState(
+    String(initialSnapshot.schedule.fullTextFetchThreshold),
+  );
   const [isPending, startTransition] = useTransition();
   const [cancellingTaskId, setCancellingTaskId] = useState<string | null>(null);
   const isScheduleDirtyRef = useRef(false);
@@ -261,7 +266,8 @@ export function AdminMonitorPanel({
   const isScheduleDirty =
     enabled !== snapshot.schedule.enabled ||
     cronExpression.trim() !== snapshot.schedule.cronExpression ||
-    sourceConcurrency.trim() !== String(snapshot.schedule.sourceConcurrency);
+    sourceConcurrency.trim() !== String(snapshot.schedule.sourceConcurrency) ||
+    fullTextFetchThreshold.trim() !== String(snapshot.schedule.fullTextFetchThreshold);
 
   isScheduleDirtyRef.current = isScheduleDirty;
 
@@ -294,6 +300,7 @@ export function AdminMonitorPanel({
           setEnabled(payload.schedule.enabled);
           setCronExpression(payload.schedule.cronExpression);
           setSourceConcurrency(String(payload.schedule.sourceConcurrency));
+          setFullTextFetchThreshold(String(payload.schedule.fullTextFetchThreshold));
         }
       } catch {
         if (!disposed) {
@@ -320,6 +327,7 @@ export function AdminMonitorPanel({
 
   const saveSchedule = () => {
     const parsedSourceConcurrency = Number.parseInt(sourceConcurrency.trim(), 10);
+    const parsedFullTextFetchThreshold = Number.parseInt(fullTextFetchThreshold.trim(), 10);
 
     if (
       !Number.isInteger(parsedSourceConcurrency) ||
@@ -328,6 +336,18 @@ export function AdminMonitorPanel({
     ) {
       showToast(
         `源抓取并发需为 ${MIN_SOURCE_CONCURRENCY}-${MAX_SOURCE_CONCURRENCY} 的整数。`,
+        "error",
+      );
+      return;
+    }
+
+    if (
+      !Number.isInteger(parsedFullTextFetchThreshold) ||
+      parsedFullTextFetchThreshold < MIN_FULL_TEXT_FETCH_THRESHOLD ||
+      parsedFullTextFetchThreshold > MAX_FULL_TEXT_FETCH_THRESHOLD
+    ) {
+      showToast(
+        `正文补抓阈值需为 ${MIN_FULL_TEXT_FETCH_THRESHOLD}-${MAX_FULL_TEXT_FETCH_THRESHOLD} 的整数。`,
         "error",
       );
       return;
@@ -346,6 +366,7 @@ export function AdminMonitorPanel({
               enabled,
               cronExpression,
               sourceConcurrency: parsedSourceConcurrency,
+              fullTextFetchThreshold: parsedFullTextFetchThreshold,
             }),
           },
         );
@@ -363,6 +384,7 @@ export function AdminMonitorPanel({
           schedule,
         }));
         setSourceConcurrency(String(schedule.sourceConcurrency));
+        setFullTextFetchThreshold(String(schedule.fullTextFetchThreshold));
         showToast("调度配置已保存。", "success");
       } catch {
         showToast("调度配置保存失败。", "error");
@@ -478,6 +500,30 @@ export function AdminMonitorPanel({
         </label>
 
         <label
+          className={cx(subtleCardClassName, "flex flex-col gap-3 p-3.5")}
+        >
+          <span className="font-mono text-[11px] font-medium uppercase tracking-[0.22em] text-[var(--muted)]">
+            Full Text
+          </span>
+          <span className="text-sm font-medium text-[var(--foreground)]">
+            正文补抓阈值
+          </span>
+          <input
+            aria-label="正文补抓阈值"
+            className={inputClassName}
+            type="number"
+            min={MIN_FULL_TEXT_FETCH_THRESHOLD}
+            max={MAX_FULL_TEXT_FETCH_THRESHOLD}
+            step={1}
+            value={fullTextFetchThreshold}
+            onChange={(event) => setFullTextFetchThreshold(event.target.value)}
+          />
+          <span className="text-sm leading-6 text-[var(--muted)]">
+            当 RSS 正文或摘要长度低于该值时，任务会尝试补抓页面全文。
+          </span>
+        </label>
+
+        <label
           className={cx(
             subtleCardClassName,
             "flex cursor-pointer flex-col gap-3 p-3.5",
@@ -549,6 +595,10 @@ export function AdminMonitorPanel({
         <TaskFact
           label="Source Concurrency"
           value={String(snapshot.schedule.sourceConcurrency)}
+        />
+        <TaskFact
+          label="Full Text Threshold"
+          value={String(snapshot.schedule.fullTextFetchThreshold)}
         />
         <TaskFact label="Timezone" value={snapshot.schedule.timezone} />
       </div>

@@ -5,8 +5,11 @@ import type { ScheduleUpdateInput } from "@/lib/tasks/types";
 export const DEFAULT_SCHEDULE_TIMEZONE = "Asia/Shanghai";
 export const DEFAULT_SCHEDULE_CRON_EXPRESSION = "0 * * * *";
 export const DEFAULT_SOURCE_CONCURRENCY = 2;
+export const DEFAULT_FULL_TEXT_FETCH_THRESHOLD = 80;
 export const MIN_SOURCE_CONCURRENCY = 1;
 export const MAX_SOURCE_CONCURRENCY = 10;
+export const MIN_FULL_TEXT_FETCH_THRESHOLD = 0;
+export const MAX_FULL_TEXT_FETCH_THRESHOLD = 5000;
 
 export function normalizeScheduleInput(input: ScheduleUpdateInput): ScheduleUpdateInput {
   const cronExpression = input.cronExpression.trim();
@@ -30,10 +33,21 @@ export function normalizeScheduleInput(input: ScheduleUpdateInput): ScheduleUpda
     );
   }
 
+  if (
+    !Number.isInteger(input.fullTextFetchThreshold) ||
+    input.fullTextFetchThreshold < MIN_FULL_TEXT_FETCH_THRESHOLD ||
+    input.fullTextFetchThreshold > MAX_FULL_TEXT_FETCH_THRESHOLD
+  ) {
+    throw new Error(
+      `Full text fetch threshold must be an integer between ${MIN_FULL_TEXT_FETCH_THRESHOLD} and ${MAX_FULL_TEXT_FETCH_THRESHOLD}.`,
+    );
+  }
+
   return {
     enabled: input.enabled,
     cronExpression,
     sourceConcurrency: input.sourceConcurrency,
+    fullTextFetchThreshold: input.fullTextFetchThreshold,
   };
 }
 

@@ -11,13 +11,18 @@ describe("runtime config defaults", () => {
     expect(defaults.rssSources).toEqual(DEFAULT_SOURCE_CONFIGS);
     expect(defaults.blacklistKeywords).toEqual(DEFAULT_BLACKLIST_KEYWORDS);
     expect(defaults.ingestion.itemConcurrency).toBe(3);
+    expect(defaults.ingestion.fullTextFetchThreshold).toBe(80);
     expect(defaults.modelApi.apiKey).toBe("");
     expect(defaults.modelApi.baseURL).toBe("");
     expect(defaults.modelApi.model).toBe("gpt-4.1-mini");
     expect(defaults.prompts.itemAnalysis.length).toBeGreaterThan(0);
-    expect(defaults.prompts.itemAnalysis).toContain("字段说明");
+    expect(defaults.prompts.itemAnalysis).toContain("固定输出格式");
+    expect(defaults.prompts.itemAnalysis).toContain("100 到 200 字中文摘要");
+    expect(defaults.prompts.itemAnalysis).not.toContain("restored");
     expect(defaults.prompts.clusterSummary.length).toBeGreaterThan(0);
+    expect(defaults.prompts.clusterSummary).toContain('{"summary":"..."}');
     expect(defaults.prompts.clusterMatch.length).toBeGreaterThan(0);
+    expect(defaults.prompts.clusterMatch).toContain('{"clusterId":"候选组ID"}');
   });
 
   it("returns fresh copies for mutable arrays", () => {

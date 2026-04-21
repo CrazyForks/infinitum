@@ -17,14 +17,15 @@ describe("dedupe helpers", () => {
   });
 
   it("requests full text when RSS content is missing or too short", () => {
-    expect(shouldFetchFullText("", true)).toBe(true);
-    expect(shouldFetchFullText("Short body", true)).toBe(true);
+    expect(shouldFetchFullText("", true, 80)).toBe(true);
+    expect(shouldFetchFullText("Short body", true, 80)).toBe(true);
     expect(
       shouldFetchFullText(
         "This RSS content is long enough that the pipeline should keep it without fetching the article body again.",
         true,
+        80,
       ),
     ).toBe(false);
-    expect(shouldFetchFullText("", false)).toBe(false);
+    expect(shouldFetchFullText("", false, 80)).toBe(false);
   });
 });

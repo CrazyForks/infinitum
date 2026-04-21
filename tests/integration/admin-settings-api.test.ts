@@ -75,6 +75,7 @@ describe("/api/admin/settings", () => {
         enabled: true,
         cronExpression: "0 * * * *",
         sourceConcurrency: 2,
+        fullTextFetchThreshold: 80,
         timezone: "Asia/Shanghai",
         lastHeartbeatAt: "2026-04-20T10:00:00.000Z",
         lastRunStartedAt: "2026-04-20T10:00:00.000Z",

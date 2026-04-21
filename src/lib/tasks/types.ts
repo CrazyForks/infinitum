@@ -18,6 +18,7 @@ export type ScheduleUpdateInput = {
   enabled: boolean;
   cronExpression: string;
   sourceConcurrency: number;
+  fullTextFetchThreshold: number;
 };
 
 export type EnqueueTaskRunInput = {
@@ -25,6 +26,26 @@ export type EnqueueTaskRunInput = {
   triggerType: BackgroundTaskRunTrigger;
   label: string;
   entityId?: string | null;
+};
+
+export type TaskStageTimingSnapshot = {
+  key: string;
+  label: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  durationMs: number | null;
+};
+
+export type TaskAiCallBreakdownKey =
+  | "item_analysis"
+  | "cluster_match"
+  | "cluster_summary";
+
+export type TaskAiCallBreakdownSnapshot = {
+  key: TaskAiCallBreakdownKey;
+  label: string;
+  actual: number;
+  estimated: number;
 };
 
 export type TaskRunSnapshot = {
@@ -38,12 +59,15 @@ export type TaskRunSnapshot = {
   progressTotal: number;
   progressLabel: string | null;
   itemsAdded: number;
+  fullTextFetchedCount?: number;
   aiCallCountActual: number;
   aiCallCountEstimated: number;
+  aiCallBreakdown?: TaskAiCallBreakdownSnapshot[];
   cancelRequestedAt: string | null;
   startedAt: string | null;
   finishedAt: string | null;
   errorSummary: string | null;
+  stageTimings: TaskStageTimingSnapshot[];
 };
 
 export type TaskScheduleSnapshot = {
@@ -51,6 +75,7 @@ export type TaskScheduleSnapshot = {
   enabled: boolean;
   cronExpression: string;
   sourceConcurrency: number;
+  fullTextFetchThreshold: number;
   timezone: string;
   lastHeartbeatAt: string | null;
   lastRunStartedAt: string | null;

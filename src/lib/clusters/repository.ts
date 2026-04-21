@@ -31,7 +31,7 @@ export async function findActiveClusterByFingerprint(fingerprint: string, since:
   });
 }
 
-export async function findRecentActiveClusterCandidates(options: { since: Date; until: Date; limit: number }) {
+export async function findRecentActiveClusterCandidates(options: { since: Date; until: Date }) {
   return prisma.contentCluster.findMany({
     where: {
       status: "active",
@@ -57,7 +57,6 @@ export async function findRecentActiveClusterCandidates(options: { since: Date; 
       itemCount: true,
     },
     orderBy: [{ latestPublishedAt: "desc" }, { updatedAt: "desc" }],
-    take: options.limit,
   }) as Promise<ClusterAssignmentCandidate[]>;
 }
 

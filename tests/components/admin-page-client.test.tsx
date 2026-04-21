@@ -36,7 +36,11 @@ vi.mock("@/components/admin/content-review-panel", () => ({
 }));
 
 vi.mock("@/components/admin/task-monitor-panel", () => ({
-  TaskMonitorPanel: () => <div>任务监控面板</div>,
+  TaskMonitorPanel: ({
+    initialFocusTaskId,
+  }: {
+    initialFocusTaskId?: string | null;
+  }) => <div>{`任务监控面板:${initialFocusTaskId ?? "none"}`}</div>,
 }));
 
 vi.mock("@/components/admin/admin-settings-panel", () => ({
@@ -57,6 +61,7 @@ function buildInitialSettings(): AdminSettingsSnapshot {
       enabled: true,
       cronExpression: "0 * * * *",
       sourceConcurrency: 2,
+      fullTextFetchThreshold: 80,
       timezone: "Asia/Shanghai",
       lastHeartbeatAt: null,
       lastRunStartedAt: null,
@@ -77,6 +82,7 @@ function buildInitialSnapshot(): BackgroundTaskMonitorSnapshot {
       enabled: true,
       cronExpression: "0 * * * *",
       sourceConcurrency: 2,
+      fullTextFetchThreshold: 80,
       timezone: "Asia/Shanghai",
       lastHeartbeatAt: null,
       lastRunStartedAt: null,
@@ -121,6 +127,19 @@ describe("AdminPageClient", () => {
     );
 
     expect(screen.getByText("内容审核:clusters")).toBeInTheDocument();
+  });
+
+  it("passes the task id from the url query into the task monitor panel", () => {
+    searchParamsState.value = "tab=monitoring&section=tasks&task=task-123";
+
+    render(
+      <AdminPageClient
+        initialSettings={buildInitialSettings()}
+        initialSnapshot={buildInitialSnapshot()}
+      />,
+    );
+
+    expect(screen.getByText("任务监控面板:task-123")).toBeInTheDocument();
   });
 
   it("pushes the selected settings tab into the url", async () => {

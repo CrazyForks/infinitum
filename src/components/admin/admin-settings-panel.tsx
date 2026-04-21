@@ -16,7 +16,9 @@ import { useToast } from "@/components/ui/toast";
 import type { AdminSettingsSnapshot } from "@/lib/settings/types";
 import {
   DEFAULT_SCHEDULE_TIMEZONE,
+  MAX_FULL_TEXT_FETCH_THRESHOLD,
   MAX_SOURCE_CONCURRENCY,
+  MIN_FULL_TEXT_FETCH_THRESHOLD,
   MIN_SOURCE_CONCURRENCY,
 } from "@/lib/tasks/scheduler";
 import { cx } from "@/lib/ui/cx";
@@ -90,6 +92,7 @@ export function AdminSettingsPanel({
   embedMode,
   activeSection: externalActiveSection,
 }: AdminSettingsPanelProps) {
+  type AdminSource = AdminSettingsSnapshot["sources"][number];
   const [isPending, startTransition] = useTransition();
   const { showToast } = useToast();
   const [internalActiveSection, setInternalActiveSection] =
@@ -103,6 +106,7 @@ export function AdminSettingsPanel({
   const opmlFileInputRef = useRef<HTMLInputElement | null>(null);
   const [sourceModalMode, setSourceModalMode] = useState<"create" | "edit" | null>(null);
   const [editingSourceId, setEditingSourceId] = useState<string | null>(null);
+  const [sourceDeleteTarget, setSourceDeleteTarget] = useState<AdminSource | null>(null);
   const [sourceNameFilter, setSourceNameFilter] = useState("");
   const [sourceGroupFilter, setSourceGroupFilter] = useState("");
   const [sourceEnabledFilter, setSourceEnabledFilter] = useState("");
@@ -124,6 +128,8 @@ export function AdminSettingsPanel({
   );
   const [taskScheduleSourceConcurrency, setTaskScheduleSourceConcurrency] =
     useState(String(initialSettings.taskSchedule.sourceConcurrency));
+  const [taskScheduleFullTextFetchThreshold, setTaskScheduleFullTextFetchThreshold] =
+    useState(String(initialSettings.taskSchedule.fullTextFetchThreshold));
   const [taskScheduleSnapshot, setTaskScheduleSnapshot] = useState(
     initialSettings.taskSchedule,
   );
@@ -216,9 +222,7 @@ export function AdminSettingsPanel({
     });
   };
 
-  const openEditSourceModal = (
-    source: AdminSettingsSnapshot["sources"][number],
-  ) => {
+  const openEditSourceModal = (source: AdminSource) => {
     setSourceModalMode("edit");
     setEditingSourceId(source.id);
     setSourceForm({
@@ -354,9 +358,28 @@ export function AdminSettingsPanel({
     );
   };
 
+  const handleConfirmDeleteSource = () => {
+    if (!sourceDeleteTarget) {
+      return;
+    }
+
+    submitJson(
+      `/api/admin/settings/sources/${sourceDeleteTarget.id}`,
+      "DELETE",
+      {},
+      "信息源已删除。",
+      true,
+    );
+    setSourceDeleteTarget(null);
+  };
+
   const saveTaskSchedule = () => {
     const parsedSourceConcurrency = Number.parseInt(
       taskScheduleSourceConcurrency.trim(),
+      10,
+    );
+    const parsedFullTextFetchThreshold = Number.parseInt(
+      taskScheduleFullTextFetchThreshold.trim(),
       10,
     );
 
@@ -367,6 +390,18 @@ export function AdminSettingsPanel({
     ) {
       showToast(
         `源抓取并发需为 ${MIN_SOURCE_CONCURRENCY}-${MAX_SOURCE_CONCURRENCY} 的整数。`,
+        "error",
+      );
+      return;
+    }
+
+    if (
+      !Number.isInteger(parsedFullTextFetchThreshold) ||
+      parsedFullTextFetchThreshold < MIN_FULL_TEXT_FETCH_THRESHOLD ||
+      parsedFullTextFetchThreshold > MAX_FULL_TEXT_FETCH_THRESHOLD
+    ) {
+      showToast(
+        `正文补抓阈值需为 ${MIN_FULL_TEXT_FETCH_THRESHOLD}-${MAX_FULL_TEXT_FETCH_THRESHOLD} 的整数。`,
         "error",
       );
       return;
@@ -383,6 +418,7 @@ export function AdminSettingsPanel({
             enabled: taskScheduleEnabled,
             cronExpression: taskScheduleCronExpression,
             sourceConcurrency: parsedSourceConcurrency,
+            fullTextFetchThreshold: parsedFullTextFetchThreshold,
           }),
         });
         const payload = (await response.json()) as {
@@ -399,6 +435,7 @@ export function AdminSettingsPanel({
         setTaskScheduleEnabled(payload.schedule.enabled);
         setTaskScheduleCronExpression(payload.schedule.cronExpression);
         setTaskScheduleSourceConcurrency(String(payload.schedule.sourceConcurrency));
+        setTaskScheduleFullTextFetchThreshold(String(payload.schedule.fullTextFetchThreshold));
         showToast("任务配置已保存。", "success");
       } catch {
         showToast("任务配置保存失败。", "error");
@@ -408,7 +445,8 @@ export function AdminSettingsPanel({
   const taskScheduleIsDirty =
     taskScheduleEnabled !== taskScheduleSnapshot.enabled ||
     taskScheduleCronExpression.trim() !== taskScheduleSnapshot.cronExpression ||
-    taskScheduleSourceConcurrency.trim() !== String(taskScheduleSnapshot.sourceConcurrency);
+    taskScheduleSourceConcurrency.trim() !== String(taskScheduleSnapshot.sourceConcurrency) ||
+    taskScheduleFullTextFetchThreshold.trim() !== String(taskScheduleSnapshot.fullTextFetchThreshold);
 
   const content = (
     <section aria-label="后台设置工作台" className="space-y-4">
@@ -740,15 +778,7 @@ export function AdminSettingsPanel({
                               size="sm"
                               title="删除"
                               className="text-[var(--danger-ink)] hover:bg-[var(--danger-surface)] hover:text-[var(--danger-ink)]"
-                              onClick={() =>
-                                submitJson(
-                                  `/api/admin/settings/sources/${source.id}`,
-                                  "DELETE",
-                                  {},
-                                  "信息源已删除。",
-                                  true,
-                                )
-                              }
+                              onClick={() => setSourceDeleteTarget(source)}
                             >
                               <IconTrash className="h-4 w-4" />
                             </IconButton>
@@ -927,6 +957,40 @@ export function AdminSettingsPanel({
                 </label>
               </div>
             </ModalShell>
+
+            <ModalShell
+              isOpen={Boolean(sourceDeleteTarget)}
+              onClose={() => setSourceDeleteTarget(null)}
+              title="确认删除信息源"
+              widthClassName="max-w-md"
+              bodyClassName="space-y-3 p-6"
+              footerClassName="border-t border-[color:var(--line)] bg-[var(--bg-muted)] p-6"
+              footer={
+                <div className="flex justify-end gap-2">
+                  <Button
+                    variant="secondary"
+                    onClick={() => setSourceDeleteTarget(null)}
+                  >
+                    取消
+                  </Button>
+                  <Button
+                    variant="primary"
+                    onClick={handleConfirmDeleteSource}
+                    disabled={isPending}
+                  >
+                    确认删除
+                  </Button>
+                </div>
+              }
+            >
+              <p className="text-sm text-[var(--text-2)]">
+                将删除信息源
+                <span className="font-medium text-[var(--foreground)]">
+                  {sourceDeleteTarget ? `「${sourceDeleteTarget.name}」` : ""}
+                </span>
+                ，该操作不可撤销。
+              </p>
+            </ModalShell>
           </div>
         ) : null}
 
@@ -945,7 +1009,7 @@ export function AdminSettingsPanel({
                   任务配置
                 </h2>
                 <p className="text-sm text-[var(--text-3)]">
-                  配置抓取任务的启用状态、Cron 调度表达式与信息源抓取并发
+                  配置抓取任务的启用状态、Cron 调度、源抓取并发与正文补抓阈值
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -961,7 +1025,7 @@ export function AdminSettingsPanel({
             </div>
 
             <div className="space-y-6">
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-[220px_minmax(0,1fr)_220px] lg:items-start">
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-[220px_minmax(0,1fr)_220px_220px] lg:items-start">
                 <div className="space-y-1.5">
                   <div className="block text-sm text-[var(--muted)]">任务开关</div>
                   <label className="flex min-h-10 items-center gap-2 rounded-sm border border-[color:var(--line)] bg-[var(--surface)] px-3 text-sm text-[var(--text-2)]">
@@ -1008,6 +1072,26 @@ export function AdminSettingsPanel({
                     value={taskScheduleSourceConcurrency}
                     onChange={(event) => setTaskScheduleSourceConcurrency(event.target.value)}
                     placeholder="例如 2"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label
+                    htmlFor="task-schedule-full-text-fetch-threshold"
+                    className="block text-sm text-[var(--muted)]"
+                  >
+                    正文补抓阈值
+                  </label>
+                  <TextInput
+                    id="task-schedule-full-text-fetch-threshold"
+                    type="number"
+                    inputMode="numeric"
+                    min={MIN_FULL_TEXT_FETCH_THRESHOLD}
+                    max={MAX_FULL_TEXT_FETCH_THRESHOLD}
+                    step={1}
+                    value={taskScheduleFullTextFetchThreshold}
+                    onChange={(event) => setTaskScheduleFullTextFetchThreshold(event.target.value)}
+                    placeholder="例如 80"
                   />
                 </div>
               </div>

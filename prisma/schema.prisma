@@ -120,7 +120,11 @@ model Item {
   moderationDetail String?
   qualityScore     Int @default(50)
   qualityRationale String @default("AI analysis unavailable")
-  topicLabel       String?
+  eventType        String?
+  eventSubject     String?
+  eventAction      String?
+  eventObject      String?
+  eventDate        String?
   aiProcessedAt    DateTime?
   restoredByAdminAt DateTime?
   errorMessage     String?
@@ -182,6 +186,7 @@ model TaskSchedule {
   enabled           Boolean               @default(true)
   cronExpression    String                @default("0 * * * *")
   sourceConcurrency Int                   @default(2)
+  fullTextFetchThreshold Int              @default(80)
   timezone          String
   lastHeartbeatAt   DateTime?
   lastRunStartedAt  DateTime?
@@ -205,12 +210,15 @@ model BackgroundTaskRun {
   progressTotal   Int                   @default(0)
   progressLabel   String?
   itemsAdded      Int                   @default(0)
+  fullTextFetchedCount Int              @default(0)
   aiCallCountActual Int                 @default(0)
   aiCallCountEstimated Int              @default(0)
+  aiCallBreakdownJson String?
   cancelRequestedAt DateTime?
   startedAt       DateTime?
   finishedAt      DateTime?
   errorSummary    String?
+  stageTimingsJson String?
   createdAt       DateTime              @default(now())
   updatedAt       DateTime              @updatedAt
   fetchRuns       FetchRun[]

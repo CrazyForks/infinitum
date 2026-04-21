@@ -7,7 +7,7 @@ import { prisma } from "@/lib/db";
 import type { SourceConfig } from "@/lib/feed/types";
 import { createRssParser } from "@/lib/ingestion/parser";
 import type { RssParserLike } from "@/lib/ingestion/types";
-import { getDefaultPromptConfigName, getDefaultPromptTemplate } from "@/lib/settings/ai-config";
+import { getDefaultPromptConfigName, getDefaultPromptSampling, getDefaultPromptTemplate } from "@/lib/settings/ai-config";
 import type {
   AdminModelApiConfig,
   AdminPromptConfig,
@@ -378,6 +378,11 @@ async function ensureModelAndPromptConfigsSeeded(
   }
 
   await prisma.$transaction(async (tx) => {
+    const shouldSeedDefaultSources =
+      sourceCount === 0 &&
+      modelConfigCount === 0 &&
+      promptConfigCount === 0;
+
     let defaultGeneralModel =
       modelConfigCount === 0
         ? null
@@ -408,24 +413,31 @@ async function ensureModelAndPromptConfigsSeeded(
           PromptConfigType.item_analysis,
           PromptConfigType.cluster_summary,
           PromptConfigType.cluster_match,
-        ].map((type) => ({
-          name: getDefaultPromptConfigName(type),
-          type,
-          prompt: getDefaultPromptTemplate(type),
-          systemPrompt:
-            type === PromptConfigType.item_analysis
-              ? fileConfig.prompts.itemAnalysis
-              : type === PromptConfigType.cluster_summary
-                ? fileConfig.prompts.clusterSummary
-                : fileConfig.prompts.clusterMatch,
-          modelApiConfigId: defaultGeneralModel?.id ?? null,
-          isEnabled: true,
-          isDefault: true,
-        })),
+        ].map((type) => {
+          const sampling = getDefaultPromptSampling(type);
+
+          return {
+            name: getDefaultPromptConfigName(type),
+            type,
+            prompt: getDefaultPromptTemplate(type),
+            systemPrompt:
+              type === PromptConfigType.item_analysis
+                ? fileConfig.prompts.itemAnalysis
+                : type === PromptConfigType.cluster_summary
+                  ? fileConfig.prompts.clusterSummary
+                  : fileConfig.prompts.clusterMatch,
+            temperature: sampling.temperature,
+            maxTokens: sampling.maxTokens,
+            topP: sampling.topP,
+            modelApiConfigId: defaultGeneralModel?.id ?? null,
+            isEnabled: true,
+            isDefault: true,
+          };
+        }),
       });
     }
 
-    if (sourceCount === 0 && fileConfig.rssSources.length > 0) {
+    if (shouldSeedDefaultSources && fileConfig.rssSources.length > 0) {
       await tx.source.createMany({
         data: fileConfig.rssSources.map((source) => ({
           name: source.name,
@@ -554,6 +566,7 @@ export async function getIngestionRuntimeConfig(): Promise<RuntimeConfig> {
     ingestion: {
       itemConcurrency: defaultModelConfig.ingestionItemConcurrency,
       sourceConcurrency: taskSchedule.sourceConcurrency,
+      fullTextFetchThreshold: taskSchedule.fullTextFetchThreshold,
     },
     modelApi: serializeRuntimeModelApi(defaultModelConfig),
     prompts: {

@@ -17,8 +17,9 @@ vi.mock("next/navigation", () => ({
 
 import { AdminSettingsPanel } from "@/components/admin/admin-settings-panel";
 import { ToastProvider } from "@/components/ui/toast";
+import type { AdminSettingsSnapshot } from "@/lib/settings/types";
 
-function buildInitialSettings() {
+function buildInitialSettings(): AdminSettingsSnapshot {
   return {
     modelApiConfigs: [
       {
@@ -59,6 +60,7 @@ function buildInitialSettings() {
       enabled: true,
       cronExpression: "0 * * * *",
       sourceConcurrency: 2,
+      fullTextFetchThreshold: 80,
       timezone: "Asia/Shanghai",
       lastHeartbeatAt: "2026-04-20T10:00:00.000Z",
       lastRunStartedAt: "2026-04-20T10:00:00.000Z",
@@ -424,6 +426,54 @@ describe("AdminSettingsPanel", () => {
     expect(screen.queryByText("Existing Source")).not.toBeInTheDocument();
   });
 
+  it("requires confirmation before deleting a source", async () => {
+    const user = userEvent.setup();
+    const refreshSpy = vi.fn();
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response(JSON.stringify({ ok: true })));
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderWithProviders(
+      <AdminSettingsPanel onRefresh={refreshSpy} initialSettings={buildInitialSettings()} />,
+    );
+
+    await user.click(screen.getByRole("tab", { name: "信息源" }));
+
+    const sourcesPanel = screen.getByRole("tabpanel");
+    await user.click(within(sourcesPanel).getByTitle("删除"));
+
+    const deleteDialog = screen.getByRole("dialog", { name: "确认删除信息源" });
+    expect(within(deleteDialog).getByText(/Existing Source/)).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await user.click(within(deleteDialog).getByRole("button", { name: "取消" }));
+    expect(screen.queryByRole("dialog", { name: "确认删除信息源" })).not.toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await user.click(within(sourcesPanel).getByTitle("删除"));
+    await user.click(
+      within(screen.getByRole("dialog", { name: "确认删除信息源" })).getByRole("button", {
+        name: "确认删除",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/admin/settings/sources/source-1", {
+        method: "DELETE",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({}),
+      });
+    });
+
+    await waitFor(() => {
+      expect(refreshSpy).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it("renders the Lumina-like group management list and creates a group from the header action", async () => {
     const user = userEvent.setup();
     const refreshSpy = vi.fn();
@@ -518,6 +568,7 @@ describe("AdminSettingsPanel", () => {
             enabled: false,
             cronExpression: "*/15 * * * *",
             sourceConcurrency: 4,
+            fullTextFetchThreshold: 120,
           },
         }),
       ),
@@ -541,11 +592,14 @@ describe("AdminSettingsPanel", () => {
     expect(within(taskPanel).queryByDisplayValue("已成功")).not.toBeInTheDocument();
     expect(within(taskPanel).getByLabelText("Cron 表达式")).toHaveValue("0 * * * *");
     expect(within(taskPanel).getByLabelText("源抓取并发")).toHaveValue(2);
+    expect(within(taskPanel).getByLabelText("正文补抓阈值")).toHaveValue(80);
 
     await user.clear(within(taskPanel).getByLabelText("Cron 表达式"));
     await user.type(within(taskPanel).getByLabelText("Cron 表达式"), "*/15 * * * *");
     await user.clear(within(taskPanel).getByLabelText("源抓取并发"));
     await user.type(within(taskPanel).getByLabelText("源抓取并发"), "4");
+    await user.clear(within(taskPanel).getByLabelText("正文补抓阈值"));
+    await user.type(within(taskPanel).getByLabelText("正文补抓阈值"), "120");
     await user.click(within(taskPanel).getByLabelText("启用默认抓取任务"));
     await user.click(within(taskPanel).getByRole("button", { name: "保存配置" }));
 
@@ -559,6 +613,7 @@ describe("AdminSettingsPanel", () => {
           enabled: false,
           cronExpression: "*/15 * * * *",
           sourceConcurrency: 4,
+          fullTextFetchThreshold: 120,
         }),
       });
     });

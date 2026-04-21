@@ -1,6 +1,6 @@
 import type { Item, Source } from "@prisma/client";
 
-import { createAiProvider, type AiProvider } from "@/lib/ai/provider";
+import { createAiProvider, type AiEventSignature, type AiProvider } from "@/lib/ai/provider";
 import {
   type ClusterAssignmentCandidate,
   createContentCluster,
@@ -20,8 +20,19 @@ import { createTaskAiUsageTracker } from "@/lib/tasks/ai-usage";
 import { enqueueTaskRun, updateTaskRun } from "@/lib/tasks/service";
 
 const CLUSTER_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
-const CLUSTER_CANDIDATE_LIMIT = 5;
 const clusterAssignmentQueues = new Map<string, Promise<void>>();
+const EVENT_TYPES = new Set<NonNullable<AiEventSignature["eventType"]>>([
+  "release",
+  "launch",
+  "update",
+  "funding",
+  "acquisition",
+  "partnership",
+  "policy",
+  "research",
+  "security",
+  "other",
+]);
 
 type ItemWithSource = Item & { source: Source };
 type ClusterAssignmentCoordinator = {
@@ -49,8 +60,48 @@ function buildItemSummary(item: ItemWithSource): string {
   return getDisplaySummary(item.summaryText, item.rssExcerpt, item.fullText ?? item.rssContent);
 }
 
-function buildClusterFingerprintSeed(item: ItemWithSource, options: { topicLabel?: string | null; clusterHint?: string | null }) {
-  return options.clusterHint || "";
+function normalizeStoredEventType(value: string | null | undefined): AiEventSignature["eventType"] {
+  return value && EVENT_TYPES.has(value as NonNullable<AiEventSignature["eventType"]>)
+    ? (value as NonNullable<AiEventSignature["eventType"]>)
+    : null;
+}
+
+function getItemEventSignature(item: {
+  eventType?: string | null;
+  eventSubject?: string | null;
+  eventAction?: string | null;
+  eventObject?: string | null;
+  eventDate?: string | null;
+}): AiEventSignature | null {
+  return {
+    eventType: normalizeStoredEventType(item.eventType),
+    eventSubject: item.eventSubject ?? null,
+    eventAction: item.eventAction ?? null,
+    eventObject: item.eventObject ?? null,
+    eventDate: item.eventDate ?? null,
+  };
+}
+
+function buildClusterFingerprintSeed(options: { eventSignature?: AiEventSignature | null }) {
+  const signature = options.eventSignature;
+
+  if (!signature?.eventSubject || !signature.eventObject) {
+    return "";
+  }
+
+  const eventKind = signature.eventAction || signature.eventType;
+
+  if (!eventKind) {
+    return "";
+  }
+
+  return [
+    signature.eventType || "",
+    signature.eventSubject,
+    signature.eventAction || "",
+    signature.eventObject,
+    signature.eventDate || "",
+  ].join("|");
 }
 
 function buildCandidateRange(item: ItemWithSource) {
@@ -61,7 +112,7 @@ function buildCandidateRange(item: ItemWithSource) {
 }
 
 function buildCandidateRangeKey(since: Date, until: Date) {
-  return `${since.getTime()}:${until.getTime()}:${CLUSTER_CANDIDATE_LIMIT}`;
+  return `${since.getTime()}:${until.getTime()}`;
 }
 
 function buildExactMatchKey(fingerprint: string, since: Date, until: Date) {
@@ -97,18 +148,40 @@ function rememberRecentCandidate(
     }
 
     cached.candidates = [candidate, ...cached.candidates.filter((entry) => entry.id !== candidate.id)]
-      .sort((left, right) => right.latestPublishedAt.getTime() - left.latestPublishedAt.getTime())
-      .slice(0, CLUSTER_CANDIDATE_LIMIT);
+      .sort((left, right) => right.latestPublishedAt.getTime() - left.latestPublishedAt.getTime());
   }
+}
+
+function buildEventSignatureLines(eventSignature?: AiEventSignature | null) {
+  if (!eventSignature) {
+    return [];
+  }
+
+  return [
+    eventSignature.eventType ? `事件类型：${eventSignature.eventType}` : null,
+    eventSignature.eventSubject ? `事件主体：${eventSignature.eventSubject}` : null,
+    eventSignature.eventAction ? `事件动作：${eventSignature.eventAction}` : null,
+    eventSignature.eventObject ? `关键对象：${eventSignature.eventObject}` : null,
+    eventSignature.eventDate ? `事件日期：${eventSignature.eventDate}` : null,
+  ].filter(Boolean);
+}
+
+function buildEventDisplayTitle(eventSignature?: AiEventSignature | null) {
+  if (!eventSignature?.eventSubject || !eventSignature.eventObject) {
+    return "";
+  }
+
+  const middle = eventSignature.eventAction || eventSignature.eventType || "";
+  return [eventSignature.eventSubject, middle, eventSignature.eventObject].filter(Boolean).join(" ");
 }
 
 function buildClusterMatchInput(
   item: ItemWithSource,
-  options: { topicLabel?: string | null; clusterHint?: string | null },
+  options: { eventSignature?: AiEventSignature | null },
 ): string {
   return [
     `标题：${getDisplayTitle(item.originalTitle, item.translatedTitle)}`,
-    options.clusterHint ? `聚合线索：${options.clusterHint}` : null,
+    ...buildEventSignatureLines(options.eventSignature),
     buildItemSummary(item) ? `摘要：${buildItemSummary(item)}` : null,
     `来源：${item.source.name}`,
   ]
@@ -137,22 +210,36 @@ function buildClusterFallback(clusterItems: ItemWithSource[], existingTitle?: st
   };
 }
 
+function shouldGenerateAiClusterSummary(clusterItems: ItemWithSource[], aiProvider?: AiProvider) {
+  return Boolean(aiProvider) && clusterItems.length >= 2;
+}
+
 async function generateClusterPresentation(clusterItems: ItemWithSource[], existingTitle?: string, aiProvider?: AiProvider) {
   const fallback = buildClusterFallback(clusterItems, existingTitle);
 
-  if (!aiProvider || clusterItems.length < 2) {
+  if (!shouldGenerateAiClusterSummary(clusterItems, aiProvider)) {
     return fallback;
   }
 
+  const summaryProvider = aiProvider!;
+
   try {
     const summarySeed = clusterItems
-      .slice(0, 3)
-      .map((item) => `${getDisplayTitle(item.originalTitle, item.translatedTitle)}：${buildItemSummary(item)}`)
+      .map((item, index) =>
+        [
+          `候选 ${index + 1}`,
+          `标题：${getDisplayTitle(item.originalTitle, item.translatedTitle)}`,
+          buildItemSummary(item) ? `摘要：${buildItemSummary(item)}` : null,
+          ...buildEventSignatureLines(getItemEventSignature(item)),
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      )
       .join("\n");
 
     return {
       title: fallback.title,
-      summary: (await aiProvider.summarizeCluster(summarySeed, { title: fallback.title })) || fallback.summary,
+      summary: (await summaryProvider.summarizeCluster(summarySeed, { title: fallback.title })) || fallback.summary,
     };
   } catch {
     return fallback;
@@ -162,13 +249,12 @@ async function generateClusterPresentation(clusterItems: ItemWithSource[], exist
 async function findClusterForItem(
   item: ItemWithSource,
   options: {
-    topicLabel?: string | null;
-    clusterHint?: string | null;
+    eventSignature?: AiEventSignature | null;
     aiProvider?: AiProvider;
     coordinator?: ClusterAssignmentCoordinator;
   },
 ) {
-  const fingerprintSeed = buildClusterFingerprintSeed(item, options);
+  const fingerprintSeed = buildClusterFingerprintSeed(options);
   const fingerprint = fingerprintSeed ? normalizeFingerprint(fingerprintSeed) : "";
   const { since, until } = buildCandidateRange(item);
   const rangeKey = buildCandidateRangeKey(since, until);
@@ -189,7 +275,6 @@ async function findClusterForItem(
       candidates: await findRecentActiveClusterCandidates({
         since,
         until,
-        limit: CLUSTER_CANDIDATE_LIMIT,
       }),
     };
     options.coordinator?.recentCandidates.set(rangeKey, recentCandidateEntry);
@@ -274,8 +359,7 @@ async function runWithClusterAssignmentWindowLocks<T>(keys: string[], task: () =
 export async function assignItemToCluster(
   itemId: string,
   options: {
-    topicLabel?: string | null;
-    clusterHint?: string | null;
+    eventSignature?: AiEventSignature | null;
     aiProvider?: AiProvider;
     coordinator?: ClusterAssignmentCoordinator;
   },
@@ -299,12 +383,17 @@ export async function assignItemToCluster(
       return null;
     }
 
-    const { cluster: matchedCluster, fingerprint } = await findClusterForItem(item, options);
+    const resolvedEventSignature = options.eventSignature ?? getItemEventSignature(item);
+    const { cluster: matchedCluster, fingerprint } = await findClusterForItem(item, {
+      ...options,
+      eventSignature: resolvedEventSignature,
+    });
+    const eventDisplayTitle = buildEventDisplayTitle(resolvedEventSignature);
     const cluster =
       matchedCluster ??
       (await createContentCluster({
         fingerprint: fingerprint || `single-${item.id}`,
-        title: options.clusterHint || getDisplayTitle(item.originalTitle, item.translatedTitle),
+        title: eventDisplayTitle || getDisplayTitle(item.originalTitle, item.translatedTitle),
         summary: buildItemSummary(item),
         score: item.qualityScore,
         latestPublishedAt: item.publishedAt,
@@ -343,12 +432,23 @@ export async function recomputeCluster(clusterId: string, aiProvider?: AiProvide
   const presentation = await generateClusterPresentation(cluster.items, cluster.title, aiProvider);
   const score = Math.max(...cluster.items.map((item) => item.qualityScore));
   const latestPublishedAt = cluster.items[0]!.publishedAt;
+  const nextItemCount = cluster.items.length;
+  const shouldSkipUpdate =
+    cluster.title === presentation.title &&
+    cluster.summary === presentation.summary &&
+    cluster.score === score &&
+    cluster.itemCount === nextItemCount &&
+    cluster.latestPublishedAt.getTime() === latestPublishedAt.getTime();
+
+  if (shouldSkipUpdate) {
+    return cluster;
+  }
 
   return updateClusterSummary(clusterId, {
     title: presentation.title,
     summary: presentation.summary,
     score,
-    itemCount: cluster.items.length,
+    itemCount: nextItemCount,
     latestPublishedAt,
   });
 }
@@ -404,13 +504,15 @@ export async function executeClusterSummaryTask(
     throw new Error("Task entityId is required.");
   }
 
-  const aiUsage = createTaskAiUsageTracker(1);
+  const aiUsage = createTaskAiUsageTracker(1, "cluster_summary");
+  const initialAiUsage = aiUsage.snapshot();
 
   await updateTaskRun(taskRun.id, {
     status: "running",
     progressLabel: "正在重新生成聚合摘要",
     aiCallCountActual: 0,
-    aiCallCountEstimated: aiUsage.snapshot().estimated,
+    aiCallCountEstimated: initialAiUsage.estimated,
+    aiCallBreakdown: initialAiUsage.breakdown,
   });
 
   try {
@@ -438,6 +540,7 @@ export async function executeClusterSummaryTask(
       progressLabel: "已完成聚合摘要重生成",
       aiCallCountActual: aiUsage.snapshot().actual,
       aiCallCountEstimated: aiUsage.snapshot().estimated,
+      aiCallBreakdown: aiUsage.snapshot().breakdown,
       finishedAt: new Date(),
       errorSummary: null,
     });
@@ -452,6 +555,7 @@ export async function executeClusterSummaryTask(
       progressLabel: "聚合摘要重生成失败",
       aiCallCountActual: aiUsage.snapshot().actual,
       aiCallCountEstimated: aiUsage.snapshot().estimated,
+      aiCallBreakdown: aiUsage.snapshot().breakdown,
       finishedAt: new Date(),
       errorSummary: error instanceof Error ? error.message : "Unknown cluster summary error",
     });

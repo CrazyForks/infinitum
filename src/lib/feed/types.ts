@@ -81,7 +81,6 @@ export type ReviewItemDTO = {
   moderationDetail: string | null;
   qualityScore: number;
   qualityRationale: string;
-  topicLabel: string | null;
   canRegenerateTranslation?: boolean;
 };
 

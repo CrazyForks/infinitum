@@ -249,9 +249,6 @@ function FilteredItemDetailModal({
             <div>
               <span className="text-[var(--text-3)]">质量分:</span> {item.qualityScore}
             </div>
-            <div>
-              <span className="text-[var(--text-3)]">主题:</span> {item.topicLabel ?? "未归类"}
-            </div>
           </div>
         </div>
 

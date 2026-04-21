@@ -7,6 +7,7 @@ import {
   createPromptConfig,
   deleteModelApiConfig,
   deletePromptConfig,
+  deleteSource,
   deleteSourceGroup,
   getAdminSettings,
   getIngestionRuntimeConfig,
@@ -32,6 +33,7 @@ describe("admin settings service", () => {
     expect(runtimeConfig.blacklistKeywords).toEqual([]);
     expect(runtimeConfig.ingestion.itemConcurrency).toBe(3);
     expect(runtimeConfig.ingestion.sourceConcurrency).toBe(2);
+    expect(runtimeConfig.ingestion.fullTextFetchThreshold).toBe(80);
     expect(runtimeConfig.modelApi.apiKey).toBe("");
     expect(runtimeConfig.modelApi.baseURL).toBe("");
     expect(runtimeConfig.modelApi.model).toBe("gpt-4.1-mini");
@@ -46,9 +48,25 @@ describe("admin settings service", () => {
     expect(settings.taskSchedule.key).toBe("ingestion_default");
     expect(settings.taskSchedule.cronExpression).toBe("0 * * * *");
     expect(settings.taskSchedule.sourceConcurrency).toBe(2);
+    expect(settings.taskSchedule.fullTextFetchThreshold).toBe(80);
     expect(settings.promptConfigs.find((config) => config.type === "item_analysis")?.systemPrompt).toContain(
-      "字段说明",
+      "固定输出格式",
     );
+    expect(settings.promptConfigs.find((config) => config.type === "item_analysis")).toMatchObject({
+      temperature: 0.2,
+      maxTokens: 1000,
+      topP: null,
+    });
+    expect(settings.promptConfigs.find((config) => config.type === "cluster_summary")).toMatchObject({
+      temperature: 0.2,
+      maxTokens: 300,
+      topP: null,
+    });
+    expect(settings.promptConfigs.find((config) => config.type === "cluster_match")).toMatchObject({
+      temperature: 0,
+      maxTokens: 80,
+      topP: null,
+    });
   });
 
   it("uses enabled default configs to build the runtime mapping", async () => {
@@ -68,8 +86,8 @@ describe("admin settings service", () => {
       systemPrompt: "分析系统提示词",
       prompt: "标题：{{title}}\n正文：{{inputText}}",
       temperature: 0.2,
-      maxTokens: 800,
-      topP: 1,
+      maxTokens: 1000,
+      topP: null,
       modelApiConfigId: modelConfig.id,
       isEnabled: true,
       isDefault: true,
@@ -79,8 +97,8 @@ describe("admin settings service", () => {
       type: "cluster_summary",
       systemPrompt: "聚合系统提示词",
       prompt: "主题：{{title}}\n候选内容：{{inputText}}",
-      temperature: null,
-      maxTokens: 500,
+      temperature: 0.2,
+      maxTokens: 300,
       topP: null,
       modelApiConfigId: null,
       isEnabled: true,
@@ -91,8 +109,8 @@ describe("admin settings service", () => {
       type: "cluster_match",
       systemPrompt: "归组系统提示词",
       prompt: "当前内容标题：{{title}}\n候选聚合组：{{candidatesJson}}",
-      temperature: null,
-      maxTokens: 400,
+      temperature: 0,
+      maxTokens: 80,
       topP: null,
       modelApiConfigId: null,
       isEnabled: true,
@@ -103,10 +121,13 @@ describe("admin settings service", () => {
 
     expect(runtimeConfig.ingestion.itemConcurrency).toBe(6);
     expect(runtimeConfig.ingestion.sourceConcurrency).toBe(2);
+    expect(runtimeConfig.ingestion.fullTextFetchThreshold).toBe(80);
     expect(runtimeConfig.modelApi.model).toBe("gpt-live");
     expect(runtimeConfig.selectedPromptConfigs?.itemAnalysis.systemPrompt).toBe("分析系统提示词");
     expect(runtimeConfig.selectedPromptConfigs?.itemAnalysis.modelApi?.model).toBe("gpt-live");
-    expect(runtimeConfig.selectedPromptConfigs?.clusterSummary.maxTokens).toBe(500);
+    expect(runtimeConfig.selectedPromptConfigs?.itemAnalysis.maxTokens).toBe(1000);
+    expect(runtimeConfig.selectedPromptConfigs?.clusterSummary.maxTokens).toBe(300);
+    expect(runtimeConfig.selectedPromptConfigs?.clusterMatch.maxTokens).toBe(80);
   });
 
   it("prevents deleting the default model config", async () => {
@@ -140,8 +161,8 @@ describe("admin settings service", () => {
       systemPrompt: "分析系统提示词",
       prompt: "标题：{{title}}\n正文：{{inputText}}",
       temperature: 0.2,
-      maxTokens: 800,
-      topP: 1,
+      maxTokens: 1000,
+      topP: null,
       modelApiConfigId: modelConfig.id,
       isEnabled: true,
       isDefault: true,
@@ -241,5 +262,22 @@ describe("admin settings service", () => {
         name: "Infra",
       },
     });
+  });
+
+  it("does not reseed default sources after admins delete all sources", async () => {
+    const initialSettings = await getAdminSettings();
+
+    expect(initialSettings.sources.length).toBeGreaterThan(0);
+
+    for (const source of initialSettings.sources) {
+      await deleteSource(source.id);
+    }
+
+    const sourcesAfterDeletion = await prisma.source.findMany();
+    expect(sourcesAfterDeletion).toHaveLength(0);
+
+    const settingsAfterDeletion = await getAdminSettings();
+
+    expect(settingsAfterDeletion.sources).toHaveLength(0);
   });
 });

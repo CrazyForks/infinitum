@@ -1,6 +1,7 @@
 "use client";
 
 import dayjs, { type Dayjs } from "dayjs";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import { PageShell } from "@/components/ui/page-shell";
@@ -462,6 +463,7 @@ export function FeedPanel({
   initialGroupTotalCount,
   availableSources = [],
 }: FeedPanelProps) {
+  const router = useRouter();
   const fallbackInitialPagination: FeedPagination = initialPagination ?? {
     page: 1,
     size: DEFAULT_FEED_PAGE_SIZE,
@@ -670,32 +672,39 @@ export function FeedPanel({
   };
 
   const refresh = () => {
-    if (!isAdmin) {
+    if (!isAdmin || status?.status === "running" || queuedRefreshAt) {
       return;
     }
 
     startTransition(async () => {
-      const queuedAt = new Date().toISOString();
-      const response = await fetch("/api/ingest/run", { method: "POST" });
-      const payload = (await response.json()) as {
-        taskRun?: {
-          id: string;
-        } | null;
-        error?: string;
-      };
+      try {
+        const queuedAt = new Date().toISOString();
+        const response = await fetch("/api/ingest/run", { method: "POST" });
+        const payload = (await response.json()) as {
+          taskRun?: {
+            id: string;
+          } | null;
+          error?: string;
+        };
 
-      if (payload.error) {
-        setRefreshFeedback({ tone: "error", message: payload.error });
-        return;
+        if (payload.error) {
+          setRefreshFeedback({ tone: "error", message: payload.error });
+          return;
+        }
+
+        if (!payload.taskRun) {
+          setRefreshFeedback({ tone: "error", message: "未返回后台任务信息。" });
+          return;
+        }
+
+        setQueuedRefreshAt(queuedAt);
+        setRefreshFeedback({ tone: "success", message: "抓取任务已进入队列，等待后台执行。" });
+        router.push(
+          `/admin?tab=monitoring&section=tasks&task=${encodeURIComponent(payload.taskRun.id)}`,
+        );
+      } catch {
+        setRefreshFeedback({ tone: "error", message: "创建抓取任务失败，请稍后重试。" });
       }
-
-      if (!payload.taskRun) {
-        setRefreshFeedback({ tone: "error", message: "未返回后台任务信息。" });
-        return;
-      }
-
-      setQueuedRefreshAt(queuedAt);
-      setRefreshFeedback({ tone: "success", message: "抓取任务已进入队列，等待后台执行。" });
     });
   };
 
@@ -1005,6 +1014,8 @@ export function FeedPanel({
   const hasClearableFilters = activeFilterSummary.length > 0;
   const latestRunSummary = formatRunSummary(status);
   const latestRunDetail = formatRunDetail(status);
+  const isRefreshDisabled =
+    isPending || status?.status === "running" || Boolean(queuedRefreshAt);
   return (
     <PageShell
       header={{
@@ -1058,7 +1069,7 @@ export function FeedPanel({
                   <button
                     type="button"
                     onClick={refresh}
-                    disabled={isPending}
+                    disabled={isRefreshDisabled}
                     className="lumina-home-action-button lumina-home-action-button--primary inline-flex items-center justify-center whitespace-nowrap rounded-sm bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(59,130,246,0.35)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)] disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <span className="inline-flex items-center gap-2">

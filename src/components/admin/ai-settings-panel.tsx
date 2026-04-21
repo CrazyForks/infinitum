@@ -1314,14 +1314,14 @@ export function AiSettingsPanel({ initialSettings, mode }: AiSettingsPanelProps)
 
             <div>
               <label className="mb-2 block text-sm font-medium text-[var(--text-2)]">系统提示词</label>
-              <pre className="w-full whitespace-pre-wrap rounded-lg border border-[color:var(--line)] bg-[var(--bg-muted)] p-4 text-sm font-mono text-[var(--text-1)]">
+              <pre className="w-full whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-lg border border-[color:var(--line)] bg-[var(--bg-muted)] p-4 text-sm font-mono text-[var(--text-1)]">
                 {showPromptPreview.systemPrompt || "未设置（必填）"}
               </pre>
             </div>
 
             <div>
               <label className="mb-2 block text-sm font-medium text-[var(--text-2)]">提示词</label>
-              <pre className="w-full whitespace-pre-wrap rounded-lg border border-[color:var(--line)] bg-[var(--bg-muted)] p-4 text-sm font-mono text-[var(--text-1)]">
+              <pre className="w-full whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-lg border border-[color:var(--line)] bg-[var(--bg-muted)] p-4 text-sm font-mono text-[var(--text-1)]">
                 {showPromptPreview.prompt}
               </pre>
             </div>

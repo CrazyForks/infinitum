@@ -1,6 +1,10 @@
 import type { ItemStatus, SourceConfig } from "@/lib/feed/types";
 
 import type { AiProvider } from "@/lib/ai/provider";
+import type {
+  TaskAiCallBreakdownSnapshot,
+  TaskStageTimingSnapshot,
+} from "@/lib/tasks/types";
 
 export type ParsedFeedItem = {
   title?: string | null;
@@ -32,6 +36,7 @@ export type ProcessedItemRecord = {
   status: ItemStatus;
   isNew: boolean;
   affectedClusterId?: string | null;
+  fullTextFetched?: boolean;
 };
 
 export type RunIngestionOptions = {
@@ -43,6 +48,7 @@ export type RunIngestionOptions = {
   blacklist: string[];
   itemConcurrency: number;
   sourceConcurrency: number;
+  fullTextFetchThreshold: number;
   now?: Date;
   onProgress?: (snapshot: {
     status: "running" | "succeeded" | "failed" | "partial";
@@ -51,8 +57,11 @@ export type RunIngestionOptions = {
     successCount: number;
     failureCount: number;
     itemsAdded: number;
+    fullTextFetchedCount: number;
     aiCallCountActual?: number;
     aiCallCountEstimated?: number;
+    aiCallBreakdown?: TaskAiCallBreakdownSnapshot[];
     errorSummary?: string | null;
+    stageTimings?: TaskStageTimingSnapshot[];
   }) => Promise<void> | void;
 };

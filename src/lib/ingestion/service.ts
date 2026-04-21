@@ -1,6 +1,6 @@
 import type { BackgroundTaskRun, FetchRun, FetchRunStatus } from "@prisma/client";
 
-import { createAiProvider } from "@/lib/ai/provider";
+import { createAiProvider, type AiEventSignature } from "@/lib/ai/provider";
 import { assignItemToCluster, createClusterAssignmentCoordinator, recomputeCluster } from "@/lib/clusters/service";
 import { prisma } from "@/lib/db";
 import {
@@ -23,7 +23,12 @@ import type {
   RunIngestionOptions,
 } from "@/lib/ingestion/types";
 import { getIngestionRuntimeConfig } from "@/lib/settings/service";
-import { DEFAULT_INGESTION_TASK_LABEL } from "@/lib/tasks/types";
+import { DEFAULT_FULL_TEXT_FETCH_THRESHOLD } from "@/lib/tasks/scheduler";
+import {
+  DEFAULT_INGESTION_TASK_LABEL,
+  type TaskAiCallBreakdownSnapshot,
+  type TaskStageTimingSnapshot,
+} from "@/lib/tasks/types";
 import {
   enqueueTaskRun,
   isTaskRunCancellationRequested,
@@ -45,6 +50,26 @@ type ResolvedRunOptions = RunIngestionOptions & {
 };
 
 const INGESTION_PROGRESS_FLUSH_INTERVAL_MS = 750;
+type IngestionStageTiming = {
+  key: string;
+  label: string;
+  startedAt: Date | null;
+  finishedAt: Date | null;
+  durationMs: number | null;
+};
+
+const EVENT_TYPES = new Set<NonNullable<AiEventSignature["eventType"]>>([
+  "release",
+  "launch",
+  "update",
+  "funding",
+  "acquisition",
+  "partnership",
+  "policy",
+  "research",
+  "security",
+  "other",
+]);
 
 class TaskRunCancellationError extends Error {
   snapshot: {
@@ -53,7 +78,9 @@ class TaskRunCancellationError extends Error {
     successCount: number;
     failureCount: number;
     itemsAdded: number;
+    fullTextFetchedCount: number;
     errorSummary: string | null;
+    stageTimings: TaskStageTimingSnapshot[];
   };
 
   constructor(snapshot: {
@@ -62,12 +89,55 @@ class TaskRunCancellationError extends Error {
     successCount: number;
     failureCount: number;
     itemsAdded: number;
+    fullTextFetchedCount: number;
     errorSummary: string | null;
+    stageTimings: TaskStageTimingSnapshot[];
   }) {
     super(TASK_RUN_CANCELLED_MESSAGE);
     this.name = "TaskRunCancellationError";
     this.snapshot = snapshot;
   }
+}
+
+function toTaskStageTimingSnapshot(stageTiming: IngestionStageTiming): TaskStageTimingSnapshot {
+  return {
+    key: stageTiming.key,
+    label: stageTiming.label,
+    startedAt: stageTiming.startedAt?.toISOString() ?? null,
+    finishedAt: stageTiming.finishedAt?.toISOString() ?? null,
+    durationMs: stageTiming.durationMs,
+  };
+}
+
+function createIngestionStageTracker() {
+  const stageTimings: IngestionStageTiming[] = [];
+
+  return {
+    snapshot() {
+      return stageTimings.map(toTaskStageTimingSnapshot);
+    },
+    startStage(key: string, label: string) {
+      const stageTiming: IngestionStageTiming = {
+        key,
+        label,
+        startedAt: new Date(),
+        finishedAt: null,
+        durationMs: null,
+      };
+
+      stageTimings.push(stageTiming);
+      return stageTiming;
+    },
+    finishStage(stageTiming: IngestionStageTiming) {
+      if (stageTiming.finishedAt) {
+        return;
+      }
+
+      const finishedAt = new Date();
+      stageTiming.finishedAt = finishedAt;
+      stageTiming.durationMs = stageTiming.startedAt ? finishedAt.getTime() - stageTiming.startedAt.getTime() : null;
+    },
+  };
 }
 
 function getBestContent(item: ParsedFeedItem): string {
@@ -126,6 +196,32 @@ function buildFallbackSummary(rssExcerpt: string | null, fallbackBody: string | 
   }
 
   return null;
+}
+
+function normalizeStoredEventType(value: string | null | undefined): AiEventSignature["eventType"] {
+  return value && EVENT_TYPES.has(value as NonNullable<AiEventSignature["eventType"]>)
+    ? (value as NonNullable<AiEventSignature["eventType"]>)
+    : null;
+}
+
+function readStoredEventSignature(item?: {
+  eventType?: string | null;
+  eventSubject?: string | null;
+  eventAction?: string | null;
+  eventObject?: string | null;
+  eventDate?: string | null;
+} | null): AiEventSignature | null {
+  if (!item) {
+    return null;
+  }
+
+  return {
+    eventType: normalizeStoredEventType(item.eventType),
+    eventSubject: item.eventSubject ?? null,
+    eventAction: item.eventAction ?? null,
+    eventObject: item.eventObject ?? null,
+    eventDate: item.eventDate ?? null,
+  };
 }
 
 function hasAnalysisInputsChanged(
@@ -193,6 +289,10 @@ async function resolveRunOptions(options?: Partial<RunIngestionOptions>): Promis
       options?.sourceConcurrency ??
       runtimeConfig?.ingestion.sourceConcurrency ??
       deriveSourceConcurrency(options?.itemConcurrency ?? runtimeConfig?.ingestion.itemConcurrency ?? 3),
+    fullTextFetchThreshold:
+      options?.fullTextFetchThreshold ??
+      runtimeConfig?.ingestion.fullTextFetchThreshold ??
+      DEFAULT_FULL_TEXT_FETCH_THRESHOLD,
     now,
   };
 }
@@ -236,6 +336,7 @@ async function processFeedItem({
   articleFetcher,
   aiProvider,
   clusterAssignmentCoordinator,
+  fullTextFetchThreshold,
   now,
 }: {
   item: ParsedFeedItem;
@@ -246,6 +347,7 @@ async function processFeedItem({
   articleFetcher: RunIngestionOptions["articleFetcher"];
   aiProvider: RunIngestionOptions["aiProvider"];
   clusterAssignmentCoordinator: ReturnType<typeof createClusterAssignmentCoordinator>;
+  fullTextFetchThreshold: number;
   now: Date;
 }): Promise<ProcessedItemRecord | null> {
   const originalTitle = item.title?.trim();
@@ -286,8 +388,8 @@ async function processFeedItem({
   let moderationDetail = existing?.moderationDetail ?? null;
   let qualityScore = existing?.qualityScore ?? 50;
   let qualityRationale = existing?.qualityRationale ?? "AI analysis unavailable";
-  let topicLabel = existing?.topicLabel ?? null;
-  let clusterHint: string | null = null;
+  let eventSignature: AiEventSignature | null = readStoredEventSignature(existing);
+  let fullTextFetched = false;
   const issues: string[] = [];
   const contentForFullTextDecision = fullText || rssContent || rssExcerpt || "";
   const canReuseExistingAnalysis = Boolean(
@@ -333,14 +435,24 @@ async function processFeedItem({
         moderationDetail: `Matched blacklist keyword: ${initialFilterMatch}`,
         qualityScore,
         qualityRationale,
-        topicLabel,
+        eventType: eventSignature?.eventType ?? null,
+        eventSubject: eventSignature?.eventSubject ?? null,
+        eventAction: eventSignature?.eventAction ?? null,
+        eventObject: eventSignature?.eventObject ?? null,
+        eventDate: eventSignature?.eventDate ?? null,
         aiProcessedAt: new Date(),
         clusterId: null,
         errorMessage: null,
       },
     );
 
-    return { id: stored.id, status: stored.status, isNew, affectedClusterId: existing?.clusterId ?? null };
+    return {
+      id: stored.id,
+      status: stored.status,
+      isNew,
+      affectedClusterId: existing?.clusterId ?? null,
+      fullTextFetched,
+    };
   }
 
   if (canReuseExistingAnalysis) {
@@ -372,20 +484,26 @@ async function processFeedItem({
         moderationDetail,
         qualityScore,
         qualityRationale,
-        topicLabel,
+        eventType: eventSignature?.eventType ?? null,
+        eventSubject: eventSignature?.eventSubject ?? null,
+        eventAction: eventSignature?.eventAction ?? null,
+        eventObject: eventSignature?.eventObject ?? null,
+        eventDate: eventSignature?.eventDate ?? null,
         aiProcessedAt: existing?.aiProcessedAt,
         clusterId: existing?.clusterId ?? null,
         errorMessage: null,
       },
     );
 
-    return { id: stored.id, status: stored.status, isNew };
+    return { id: stored.id, status: stored.status, isNew, fullTextFetched };
   }
 
-  if (!fullText && shouldFetchFullText(contentForFullTextDecision, fetchFullTextWhenMissing)) {
+  if (!fullText && shouldFetchFullText(contentForFullTextDecision, fetchFullTextWhenMissing, fullTextFetchThreshold)) {
     try {
-      fullText = await articleFetcher(originalUrl);
+      const fetchedFullText = await articleFetcher(originalUrl);
+      fullText = fetchedFullText;
       status = "fetched";
+      fullTextFetched = Boolean(fetchedFullText && fetchedFullText.trim());
     } catch (error) {
       appendIssue(issues, error, "Unknown article fetch error");
     }
@@ -424,8 +542,7 @@ async function processFeedItem({
       moderationDetail = enrichment.moderationDetail;
       qualityScore = enrichment.qualityScore;
       qualityRationale = enrichment.qualityRationale;
-      topicLabel = enrichment.topicLabel;
-      clusterHint = enrichment.clusterHint;
+      eventSignature = enrichment.eventSignature;
     } catch (error) {
       appendIssue(issues, error, "Unknown ai enrichment error");
       moderationStatus = "allowed";
@@ -433,8 +550,7 @@ async function processFeedItem({
       moderationDetail = null;
       qualityScore = 50;
       qualityRationale = "AI analysis unavailable";
-      topicLabel = null;
-      clusterHint = null;
+      eventSignature = null;
     }
 
     if (!summaryText) {
@@ -472,7 +588,11 @@ async function processFeedItem({
       moderationDetail,
       qualityScore,
       qualityRationale,
-      topicLabel,
+      eventType: eventSignature?.eventType ?? null,
+      eventSubject: eventSignature?.eventSubject ?? null,
+      eventAction: eventSignature?.eventAction ?? null,
+      eventObject: eventSignature?.eventObject ?? null,
+      eventDate: eventSignature?.eventDate ?? null,
       aiProcessedAt: new Date(),
       clusterId: moderationStatus === "filtered" ? null : existing?.clusterId ?? null,
       errorMessage: issues.length > 0 ? issues.join(" | ") : null,
@@ -488,8 +608,7 @@ async function processFeedItem({
     }
   } else {
     const clusterId = await assignItemToCluster(stored.id, {
-      topicLabel,
-      clusterHint,
+      eventSignature,
       aiProvider,
       coordinator: clusterAssignmentCoordinator,
     });
@@ -498,7 +617,7 @@ async function processFeedItem({
     }
   }
 
-  return { id: stored.id, status: stored.status, isNew, affectedClusterId };
+  return { id: stored.id, status: stored.status, isNew, affectedClusterId, fullTextFetched };
 }
 
 async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
@@ -510,9 +629,11 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
     blacklist,
     itemConcurrency,
     sourceConcurrency,
+    fullTextFetchThreshold,
     now,
   } = options;
-  const sources = await syncSources(sourceConfigs);
+  const stageTracker = createIngestionStageTracker();
+  let sources: Awaited<ReturnType<typeof syncSources>> = [];
   const aiUsage = createTaskAiUsageTracker();
   const trackedAiProvider = aiUsage.wrapProvider(aiProvider);
   const preparedItems: PreparedFeedItem[] = [];
@@ -520,6 +641,7 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
   let successCount = 0;
   let failureCount = 0;
   let itemsAdded = 0;
+  let fullTextFetchedCount = 0;
   let cancellationRequested = false;
   const affectedClusterIds = new Set<string>();
   const clusterAssignmentCoordinator = createClusterAssignmentCoordinator();
@@ -529,8 +651,20 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
     successCount,
     failureCount,
     itemsAdded,
+    fullTextFetchedCount,
     errorSummary: errors.length > 0 ? errors.join(" | ") : null,
+    stageTimings: stageTracker.snapshot(),
   });
+  const emitTaskProgress = async (status: FetchRunStatus | "running") => {
+    const aiUsageSnapshot = aiUsage.snapshot();
+    await options.onProgress?.({
+      status,
+      ...getProgressSnapshot(),
+      aiCallCountActual: aiUsageSnapshot.actual,
+      aiCallCountEstimated: aiUsageSnapshot.estimated,
+      aiCallBreakdown: aiUsageSnapshot.breakdown,
+    });
+  };
   const checkCancellation = async () => {
     if (!run.taskRunId || cancellationRequested) {
       return cancellationRequested;
@@ -545,31 +679,38 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
     }
   };
 
-  await runWithConcurrency(
-    sources.map((source) => async () => {
-      await throwIfCancellationRequested();
+  const sourceSyncStage = stageTracker.startStage("source_sync", "信息源同步");
 
-      try {
-        const feed = await parser.parseURL(source.rssUrl);
+  try {
+    sources = await syncSources(sourceConfigs);
+    await runWithConcurrency(
+      sources.map((source) => async () => {
+        await throwIfCancellationRequested();
 
-        for (const item of feed.items ?? []) {
-          preparedItems.push({
-            item,
-            sourceId: source.id,
-            sourceName: source.name,
-            fetchFullTextWhenMissing: source.fetchFullTextWhenMissing,
-          });
+        try {
+          const feed = await parser.parseURL(source.rssUrl);
+
+          for (const item of feed.items ?? []) {
+            preparedItems.push({
+              item,
+              sourceId: source.id,
+              sourceName: source.name,
+              fetchFullTextWhenMissing: source.fetchFullTextWhenMissing,
+            });
+          }
+        } catch (error) {
+          errors.push(`${source.name}: ${error instanceof Error ? error.message : "Unknown feed error"}`);
+          failureCount += 1;
         }
-      } catch (error) {
-        errors.push(`${source.name}: ${error instanceof Error ? error.message : "Unknown feed error"}`);
-        failureCount += 1;
-      }
-    }),
-    sourceConcurrency,
-    {
-      shouldStop: checkCancellation,
-    },
-  );
+      }),
+      sourceConcurrency,
+      {
+        shouldStop: checkCancellation,
+      },
+    );
+  } finally {
+    stageTracker.finishStage(sourceSyncStage);
+  }
 
   aiUsage.setEstimated(preparedItems.filter((preparedItem) => willRequireAiAnalysis(preparedItem, blacklist)).length);
 
@@ -581,17 +722,7 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
     itemsAdded,
     errorSummary: errors.length > 0 ? errors.join(" | ") : null,
   });
-  await options.onProgress?.({
-    status: "running",
-    sourceCount: sources.length,
-    itemCount: preparedItems.length,
-    successCount,
-    failureCount,
-    itemsAdded,
-    aiCallCountActual: aiUsage.snapshot().actual,
-    aiCallCountEstimated: aiUsage.snapshot().estimated,
-    errorSummary: errors.length > 0 ? errors.join(" | ") : null,
-  });
+  await emitTaskProgress("running");
 
   await throwIfCancellationRequested();
 
@@ -607,17 +738,7 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
       itemsAdded,
       errorSummary: errors.length > 0 ? errors.join(" | ") : null,
     });
-    await options.onProgress?.({
-      status,
-      sourceCount: sources.length,
-      itemCount: preparedItems.length,
-      successCount,
-      failureCount,
-      itemsAdded,
-      aiCallCountActual: aiUsage.snapshot().actual,
-      aiCallCountEstimated: aiUsage.snapshot().estimated,
-      errorSummary: errors.length > 0 ? errors.join(" | ") : null,
-    });
+    await emitTaskProgress(status);
   };
   let progressChain = Promise.resolve();
   const enqueueProgressUpdate = (
@@ -640,6 +761,10 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
         }
       }
 
+      if (result?.fullTextFetched) {
+        fullTextFetchedCount += 1;
+      }
+
       // Collect affected clusters for batch recomputation
       if (result?.affectedClusterId) {
         affectedClusterIds.add(result.affectedClusterId);
@@ -659,44 +784,56 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
     return progressChain;
   };
 
-  await runWithConcurrency(
-    preparedItems.map((preparedItem) => async () => {
-      try {
-        const result = await processFeedItem({
-          ...preparedItem,
-          blacklist,
-          articleFetcher,
-          aiProvider: trackedAiProvider,
-          clusterAssignmentCoordinator,
-          now,
-        });
+  const itemProcessingStage = stageTracker.startStage("item_processing", "内容处理");
+  try {
+    await runWithConcurrency(
+      preparedItems.map((preparedItem) => async () => {
+        try {
+          const result = await processFeedItem({
+            ...preparedItem,
+            blacklist,
+            articleFetcher,
+            aiProvider: trackedAiProvider,
+            clusterAssignmentCoordinator,
+            fullTextFetchThreshold,
+            now,
+          });
 
-        await enqueueProgressUpdate(result);
-      } catch (error) {
-        const message =
-          error instanceof Error
-            ? `${preparedItem.sourceName}: ${preparedItem.item.title ?? "Untitled item"}: ${error.message}`
-            : `${preparedItem.sourceName}: Unknown item processing error`;
-        await enqueueProgressUpdate(null, message);
-      }
-    }),
-    itemConcurrency,
-    {
-      shouldStop: checkCancellation,
-    },
-  );
+          await enqueueProgressUpdate(result);
+        } catch (error) {
+          const message =
+            error instanceof Error
+              ? `${preparedItem.sourceName}: ${preparedItem.item.title ?? "Untitled item"}: ${error.message}`
+              : `${preparedItem.sourceName}: Unknown item processing error`;
+          await enqueueProgressUpdate(null, message);
+        }
+      }),
+      itemConcurrency,
+      {
+        shouldStop: checkCancellation,
+      },
+    );
 
-  await enqueueProgressUpdate(null, undefined, { forceFlush: true });
-  await progressChain;
+    await enqueueProgressUpdate(null, undefined, { forceFlush: true });
+    await progressChain;
+  } finally {
+    stageTracker.finishStage(itemProcessingStage);
+  }
   await throwIfCancellationRequested();
 
-  // Recompute only affected clusters instead of all clusters
-  await runWithConcurrency(
-    [...affectedClusterIds].map((clusterId) => async () => {
-      await recomputeCluster(clusterId, trackedAiProvider);
-    }),
-    Math.max(1, Math.min(3, sourceConcurrency)),
-  );
+  const clusterFinalizeStage = stageTracker.startStage("cluster_finalize", "聚合收尾");
+  await emitTaskProgress("running");
+  try {
+    // Recompute only affected clusters instead of all clusters
+    await runWithConcurrency(
+      [...affectedClusterIds].map((clusterId) => async () => {
+        await recomputeCluster(clusterId, trackedAiProvider);
+      }),
+      Math.max(1, Math.min(3, sourceConcurrency)),
+    );
+  } finally {
+    stageTracker.finishStage(clusterFinalizeStage);
+  }
 
   const status: FetchRunStatus =
     errors.length > 0 || failureCount > 0
@@ -723,9 +860,12 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
     successCount: completedRun.successCount,
     failureCount: completedRun.failureCount,
     itemsAdded: completedRun.itemsAdded,
+    fullTextFetchedCount,
     aiCallCountActual: aiUsage.snapshot().actual,
     aiCallCountEstimated: aiUsage.snapshot().estimated,
+    aiCallBreakdown: aiUsage.snapshot().breakdown,
     errorSummary: completedRun.errorSummary,
+    stageTimings: stageTracker.snapshot(),
   });
 
   return completedRun;
@@ -756,7 +896,9 @@ async function runExistingFetchRun(run: FetchRun, options: ResolvedRunOptions) {
         successCount: cancelledRun.successCount,
         failureCount: cancelledRun.failureCount,
         itemsAdded: cancelledRun.itemsAdded,
+        fullTextFetchedCount: error.snapshot.fullTextFetchedCount,
         errorSummary: cancelledRun.errorSummary,
+        stageTimings: error.snapshot.stageTimings,
       });
 
       invalidateFeedCache();
@@ -781,6 +923,7 @@ async function runExistingFetchRun(run: FetchRun, options: ResolvedRunOptions) {
       successCount: failedRun.successCount,
       failureCount: failedRun.failureCount,
       itemsAdded: failedRun.itemsAdded,
+      fullTextFetchedCount: 0,
       errorSummary: failedRun.errorSummary,
     });
 
@@ -822,16 +965,19 @@ function buildTaskProgressLabel(snapshot: {
   successCount: number;
   failureCount: number;
   itemCount: number;
+  fullTextFetchedCount?: number;
 }) {
+  const fullTextFetchedLabel = `，正文补抓 ${snapshot.fullTextFetchedCount ?? 0} 篇`;
+
   if (snapshot.sourceCount === 0) {
     return "正在同步信息源列表";
   }
 
   if (snapshot.itemCount === 0) {
-    return `已同步 ${snapshot.sourceCount} 个源，暂无可处理内容，失败 ${snapshot.failureCount} 项`;
+    return `已同步 ${snapshot.sourceCount} 个源，暂无可处理内容，失败 ${snapshot.failureCount} 项${fullTextFetchedLabel}`;
   }
 
-  return `已处理 ${snapshot.successCount + snapshot.failureCount}/${snapshot.itemCount} 条内容，来自 ${snapshot.sourceCount} 个源，失败 ${snapshot.failureCount} 项`;
+  return `已处理 ${snapshot.successCount + snapshot.failureCount}/${snapshot.itemCount} 条内容，来自 ${snapshot.sourceCount} 个源，失败 ${snapshot.failureCount} 项${fullTextFetchedLabel}`;
 }
 
 export async function runIngestionTask(taskRun: BackgroundTaskRun, options?: Partial<RunIngestionOptions>) {
@@ -843,13 +989,18 @@ export async function runIngestionTask(taskRun: BackgroundTaskRun, options?: Par
   const run = await createFetchRun(triggerType, resolvedOptions.now, taskRun.id);
   let latestAiCallCountActual = 0;
   let latestAiCallCountEstimated = 0;
+  let latestAiCallBreakdown: TaskAiCallBreakdownSnapshot[] = [];
+  let latestStageTimings: TaskStageTimingSnapshot[] = [];
+  let latestFullTextFetchedCount = 0;
 
   await updateTaskRun(taskRun.id, {
     status: "running",
     startedAt: run.startedAt,
     progressLabel: "正在同步信息源列表",
+    fullTextFetchedCount: 0,
     aiCallCountActual: 0,
     aiCallCountEstimated: 0,
+    aiCallBreakdown: [],
   });
 
   const completedRun = await runExistingFetchRun(run, {
@@ -857,15 +1008,21 @@ export async function runIngestionTask(taskRun: BackgroundTaskRun, options?: Par
     onProgress: async (snapshot) => {
       latestAiCallCountActual = snapshot.aiCallCountActual ?? latestAiCallCountActual;
       latestAiCallCountEstimated = snapshot.aiCallCountEstimated ?? latestAiCallCountEstimated;
+      latestAiCallBreakdown = snapshot.aiCallBreakdown ?? latestAiCallBreakdown;
+      latestStageTimings = snapshot.stageTimings ?? latestStageTimings;
+      latestFullTextFetchedCount = snapshot.fullTextFetchedCount;
       await updateTaskRun(taskRun.id, {
         status: snapshot.status,
         progressCurrent: snapshot.successCount + snapshot.failureCount,
         progressTotal: snapshot.itemCount,
         progressLabel: buildTaskProgressLabel(snapshot),
         itemsAdded: snapshot.itemsAdded,
+        fullTextFetchedCount: snapshot.fullTextFetchedCount,
         aiCallCountActual: latestAiCallCountActual,
         aiCallCountEstimated: latestAiCallCountEstimated,
+        aiCallBreakdown: latestAiCallBreakdown,
         errorSummary: snapshot.errorSummary ?? null,
+        stageTimings: snapshot.stageTimings ?? [],
         finishedAt:
           snapshot.status === "running"
             ? null
@@ -879,11 +1036,19 @@ export async function runIngestionTask(taskRun: BackgroundTaskRun, options?: Par
     progressCurrent: completedRun.successCount + completedRun.failureCount,
     progressTotal: completedRun.itemCount,
     progressLabel:
-      completedRun.errorSummary === TASK_RUN_CANCELLED_MESSAGE ? TASK_RUN_CANCELLED_LABEL : buildTaskProgressLabel(completedRun),
+      completedRun.errorSummary === TASK_RUN_CANCELLED_MESSAGE
+        ? TASK_RUN_CANCELLED_LABEL
+        : buildTaskProgressLabel({
+            ...completedRun,
+            fullTextFetchedCount: latestFullTextFetchedCount,
+          }),
     itemsAdded: completedRun.itemsAdded,
+    fullTextFetchedCount: latestFullTextFetchedCount,
     aiCallCountActual: latestAiCallCountActual,
     aiCallCountEstimated: latestAiCallCountEstimated,
+    aiCallBreakdown: latestAiCallBreakdown,
     errorSummary: completedRun.errorSummary ?? null,
+    stageTimings: latestStageTimings,
     finishedAt: completedRun.finishedAt,
   });
 

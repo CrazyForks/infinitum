@@ -47,6 +47,7 @@ export type AdminSettingsSnapshot = {
     enabled: boolean;
     cronExpression: string;
     sourceConcurrency: number;
+    fullTextFetchThreshold: number;
     timezone: string;
     lastHeartbeatAt: string | null;
     lastRunStartedAt: string | null;
