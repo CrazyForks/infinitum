@@ -74,6 +74,7 @@ describe("/api/admin/settings", () => {
         key: "ingestion_default",
         enabled: true,
         cronExpression: "0 * * * *",
+        sourceConcurrency: 2,
         timezone: "Asia/Shanghai",
         lastHeartbeatAt: "2026-04-20T10:00:00.000Z",
         lastRunStartedAt: "2026-04-20T10:00:00.000Z",

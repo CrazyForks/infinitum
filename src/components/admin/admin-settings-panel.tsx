@@ -14,7 +14,11 @@ import { TextArea } from "@/components/ui/text-area";
 import { TextInput } from "@/components/ui/text-input";
 import { useToast } from "@/components/ui/toast";
 import type { AdminSettingsSnapshot } from "@/lib/settings/types";
-import { DEFAULT_SCHEDULE_TIMEZONE } from "@/lib/tasks/scheduler";
+import {
+  DEFAULT_SCHEDULE_TIMEZONE,
+  MAX_SOURCE_CONCURRENCY,
+  MIN_SOURCE_CONCURRENCY,
+} from "@/lib/tasks/scheduler";
 import { cx } from "@/lib/ui/cx";
 
 type AdminSettingsPanelProps = {
@@ -118,6 +122,8 @@ export function AdminSettingsPanel({
   const [taskScheduleCronExpression, setTaskScheduleCronExpression] = useState(
     initialSettings.taskSchedule.cronExpression,
   );
+  const [taskScheduleSourceConcurrency, setTaskScheduleSourceConcurrency] =
+    useState(String(initialSettings.taskSchedule.sourceConcurrency));
   const [taskScheduleSnapshot, setTaskScheduleSnapshot] = useState(
     initialSettings.taskSchedule,
   );
@@ -349,6 +355,23 @@ export function AdminSettingsPanel({
   };
 
   const saveTaskSchedule = () => {
+    const parsedSourceConcurrency = Number.parseInt(
+      taskScheduleSourceConcurrency.trim(),
+      10,
+    );
+
+    if (
+      !Number.isInteger(parsedSourceConcurrency) ||
+      parsedSourceConcurrency < MIN_SOURCE_CONCURRENCY ||
+      parsedSourceConcurrency > MAX_SOURCE_CONCURRENCY
+    ) {
+      showToast(
+        `源抓取并发需为 ${MIN_SOURCE_CONCURRENCY}-${MAX_SOURCE_CONCURRENCY} 的整数。`,
+        "error",
+      );
+      return;
+    }
+
     startTransition(async () => {
       try {
         const response = await fetch("/api/admin/monitor/schedule/ingestion-default", {
@@ -359,6 +382,7 @@ export function AdminSettingsPanel({
           body: JSON.stringify({
             enabled: taskScheduleEnabled,
             cronExpression: taskScheduleCronExpression,
+            sourceConcurrency: parsedSourceConcurrency,
           }),
         });
         const payload = (await response.json()) as {
@@ -374,6 +398,7 @@ export function AdminSettingsPanel({
         setTaskScheduleSnapshot(payload.schedule);
         setTaskScheduleEnabled(payload.schedule.enabled);
         setTaskScheduleCronExpression(payload.schedule.cronExpression);
+        setTaskScheduleSourceConcurrency(String(payload.schedule.sourceConcurrency));
         showToast("任务配置已保存。", "success");
       } catch {
         showToast("任务配置保存失败。", "error");
@@ -382,7 +407,8 @@ export function AdminSettingsPanel({
   };
   const taskScheduleIsDirty =
     taskScheduleEnabled !== taskScheduleSnapshot.enabled ||
-    taskScheduleCronExpression.trim() !== taskScheduleSnapshot.cronExpression;
+    taskScheduleCronExpression.trim() !== taskScheduleSnapshot.cronExpression ||
+    taskScheduleSourceConcurrency.trim() !== String(taskScheduleSnapshot.sourceConcurrency);
 
   const content = (
     <section aria-label="后台设置工作台" className="space-y-4">
@@ -919,7 +945,7 @@ export function AdminSettingsPanel({
                   任务配置
                 </h2>
                 <p className="text-sm text-[var(--text-3)]">
-                  配置抓取任务的启用状态与 Cron 调度表达式
+                  配置抓取任务的启用状态、Cron 调度表达式与信息源抓取并发
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -935,7 +961,7 @@ export function AdminSettingsPanel({
             </div>
 
             <div className="space-y-6">
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-[220px_minmax(0,1fr)] md:items-start">
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-[220px_minmax(0,1fr)_220px] lg:items-start">
                 <div className="space-y-1.5">
                   <div className="block text-sm text-[var(--muted)]">任务开关</div>
                   <label className="flex min-h-10 items-center gap-2 rounded-sm border border-[color:var(--line)] bg-[var(--surface)] px-3 text-sm text-[var(--text-2)]">
@@ -963,9 +989,26 @@ export function AdminSettingsPanel({
                     onChange={(event) => setTaskScheduleCronExpression(event.target.value)}
                     placeholder="例如 0 * * * *"
                   />
-                  <div className="text-xs text-[var(--text-3)]">
-                    示例：`0 * * * *` 表示每小时执行一次，`*/15 * * * *` 表示每 15 分钟执行一次。
-                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label
+                    htmlFor="task-schedule-source-concurrency"
+                    className="block text-sm text-[var(--muted)]"
+                  >
+                    源抓取并发
+                  </label>
+                  <TextInput
+                    id="task-schedule-source-concurrency"
+                    type="number"
+                    inputMode="numeric"
+                    min={MIN_SOURCE_CONCURRENCY}
+                    max={MAX_SOURCE_CONCURRENCY}
+                    step={1}
+                    value={taskScheduleSourceConcurrency}
+                    onChange={(event) => setTaskScheduleSourceConcurrency(event.target.value)}
+                    placeholder="例如 2"
+                  />
                 </div>
               </div>
 

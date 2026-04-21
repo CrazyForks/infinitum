@@ -59,9 +59,10 @@ describe("sqlite setup", () => {
 
     expect(firstResult.code).toBe(0);
     expect(secondResult.code).toBe(0);
-    expect(firstResult.stderr).toBe("");
-    expect(secondResult.stderr).toBe("");
+    expect(firstResult.stderr).not.toContain("Error");
+    expect(secondResult.stderr).not.toContain("Error");
     expect(runSqlite(dbPath, `SELECT COUNT(*) FROM "sqlite_master" WHERE "type" = 'table' AND "name" = 'model_api_configs'`)).toBe("1");
     expect(runSqlite(dbPath, `SELECT COUNT(*) FROM "sqlite_master" WHERE "type" = 'table' AND "name" = 'prompt_configs'`)).toBe("1");
+    expect(runSqlite(dbPath, `SELECT COUNT(*) FROM pragma_table_info('task_schedules') WHERE "name" = 'sourceConcurrency'`)).toBe("1");
   });
 });

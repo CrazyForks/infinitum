@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 const args = process.argv.slice(2);
@@ -13,13 +13,44 @@ if (!dbPathArg) {
 const root = process.cwd();
 const dbPath = path.resolve(root, dbPathArg);
 const dbDir = path.dirname(dbPath);
-const sql = readFileSync(path.resolve(root, "prisma/init.sql"), "utf8");
 const lockPath = `${dbPath}.setup.lock`;
 const lockTimeoutMs = Number.parseInt(process.env.SQLITE_SETUP_LOCK_TIMEOUT_MS || "30000", 10);
 const staleLockMs = Number.parseInt(process.env.SQLITE_SETUP_STALE_LOCK_MS || "120000", 10);
 const testHoldMs = Number.parseInt(process.env.SQLITE_SETUP_LOCK_HOLD_MS || "0", 10);
 const sleepBuffer = new SharedArrayBuffer(4);
 const sleepView = new Int32Array(sleepBuffer);
+
+function resolvePrismaCliPath() {
+  const cliFileName = process.platform === "win32" ? "prisma.cmd" : "prisma";
+  const cliPath = path.resolve(root, "node_modules", ".bin", cliFileName);
+
+  if (!existsSync(cliPath)) {
+    throw new Error(`Prisma CLI not found at ${cliPath}`);
+  }
+
+  return cliPath;
+}
+
+function loadSchemaSql() {
+  const prismaSchemaPath = path.resolve(root, "prisma", "schema.prisma");
+
+  return execFileSync(
+    resolvePrismaCliPath(),
+    ["migrate", "diff", "--from-empty", "--to-schema-datamodel", prismaSchemaPath, "--script"],
+    {
+      cwd: root,
+      encoding: "utf8",
+      env: process.env,
+    },
+  );
+}
+
+function makeSqliteSchemaIdempotent(sql) {
+  return sql
+    .replace(/^CREATE TABLE /gm, "CREATE TABLE IF NOT EXISTS ")
+    .replace(/^CREATE UNIQUE INDEX /gm, "CREATE UNIQUE INDEX IF NOT EXISTS ")
+    .replace(/^CREATE INDEX /gm, "CREATE INDEX IF NOT EXISTS ");
+}
 
 function runSqlite(commandArgs, options = {}) {
   return execFileSync("sqlite3", commandArgs, {
@@ -91,6 +122,7 @@ try {
     rmSync(dbPath, { force: true });
   }
 
+  const sql = makeSqliteSchemaIdempotent(loadSchemaSql());
   runSqlite([dbPath], {
     input: sql,
   });

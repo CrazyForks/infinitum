@@ -4,6 +4,9 @@ import type { ScheduleUpdateInput } from "@/lib/tasks/types";
 
 export const DEFAULT_SCHEDULE_TIMEZONE = "Asia/Shanghai";
 export const DEFAULT_SCHEDULE_CRON_EXPRESSION = "0 * * * *";
+export const DEFAULT_SOURCE_CONCURRENCY = 2;
+export const MIN_SOURCE_CONCURRENCY = 1;
+export const MAX_SOURCE_CONCURRENCY = 10;
 
 export function normalizeScheduleInput(input: ScheduleUpdateInput): ScheduleUpdateInput {
   const cronExpression = input.cronExpression.trim();
@@ -17,9 +20,20 @@ export function normalizeScheduleInput(input: ScheduleUpdateInput): ScheduleUpda
     tz: DEFAULT_SCHEDULE_TIMEZONE,
   });
 
+  if (
+    !Number.isInteger(input.sourceConcurrency) ||
+    input.sourceConcurrency < MIN_SOURCE_CONCURRENCY ||
+    input.sourceConcurrency > MAX_SOURCE_CONCURRENCY
+  ) {
+    throw new Error(
+      `Source concurrency must be an integer between ${MIN_SOURCE_CONCURRENCY} and ${MAX_SOURCE_CONCURRENCY}.`,
+    );
+  }
+
   return {
     enabled: input.enabled,
     cronExpression,
+    sourceConcurrency: input.sourceConcurrency,
   };
 }
 

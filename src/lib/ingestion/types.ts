@@ -42,6 +42,7 @@ export type RunIngestionOptions = {
   sourceConfigs: SourceConfig[];
   blacklist: string[];
   itemConcurrency: number;
+  sourceConcurrency: number;
   now?: Date;
   onProgress?: (snapshot: {
     status: "running" | "succeeded" | "failed" | "partial";

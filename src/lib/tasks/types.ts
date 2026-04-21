@@ -17,6 +17,7 @@ export type BackgroundTaskRunStatus = "queued" | "running" | "succeeded" | "fail
 export type ScheduleUpdateInput = {
   enabled: boolean;
   cronExpression: string;
+  sourceConcurrency: number;
 };
 
 export type EnqueueTaskRunInput = {
@@ -49,6 +50,7 @@ export type TaskScheduleSnapshot = {
   key: DefaultIngestionScheduleKey;
   enabled: boolean;
   cronExpression: string;
+  sourceConcurrency: number;
   timezone: string;
   lastHeartbeatAt: string | null;
   lastRunStartedAt: string | null;

@@ -38,6 +38,7 @@ describe("/api/admin/monitor", () => {
         key: "ingestion_default",
         enabled: true,
         cronExpression: "0 * * * *",
+        sourceConcurrency: 2,
         timezone: "Asia/Shanghai",
         lastHeartbeatAt: "2026-04-12T00:00:00.000Z",
         lastRunStartedAt: null,
@@ -66,6 +67,7 @@ describe("/api/admin/monitor", () => {
       key: "ingestion_default",
       enabled: false,
       cronExpression: "*/15 * * * *",
+      sourceConcurrency: 4,
       timezone: "Asia/Shanghai",
       lastHeartbeatAt: null,
       lastRunStartedAt: null,
@@ -78,7 +80,7 @@ describe("/api/admin/monitor", () => {
     const response = await PATCH(
       new Request("http://localhost/api/admin/monitor/schedule/ingestion-default", {
         method: "PATCH",
-        body: JSON.stringify({ enabled: false, cronExpression: "*/15 * * * *" }),
+        body: JSON.stringify({ enabled: false, cronExpression: "*/15 * * * *", sourceConcurrency: 4 }),
         headers: { "content-type": "application/json" },
       }),
     );
@@ -88,9 +90,11 @@ describe("/api/admin/monitor", () => {
     expect(updateDefaultIngestionSchedule).toHaveBeenCalledWith({
       enabled: false,
       cronExpression: "*/15 * * * *",
+      sourceConcurrency: 4,
     });
     expect(json.schedule.enabled).toBe(false);
     expect(json.schedule.cronExpression).toBe("*/15 * * * *");
+    expect(json.schedule.sourceConcurrency).toBe(4);
   });
 
   it("requests cancellation for a running task", async () => {

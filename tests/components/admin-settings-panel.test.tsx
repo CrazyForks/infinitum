@@ -58,6 +58,7 @@ function buildInitialSettings() {
       key: "ingestion_default",
       enabled: true,
       cronExpression: "0 * * * *",
+      sourceConcurrency: 2,
       timezone: "Asia/Shanghai",
       lastHeartbeatAt: "2026-04-20T10:00:00.000Z",
       lastRunStartedAt: "2026-04-20T10:00:00.000Z",
@@ -516,6 +517,7 @@ describe("AdminSettingsPanel", () => {
             ...buildInitialSettings().taskSchedule,
             enabled: false,
             cronExpression: "*/15 * * * *",
+            sourceConcurrency: 4,
           },
         }),
       ),
@@ -538,9 +540,12 @@ describe("AdminSettingsPanel", () => {
     expect(within(taskPanel).queryByDisplayValue("调度器在线")).not.toBeInTheDocument();
     expect(within(taskPanel).queryByDisplayValue("已成功")).not.toBeInTheDocument();
     expect(within(taskPanel).getByLabelText("Cron 表达式")).toHaveValue("0 * * * *");
+    expect(within(taskPanel).getByLabelText("源抓取并发")).toHaveValue(2);
 
     await user.clear(within(taskPanel).getByLabelText("Cron 表达式"));
     await user.type(within(taskPanel).getByLabelText("Cron 表达式"), "*/15 * * * *");
+    await user.clear(within(taskPanel).getByLabelText("源抓取并发"));
+    await user.type(within(taskPanel).getByLabelText("源抓取并发"), "4");
     await user.click(within(taskPanel).getByLabelText("启用默认抓取任务"));
     await user.click(within(taskPanel).getByRole("button", { name: "保存配置" }));
 
@@ -553,6 +558,7 @@ describe("AdminSettingsPanel", () => {
         body: JSON.stringify({
           enabled: false,
           cronExpression: "*/15 * * * *",
+          sourceConcurrency: 4,
         }),
       });
     });

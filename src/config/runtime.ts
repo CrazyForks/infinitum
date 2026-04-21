@@ -12,6 +12,7 @@ export type RuntimeConfig = {
   blacklistKeywords: string[];
   ingestion: {
     itemConcurrency: number;
+    sourceConcurrency: number;
   };
   modelApi: {
     apiKey: string;
@@ -60,6 +61,7 @@ export function getRuntimeConfig(): RuntimeConfig {
     blacklistKeywords: [...DEFAULT_BLACKLIST_KEYWORDS],
     ingestion: {
       itemConcurrency: 3,
+      sourceConcurrency: 2,
     },
     modelApi: {
       apiKey: "",

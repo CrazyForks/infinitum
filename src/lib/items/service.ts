@@ -3,6 +3,7 @@ import type { Item } from "@prisma/client";
 import { createAiProvider, type AiProvider } from "@/lib/ai/provider";
 import { assignItemToCluster, recomputeCluster } from "@/lib/clusters/service";
 import { prisma } from "@/lib/db";
+import { invalidateFeedCache } from "@/lib/feed/cache";
 import { shouldTranslateTitle, stripHtmlTags } from "@/lib/feed/presentation";
 import { getIngestionRuntimeConfig } from "@/lib/settings/service";
 import { createTaskAiUsageTracker } from "@/lib/tasks/ai-usage";
@@ -94,6 +95,8 @@ export async function regenerateItemContent(
     if (item.clusterId) {
       await recomputeCluster(item.clusterId, aiProvider);
     }
+
+    invalidateFeedCache();
   } catch (error) {
     await prisma.item.update({
       where: { id: item.id },
@@ -173,6 +176,7 @@ export async function restoreFilteredItem(itemId: string, options?: Regeneration
     clusterHint: null,
     aiProvider: options?.aiProvider,
   });
+  invalidateFeedCache();
 
   return prisma.item.findUniqueOrThrow({
     where: { id: restored.id },
@@ -236,6 +240,8 @@ export async function reanalyzeItem(itemId: string, options?: RegenerationOption
   if (previousClusterId && previousClusterId !== updated.clusterId) {
     await recomputeCluster(previousClusterId, aiProvider);
   }
+
+  invalidateFeedCache();
 
   return prisma.item.findUniqueOrThrow({
     where: { id: updated.id },

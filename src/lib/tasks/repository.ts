@@ -1,5 +1,10 @@
 import { prisma } from "@/lib/db";
-import { computeNextRunAt, DEFAULT_SCHEDULE_CRON_EXPRESSION, DEFAULT_SCHEDULE_TIMEZONE } from "@/lib/tasks/scheduler";
+import {
+  computeNextRunAt,
+  DEFAULT_SCHEDULE_CRON_EXPRESSION,
+  DEFAULT_SCHEDULE_TIMEZONE,
+  DEFAULT_SOURCE_CONCURRENCY,
+} from "@/lib/tasks/scheduler";
 import { DEFAULT_INGESTION_SCHEDULE_KEY, type EnqueueTaskRunInput } from "@/lib/tasks/types";
 
 export async function upsertDefaultIngestionSchedule() {
@@ -12,6 +17,7 @@ export async function upsertDefaultIngestionSchedule() {
       key: DEFAULT_INGESTION_SCHEDULE_KEY,
       enabled: true,
       cronExpression: DEFAULT_SCHEDULE_CRON_EXPRESSION,
+      sourceConcurrency: DEFAULT_SOURCE_CONCURRENCY,
       timezone: DEFAULT_SCHEDULE_TIMEZONE,
       nextRunAt: computeNextRunAt({
         cronExpression: DEFAULT_SCHEDULE_CRON_EXPRESSION,

@@ -37,6 +37,7 @@ describe("AdminMonitorPanel", () => {
       key: "ingestion_default",
       enabled: true,
       cronExpression: "0 * * * *",
+      sourceConcurrency: 2,
       timezone: "Asia/Shanghai",
       lastHeartbeatAt: "2026-04-12T00:00:00.000Z",
       lastRunStartedAt: null,
@@ -80,6 +81,7 @@ describe("AdminMonitorPanel", () => {
     expect(screen.getByRole("region", { name: "最近任务" })).toBeInTheDocument();
     expect(screen.getAllByText("默认抓取任务")[0]).toBeInTheDocument();
     expect(screen.getByLabelText("Cron 表达式")).toHaveValue("0 * * * *");
+    expect(screen.getByLabelText("源抓取并发")).toHaveValue(2);
     expect(screen.getByText("已处理 3/10 条内容，来自 1 个源，失败 0 项")).toBeInTheDocument();
     expect(screen.getByText("AI 调用：2 / 6")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "终止任务" })).toBeInTheDocument();
@@ -96,6 +98,7 @@ describe("AdminMonitorPanel", () => {
               ...initialSnapshot.schedule,
               enabled: false,
               cronExpression: "*/15 * * * *",
+              sourceConcurrency: 4,
             },
           }),
         ),
@@ -107,6 +110,8 @@ describe("AdminMonitorPanel", () => {
 
     await user.clear(screen.getByLabelText("Cron 表达式"));
     await user.type(screen.getByLabelText("Cron 表达式"), "*/15 * * * *");
+    await user.clear(screen.getByLabelText("源抓取并发"));
+    await user.type(screen.getByLabelText("源抓取并发"), "4");
     await user.click(screen.getByLabelText("启用默认抓取任务"));
     await user.click(screen.getByRole("button", { name: "保存调度设置" }));
 
@@ -119,6 +124,7 @@ describe("AdminMonitorPanel", () => {
         body: JSON.stringify({
           enabled: false,
           cronExpression: "*/15 * * * *",
+          sourceConcurrency: 4,
         }),
       });
     });
@@ -149,6 +155,7 @@ describe("AdminMonitorPanel", () => {
             ...initialSnapshot.schedule,
             enabled: true,
             cronExpression: "0 * * * *",
+            sourceConcurrency: 2,
             nextRunAt: "2026-04-12T02:00:00.000Z",
           },
         }),
@@ -160,12 +167,15 @@ describe("AdminMonitorPanel", () => {
     renderWithProviders(<AdminMonitorPanel initialSnapshot={initialSnapshot} />);
 
     const intervalInput = screen.getByLabelText("Cron 表达式");
+    const sourceConcurrencyInput = screen.getByLabelText("源抓取并发");
     const enabledCheckbox = screen.getByLabelText("启用默认抓取任务");
 
     fireEvent.change(intervalInput, { target: { value: "*/15 * * * *" } });
+    fireEvent.change(sourceConcurrencyInput, { target: { value: "5" } });
     fireEvent.click(enabledCheckbox);
 
     expect(intervalInput).toHaveValue("*/15 * * * *");
+    expect(sourceConcurrencyInput).toHaveValue(5);
     expect(enabledCheckbox).not.toBeChecked();
 
     await act(async () => {
@@ -176,6 +186,7 @@ describe("AdminMonitorPanel", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/admin/monitor");
 
     expect(intervalInput).toHaveValue("*/15 * * * *");
+    expect(sourceConcurrencyInput).toHaveValue(5);
     expect(enabledCheckbox).not.toBeChecked();
   });
 

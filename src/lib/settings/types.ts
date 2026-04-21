@@ -46,6 +46,7 @@ export type AdminSettingsSnapshot = {
     key: "ingestion_default";
     enabled: boolean;
     cronExpression: string;
+    sourceConcurrency: number;
     timezone: string;
     lastHeartbeatAt: string | null;
     lastRunStartedAt: string | null;

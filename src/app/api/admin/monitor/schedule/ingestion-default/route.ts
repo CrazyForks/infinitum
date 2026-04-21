@@ -2,11 +2,13 @@ import { z } from "zod";
 
 import { getAdminErrorStatus } from "@/lib/admin/http";
 import { requireAdmin } from "@/lib/admin/session";
+import { MAX_SOURCE_CONCURRENCY, MIN_SOURCE_CONCURRENCY } from "@/lib/tasks/scheduler";
 import { toTaskScheduleSnapshot, updateDefaultIngestionSchedule } from "@/lib/tasks/service";
 
 const scheduleUpdateSchema = z.object({
   enabled: z.boolean(),
   cronExpression: z.string().trim().min(1),
+  sourceConcurrency: z.number().int().min(MIN_SOURCE_CONCURRENCY).max(MAX_SOURCE_CONCURRENCY),
 });
 
 export async function PATCH(request: Request) {

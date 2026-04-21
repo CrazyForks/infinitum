@@ -512,7 +512,7 @@ function pickPromptConfigByType(
 export async function getIngestionRuntimeConfig(): Promise<RuntimeConfig> {
   await ensureRuntimeConfigSeeded();
 
-  const [sources, blacklist, defaultModelConfig, promptConfigs] = await Promise.all([
+  const [sources, blacklist, defaultModelConfig, promptConfigs, taskSchedule] = await Promise.all([
     prisma.source.findMany({
       where: { enabled: true },
       orderBy: { name: "asc" },
@@ -537,6 +537,7 @@ export async function getIngestionRuntimeConfig(): Promise<RuntimeConfig> {
       },
       orderBy: [{ createdAt: "asc" }],
     }),
+    ensureDefaultIngestionSchedule(),
   ]);
 
   if (!defaultModelConfig) {
@@ -552,6 +553,7 @@ export async function getIngestionRuntimeConfig(): Promise<RuntimeConfig> {
     blacklistKeywords: blacklist.map((entry) => entry.keyword),
     ingestion: {
       itemConcurrency: defaultModelConfig.ingestionItemConcurrency,
+      sourceConcurrency: taskSchedule.sourceConcurrency,
     },
     modelApi: serializeRuntimeModelApi(defaultModelConfig),
     prompts: {

@@ -1,5 +1,14 @@
 import { prisma } from "@/lib/db";
 
+export type ClusterAssignmentCandidate = {
+  id: string;
+  title: string;
+  summary: string;
+  fingerprint: string;
+  latestPublishedAt: Date;
+  itemCount: number;
+};
+
 export async function findActiveClusterByFingerprint(fingerprint: string, since: Date, until?: Date) {
   return prisma.contentCluster.findFirst({
     where: {
@@ -49,7 +58,7 @@ export async function findRecentActiveClusterCandidates(options: { since: Date; 
     },
     orderBy: [{ latestPublishedAt: "desc" }, { updatedAt: "desc" }],
     take: options.limit,
-  });
+  }) as Promise<ClusterAssignmentCandidate[]>;
 }
 
 export async function createContentCluster(data: {

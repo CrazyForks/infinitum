@@ -2,6 +2,7 @@ import type { Item, Source } from "@prisma/client";
 
 import { createAiProvider, type AiProvider } from "@/lib/ai/provider";
 import {
+  type ClusterAssignmentCandidate,
   createContentCluster,
   deleteCluster,
   findActiveClusterByFingerprint,
@@ -12,6 +13,7 @@ import {
   updateClusterSummary,
 } from "@/lib/clusters/repository";
 import { prisma } from "@/lib/db";
+import { invalidateFeedCache } from "@/lib/feed/cache";
 import { getDisplaySummary, getDisplayTitle } from "@/lib/feed/presentation";
 import { getIngestionRuntimeConfig } from "@/lib/settings/service";
 import { createTaskAiUsageTracker } from "@/lib/tasks/ai-usage";
@@ -19,9 +21,20 @@ import { enqueueTaskRun, updateTaskRun } from "@/lib/tasks/service";
 
 const CLUSTER_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
 const CLUSTER_CANDIDATE_LIMIT = 5;
-let clusterAssignmentQueue = Promise.resolve();
+const clusterAssignmentQueues = new Map<string, Promise<void>>();
 
 type ItemWithSource = Item & { source: Source };
+type ClusterAssignmentCoordinator = {
+  exactMatches: Map<string, ClusterAssignmentCandidate | null>;
+  recentCandidates: Map<string, { sinceMs: number; untilMs: number; candidates: ClusterAssignmentCandidate[] }>;
+};
+
+export function createClusterAssignmentCoordinator(): ClusterAssignmentCoordinator {
+  return {
+    exactMatches: new Map(),
+    recentCandidates: new Map(),
+  };
+}
 
 function normalizeFingerprint(value: string): string {
   return value
@@ -38,6 +51,55 @@ function buildItemSummary(item: ItemWithSource): string {
 
 function buildClusterFingerprintSeed(item: ItemWithSource, options: { topicLabel?: string | null; clusterHint?: string | null }) {
   return options.clusterHint || "";
+}
+
+function buildCandidateRange(item: ItemWithSource) {
+  return {
+    since: new Date(item.publishedAt.getTime() - CLUSTER_LOOKBACK_MS),
+    until: new Date(item.publishedAt.getTime() + CLUSTER_LOOKBACK_MS),
+  };
+}
+
+function buildCandidateRangeKey(since: Date, until: Date) {
+  return `${since.getTime()}:${until.getTime()}:${CLUSTER_CANDIDATE_LIMIT}`;
+}
+
+function buildExactMatchKey(fingerprint: string, since: Date, until: Date) {
+  return `${fingerprint}:${buildCandidateRangeKey(since, until)}`;
+}
+
+function toClusterAssignmentCandidate(cluster: {
+  id: string;
+  title: string;
+  summary: string;
+  fingerprint: string;
+  latestPublishedAt: Date;
+  itemCount?: number;
+}): ClusterAssignmentCandidate {
+  return {
+    id: cluster.id,
+    title: cluster.title,
+    summary: cluster.summary,
+    fingerprint: cluster.fingerprint,
+    latestPublishedAt: cluster.latestPublishedAt,
+    itemCount: cluster.itemCount ?? 1,
+  };
+}
+
+function rememberRecentCandidate(
+  coordinator: ClusterAssignmentCoordinator,
+  candidate: ClusterAssignmentCandidate,
+  publishedAt: Date,
+) {
+  for (const cached of coordinator.recentCandidates.values()) {
+    if (publishedAt.getTime() < cached.sinceMs || publishedAt.getTime() > cached.untilMs) {
+      continue;
+    }
+
+    cached.candidates = [candidate, ...cached.candidates.filter((entry) => entry.id !== candidate.id)]
+      .sort((left, right) => right.latestPublishedAt.getTime() - left.latestPublishedAt.getTime())
+      .slice(0, CLUSTER_CANDIDATE_LIMIT);
+  }
 }
 
 function buildClusterMatchInput(
@@ -103,18 +165,37 @@ async function findClusterForItem(
     topicLabel?: string | null;
     clusterHint?: string | null;
     aiProvider?: AiProvider;
+    coordinator?: ClusterAssignmentCoordinator;
   },
 ) {
   const fingerprintSeed = buildClusterFingerprintSeed(item, options);
   const fingerprint = fingerprintSeed ? normalizeFingerprint(fingerprintSeed) : "";
-  const since = new Date(item.publishedAt.getTime() - CLUSTER_LOOKBACK_MS);
-  const until = new Date(item.publishedAt.getTime() + CLUSTER_LOOKBACK_MS);
-  const exactMatch = fingerprint ? await findActiveClusterByFingerprint(fingerprint, since, until) : null;
-  const recentCandidates = await findRecentActiveClusterCandidates({
-    since,
-    until,
-    limit: CLUSTER_CANDIDATE_LIMIT,
-  });
+  const { since, until } = buildCandidateRange(item);
+  const rangeKey = buildCandidateRangeKey(since, until);
+  const exactMatchKey = fingerprint ? buildExactMatchKey(fingerprint, since, until) : "";
+  let exactMatch = fingerprint ? options.coordinator?.exactMatches.get(exactMatchKey) : undefined;
+
+  if (fingerprint && typeof exactMatch === "undefined") {
+    exactMatch = await findActiveClusterByFingerprint(fingerprint, since, until);
+    options.coordinator?.exactMatches.set(exactMatchKey, exactMatch ? toClusterAssignmentCandidate(exactMatch) : null);
+  }
+
+  let recentCandidateEntry = options.coordinator?.recentCandidates.get(rangeKey);
+
+  if (!recentCandidateEntry) {
+    recentCandidateEntry = {
+      sinceMs: since.getTime(),
+      untilMs: until.getTime(),
+      candidates: await findRecentActiveClusterCandidates({
+        since,
+        until,
+        limit: CLUSTER_CANDIDATE_LIMIT,
+      }),
+    };
+    options.coordinator?.recentCandidates.set(rangeKey, recentCandidateEntry);
+  }
+
+  const recentCandidates = recentCandidateEntry.candidates;
   const candidates = exactMatch
     ? [exactMatch, ...recentCandidates.filter((candidate) => candidate.id !== exactMatch.id)]
     : recentCandidates;
@@ -148,20 +229,46 @@ async function findClusterForItem(
   }
 }
 
-async function runWithClusterAssignmentLock<T>(task: () => Promise<T>) {
-  const previous = clusterAssignmentQueue;
+function getClusterAssignmentWindowKeys(publishedAt: Date) {
+  const bucketSizeMs = CLUSTER_LOOKBACK_MS;
+  const currentBucket = Math.floor(publishedAt.getTime() / bucketSizeMs);
+
+  return [currentBucket - 1, currentBucket, currentBucket + 1].map((bucket) => `window:${bucket}`);
+}
+
+async function runWithClusterAssignmentKeyLock<T>(key: string, task: () => Promise<T>) {
+  const previous = clusterAssignmentQueues.get(key) ?? Promise.resolve();
   let release!: () => void;
-  clusterAssignmentQueue = new Promise<void>((resolve) => {
+  const next = new Promise<void>((resolve) => {
     release = resolve;
   });
+  const queued = previous.then(() => next);
 
+  clusterAssignmentQueues.set(key, queued);
   await previous;
 
   try {
     return await task();
   } finally {
     release();
+
+    if (clusterAssignmentQueues.get(key) === queued) {
+      clusterAssignmentQueues.delete(key);
+    }
   }
+}
+
+async function runWithClusterAssignmentWindowLocks<T>(keys: string[], task: () => Promise<T>) {
+  const uniqueKeys = [...new Set(keys)].sort();
+  let execute = task;
+
+  for (let index = uniqueKeys.length - 1; index >= 0; index -= 1) {
+    const key = uniqueKeys[index]!;
+    const next = execute;
+    execute = () => runWithClusterAssignmentKeyLock(key, next);
+  }
+
+  return execute();
 }
 
 export async function assignItemToCluster(
@@ -170,9 +277,19 @@ export async function assignItemToCluster(
     topicLabel?: string | null;
     clusterHint?: string | null;
     aiProvider?: AiProvider;
+    coordinator?: ClusterAssignmentCoordinator;
   },
 ) {
-  return runWithClusterAssignmentLock(async () => {
+  const item = await prisma.item.findUnique({
+    where: { id: itemId },
+    include: { source: true },
+  });
+
+  if (!item || (item.moderationStatus !== "allowed" && item.moderationStatus !== "restored")) {
+    return null;
+  }
+
+  return runWithClusterAssignmentWindowLocks(getClusterAssignmentWindowKeys(item.publishedAt), async () => {
     const item = await prisma.item.findUnique({
       where: { id: itemId },
       include: { source: true },
@@ -192,6 +309,17 @@ export async function assignItemToCluster(
         score: item.qualityScore,
         latestPublishedAt: item.publishedAt,
       }));
+
+    if (options.coordinator) {
+      const candidate = toClusterAssignmentCandidate(cluster);
+
+      if (fingerprint) {
+        const { since, until } = buildCandidateRange(item);
+        options.coordinator.exactMatches.set(buildExactMatchKey(fingerprint, since, until), candidate);
+      }
+
+      rememberRecentCandidate(options.coordinator, candidate, item.publishedAt);
+    }
 
     await setItemCluster(item.id, cluster.id);
     // Note: Cluster summary recomputation is now handled at batch level in executeIngestion
@@ -238,12 +366,15 @@ export async function detachItemFromCluster(itemId: string, aiProvider?: AiProvi
   const previousClusterId = item.clusterId;
   await setItemCluster(itemId, null);
   await recomputeCluster(previousClusterId, aiProvider);
+  invalidateFeedCache();
 
   return previousClusterId;
 }
 
 export async function setClusterVisibility(clusterId: string, visible: boolean) {
-  return updateClusterStatus(clusterId, visible ? "active" : "hidden");
+  const cluster = await updateClusterStatus(clusterId, visible ? "active" : "hidden");
+  invalidateFeedCache();
+  return cluster;
 }
 
 export async function recomputeAllClusters(aiProvider?: AiProvider) {
@@ -311,6 +442,7 @@ export async function executeClusterSummaryTask(
       errorSummary: null,
     });
 
+    invalidateFeedCache();
     return cluster;
   } catch (error) {
     await updateTaskRun(taskRun.id, {

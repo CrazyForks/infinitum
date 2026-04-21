@@ -32,6 +32,7 @@ describe("background task persistence", () => {
         key: "ingestion_default",
         enabled: true,
         cronExpression: "0 * * * *",
+        sourceConcurrency: 2,
         timezone: "Asia/Shanghai",
         nextRunAt: new Date("2026-04-12T01:00:00.000Z"),
       },
@@ -39,6 +40,7 @@ describe("background task persistence", () => {
 
     expect(schedule.key).toBe("ingestion_default");
     expect(schedule.cronExpression).toBe("0 * * * *");
+    expect(schedule.sourceConcurrency).toBe(2);
   });
 
   it("links fetch runs to a background task run", async () => {
@@ -67,6 +69,7 @@ describe("background task persistence", () => {
 
     expect(schedule.key).toBe("ingestion_default");
     expect(schedule.cronExpression).toBe("0 * * * *");
+    expect(schedule.sourceConcurrency).toBe(2);
   });
 
   it("claims a queued task only once", async () => {
@@ -218,6 +221,7 @@ describe("background task persistence", () => {
         key: "ingestion_default",
         enabled: true,
         cronExpression: "0 * * * *",
+        sourceConcurrency: 2,
         timezone: "Asia/Shanghai",
         nextRunAt: new Date("2026-04-12T01:00:00.000Z"),
       },
@@ -244,10 +248,12 @@ describe("background task persistence", () => {
     const updated = await updateDefaultIngestionSchedule({
       enabled: false,
       cronExpression: "*/15 * * * *",
+      sourceConcurrency: 4,
     });
 
     expect(updated.enabled).toBe(false);
     expect(updated.cronExpression).toBe("*/15 * * * *");
+    expect(updated.sourceConcurrency).toBe(4);
   });
 
   it("builds a monitor snapshot with schedule and task lists", async () => {
@@ -266,6 +272,7 @@ describe("background task persistence", () => {
     const snapshot = await getBackgroundTaskMonitorSnapshot(new Date("2026-04-12T01:00:00.000Z"));
 
     expect(snapshot.schedule.key).toBe("ingestion_default");
+    expect(snapshot.schedule.sourceConcurrency).toBe(2);
     expect(Array.isArray(snapshot.runningTasks)).toBe(true);
     expect(Array.isArray(snapshot.recentTasks)).toBe(true);
     expect(snapshot.recentTasks[0]?.label).toBe("默认抓取任务");
@@ -311,6 +318,7 @@ describe("background task persistence", () => {
         key: "ingestion_default",
         enabled: true,
         cronExpression: "0 * * * *",
+        sourceConcurrency: 2,
         timezone: "Asia/Shanghai",
         nextRunAt: new Date("2026-04-12T01:00:00.000Z"),
         lastHeartbeatAt: new Date("2026-04-12T00:00:00.000Z"),

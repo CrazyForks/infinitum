@@ -1,5 +1,6 @@
 "use client";
 
+import type { Dispatch, SetStateAction } from "react";
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 
 import { PageShell } from "@/components/ui/page-shell";
@@ -161,6 +162,20 @@ function truncateText(value: string | null | undefined, maxLength: number) {
     return value;
   }
   return `${value.slice(0, maxLength).trimEnd()}...`;
+}
+
+async function executeWithPendingId(
+  id: string,
+  setPendingId: Dispatch<SetStateAction<string | null>>,
+  action: () => Promise<void>,
+) {
+  setPendingId(id);
+
+  try {
+    await action();
+  } finally {
+    setPendingId((current) => (current === id ? null : current));
+  }
 }
 
 // Filtered Item Detail Modal
@@ -517,7 +532,13 @@ function ContentReviewContent({ initialTab = "filtered" }: ContentReviewContentP
     return cleanup;
   }, [fetchData]);
 
-  const postAction = (
+  const runTransition = useCallback((action: () => Promise<void>) => {
+    startTransition(() => {
+      void action();
+    });
+  }, []);
+
+  const postAction = useCallback(async (
     url: string,
     successMessage: string,
     options?: {
@@ -525,29 +546,29 @@ function ContentReviewContent({ initialTab = "filtered" }: ContentReviewContentP
       requiredField?: RequiredActionField;
     },
   ) => {
-    startTransition(async () => {
-      try {
-        const response = await fetch(url, { method: "POST" });
-        const payload = (await response.json()) as ActionPayload;
-        const responseError = getResponseError(response, payload, "操作失败");
+    try {
+      const response = await fetch(url, { method: "POST" });
+      const payload = (await response.json()) as ActionPayload;
+      const responseError = getResponseError(response, payload, "操作失败");
 
-        if (responseError) {
-          showToast(responseError, "error");
-          return;
-        }
-
-        if (options?.requiredField && !payload[options.requiredField]) {
-          showToast("操作失败", "error");
-          return;
-        }
-
-        options?.onSuccess?.(payload);
-        showToast(successMessage, "success");
-      } catch {
-        showToast("操作失败", "error");
+      if (responseError) {
+        showToast(responseError, "error");
+        return false;
       }
-    });
-  };
+
+      if (options?.requiredField && !payload[options.requiredField]) {
+        showToast("操作失败", "error");
+        return false;
+      }
+
+      options?.onSuccess?.(payload);
+      showToast(successMessage, "success");
+      return true;
+    } catch {
+      showToast("操作失败", "error");
+      return false;
+    }
+  }, [showToast]);
 
   const filteredSources = useMemo(
     () => Array.from(new Set(filteredItems.map((item) => item.sourceName))).sort((a, b) => a.localeCompare(b)),
@@ -612,11 +633,12 @@ function ContentReviewContent({ initialTab = "filtered" }: ContentReviewContentP
   }, [clusters, clusterSearch, clusterStatus, clusterTimeRange]);
 
   // Pagination
-  const { currentItems, totalPages, paginatedItems } = useMemo(() => {
+  const { currentItems, totalPages, paginatedItems, currentPage } = useMemo(() => {
     const currentItems = activeTab === "filtered" ? visibleFilteredItems : visibleClusters;
     const totalPages = Math.ceil(currentItems.length / pageSize) || 1;
-    const paginatedItems = currentItems.slice((page - 1) * pageSize, page * pageSize);
-    return { currentItems, totalPages, paginatedItems };
+    const currentPage = Math.min(page, totalPages);
+    const paginatedItems = currentItems.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+    return { currentItems, totalPages, paginatedItems, currentPage };
   }, [activeTab, visibleFilteredItems, visibleClusters, page, pageSize]);
 
   const hasFilters =
@@ -658,62 +680,71 @@ function ContentReviewContent({ initialTab = "filtered" }: ContentReviewContentP
   };
 
   const handleRestoreItem = (itemId: string) => {
-    setRestoringItemId(itemId);
-    postAction(`/api/admin/items/${itemId}/restore`, "内容已恢复。", {
-      onSuccess: () => {
-        setFilteredItems((current) => current.filter((entry) => entry.id !== itemId));
-        handleCloseFilteredDetail();
-      },
+    runTransition(async () => {
+      await executeWithPendingId(itemId, setRestoringItemId, async () => {
+        await postAction(`/api/admin/items/${itemId}/restore`, "内容已恢复。", {
+          onSuccess: () => {
+            setFilteredItems((current) => current.filter((entry) => entry.id !== itemId));
+            handleCloseFilteredDetail();
+          },
+        });
+      });
     });
-    setRestoringItemId(null);
   };
 
   const handleReanalyzeItem = (itemId: string) => {
-    setReanalyzingItemId(itemId);
-    postAction(`/api/admin/items/${itemId}/reanalyze`, "已创建后台任务，正在处理中。", {
-      requiredField: "taskRun",
+    runTransition(async () => {
+      await executeWithPendingId(itemId, setReanalyzingItemId, async () => {
+        await postAction(`/api/admin/items/${itemId}/reanalyze`, "已创建后台任务，正在处理中。", {
+          requiredField: "taskRun",
+        });
+      });
     });
-    setReanalyzingItemId(null);
   };
 
   const handleRegenerateSummary = (clusterId: string) => {
-    setRegeneratingClusterId(clusterId);
-    postAction(`/api/admin/clusters/${clusterId}/regenerate-summary`, "已创建后台任务，正在处理中。", {
-      requiredField: "taskRun",
+    runTransition(async () => {
+      await executeWithPendingId(clusterId, setRegeneratingClusterId, async () => {
+        await postAction(`/api/admin/clusters/${clusterId}/regenerate-summary`, "已创建后台任务，正在处理中。", {
+          requiredField: "taskRun",
+        });
+      });
     });
-    setRegeneratingClusterId(null);
   };
 
   const handleToggleClusterStatus = (clusterId: string, currentStatus: ClusterDTO["status"]) => {
-    setTogglingClusterId(clusterId);
     const action = currentStatus === "hidden" ? "restore" : "hide";
     const message = currentStatus === "hidden" ? "聚合组已恢复。" : "聚合组已隐藏。";
-    postAction(`/api/admin/clusters/${clusterId}/${action}`, message, {
-      requiredField: "cluster",
-      onSuccess: (payload) => {
-        setClusters((current) =>
-          current.map((entry) => (entry.id === clusterId ? payload.cluster ?? entry : entry)),
-        );
-        // Update selected cluster if open
-        if (selectedCluster?.id === clusterId && payload.cluster) {
-          setSelectedCluster(payload.cluster);
-        }
-      },
+    runTransition(async () => {
+      await executeWithPendingId(clusterId, setTogglingClusterId, async () => {
+        await postAction(`/api/admin/clusters/${clusterId}/${action}`, message, {
+          requiredField: "cluster",
+          onSuccess: (payload) => {
+            setClusters((current) =>
+              current.map((entry) => (entry.id === clusterId ? payload.cluster ?? entry : entry)),
+            );
+            if (selectedCluster?.id === clusterId && payload.cluster) {
+              setSelectedCluster(payload.cluster);
+            }
+          },
+        });
+      });
     });
-    setTogglingClusterId(null);
   };
 
   const handleDetachItem = (clusterId: string, itemId: string) => {
-    postAction(`/api/admin/clusters/${clusterId}/items/${itemId}/detach`, "已移出聚合组。", {
-      requiredField: "cluster",
-      onSuccess: (payload) => {
-        setClusters((current) =>
-          current.map((entry) => (entry.id === clusterId ? payload.cluster ?? entry : entry)),
-        );
-        if (selectedCluster?.id === clusterId && payload.cluster) {
-          setSelectedCluster(payload.cluster);
-        }
-      },
+    runTransition(async () => {
+      await postAction(`/api/admin/clusters/${clusterId}/items/${itemId}/detach`, "已移出聚合组。", {
+        requiredField: "cluster",
+        onSuccess: (payload) => {
+          setClusters((current) =>
+            current.map((entry) => (entry.id === clusterId ? payload.cluster ?? entry : entry)),
+          );
+          if (selectedCluster?.id === clusterId && payload.cluster) {
+            setSelectedCluster(payload.cluster);
+          }
+        },
+      });
     });
   };
 
@@ -1073,17 +1104,17 @@ function ContentReviewContent({ initialTab = "filtered" }: ContentReviewContentP
             <button
               className={secondaryButtonClassName}
               onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={page === 1}
+              disabled={currentPage === 1}
             >
               上一页
             </button>
             <span className="min-w-[100px] px-4 py-2 text-center text-sm bg-[var(--surface)] border border-[color:var(--line)] rounded-sm text-[var(--muted)]">
-              第 {page} / {totalPages} 页
+              第 {currentPage} / {totalPages} 页
             </span>
             <button
               className={secondaryButtonClassName}
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={page >= totalPages}
+              disabled={currentPage >= totalPages}
             >
               下一页
             </button>

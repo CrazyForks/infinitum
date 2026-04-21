@@ -115,6 +115,7 @@ export function toTaskScheduleSnapshot(schedule: {
   key: string;
   enabled: boolean;
   cronExpression: string;
+  sourceConcurrency: number;
   timezone: string;
   lastHeartbeatAt: Date | null;
   lastRunStartedAt: Date | null;
@@ -126,6 +127,7 @@ export function toTaskScheduleSnapshot(schedule: {
     key: schedule.key as TaskScheduleSnapshot["key"],
     enabled: schedule.enabled,
     cronExpression: schedule.cronExpression,
+    sourceConcurrency: schedule.sourceConcurrency,
     timezone: schedule.timezone,
     lastHeartbeatAt: schedule.lastHeartbeatAt?.toISOString() ?? null,
     lastRunStartedAt: schedule.lastRunStartedAt?.toISOString() ?? null,
@@ -140,7 +142,11 @@ export function toTaskScheduleSnapshot(schedule: {
   };
 }
 
-export async function updateDefaultIngestionSchedule(input: { enabled: boolean; cronExpression: string }) {
+export async function updateDefaultIngestionSchedule(input: {
+  enabled: boolean;
+  cronExpression: string;
+  sourceConcurrency: number;
+}) {
   const normalizedInput = normalizeScheduleInput(input);
   const currentSchedule = await ensureDefaultIngestionSchedule();
   const now = new Date();
@@ -156,6 +162,7 @@ export async function updateDefaultIngestionSchedule(input: { enabled: boolean; 
     data: {
       enabled: normalizedInput.enabled,
       cronExpression: normalizedInput.cronExpression,
+      sourceConcurrency: normalizedInput.sourceConcurrency,
       nextRunAt,
     },
   });

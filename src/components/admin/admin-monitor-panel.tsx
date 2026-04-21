@@ -5,6 +5,10 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { PageShell } from "@/components/ui/page-shell";
 import { useToast } from "@/components/ui/toast";
 import { StatusBanner } from "@/components/ui/status-banner";
+import {
+  MAX_SOURCE_CONCURRENCY,
+  MIN_SOURCE_CONCURRENCY,
+} from "@/lib/tasks/scheduler";
 import type {
   BackgroundTaskMonitorSnapshot,
   TaskRunSnapshot,
@@ -247,13 +251,17 @@ export function AdminMonitorPanel({
   const [cronExpression, setCronExpression] = useState(
     initialSnapshot.schedule.cronExpression,
   );
+  const [sourceConcurrency, setSourceConcurrency] = useState(
+    String(initialSnapshot.schedule.sourceConcurrency),
+  );
   const [isPending, startTransition] = useTransition();
   const [cancellingTaskId, setCancellingTaskId] = useState<string | null>(null);
   const isScheduleDirtyRef = useRef(false);
   const hasShownRefreshErrorRef = useRef(false);
   const isScheduleDirty =
     enabled !== snapshot.schedule.enabled ||
-    cronExpression.trim() !== snapshot.schedule.cronExpression;
+    cronExpression.trim() !== snapshot.schedule.cronExpression ||
+    sourceConcurrency.trim() !== String(snapshot.schedule.sourceConcurrency);
 
   isScheduleDirtyRef.current = isScheduleDirty;
 
@@ -285,6 +293,7 @@ export function AdminMonitorPanel({
         if (!isScheduleDirtyRef.current) {
           setEnabled(payload.schedule.enabled);
           setCronExpression(payload.schedule.cronExpression);
+          setSourceConcurrency(String(payload.schedule.sourceConcurrency));
         }
       } catch {
         if (!disposed) {
@@ -310,6 +319,20 @@ export function AdminMonitorPanel({
   }, [showToast, snapshot.runningTasks.length]);
 
   const saveSchedule = () => {
+    const parsedSourceConcurrency = Number.parseInt(sourceConcurrency.trim(), 10);
+
+    if (
+      !Number.isInteger(parsedSourceConcurrency) ||
+      parsedSourceConcurrency < MIN_SOURCE_CONCURRENCY ||
+      parsedSourceConcurrency > MAX_SOURCE_CONCURRENCY
+    ) {
+      showToast(
+        `源抓取并发需为 ${MIN_SOURCE_CONCURRENCY}-${MAX_SOURCE_CONCURRENCY} 的整数。`,
+        "error",
+      );
+      return;
+    }
+
     startTransition(async () => {
       try {
         const response = await fetch(
@@ -322,6 +345,7 @@ export function AdminMonitorPanel({
             body: JSON.stringify({
               enabled,
               cronExpression,
+              sourceConcurrency: parsedSourceConcurrency,
             }),
           },
         );
@@ -338,6 +362,7 @@ export function AdminMonitorPanel({
           ...current,
           schedule,
         }));
+        setSourceConcurrency(String(schedule.sourceConcurrency));
         showToast("调度配置已保存。", "success");
       } catch {
         showToast("调度配置保存失败。", "error");
@@ -429,6 +454,30 @@ export function AdminMonitorPanel({
         </label>
 
         <label
+          className={cx(subtleCardClassName, "flex flex-col gap-3 p-3.5")}
+        >
+          <span className="font-mono text-[11px] font-medium uppercase tracking-[0.22em] text-[var(--muted)]">
+            Sources
+          </span>
+          <span className="text-sm font-medium text-[var(--foreground)]">
+            源抓取并发
+          </span>
+          <input
+            aria-label="源抓取并发"
+            className={inputClassName}
+            type="number"
+            min={MIN_SOURCE_CONCURRENCY}
+            max={MAX_SOURCE_CONCURRENCY}
+            step={1}
+            value={sourceConcurrency}
+            onChange={(event) => setSourceConcurrency(event.target.value)}
+          />
+          <span className="text-sm leading-6 text-[var(--muted)]">
+            控制同一轮任务里并发抓取多少个信息源；条目级 AI 并发仍由默认模型配置控制。
+          </span>
+        </label>
+
+        <label
           className={cx(
             subtleCardClassName,
             "flex cursor-pointer flex-col gap-3 p-3.5",
@@ -496,6 +545,10 @@ export function AdminMonitorPanel({
         <TaskFact
           label="Next Run"
           value={formatDateTime(snapshot.schedule.nextRunAt)}
+        />
+        <TaskFact
+          label="Source Concurrency"
+          value={String(snapshot.schedule.sourceConcurrency)}
         />
         <TaskFact label="Timezone" value={snapshot.schedule.timezone} />
       </div>

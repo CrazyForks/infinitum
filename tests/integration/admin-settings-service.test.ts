@@ -31,6 +31,7 @@ describe("admin settings service", () => {
     expect(runtimeConfig.rssSources.length).toBeGreaterThan(0);
     expect(runtimeConfig.blacklistKeywords).toEqual([]);
     expect(runtimeConfig.ingestion.itemConcurrency).toBe(3);
+    expect(runtimeConfig.ingestion.sourceConcurrency).toBe(2);
     expect(runtimeConfig.modelApi.apiKey).toBe("");
     expect(runtimeConfig.modelApi.baseURL).toBe("");
     expect(runtimeConfig.modelApi.model).toBe("gpt-4.1-mini");
@@ -44,6 +45,7 @@ describe("admin settings service", () => {
     expect(settings.promptConfigs).toHaveLength(3);
     expect(settings.taskSchedule.key).toBe("ingestion_default");
     expect(settings.taskSchedule.cronExpression).toBe("0 * * * *");
+    expect(settings.taskSchedule.sourceConcurrency).toBe(2);
     expect(settings.promptConfigs.find((config) => config.type === "item_analysis")?.systemPrompt).toContain(
       "字段说明",
     );
@@ -100,6 +102,7 @@ describe("admin settings service", () => {
     const runtimeConfig = await getIngestionRuntimeConfig();
 
     expect(runtimeConfig.ingestion.itemConcurrency).toBe(6);
+    expect(runtimeConfig.ingestion.sourceConcurrency).toBe(2);
     expect(runtimeConfig.modelApi.model).toBe("gpt-live");
     expect(runtimeConfig.selectedPromptConfigs?.itemAnalysis.systemPrompt).toBe("分析系统提示词");
     expect(runtimeConfig.selectedPromptConfigs?.itemAnalysis.modelApi?.model).toBe("gpt-live");

@@ -132,6 +132,7 @@ model Item {
   @@index([sourceId, publishedAt])
   @@index([status, publishedAt])
   @@index([moderationStatus, publishedAt])
+  @@index([status, moderationStatus, createdAt])
   @@index([clusterId, publishedAt])
   @@index([qualityScore, publishedAt])
   @@map("items")
@@ -180,6 +181,7 @@ model TaskSchedule {
   key               String                @unique
   enabled           Boolean               @default(true)
   cronExpression    String                @default("0 * * * *")
+  sourceConcurrency Int                   @default(2)
   timezone          String
   lastHeartbeatAt   DateTime?
   lastRunStartedAt  DateTime?

@@ -40,6 +40,12 @@ type CountRow = {
   total: bigint;
 };
 
+type FeedGroupCountRow = {
+  id: string;
+  name: string;
+  count: bigint;
+};
+
 export async function syncSources(sourceConfigs: SourceConfig[]) {
   for (const source of sourceConfigs) {
     await prisma.source.upsert({
@@ -423,48 +429,34 @@ export async function listFeedGroupCounts(
     ...filters,
     groupId: null,
   };
-
-  const items = await prisma.item.findMany({
-    where: buildItemWhere(effectiveFilters),
-    select: {
-      source: {
-        select: {
-          groupId: true,
-          group: {
-            select: {
-              name: true,
-            },
-          },
-        },
-      },
-    },
-  });
-
-  const groups = new Map<string, FeedGroupOption>();
-
-  for (const item of items) {
-    const groupId = item.source.groupId;
-    const groupName = item.source.group?.name;
-
-    if (!groupId || !groupName) {
-      continue;
-    }
-
-    const current = groups.get(groupId);
-    if (current) {
-      current.count += 1;
-    } else {
-      groups.set(groupId, {
-        id: groupId,
-        name: groupName,
-        count: 1,
-      });
-    }
-  }
+  const filteredItemsCte = buildFeedEntryCandidatesCte(effectiveFilters);
+  const [groupRows, totalRows] = await Promise.all([
+    prisma.$queryRaw<FeedGroupCountRow[]>(Prisma.sql`
+      ${filteredItemsCte}
+      SELECT
+        s."groupId" AS id,
+        g.name AS name,
+        COUNT(*) AS count
+      FROM filtered_items fi
+      INNER JOIN "sources" s ON s.id = fi."sourceId"
+      INNER JOIN "source_groups" g ON g.id = s."groupId"
+      GROUP BY s."groupId", g.name
+      ORDER BY g.name ASC
+    `),
+    prisma.$queryRaw<CountRow[]>(Prisma.sql`
+      ${filteredItemsCte}
+      SELECT COUNT(*) AS total
+      FROM filtered_items
+    `),
+  ]);
 
   return {
-    groups: [...groups.values()].sort((left, right) => left.name.localeCompare(right.name)),
-    totalCount: items.length,
+    groups: groupRows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      count: toNumber(row.count),
+    })),
+    totalCount: toNumber(totalRows[0]?.total ?? BigInt(0)),
   };
 }
 

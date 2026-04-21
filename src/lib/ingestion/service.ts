@@ -1,7 +1,7 @@
 import type { BackgroundTaskRun, FetchRun, FetchRunStatus } from "@prisma/client";
 
 import { createAiProvider } from "@/lib/ai/provider";
-import { assignItemToCluster, recomputeCluster } from "@/lib/clusters/service";
+import { assignItemToCluster, createClusterAssignmentCoordinator, recomputeCluster } from "@/lib/clusters/service";
 import { prisma } from "@/lib/db";
 import {
   completeFetchRun,
@@ -11,6 +11,7 @@ import {
   updateFetchRunProgress,
   upsertItem,
 } from "@/lib/feed/repository";
+import { invalidateFeedCache } from "@/lib/feed/cache";
 import { shouldTranslateTitle, stripHtmlTags } from "@/lib/feed/presentation";
 import { buildDedupeKeys, shouldFetchFullText } from "@/lib/ingestion/dedupe";
 import { findBlacklistMatch } from "@/lib/ingestion/filtering";
@@ -43,7 +44,7 @@ type ResolvedRunOptions = RunIngestionOptions & {
   now: Date;
 };
 
-const activeBackgroundRuns = new Map<string, Promise<void>>();
+const INGESTION_PROGRESS_FLUSH_INTERVAL_MS = 750;
 
 class TaskRunCancellationError extends Error {
   snapshot: {
@@ -106,6 +107,10 @@ function truncateText(value: string, maxLength = 180): string {
 
 function appendIssue(issues: string[], error: unknown, fallbackMessage: string) {
   issues.push(error instanceof Error ? error.message : fallbackMessage);
+}
+
+function deriveSourceConcurrency(itemConcurrency: number) {
+  return Math.max(1, Math.min(4, Math.ceil(itemConcurrency / 2)));
 }
 
 function buildFallbackSummary(rssExcerpt: string | null, fallbackBody: string | null): string | null {
@@ -184,6 +189,10 @@ async function resolveRunOptions(options?: Partial<RunIngestionOptions>): Promis
     sourceConfigs: options?.sourceConfigs ?? runtimeConfig?.rssSources ?? [],
     blacklist: options?.blacklist ?? runtimeConfig?.blacklistKeywords ?? [],
     itemConcurrency: options?.itemConcurrency ?? runtimeConfig?.ingestion.itemConcurrency ?? 3,
+    sourceConcurrency:
+      options?.sourceConcurrency ??
+      runtimeConfig?.ingestion.sourceConcurrency ??
+      deriveSourceConcurrency(options?.itemConcurrency ?? runtimeConfig?.ingestion.itemConcurrency ?? 3),
     now,
   };
 }
@@ -226,6 +235,7 @@ async function processFeedItem({
   blacklist,
   articleFetcher,
   aiProvider,
+  clusterAssignmentCoordinator,
   now,
 }: {
   item: ParsedFeedItem;
@@ -235,6 +245,7 @@ async function processFeedItem({
   blacklist: string[];
   articleFetcher: RunIngestionOptions["articleFetcher"];
   aiProvider: RunIngestionOptions["aiProvider"];
+  clusterAssignmentCoordinator: ReturnType<typeof createClusterAssignmentCoordinator>;
   now: Date;
 }): Promise<ProcessedItemRecord | null> {
   const originalTitle = item.title?.trim();
@@ -287,16 +298,6 @@ async function processFeedItem({
       existing.status !== "fetched" &&
       existing.status !== "failed",
   );
-
-  // Debug logging for analysis reuse decision
-  if (existing && !canReuseExistingAnalysis) {
-    console.log(`[DEBUG] Item ${existing.id} cannot reuse analysis:`, {
-      analysisInputsChanged,
-      hasAiProcessedAt: !!existing.aiProcessedAt,
-      status: existing.status,
-      title: existing.originalTitle?.slice(0, 50),
-    });
-  }
   const initialFilterMatch = findBlacklistMatch({
     title: originalTitle,
     content: [rssContent, rssExcerpt].filter(Boolean).join("\n"),
@@ -339,11 +340,7 @@ async function processFeedItem({
       },
     );
 
-    if (existing?.clusterId) {
-      await recomputeCluster(existing.clusterId, aiProvider);
-    }
-
-    return { id: stored.id, status: stored.status, isNew };
+    return { id: stored.id, status: stored.status, isNew, affectedClusterId: existing?.clusterId ?? null };
   }
 
   if (canReuseExistingAnalysis) {
@@ -494,6 +491,7 @@ async function processFeedItem({
       topicLabel,
       clusterHint,
       aiProvider,
+      coordinator: clusterAssignmentCoordinator,
     });
     if (clusterId && (isNew || existing?.clusterId !== clusterId)) {
       affectedClusterId = clusterId;
@@ -511,6 +509,7 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
     sourceConfigs,
     blacklist,
     itemConcurrency,
+    sourceConcurrency,
     now,
   } = options;
   const sources = await syncSources(sourceConfigs);
@@ -523,6 +522,7 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
   let itemsAdded = 0;
   let cancellationRequested = false;
   const affectedClusterIds = new Set<string>();
+  const clusterAssignmentCoordinator = createClusterAssignmentCoordinator();
   const getProgressSnapshot = () => ({
     sourceCount: sources.length,
     itemCount: preparedItems.length,
@@ -545,25 +545,31 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
     }
   };
 
-  for (const source of sources) {
-    await throwIfCancellationRequested();
+  await runWithConcurrency(
+    sources.map((source) => async () => {
+      await throwIfCancellationRequested();
 
-    try {
-      const feed = await parser.parseURL(source.rssUrl);
+      try {
+        const feed = await parser.parseURL(source.rssUrl);
 
-      for (const item of feed.items ?? []) {
-        preparedItems.push({
-          item,
-          sourceId: source.id,
-          sourceName: source.name,
-          fetchFullTextWhenMissing: source.fetchFullTextWhenMissing,
-        });
+        for (const item of feed.items ?? []) {
+          preparedItems.push({
+            item,
+            sourceId: source.id,
+            sourceName: source.name,
+            fetchFullTextWhenMissing: source.fetchFullTextWhenMissing,
+          });
+        }
+      } catch (error) {
+        errors.push(`${source.name}: ${error instanceof Error ? error.message : "Unknown feed error"}`);
+        failureCount += 1;
       }
-    } catch (error) {
-      errors.push(`${source.name}: ${error instanceof Error ? error.message : "Unknown feed error"}`);
-      failureCount += 1;
-    }
-  }
+    }),
+    sourceConcurrency,
+    {
+      shouldStop: checkCancellation,
+    },
+  );
 
   aiUsage.setEstimated(preparedItems.filter((preparedItem) => willRequireAiAnalysis(preparedItem, blacklist)).length);
 
@@ -589,8 +595,38 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
 
   await throwIfCancellationRequested();
 
+  let lastProgressFlushAt = 0;
+  const flushProgress = async (status: FetchRunStatus | "running") => {
+    lastProgressFlushAt = Date.now();
+
+    await updateFetchRunProgress(run.id, {
+      sourceCount: sources.length,
+      itemCount: preparedItems.length,
+      successCount,
+      failureCount,
+      itemsAdded,
+      errorSummary: errors.length > 0 ? errors.join(" | ") : null,
+    });
+    await options.onProgress?.({
+      status,
+      sourceCount: sources.length,
+      itemCount: preparedItems.length,
+      successCount,
+      failureCount,
+      itemsAdded,
+      aiCallCountActual: aiUsage.snapshot().actual,
+      aiCallCountEstimated: aiUsage.snapshot().estimated,
+      errorSummary: errors.length > 0 ? errors.join(" | ") : null,
+    });
+  };
   let progressChain = Promise.resolve();
-  const enqueueProgressUpdate = (result: ProcessedItemRecord | null, issue?: string) => {
+  const enqueueProgressUpdate = (
+    result: ProcessedItemRecord | null,
+    issue?: string,
+    options?: {
+      forceFlush?: boolean;
+    },
+  ) => {
     progressChain = progressChain.then(async () => {
       if (issue) {
         errors.push(issue);
@@ -609,25 +645,15 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
         affectedClusterIds.add(result.affectedClusterId);
       }
 
-      await updateFetchRunProgress(run.id, {
-        sourceCount: sources.length,
-        itemCount: preparedItems.length,
-        successCount,
-        failureCount,
-        itemsAdded,
-        errorSummary: errors.length > 0 ? errors.join(" | ") : null,
-      });
-      await options.onProgress?.({
-        status: "running",
-        sourceCount: sources.length,
-        itemCount: preparedItems.length,
-        successCount,
-        failureCount,
-        itemsAdded,
-        aiCallCountActual: aiUsage.snapshot().actual,
-        aiCallCountEstimated: aiUsage.snapshot().estimated,
-        errorSummary: errors.length > 0 ? errors.join(" | ") : null,
-      });
+      const shouldFlushNow =
+        options?.forceFlush ||
+        Date.now() - lastProgressFlushAt >= INGESTION_PROGRESS_FLUSH_INTERVAL_MS;
+
+      if (!shouldFlushNow) {
+        return;
+      }
+
+      await flushProgress("running");
     });
 
     return progressChain;
@@ -641,6 +667,7 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
           blacklist,
           articleFetcher,
           aiProvider: trackedAiProvider,
+          clusterAssignmentCoordinator,
           now,
         });
 
@@ -659,13 +686,17 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
     },
   );
 
+  await enqueueProgressUpdate(null, undefined, { forceFlush: true });
   await progressChain;
   await throwIfCancellationRequested();
 
   // Recompute only affected clusters instead of all clusters
-  for (const clusterId of affectedClusterIds) {
-    await recomputeCluster(clusterId, trackedAiProvider);
-  }
+  await runWithConcurrency(
+    [...affectedClusterIds].map((clusterId) => async () => {
+      await recomputeCluster(clusterId, trackedAiProvider);
+    }),
+    Math.max(1, Math.min(3, sourceConcurrency)),
+  );
 
   const status: FetchRunStatus =
     errors.length > 0 || failureCount > 0
@@ -702,7 +733,9 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
 
 async function runExistingFetchRun(run: FetchRun, options: ResolvedRunOptions) {
   try {
-    return await executeIngestion(run, options);
+    const completedRun = await executeIngestion(run, options);
+    invalidateFeedCache();
+    return completedRun;
   } catch (error) {
     if (error instanceof TaskRunCancellationError) {
       const cancelledRun = await completeFetchRun(run.id, {
@@ -726,6 +759,7 @@ async function runExistingFetchRun(run: FetchRun, options: ResolvedRunOptions) {
         errorSummary: cancelledRun.errorSummary,
       });
 
+      invalidateFeedCache();
       return cancelledRun;
     }
 
@@ -750,6 +784,7 @@ async function runExistingFetchRun(run: FetchRun, options: ResolvedRunOptions) {
       errorSummary: failedRun.errorSummary,
     });
 
+    invalidateFeedCache();
     return failedRun;
   }
 }
@@ -853,17 +888,4 @@ export async function runIngestionTask(taskRun: BackgroundTaskRun, options?: Par
   });
 
   return completedRun;
-}
-
-export async function startIngestion(options?: Partial<RunIngestionOptions>) {
-  const resolvedOptions = await resolveRunOptions(options);
-  const run = await createFetchRun(resolvedOptions.trigger, resolvedOptions.now);
-  const backgroundRun = runExistingFetchRun(run, resolvedOptions).then(() => undefined);
-
-  activeBackgroundRuns.set(run.id, backgroundRun);
-  void backgroundRun.finally(() => {
-    activeBackgroundRuns.delete(run.id);
-  });
-
-  return run;
 }
