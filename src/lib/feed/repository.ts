@@ -54,14 +54,14 @@ export async function syncSources(sourceConfigs: SourceConfig[]) {
         name: source.name,
         siteUrl: source.siteUrl,
         enabled: source.enabled,
-        fetchFullTextWhenMissing: source.fetchFullTextWhenMissing,
+        aiParsingEnabled: source.aiParsingEnabled,
       },
       create: {
         name: source.name,
         rssUrl: source.rssUrl,
         siteUrl: source.siteUrl,
         enabled: source.enabled,
-        fetchFullTextWhenMissing: source.fetchFullTextWhenMissing,
+        aiParsingEnabled: source.aiParsingEnabled,
       },
     });
   }

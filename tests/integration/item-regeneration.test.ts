@@ -64,7 +64,7 @@ describe("regenerateItemContent", () => {
         rssUrl: "https://example.com/feed.xml",
         siteUrl: "https://example.com",
         enabled: true,
-        fetchFullTextWhenMissing: true,
+        aiParsingEnabled: true,
       },
     });
 
@@ -118,7 +118,7 @@ describe("regenerateItemContent", () => {
         rssUrl: "https://example.com/feed.xml",
         siteUrl: "https://example.com",
         enabled: true,
-        fetchFullTextWhenMissing: true,
+        aiParsingEnabled: true,
       },
     });
 
@@ -172,7 +172,7 @@ describe("regenerateItemContent", () => {
         rssUrl: "https://example.com/feed.xml",
         siteUrl: "https://example.com",
         enabled: true,
-        fetchFullTextWhenMissing: true,
+        aiParsingEnabled: true,
       },
     });
 
@@ -212,7 +212,7 @@ describe("regenerateItemContent", () => {
         rssUrl: "https://example.com/feed.xml",
         siteUrl: "https://example.com",
         enabled: true,
-        fetchFullTextWhenMissing: true,
+        aiParsingEnabled: true,
       },
     });
     const cluster = await prisma.contentCluster.create({
@@ -320,7 +320,7 @@ describe("regenerateItemContent", () => {
         rssUrl: "https://example.com/feed.xml",
         siteUrl: "https://example.com",
         enabled: true,
-        fetchFullTextWhenMissing: true,
+        aiParsingEnabled: true,
       },
     });
     const existingCluster = await prisma.contentCluster.create({
@@ -436,7 +436,7 @@ describe("regenerateItemContent", () => {
         rssUrl: "https://example.com/feed.xml",
         siteUrl: "https://example.com",
         enabled: true,
-        fetchFullTextWhenMissing: true,
+        aiParsingEnabled: true,
       },
     });
     const cluster = await prisma.contentCluster.create({

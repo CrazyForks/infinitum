@@ -42,7 +42,7 @@ type PreparedFeedItem = {
   item: ParsedFeedItem;
   sourceId: string;
   sourceName: string;
-  fetchFullTextWhenMissing: boolean;
+  aiParsingEnabled: boolean;
 };
 
 type ResolvedRunOptions = RunIngestionOptions & {
@@ -333,7 +333,7 @@ async function processFeedItem({
   item,
   sourceId,
   sourceName,
-  fetchFullTextWhenMissing,
+  aiParsingEnabled,
   blacklist,
   articleFetcher,
   aiProvider,
@@ -344,7 +344,7 @@ async function processFeedItem({
   item: ParsedFeedItem;
   sourceId: string;
   sourceName: string;
-  fetchFullTextWhenMissing: boolean;
+  aiParsingEnabled: boolean;
   blacklist: string[];
   articleFetcher: RunIngestionOptions["articleFetcher"];
   aiProvider: RunIngestionOptions["aiProvider"];
@@ -500,7 +500,9 @@ async function processFeedItem({
     return { id: stored.id, status: stored.status, isNew, fullTextFetched };
   }
 
-  if (!fullText && shouldFetchFullText(contentForFullTextDecision, fetchFullTextWhenMissing, fullTextFetchThreshold)) {
+  // 只有开启 AI 解析时才需要补抓全文
+  const shouldFetchFullTextWhenMissing = aiParsingEnabled;
+  if (!fullText && shouldFetchFullText(contentForFullTextDecision, shouldFetchFullTextWhenMissing, fullTextFetchThreshold)) {
     try {
       const fetchedFullText = await articleFetcher(originalUrl);
       fullText = fetchedFullText;
@@ -523,7 +525,7 @@ async function processFeedItem({
     moderationStatus = "filtered";
     moderationReason = "rule_blacklist";
     moderationDetail = `Matched blacklist keyword: ${filterMatch}`;
-  } else {
+  } else if (aiParsingEnabled) {
     const translateTitle = shouldTranslateTitle(originalTitle);
     const enrichmentInput = fullText || rssContent || rssExcerpt || originalTitle;
 
@@ -560,6 +562,22 @@ async function processFeedItem({
     }
 
     status = moderationStatus === "filtered" ? "filtered" : "processed";
+  } else {
+    // AI parsing disabled - use RSS data directly
+    const translateTitle = shouldTranslateTitle(originalTitle);
+
+    if (translateTitle) {
+      translatedTitle = originalTitle;
+    }
+
+    summaryText = buildFallbackSummary(rssExcerpt, fullText || rssContent);
+    moderationStatus = "allowed";
+    moderationReason = null;
+    moderationDetail = null;
+    qualityScore = 50;
+    qualityRationale = "AI parsing disabled for this source";
+    eventSignature = null;
+    status = "processed";
   }
 
   const stored = await upsertItem(
@@ -699,7 +717,7 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
               item,
               sourceId: source.id,
               sourceName: source.name,
-              fetchFullTextWhenMissing: source.fetchFullTextWhenMissing,
+              aiParsingEnabled: source.aiParsingEnabled,
             });
           }
         } catch (error) {

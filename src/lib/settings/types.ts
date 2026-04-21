@@ -68,7 +68,7 @@ export type AdminSettingsSnapshot = {
     rssUrl: string;
     siteUrl: string;
     enabled: boolean;
-    fetchFullTextWhenMissing: boolean;
+    aiParsingEnabled: boolean;
     groupId: string | null;
     groupName: string | null;
   }>;
@@ -78,6 +78,7 @@ export type ResolvedSourceMetadata = {
   name: string;
   rssUrl: string;
   siteUrl: string;
+  suggestedAiParsingEnabled: boolean;
 };
 
 export type OpmlImportFailure = {

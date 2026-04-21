@@ -119,7 +119,7 @@ export function AdminSettingsPanel({
     rssUrl: "",
     siteUrl: "",
     enabled: true,
-    fetchFullTextWhenMissing: true,
+    aiParsingEnabled: true,
     groupId: "",
   });
   const [taskScheduleEnabled, setTaskScheduleEnabled] = useState(
@@ -221,7 +221,7 @@ export function AdminSettingsPanel({
       rssUrl: "",
       siteUrl: "",
       enabled: true,
-      fetchFullTextWhenMissing: true,
+      aiParsingEnabled: true,
       groupId: "",
     });
   };
@@ -234,7 +234,7 @@ export function AdminSettingsPanel({
       rssUrl: source.rssUrl,
       siteUrl: source.siteUrl,
       enabled: source.enabled,
-      fetchFullTextWhenMissing: source.fetchFullTextWhenMissing,
+      aiParsingEnabled: source.aiParsingEnabled ?? true,
       groupId: source.groupId ?? "",
     });
   };
@@ -261,6 +261,7 @@ export function AdminSettingsPanel({
             name: string;
             rssUrl: string;
             siteUrl: string;
+            suggestedAiParsingEnabled: boolean;
           };
           error?: string;
         };
@@ -277,6 +278,7 @@ export function AdminSettingsPanel({
           name: source.name,
           rssUrl: source.rssUrl,
           siteUrl: source.siteUrl,
+          aiParsingEnabled: source.suggestedAiParsingEnabled,
         }));
         showToast("已根据 RSS 自动填充信息源基本信息。", "success");
       } catch {
@@ -780,7 +782,7 @@ export function AdminSettingsPanel({
                         <td className="px-4 py-3 text-[var(--text-2)]">
                           <div>{source.enabled ? "已启用" : "已停用"}</div>
                           <div className="mt-1 text-xs text-[var(--text-3)]">
-                            {source.fetchFullTextWhenMissing ? "缺全文时补抓" : "仅保留 RSS"}
+                            {source.aiParsingEnabled !== false ? "AI解析" : "仅RSS"}
                           </div>
                         </td>
                         <td className="px-4 py-3 text-xs text-[var(--text-3)]">
@@ -973,17 +975,17 @@ export function AdminSettingsPanel({
                 </label>
                 <label className="flex flex-wrap items-center gap-2">
                   <input
-                    checked={sourceForm.fetchFullTextWhenMissing}
+                    checked={sourceForm.aiParsingEnabled}
                     className={checkboxInputClassName}
                     type="checkbox"
                     onChange={(event) =>
                       setSourceForm((current) => ({
                         ...current,
-                        fetchFullTextWhenMissing: event.target.checked,
+                        aiParsingEnabled: event.target.checked,
                       }))
                     }
                   />
-                  <span className="text-sm text-[var(--text-2)]">缺全文时补抓</span>
+                  <span className="text-sm text-[var(--text-2)]">AI解析</span>
                 </label>
               </div>
             </ModalShell>

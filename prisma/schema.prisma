@@ -80,17 +80,17 @@ enum PromptConfigType {
 }
 
 model Source {
-  id                       String   @id @default(cuid())
-  groupId                  String?
-  name                     String
-  rssUrl                   String   @unique
-  siteUrl                  String
-  enabled                  Boolean  @default(true)
-  fetchFullTextWhenMissing Boolean  @default(true)
-  createdAt                DateTime @default(now())
-  updatedAt                DateTime @updatedAt
-  items                    Item[]
-  group                    SourceGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  id               String   @id @default(cuid())
+  groupId          String?
+  name             String
+  rssUrl           String   @unique
+  siteUrl          String
+  enabled          Boolean  @default(true)
+  aiParsingEnabled Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  items            Item[]
+  group            SourceGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
 
   @@index([groupId, name])
   @@map("sources")

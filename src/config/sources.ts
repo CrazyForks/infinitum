@@ -6,13 +6,13 @@ export const DEFAULT_SOURCE_CONFIGS: SourceConfig[] = [
     rssUrl: "https://openai.com/news/rss.xml",
     siteUrl: "https://openai.com/news",
     enabled: true,
-    fetchFullTextWhenMissing: true,
+    aiParsingEnabled: false,
   },
   {
     name: "Hacker News Frontpage",
     rssUrl: "https://hnrss.org/frontpage",
     siteUrl: "https://news.ycombinator.com/",
     enabled: true,
-    fetchFullTextWhenMissing: false,
+    aiParsingEnabled: true,
   },
 ];

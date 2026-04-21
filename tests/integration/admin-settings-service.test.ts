@@ -184,7 +184,7 @@ describe("admin settings service", () => {
         rssUrl: "https://grouped.example.com/feed.xml",
         siteUrl: "https://grouped.example.com",
         enabled: true,
-        fetchFullTextWhenMissing: true,
+        aiParsingEnabled: true,
         groupId: group.id,
       },
     });

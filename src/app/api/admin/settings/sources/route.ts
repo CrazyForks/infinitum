@@ -9,7 +9,7 @@ const sourceSchema = z.object({
   rssUrl: z.url(),
   siteUrl: z.url(),
   enabled: z.boolean(),
-  fetchFullTextWhenMissing: z.boolean(),
+  aiParsingEnabled: z.boolean().default(true),
   groupId: z.string().nullable().optional(),
 });
 

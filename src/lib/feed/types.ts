@@ -130,5 +130,5 @@ export type SourceConfig = {
   rssUrl: string;
   siteUrl: string;
   enabled: boolean;
-  fetchFullTextWhenMissing: boolean;
+  aiParsingEnabled: boolean;
 };

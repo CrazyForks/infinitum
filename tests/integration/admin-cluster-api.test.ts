@@ -41,7 +41,7 @@ describe("/api/admin/clusters", () => {
         rssUrl: "https://cluster.example.com/feed.xml",
         siteUrl: "https://cluster.example.com",
         enabled: true,
-        fetchFullTextWhenMissing: false,
+        aiParsingEnabled: false,
       },
     });
 

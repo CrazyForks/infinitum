@@ -18,7 +18,7 @@ describe("/api/feed", () => {
         rssUrl: "https://api.example.com/feed.xml",
         siteUrl: "https://api.example.com",
         enabled: true,
-        fetchFullTextWhenMissing: true,
+        aiParsingEnabled: true,
       },
     });
 
@@ -436,7 +436,7 @@ describe("/api/feed", () => {
           rssUrl: "https://grouped.example.com/feed.xml",
           siteUrl: "https://grouped.example.com",
           enabled: true,
-          fetchFullTextWhenMissing: true,
+          aiParsingEnabled: true,
           groupId: group.id,
         },
       });
@@ -518,7 +518,7 @@ describe("/api/feed", () => {
           rssUrl: "https://infra.example.com/feed.xml",
           siteUrl: "https://infra.example.com",
           enabled: true,
-          fetchFullTextWhenMissing: true,
+          aiParsingEnabled: true,
           groupId: infra.id,
         },
       });
@@ -529,7 +529,7 @@ describe("/api/feed", () => {
           rssUrl: "https://ai.example.com/feed.xml",
           siteUrl: "https://ai.example.com",
           enabled: true,
-          fetchFullTextWhenMissing: true,
+          aiParsingEnabled: true,
           groupId: ai.id,
         },
       });
@@ -604,7 +604,7 @@ describe("/api/feed", () => {
           rssUrl: "https://ungrouped.example.com/feed.xml",
           siteUrl: "https://ungrouped.example.com",
           enabled: true,
-          fetchFullTextWhenMissing: true,
+          aiParsingEnabled: true,
         },
       });
 
@@ -669,7 +669,7 @@ describe("/api/feed", () => {
           rssUrl: "https://other.example.com/feed.xml",
           siteUrl: "https://other.example.com",
           enabled: true,
-          fetchFullTextWhenMissing: true,
+          aiParsingEnabled: true,
         },
       });
 

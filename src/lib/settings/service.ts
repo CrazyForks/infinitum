@@ -174,14 +174,14 @@ function toSourceConfig(source: {
   rssUrl: string;
   siteUrl: string;
   enabled: boolean;
-  fetchFullTextWhenMissing: boolean;
+  aiParsingEnabled: boolean;
 }): SourceConfig {
   return {
     name: source.name,
     rssUrl: source.rssUrl,
     siteUrl: source.siteUrl,
     enabled: source.enabled,
-    fetchFullTextWhenMissing: source.fetchFullTextWhenMissing,
+    aiParsingEnabled: source.aiParsingEnabled,
   };
 }
 
@@ -462,7 +462,7 @@ async function ensureModelAndPromptConfigsSeeded(
           rssUrl: source.rssUrl,
           siteUrl: source.siteUrl,
           enabled: source.enabled,
-          fetchFullTextWhenMissing: source.fetchFullTextWhenMissing,
+          aiParsingEnabled: source.aiParsingEnabled,
         })),
       });
     }
@@ -579,7 +579,7 @@ export async function getIngestionRuntimeConfig(): Promise<RuntimeConfig> {
   const clusterMatchConfig = pickPromptConfigByType(promptConfigs, PromptConfigType.cluster_match);
 
   return {
-    rssSources: sources.map(toSourceConfig),
+    rssSources: sources.map((s) => toSourceConfig(s)),
     blacklistKeywords: blacklist.map((entry) => entry.keyword),
     ingestion: {
       itemConcurrency: defaultModelConfig.ingestionItemConcurrency,
@@ -649,7 +649,7 @@ export async function getAdminSettings(): Promise<AdminSettingsSnapshot> {
       rssUrl: source.rssUrl,
       siteUrl: source.siteUrl,
       enabled: source.enabled,
-      fetchFullTextWhenMissing: source.fetchFullTextWhenMissing,
+      aiParsingEnabled: source.aiParsingEnabled,
       groupId: source.groupId,
       groupName: source.group?.name ?? null,
     })),
@@ -679,11 +679,48 @@ export async function resolveSourceMetadata(
   const siteUrl = normalizeUrl(parsedFeed.link) ?? buildSiteUrlFromRssUrl(normalizedRssUrl);
   const name = normalizeText(parsedFeed.title) || getFallbackSourceName(normalizedRssUrl);
 
+  // 检测 RSS 源质量，判断是否需要 AI 解析
+  const items = parsedFeed.items ?? [];
+  const suggestedAiParsingEnabled = shouldEnableAiParsing(items);
+
   return {
     name,
     rssUrl: normalizedRssUrl,
     siteUrl,
+    suggestedAiParsingEnabled,
   };
+}
+
+/**
+ * 根据 RSS 条目内容质量判断是否需要 AI 解析
+ * 如果 RSS 已经有良好的格式和完整的内容，建议关闭 AI 解析
+ */
+function shouldEnableAiParsing(items: Array<{ content?: string | null; "content:encoded"?: string | null; contentSnippet?: string | null }>): boolean {
+  if (items.length === 0) {
+    return true; // 默认开启，如果无法判断
+  }
+
+  // 检查每个条目的内容质量
+  let wellFormattedCount = 0;
+  const sampleSize = Math.min(items.length, 5); // 抽样前5条
+
+  for (let i = 0; i < sampleSize; i++) {
+    const item = items[i];
+    const hasFullContent = Boolean(
+      item["content:encoded"]?.trim() || item.content?.trim()
+    );
+    const contentLength = (item.contentSnippet ?? "").length;
+    const hasGoodSnippet = contentLength >= 100; // 摘要超过100字符认为是良好的
+
+    // 如果条目有完整内容或良好的摘要，认为是格式良好的
+    if (hasFullContent || hasGoodSnippet) {
+      wellFormattedCount++;
+    }
+  }
+
+  // 如果超过60%的抽样条目格式良好，建议关闭 AI 解析
+  const wellFormattedRatio = wellFormattedCount / sampleSize;
+  return wellFormattedRatio < 0.6;
 }
 
 export async function importSourcesFromOpml(
@@ -739,7 +776,6 @@ export async function importSourcesFromOpml(
           siteUrl,
           groupId,
           enabled: true,
-          fetchFullTextWhenMissing: true,
         },
         create: {
           name,
@@ -747,7 +783,7 @@ export async function importSourcesFromOpml(
           siteUrl,
           groupId,
           enabled: true,
-          fetchFullTextWhenMissing: true,
+          aiParsingEnabled: true,
         },
       });
 
@@ -1286,7 +1322,7 @@ export async function createSource(input: SourceInput) {
       rssUrl: input.rssUrl,
       siteUrl: input.siteUrl,
       enabled: input.enabled,
-      fetchFullTextWhenMissing: input.fetchFullTextWhenMissing,
+      aiParsingEnabled: input.aiParsingEnabled,
       groupId: input.groupId ?? null,
     },
   });
@@ -1300,7 +1336,7 @@ export async function updateSource(id: string, input: SourceInput) {
       rssUrl: input.rssUrl,
       siteUrl: input.siteUrl,
       enabled: input.enabled,
-      fetchFullTextWhenMissing: input.fetchFullTextWhenMissing,
+      aiParsingEnabled: input.aiParsingEnabled,
       groupId: input.groupId ?? null,
     },
   });

@@ -34,7 +34,7 @@ describe("runtime config defaults", () => {
       rssUrl: "https://example.com/feed.xml",
       siteUrl: "https://example.com",
       enabled: true,
-      fetchFullTextWhenMissing: false,
+      aiParsingEnabled: true,
     });
     left.blacklistKeywords.push("foo");
 

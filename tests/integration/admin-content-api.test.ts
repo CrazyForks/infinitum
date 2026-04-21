@@ -31,7 +31,7 @@ describe("/api/admin/items", () => {
         rssUrl: "https://review.example.com/feed.xml",
         siteUrl: "https://review.example.com",
         enabled: true,
-        fetchFullTextWhenMissing: false,
+        aiParsingEnabled: false,
       },
     });
 
