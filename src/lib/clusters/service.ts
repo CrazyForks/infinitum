@@ -471,6 +471,51 @@ export async function detachItemFromCluster(itemId: string, aiProvider?: AiProvi
   return previousClusterId;
 }
 
+export async function moveItemToCluster(itemId: string, clusterId: string, aiProvider?: AiProvider) {
+  const [item, targetCluster] = await Promise.all([
+    prisma.item.findUnique({
+      where: { id: itemId },
+      select: {
+        id: true,
+        clusterId: true,
+        moderationStatus: true,
+        status: true,
+      },
+    }),
+    prisma.contentCluster.findUnique({
+      where: { id: clusterId },
+      select: {
+        id: true,
+        status: true,
+      },
+    }),
+  ]);
+
+  if (!item || item.status !== "processed" || (item.moderationStatus !== "allowed" && item.moderationStatus !== "restored")) {
+    throw new Error("Item not found");
+  }
+
+  if (!targetCluster || targetCluster.status !== "active") {
+    throw new Error("Cluster not found");
+  }
+
+  if (item.clusterId === clusterId) {
+    return clusterId;
+  }
+
+  const previousClusterId = item.clusterId;
+  await setItemCluster(itemId, clusterId);
+  await recomputeCluster(clusterId, aiProvider);
+
+  if (previousClusterId) {
+    await recomputeCluster(previousClusterId, aiProvider);
+  }
+
+  invalidateFeedCache();
+
+  return clusterId;
+}
+
 export async function setClusterVisibility(clusterId: string, visible: boolean) {
   const cluster = await updateClusterStatus(clusterId, visible ? "active" : "hidden");
   invalidateFeedCache();

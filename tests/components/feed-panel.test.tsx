@@ -1293,6 +1293,195 @@ describe("FeedPanel", () => {
     expect(screen.getByText("摘要内容")).toBeInTheDocument();
   });
 
+  it("lets admins search clusters by title and manually join a singleton cluster from a homepage card", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
+      const url = getFetchUrl(input);
+
+      if (url === "/api/admin/clusters") {
+        return new Response(
+          JSON.stringify({
+            clusters: [
+              {
+                id: "cluster-singleton",
+                title: "单条聚合候选",
+                summary: "只有一条内容的聚合",
+                score: 75,
+                itemCount: 1,
+                latestPublishedAt: "2026-04-08T09:00:00.000Z",
+                status: "active",
+                items: [],
+              },
+              {
+                id: "cluster-joined",
+                title: "已存在的 OpenAI 聚合",
+                summary: "已有多条内容",
+                score: 88,
+                itemCount: 3,
+                latestPublishedAt: "2026-04-10T09:00:00.000Z",
+                status: "active",
+                items: [],
+              },
+            ],
+          }),
+        );
+      }
+
+      if (url === "/api/admin/items/item-1/join-cluster") {
+        expect(init?.method).toBe("POST");
+
+        return new Response(
+          JSON.stringify({
+            cluster: {
+              id: "cluster-singleton",
+            },
+          }),
+        );
+      }
+
+      if (url === "/api/feed?range=7d&sort=time_desc&tzOffsetMinutes=-480") {
+        return new Response(
+          JSON.stringify({
+            items: [
+              {
+                ...initialEntries[0],
+                id: "cluster-singleton",
+                title: "单条聚合候选",
+                itemCount: 2,
+              },
+            ],
+            pagination: {
+              page: 1,
+              size: 20,
+              total: 1,
+              totalPages: 1,
+            },
+            range: "7d" satisfies FeedRange,
+            sort: "time_desc" satisfies FeedSort,
+            start: null,
+            end: null,
+            groupId: null,
+            sourceId: null,
+            title: null,
+          }),
+        );
+      }
+
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <FeedPanel
+        initialItems={initialEntries}
+        initialRange="7d"
+        initialSort="time_desc"
+        initialStartDate={null}
+        initialEndDate={null}
+        initialNextCursor={null}
+        initialStatus={null}
+        isAdmin
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "加入聚合组：中文标题" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "手动加入聚合组" });
+    expect(await within(dialog).findByText("单条聚合候选")).toBeInTheDocument();
+    expect(within(dialog).getByText("1 条内容")).toBeInTheDocument();
+
+    await user.type(within(dialog).getByLabelText("搜索聚合标题"), "单条");
+    await user.click(within(dialog).getByRole("button", { name: /选择聚合组：单条聚合候选/ }));
+    await user.click(within(dialog).getByRole("button", { name: "确认加入" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/admin/items/item-1/join-cluster", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ clusterId: "cluster-singleton" }),
+      });
+    });
+
+    expect(await screen.findByText("已加入聚合组。")).toBeInTheDocument();
+  });
+
+  it("shows a confirmation dialog before manually filtering a homepage card", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
+      const url = getFetchUrl(input);
+
+      if (url === "/api/admin/items/item-1/filter") {
+        expect(init?.method).toBe("POST");
+
+        return new Response(
+          JSON.stringify({
+            item: {
+              id: "item-1",
+            },
+          }),
+        );
+      }
+
+      if (url === "/api/feed?range=7d&sort=time_desc&tzOffsetMinutes=-480") {
+        return new Response(
+          JSON.stringify({
+            items: [initialEntries[0]],
+            pagination: {
+              page: 1,
+              size: 20,
+              total: 1,
+              totalPages: 1,
+            },
+            range: "7d" satisfies FeedRange,
+            sort: "time_desc" satisfies FeedSort,
+            start: null,
+            end: null,
+            groupId: null,
+            sourceId: null,
+            title: null,
+          }),
+        );
+      }
+
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <FeedPanel
+        initialItems={initialEntries}
+        initialRange="7d"
+        initialSort="time_desc"
+        initialStartDate={null}
+        initialEndDate={null}
+        initialNextCursor={null}
+        initialStatus={null}
+        isAdmin
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "手动过滤：中文标题" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "确认手动过滤" });
+    expect(within(dialog).getByText("过滤后该内容会立即从主页列表中移除。")).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "确认过滤" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/admin/items/item-1/filter", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+      });
+    });
+
+    expect(await screen.findByText("已手动过滤该内容。")).toBeInTheDocument();
+  });
+
   it("can queue both translation and summary from the regenerate dialog", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input) => {
@@ -1362,6 +1551,8 @@ describe("FeedPanel", () => {
     const clusterSummary = screen.getByText("聚合摘要内容");
 
     expect(regenerateButton.className).toContain("feed-card-icon-button");
+    expect(regenerateButton.className).toContain("p-1.5");
+    expect(regenerateButton.className).toContain("text-[var(--text-2)]");
     expect(regenerateButton.querySelector("svg")?.getAttribute("viewBox")).toBe("0 0 24 24");
     expect(singleSummary.className).not.toContain("max-w-4xl");
     expect(clusterSummary.className).not.toContain("max-w-4xl");
@@ -1389,6 +1580,7 @@ describe("FeedPanel", () => {
     const card = title.closest("article");
     const clusterCard = clusterTitle.closest("article");
     const regenerateButton = screen.getByRole("button", { name: "重新生成内容" });
+    const actionGroup = regenerateButton.parentElement;
     const clusterToggleRow = clusterToggle.parentElement;
     const clusterDivider = clusterToggleRow?.querySelector(".h-px.flex-1");
 
@@ -1410,7 +1602,9 @@ describe("FeedPanel", () => {
     expect(within(card as HTMLElement).getByText("作者：Alex")).toBeInTheDocument();
     expect(within(card as HTMLElement).getByText(/发表：2026\/04\/09 17:00/)).toBeInTheDocument();
     expect(within(clusterCard as HTMLElement).getByText("来源：2 个来源")).toBeInTheDocument();
-    expect(title.parentElement).toBe(regenerateButton.parentElement);
+    expect(actionGroup).toHaveClass("flex");
+    expect(actionGroup).toHaveClass("shrink-0");
+    expect(actionGroup).toHaveClass("gap-0.5");
   });
 
   it("renders regenerate API errors as alerts", async () => {

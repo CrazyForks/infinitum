@@ -12,11 +12,13 @@ import { FilterSelect } from "@/components/ui/filter-select";
 import { FilterSelectInline } from "@/components/ui/filter-select-inline";
 import { FilterSummary } from "@/components/ui/filter-summary";
 import { FormField } from "@/components/ui/form-field";
+import { IconFilter, IconPlus } from "@/components/ui/icons";
 import { ModalShell } from "@/components/ui/modal-shell";
 import { SelectField } from "@/components/ui/select-field";
 import { TextInput } from "@/components/ui/text-input";
 import { RANGE_OPTIONS, SORT_OPTIONS } from "@/lib/feed/range";
 import type {
+  ClusterDTO,
   FeedPagination,
   FeedClusterPreviewItemDTO,
   FeedEntryDTO,
@@ -81,6 +83,17 @@ type RegenerateDialogState = {
 } | null;
 
 type RegenerateMode = "summary" | "translation" | "both";
+
+type AssignClusterDialogState = {
+  itemId: string;
+  itemTitle: string;
+  currentClusterId?: string | null;
+} | null;
+
+type ManualFilterDialogState = {
+  itemId: string;
+  itemTitle: string;
+} | null;
 
 type DateRangeValue = [Dayjs | null, Dayjs | null] | null;
 
@@ -493,6 +506,12 @@ export function FeedPanel({
   const [refreshFeedback, setRefreshFeedback] = useState<FeedFeedback | null>(null);
   const [regenerateDialog, setRegenerateDialog] = useState<RegenerateDialogState>(null);
   const [regenerateMode, setRegenerateMode] = useState<RegenerateMode>("summary");
+  const [assignClusterDialog, setAssignClusterDialog] = useState<AssignClusterDialogState>(null);
+  const [manualFilterDialog, setManualFilterDialog] = useState<ManualFilterDialogState>(null);
+  const [clusterOptions, setClusterOptions] = useState<ClusterDTO[]>([]);
+  const [clusterSearch, setClusterSearch] = useState("");
+  const [selectedClusterId, setSelectedClusterId] = useState<string | null>(null);
+  const [isLoadingClusterOptions, setIsLoadingClusterOptions] = useState(false);
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(
     Boolean(initialStartDate || initialEndDate || initialSourceId || initialTitle),
   );
@@ -544,6 +563,25 @@ export function FeedPanel({
 
     return filters;
   }, [availableGroups, availableSources, groupId, sourceId, summary.rangeLabel, summary.sortLabel, titleFilter]);
+  const visibleClusterOptions = useMemo(() => {
+    const normalizedSearch = clusterSearch.trim().toLocaleLowerCase();
+
+    return clusterOptions.filter((cluster) => {
+      if (cluster.status !== "active") {
+        return false;
+      }
+
+      if (assignClusterDialog?.currentClusterId && cluster.id === assignClusterDialog.currentClusterId) {
+        return false;
+      }
+
+      if (!normalizedSearch) {
+        return true;
+      }
+
+      return cluster.title.toLocaleLowerCase().includes(normalizedSearch);
+    });
+  }, [assignClusterDialog?.currentClusterId, clusterOptions, clusterSearch]);
 
   const resetExpandedClusterState = () => {
     setExpandedClusters({});
@@ -722,6 +760,140 @@ export function FeedPanel({
       } | null;
       error?: string;
     };
+  };
+
+  const reloadCurrentFeed = () => {
+    startTransition(async () => {
+      const payload = await requestFeed(latestQueryRef.current, { page: currentPage, size: pageSize });
+      replaceFeedData(payload.items, payload.pagination);
+      setGroups(payload.groups ?? availableGroups);
+      setGroupTotalCount(payload.groupTotalCount ?? payload.pagination.total);
+    });
+  };
+
+  const openAssignClusterDialog = (itemId: string, itemTitle: string, currentClusterId?: string | null) => {
+    setAssignClusterDialog({
+      itemId,
+      itemTitle,
+      currentClusterId: currentClusterId ?? null,
+    });
+    setClusterSearch("");
+    setSelectedClusterId(null);
+    setIsLoadingClusterOptions(true);
+
+    startTransition(async () => {
+      try {
+        const response = await fetch("/api/admin/clusters");
+        const payload = (await response.json()) as {
+          clusters?: ClusterDTO[];
+          error?: string;
+        };
+
+        if (!response.ok || payload.error) {
+          setRefreshFeedback({
+            tone: "error",
+            message: payload.error ?? "加载聚合组选项失败，请稍后重试。",
+          });
+          setAssignClusterDialog(null);
+          return;
+        }
+
+        setClusterOptions(payload.clusters ?? []);
+      } catch {
+        setRefreshFeedback({
+          tone: "error",
+          message: "加载聚合组选项失败，请稍后重试。",
+        });
+        setAssignClusterDialog(null);
+      } finally {
+        setIsLoadingClusterOptions(false);
+      }
+    });
+  };
+
+  const confirmAssignCluster = () => {
+    if (!assignClusterDialog || !selectedClusterId) {
+      return;
+    }
+
+    const { itemId } = assignClusterDialog;
+    setAssignClusterDialog(null);
+
+    startTransition(async () => {
+      try {
+        const response = await fetch(`/api/admin/items/${itemId}/join-cluster`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ clusterId: selectedClusterId }),
+        });
+        const payload = (await response.json()) as {
+          error?: string;
+        };
+
+        if (!response.ok || payload.error) {
+          setRefreshFeedback({
+            tone: "error",
+            message: payload.error ?? "加入聚合组失败，请稍后重试。",
+          });
+          return;
+        }
+
+        reloadCurrentFeed();
+        setRefreshFeedback({
+          tone: "success",
+          message: "已加入聚合组。",
+        });
+      } catch {
+        setRefreshFeedback({
+          tone: "error",
+          message: "加入聚合组失败，请稍后重试。",
+        });
+      }
+    });
+  };
+
+  const confirmManualFilter = () => {
+    if (!manualFilterDialog) {
+      return;
+    }
+
+    const { itemId } = manualFilterDialog;
+    setManualFilterDialog(null);
+
+    startTransition(async () => {
+      try {
+        const response = await fetch(`/api/admin/items/${itemId}/filter`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+        });
+        const payload = (await response.json()) as {
+          error?: string;
+        };
+
+        if (!response.ok || payload.error) {
+          setRefreshFeedback({
+            tone: "error",
+            message: payload.error ?? "手动过滤失败，请稍后重试。",
+          });
+          return;
+        }
+
+        reloadCurrentFeed();
+        setRefreshFeedback({
+          tone: "success",
+          message: "已手动过滤该内容。",
+        });
+      } catch {
+        setRefreshFeedback({
+          tone: "error",
+          message: "手动过滤失败，请稍后重试。",
+        });
+      }
+    });
   };
 
   const runRegeneration = (targets: Array<"translation" | "summary">) => {
@@ -1004,7 +1176,7 @@ export function FeedPanel({
   const cardTitleClassName = "text-xl font-semibold leading-7 text-[var(--foreground)]";
   const metaTextClassName = "inline-flex items-center";
   const iconButtonClassName =
-    "feed-card-icon-button inline-flex h-8 w-8 items-center justify-center rounded-sm border border-transparent bg-transparent text-[var(--muted)] transition hover:bg-[var(--surface-muted)] hover:text-[var(--foreground)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(59,130,246,0.28)] focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:cursor-not-allowed disabled:opacity-55";
+    "feed-card-icon-button inline-flex items-center justify-center rounded-sm border border-transparent bg-transparent p-1.5 text-[var(--text-2)] transition hover:bg-[var(--bg-muted)] hover:text-[var(--text-1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]/35 disabled:cursor-not-allowed disabled:opacity-50";
   const clusterToggleClassName =
     "inline-flex shrink-0 items-center gap-1 bg-transparent px-0 py-0 text-left text-[11px] leading-none text-[var(--muted)] transition hover:text-[var(--foreground)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(59,130,246,0.28)] focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:cursor-not-allowed disabled:opacity-55";
   const paginationButtonClassName =
@@ -1245,20 +1417,44 @@ export function FeedPanel({
                                 {clusterItem.title}
                               </a>
                               {isAdmin ? (
-                                <button
-                                  aria-label={`重新生成内容：${clusterItem.title}`}
-                                  title="重新生成内容"
-                                  className={iconButtonClassName}
-                                  type="button"
-                                  onClick={() =>
-                                    openRegenerateDialog(clusterItem.id, Boolean(clusterItem.canRegenerateTranslation), {
-                                      shouldAnnounceClusterRefresh: true,
-                                    })
-                                  }
-                                  disabled={isPending}
-                                >
-                                  <RefreshIcon />
-                                </button>
+                                <div className="flex shrink-0 items-center gap-0.5">
+                                  <button
+                                    aria-label={`加入聚合组：${clusterItem.title}`}
+                                    title="加入聚合组"
+                                    className={iconButtonClassName}
+                                    type="button"
+                                    onClick={() => openAssignClusterDialog(clusterItem.id, clusterItem.title, entry.id)}
+                                    disabled={isPending}
+                                  >
+                                    <IconPlus className="h-4 w-4" />
+                                  </button>
+                                  <button
+                                    aria-label={`手动过滤：${clusterItem.title}`}
+                                    title="手动过滤"
+                                    className={iconButtonClassName}
+                                    type="button"
+                                    onClick={() =>
+                                      setManualFilterDialog({ itemId: clusterItem.id, itemTitle: clusterItem.title })
+                                    }
+                                    disabled={isPending}
+                                  >
+                                    <IconFilter className="h-4 w-4" />
+                                  </button>
+                                  <button
+                                    aria-label={`重新生成内容：${clusterItem.title}`}
+                                    title="重新生成内容"
+                                    className={iconButtonClassName}
+                                    type="button"
+                                    onClick={() =>
+                                      openRegenerateDialog(clusterItem.id, Boolean(clusterItem.canRegenerateTranslation), {
+                                        shouldAnnounceClusterRefresh: true,
+                                      })
+                                    }
+                                    disabled={isPending}
+                                  >
+                                    <RefreshIcon />
+                                  </button>
+                                </div>
                               ) : null}
                             </div>
                             <div className={cardMetaRowClassName}>
@@ -1289,16 +1485,38 @@ export function FeedPanel({
                         </a>
                       </h2>
                       {isAdmin ? (
-                        <button
-                          aria-label="重新生成内容"
-                          title="重新生成内容"
-                          className={iconButtonClassName}
-                          type="button"
-                          onClick={() => openRegenerateDialog(entry.id, Boolean(entry.canRegenerateTranslation))}
-                          disabled={isPending}
-                        >
-                          <RefreshIcon />
-                        </button>
+                        <div className="flex shrink-0 items-center gap-0.5">
+                          <button
+                            aria-label={`加入聚合组：${entry.title}`}
+                            title="加入聚合组"
+                            className={iconButtonClassName}
+                            type="button"
+                            onClick={() => openAssignClusterDialog(entry.id, entry.title)}
+                            disabled={isPending}
+                          >
+                            <IconPlus className="h-4 w-4" />
+                          </button>
+                          <button
+                            aria-label={`手动过滤：${entry.title}`}
+                            title="手动过滤"
+                            className={iconButtonClassName}
+                            type="button"
+                            onClick={() => setManualFilterDialog({ itemId: entry.id, itemTitle: entry.title })}
+                            disabled={isPending}
+                          >
+                            <IconFilter className="h-4 w-4" />
+                          </button>
+                          <button
+                            aria-label="重新生成内容"
+                            title="重新生成内容"
+                            className={iconButtonClassName}
+                            type="button"
+                            onClick={() => openRegenerateDialog(entry.id, Boolean(entry.canRegenerateTranslation))}
+                            disabled={isPending}
+                          >
+                            <RefreshIcon />
+                          </button>
+                        </div>
                       ) : null}
                     </div>
                     <div className={cardMetaRowClassName}>
@@ -1384,6 +1602,97 @@ export function FeedPanel({
             </div>
           </div>
         ) : null}
+
+        <ModalShell
+          isOpen={Boolean(assignClusterDialog)}
+          onClose={() => setAssignClusterDialog(null)}
+          title="手动加入聚合组"
+          widthClassName="max-w-2xl"
+          bodyClassName="space-y-4 p-4"
+          footer={
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="secondary" onClick={() => setAssignClusterDialog(null)} disabled={isPending}>
+                取消
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                onClick={confirmAssignCluster}
+                disabled={isPending || !selectedClusterId}
+              >
+                确认加入
+              </Button>
+            </div>
+          }
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-[var(--muted)]">
+              为“{assignClusterDialog?.itemTitle ?? ""}”搜索并选择目标聚合组。
+            </p>
+            <FormField label="搜索聚合标题" htmlFor="assign-cluster-search">
+              <TextInput
+                id="assign-cluster-search"
+                aria-label="搜索聚合标题"
+                value={clusterSearch}
+                onChange={(event) => setClusterSearch(event.target.value)}
+                placeholder="输入聚合标题关键词"
+              />
+            </FormField>
+            <div className="max-h-72 space-y-2 overflow-y-auto rounded-sm border border-[color:var(--line)] p-2">
+              {isLoadingClusterOptions ? (
+                <p className="px-2 py-3 text-sm text-[var(--muted)]">正在加载聚合组选项...</p>
+              ) : visibleClusterOptions.length ? (
+                visibleClusterOptions.map((cluster) => {
+                  const isSelected = selectedClusterId === cluster.id;
+
+                  return (
+                    <button
+                      key={cluster.id}
+                      type="button"
+                      aria-pressed={isSelected}
+                      aria-label={`选择聚合组：${cluster.title}`}
+                      onClick={() => setSelectedClusterId(cluster.id)}
+                      className={cx(
+                        "w-full rounded-sm border px-3 py-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(59,130,246,0.28)]",
+                        isSelected
+                          ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent-strong)]"
+                          : "border-[color:var(--line)] bg-[var(--surface)] hover:bg-[var(--surface-muted)]",
+                      )}
+                    >
+                      <div className="text-sm font-medium">{cluster.title}</div>
+                      <div className="mt-1 text-xs text-[var(--muted)]">{cluster.itemCount} 条内容</div>
+                    </button>
+                  );
+                })
+              ) : (
+                <p className="px-2 py-3 text-sm text-[var(--muted)]">没有匹配的聚合组。</p>
+              )}
+            </div>
+          </div>
+        </ModalShell>
+
+        <ModalShell
+          isOpen={Boolean(manualFilterDialog)}
+          onClose={() => setManualFilterDialog(null)}
+          title="确认手动过滤"
+          widthClassName="max-w-md"
+          bodyClassName="space-y-3 p-4"
+          footer={
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="secondary" onClick={() => setManualFilterDialog(null)} disabled={isPending}>
+                取消
+              </Button>
+              <Button type="button" variant="primary" onClick={confirmManualFilter} disabled={isPending}>
+                确认过滤
+              </Button>
+            </div>
+          }
+        >
+          <div className="space-y-3 text-sm text-[var(--muted)]">
+            <p>将“{manualFilterDialog?.itemTitle ?? ""}”标记为手动过滤。</p>
+            <p>过滤后该内容会立即从主页列表中移除。</p>
+          </div>
+        </ModalShell>
 
         <ModalShell
           isOpen={Boolean(regenerateDialog)}

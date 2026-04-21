@@ -71,6 +71,66 @@ describe("/api/admin/items", () => {
         language: "en",
       },
     });
+
+    await prisma.item.create({
+      data: {
+        id: "item-visible",
+        sourceId: source.id,
+        clusterId: "cluster-1",
+        originalUrl: "https://review.example.com/posts/2",
+        canonicalUrl: "https://review.example.com/posts/2",
+        urlHash: "hash-visible",
+        dedupeSignature: "review|2",
+        originalTitle: "OpenAI ships a new agent tool",
+        translatedTitle: "OpenAI 发布新的 agent 工具",
+        publishedAt: new Date("2026-04-11T09:00:00.000Z"),
+        summaryText: "正常内容",
+        status: "processed",
+        moderationStatus: "allowed",
+        moderationReason: null,
+        moderationDetail: "信息有效",
+        qualityScore: 86,
+        qualityRationale: "信息密度高",
+        language: "en",
+      },
+    });
+
+    await prisma.contentCluster.create({
+      data: {
+        id: "cluster-singleton",
+        kind: "topic",
+        title: "Singleton cluster",
+        summary: "单条聚合摘要",
+        score: 68,
+        itemCount: 1,
+        latestPublishedAt: new Date("2026-04-12T09:00:00.000Z"),
+        status: "active",
+        fingerprint: "singleton-cluster",
+      },
+    });
+
+    await prisma.item.create({
+      data: {
+        id: "item-singleton",
+        sourceId: source.id,
+        clusterId: "cluster-singleton",
+        originalUrl: "https://review.example.com/posts/3",
+        canonicalUrl: "https://review.example.com/posts/3",
+        urlHash: "hash-singleton",
+        dedupeSignature: "review|3",
+        originalTitle: "Singleton cluster item",
+        translatedTitle: "单条聚合内容",
+        publishedAt: new Date("2026-04-12T09:00:00.000Z"),
+        summaryText: "单条聚合内容摘要",
+        status: "processed",
+        moderationStatus: "allowed",
+        moderationReason: null,
+        moderationDetail: "信息有效",
+        qualityScore: 68,
+        qualityRationale: "质量尚可",
+        language: "en",
+      },
+    });
   });
 
   it("lists filtered items for admins", async () => {
@@ -111,5 +171,59 @@ describe("/api/admin/items", () => {
     });
     expect(stored.moderationStatus).toBe("restored");
     expect(stored.restoredByAdminAt).not.toBeNull();
+  });
+
+  it("manually filters a visible item for admins", async () => {
+    requireAdmin.mockResolvedValue(undefined);
+
+    const { POST } = await import("@/app/api/admin/items/[id]/filter/route");
+    const response = await POST(
+      new Request("http://localhost/api/admin/items/item-visible/filter", { method: "POST" }),
+      {
+        params: Promise.resolve({ id: "item-visible" }),
+      },
+    );
+    const json = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(json.item.moderationStatus).toBe("filtered");
+    expect(json.item.moderationReason).toBe("other");
+
+    const stored = await prisma.item.findUniqueOrThrow({
+      where: { id: "item-visible" },
+    });
+    expect(stored.moderationStatus).toBe("filtered");
+    expect(stored.status).toBe("filtered");
+    expect(stored.clusterId).toBeNull();
+  });
+
+  it("moves an item into the selected cluster for admins, including singleton clusters", async () => {
+    requireAdmin.mockResolvedValue(undefined);
+
+    const { POST } = await import("@/app/api/admin/items/[id]/join-cluster/route");
+    const response = await POST(
+      new Request("http://localhost/api/admin/items/item-visible/join-cluster", {
+        method: "POST",
+        body: JSON.stringify({ clusterId: "cluster-singleton" }),
+        headers: { "content-type": "application/json" },
+      }),
+      {
+        params: Promise.resolve({ id: "item-visible" }),
+      },
+    );
+    const json = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(json.cluster.id).toBe("cluster-singleton");
+
+    const stored = await prisma.item.findUniqueOrThrow({
+      where: { id: "item-visible" },
+    });
+    expect(stored.clusterId).toBe("cluster-singleton");
+
+    const updatedCluster = await prisma.contentCluster.findUniqueOrThrow({
+      where: { id: "cluster-singleton" },
+    });
+    expect(updatedCluster.itemCount).toBe(2);
   });
 });

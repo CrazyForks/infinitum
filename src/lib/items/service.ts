@@ -202,6 +202,43 @@ export async function restoreFilteredItem(itemId: string, options?: Regeneration
   });
 }
 
+export async function manuallyFilterItem(itemId: string, options?: RegenerationOptions) {
+  const item = await prisma.item.findUnique({
+    where: { id: itemId },
+    include: { source: true },
+  });
+
+  if (!item) {
+    throw new Error("Item not found");
+  }
+
+  const previousClusterId = item.clusterId;
+  const filtered = await prisma.item.update({
+    where: { id: item.id },
+    data: {
+      moderationStatus: "filtered",
+      moderationReason: "other",
+      moderationDetail: "管理员手动过滤",
+      status: "filtered",
+      clusterId: null,
+      restoredByAdminAt: null,
+      errorMessage: null,
+    },
+    include: { source: true },
+  });
+
+  if (previousClusterId) {
+    await recomputeCluster(previousClusterId, options?.aiProvider);
+  }
+
+  invalidateFeedCache();
+
+  return prisma.item.findUniqueOrThrow({
+    where: { id: filtered.id },
+    include: { source: true },
+  });
+}
+
 export async function reanalyzeItem(itemId: string, options?: RegenerationOptions) {
   const item = await prisma.item.findUnique({
     where: { id: itemId },
