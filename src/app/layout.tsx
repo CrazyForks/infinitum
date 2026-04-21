@@ -15,8 +15,13 @@ const brandFont = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "Infinitum Console",
+  title: "Infinitum",
   description: "面向抓取、审核、聚合与监控的高密度信息流后台。",
+  icons: {
+    icon: "/brand-mark.svg",
+    shortcut: "/brand-mark.svg",
+    apple: "/brand-mark.svg",
+  },
 };
 
 export default function RootLayout({

@@ -74,13 +74,10 @@ type DeleteModalState =
 
 const surfaceCardClassName =
   "w-full min-w-0 rounded-sm border border-[color:var(--line)] bg-[var(--surface)] p-6 shadow-sm";
-const mutedCardClassName = "rounded-sm border border-[color:var(--line)] bg-[var(--bg-muted)]";
 const itemCardClassName = "rounded-lg border border-[color:var(--line)] p-4 transition hover:shadow-md";
 const emptyStateClassName =
   "rounded-sm border border-[color:var(--line)] bg-[var(--bg-muted)] px-4 py-8 text-center text-sm text-[var(--muted)]";
 const labelClassName = "block text-sm text-[var(--text-2)]";
-const inputClassName =
-  "w-full rounded-sm border border-[color:var(--line)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--foreground)] shadow-[0_1px_3px_rgba(0,0,0,0.06)] transition placeholder:text-[var(--text-3)] focus-visible:border-[color:var(--accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(59,130,246,0.35)]";
 const codeClassName = "rounded bg-[var(--bg-muted)] px-2 py-1 text-xs";
 const checkboxInputClassName =
   "h-4 w-4 rounded border-[color:var(--line)] text-[var(--accent)] focus:ring-[rgba(59,130,246,0.35)]";

@@ -27,6 +27,10 @@ describe("GlobalHeader", () => {
     render(<GlobalHeader activeNav="home" isAdmin={false} />);
 
     expect(screen.getByRole("link", { name: /Infinitum/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "GitHub" })).toHaveAttribute(
+      "href",
+      "https://github.com/shawnxie94/infinitum",
+    );
     expect(screen.getByRole("navigation", { name: "主导航" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "主页" })).toHaveAttribute("href", "/");
     expect(screen.getByRole("button", { name: "登录" })).toBeInTheDocument();
@@ -35,7 +39,8 @@ describe("GlobalHeader", () => {
   it("uses the widened shared header container width", () => {
     render(<GlobalHeader activeNav="home" isAdmin={false} />);
 
-    const headerContent = screen.getByRole("navigation", { name: "主导航" }).parentElement;
+    const header = screen.getByRole("navigation", { name: "主导航" }).closest("header");
+    const headerContent = header?.firstElementChild;
 
     expect(headerContent).not.toBeNull();
     expect(headerContent?.className).toContain("max-w-7xl");

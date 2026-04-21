@@ -1,4 +1,7 @@
-export type DefaultIngestionScheduleKey = "ingestion_default";
+export const DEFAULT_INGESTION_SCHEDULE_KEY = "ingestion_default" as const;
+export const DEFAULT_INGESTION_TASK_LABEL = "默认抓取任务";
+
+export type DefaultIngestionScheduleKey = typeof DEFAULT_INGESTION_SCHEDULE_KEY;
 
 export type BackgroundTaskRunKind =
   | "ingestion"
@@ -13,7 +16,7 @@ export type BackgroundTaskRunStatus = "queued" | "running" | "succeeded" | "fail
 
 export type ScheduleUpdateInput = {
   enabled: boolean;
-  intervalMinutes: number;
+  cronExpression: string;
 };
 
 export type EnqueueTaskRunInput = {
@@ -45,7 +48,7 @@ export type TaskRunSnapshot = {
 export type TaskScheduleSnapshot = {
   key: DefaultIngestionScheduleKey;
   enabled: boolean;
-  intervalMinutes: number;
+  cronExpression: string;
   timezone: string;
   lastHeartbeatAt: string | null;
   lastRunStartedAt: string | null;

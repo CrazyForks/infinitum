@@ -81,7 +81,7 @@ CREATE TABLE IF NOT EXISTS "task_schedules" (
   "id" TEXT NOT NULL PRIMARY KEY,
   "key" TEXT NOT NULL,
   "enabled" BOOLEAN NOT NULL DEFAULT true,
-  "intervalMinutes" INTEGER NOT NULL,
+  "cronExpression" TEXT NOT NULL DEFAULT '0 * * * *',
   "timezone" TEXT NOT NULL,
   "lastHeartbeatAt" DATETIME,
   "lastRunStartedAt" DATETIME,

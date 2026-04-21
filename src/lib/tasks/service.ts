@@ -6,7 +6,13 @@ import {
   upsertDefaultIngestionSchedule,
 } from "@/lib/tasks/repository";
 import { computeNextRunAt, isSchedulerHeartbeatStale, normalizeScheduleInput } from "@/lib/tasks/scheduler";
-import type { BackgroundTaskMonitorSnapshot, EnqueueTaskRunInput, TaskRunSnapshot, TaskScheduleSnapshot } from "@/lib/tasks/types";
+import {
+  DEFAULT_INGESTION_SCHEDULE_KEY,
+  type BackgroundTaskMonitorSnapshot,
+  type EnqueueTaskRunInput,
+  type TaskRunSnapshot,
+  type TaskScheduleSnapshot,
+} from "@/lib/tasks/types";
 import { prisma } from "@/lib/db";
 
 export const TASK_RUN_CANCELLED_MESSAGE = "管理员手动终止任务。";
@@ -57,7 +63,7 @@ export async function updateTaskRun(
       data,
     }),
     prisma.taskSchedule.updateMany({
-      where: { key: "ingestion_default" },
+      where: { key: DEFAULT_INGESTION_SCHEDULE_KEY },
       data: {
         lastHeartbeatAt: now,
       },
@@ -108,7 +114,7 @@ export function toTaskRunSnapshot(taskRun: {
 export function toTaskScheduleSnapshot(schedule: {
   key: string;
   enabled: boolean;
-  intervalMinutes: number;
+  cronExpression: string;
   timezone: string;
   lastHeartbeatAt: Date | null;
   lastRunStartedAt: Date | null;
@@ -119,7 +125,7 @@ export function toTaskScheduleSnapshot(schedule: {
   return {
     key: schedule.key as TaskScheduleSnapshot["key"],
     enabled: schedule.enabled,
-    intervalMinutes: schedule.intervalMinutes,
+    cronExpression: schedule.cronExpression,
     timezone: schedule.timezone,
     lastHeartbeatAt: schedule.lastHeartbeatAt?.toISOString() ?? null,
     lastRunStartedAt: schedule.lastRunStartedAt?.toISOString() ?? null,
@@ -134,21 +140,22 @@ export function toTaskScheduleSnapshot(schedule: {
   };
 }
 
-export async function updateDefaultIngestionSchedule(input: { enabled: boolean; intervalMinutes: number }) {
+export async function updateDefaultIngestionSchedule(input: { enabled: boolean; cronExpression: string }) {
   const normalizedInput = normalizeScheduleInput(input);
   const currentSchedule = await ensureDefaultIngestionSchedule();
   const now = new Date();
   const nextRunAt = computeNextRunAt({
-    intervalMinutes: normalizedInput.intervalMinutes,
+    cronExpression: normalizedInput.cronExpression,
     now,
     anchor: currentSchedule.lastRunFinishedAt ?? now,
+    timezone: currentSchedule.timezone,
   });
 
   return prisma.taskSchedule.update({
     where: { id: currentSchedule.id },
     data: {
       enabled: normalizedInput.enabled,
-      intervalMinutes: normalizedInput.intervalMinutes,
+      cronExpression: normalizedInput.cronExpression,
       nextRunAt,
     },
   });

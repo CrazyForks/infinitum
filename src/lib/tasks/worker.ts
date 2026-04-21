@@ -3,7 +3,14 @@ import type { BackgroundTaskRun } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { executeTaskRun as defaultExecuteTaskRun } from "@/lib/tasks/handlers";
 import { computeNextRunAt } from "@/lib/tasks/scheduler";
-import { claimNextQueuedTaskRun, ensureDefaultIngestionSchedule, enqueueTaskRun } from "@/lib/tasks/service";
+import { DEFAULT_INGESTION_TASK_LABEL } from "@/lib/tasks/types";
+import {
+  claimNextQueuedTaskRun,
+  ensureDefaultIngestionSchedule,
+  enqueueTaskRun,
+  TASK_RUN_CANCELLED_LABEL,
+  TASK_RUN_CANCELLED_MESSAGE,
+} from "@/lib/tasks/service";
 
 const DEFAULT_TASK_STALE_MS = 15 * 60_000;
 const DEFAULT_POLL_INTERVAL_MS = 2_000;
@@ -48,16 +55,17 @@ async function enqueueScheduledIngestionIfDue(now: Date) {
   await enqueueTaskRun({
     kind: "ingestion",
     triggerType: "scheduled",
-    label: "默认抓取任务",
+    label: DEFAULT_INGESTION_TASK_LABEL,
   });
 
   await prisma.taskSchedule.update({
     where: { id: schedule.id },
     data: {
       nextRunAt: computeNextRunAt({
-        intervalMinutes: schedule.intervalMinutes,
+        cronExpression: schedule.cronExpression,
         now,
         anchor: schedule.nextRunAt,
+        timezone: schedule.timezone,
       }),
     },
   });
@@ -68,9 +76,22 @@ async function enqueueScheduledIngestionIfDue(now: Date) {
 export async function recoverStaleTaskRuns(now = new Date()) {
   const staleBefore = new Date(now.getTime() - DEFAULT_TASK_STALE_MS);
   const staleReason = "Worker exited before completing the task.";
+  const cancellationRequestedRuns = await prisma.backgroundTaskRun.findMany({
+    where: {
+      status: "running",
+      cancelRequestedAt: {
+        not: null,
+      },
+      finishedAt: null,
+    },
+    select: {
+      id: true,
+    },
+  });
   const staleRuns = await prisma.backgroundTaskRun.findMany({
     where: {
       status: "running",
+      cancelRequestedAt: null,
       startedAt: {
         lt: staleBefore,
       },
@@ -81,8 +102,41 @@ export async function recoverStaleTaskRuns(now = new Date()) {
     },
   });
 
+  const cancellationRequestedTaskRunIds = cancellationRequestedRuns.map((run) => run.id);
   const staleTaskRunIds = staleRuns.map((run) => run.id);
   let recoveredCount = 0;
+
+  if (cancellationRequestedTaskRunIds.length > 0) {
+    const result = await prisma.backgroundTaskRun.updateMany({
+      where: {
+        id: {
+          in: cancellationRequestedTaskRunIds,
+        },
+      },
+      data: {
+        status: "cancelled",
+        finishedAt: now,
+        progressLabel: TASK_RUN_CANCELLED_LABEL,
+        errorSummary: TASK_RUN_CANCELLED_MESSAGE,
+      },
+    });
+
+    await prisma.fetchRun.updateMany({
+      where: {
+        taskRunId: {
+          in: cancellationRequestedTaskRunIds,
+        },
+        status: "running",
+      },
+      data: {
+        status: "failed",
+        finishedAt: now,
+        errorSummary: TASK_RUN_CANCELLED_MESSAGE,
+      },
+    });
+
+    recoveredCount += result.count;
+  }
 
   if (staleTaskRunIds.length > 0) {
     const result = await prisma.backgroundTaskRun.updateMany({
@@ -112,7 +166,7 @@ export async function recoverStaleTaskRuns(now = new Date()) {
       },
     });
 
-    recoveredCount = result.count;
+    recoveredCount += result.count;
   }
 
   await prisma.fetchRun.updateMany({

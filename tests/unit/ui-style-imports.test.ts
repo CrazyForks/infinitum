@@ -8,7 +8,7 @@ const deletedStyleModulePaths = [
   "src/components/admin/admin.module.css",
 ] as const;
 
-const legacyStyleModules = ["feed-panel.module.css", "admin.module.css"] as const;
+const removedStyleModules = ["feed-panel.module.css", "admin.module.css"] as const;
 const sourceRoot = path.join(process.cwd(), "src");
 
 function listSourceFiles(directoryPath: string): string[] {
@@ -25,7 +25,7 @@ function listSourceFiles(directoryPath: string): string[] {
   });
 }
 
-describe("legacy UI style module imports", () => {
+describe("removed UI style module imports", () => {
   it.each(deletedStyleModulePaths)("keeps deleted style module absent: %s", (filePath) => {
     expect(existsSync(path.join(process.cwd(), filePath))).toBe(false);
   });
@@ -36,7 +36,7 @@ describe("legacy UI style module imports", () => {
     for (const filePath of sourceFiles) {
       const source = readFileSync(filePath, "utf8");
 
-      for (const moduleName of legacyStyleModules) {
+      for (const moduleName of removedStyleModules) {
         expect(source).not.toContain(moduleName);
       }
     }

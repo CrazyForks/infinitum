@@ -199,7 +199,7 @@ describe("FeedPanel", () => {
     expect(within(filterRegion).queryByLabelText("标题模糊搜索")).not.toBeInTheDocument();
     expect(within(filterRegion).getByText("创建时间：7天")).toBeInTheDocument();
     expect(within(filterRegion).getByText("排序：按时间倒序")).toBeInTheDocument();
-    expect(within(filterRegion).getByText("最近抓取：尚未执行")).toBeInTheDocument();
+    expect(within(filterRegion).queryByText("最近抓取：尚未执行")).not.toBeInTheDocument();
     expect(within(filterRegion).getByRole("button", { name: "清除筛选" })).toBeInTheDocument();
     expect(screen.getByText("高质量 90")).toBeInTheDocument();
     expect(screen.getAllByText(/Example Feed/).length).toBeGreaterThan(0);
@@ -594,6 +594,7 @@ describe("FeedPanel", () => {
           itemCount: 6,
           successCount: 4,
           failureCount: 2,
+          itemsAdded: 12,
           errorSummary: "2 个源抓取失败",
         }}
         isAdmin={false}
@@ -602,8 +603,10 @@ describe("FeedPanel", () => {
 
     const filterRegion = screen.getByRole("region", { name: "信息流筛选" });
 
-    expect(within(filterRegion).getByText(/最近抓取：部分成功 · 6\/6 · 2026\/04\/10 18:06/)).toBeInTheDocument();
-    expect(within(filterRegion).getByText("抓取说明：2 个源抓取失败")).toBeInTheDocument();
+    expect(
+      within(filterRegion).queryByText(/最近抓取：部分成功 · 新增12条 · 2026\/04\/10 18:06/),
+    ).not.toBeInTheDocument();
+    expect(within(filterRegion).queryByText("抓取说明：2 个源抓取失败")).not.toBeInTheDocument();
   });
 
   it("keeps the latest ingestion summary next to the refresh button for admins", () => {
@@ -625,6 +628,7 @@ describe("FeedPanel", () => {
           itemCount: 50,
           successCount: 50,
           failureCount: 0,
+          itemsAdded: 50,
           errorSummary: null,
         }}
         isAdmin
@@ -635,7 +639,7 @@ describe("FeedPanel", () => {
     const inlineControls = refreshButton.parentElement;
 
     expect(inlineControls).not.toBeNull();
-    expect(inlineControls).toHaveTextContent("最近抓取：已成功 · 50/50 · 2026/04/18 08:58");
+    expect(inlineControls).toHaveTextContent("最近抓取：已成功 · 新增50条 · 2026/04/18 08:58");
   });
 
   it("keeps Lumina-like typography on the homepage filter controls and cards", () => {

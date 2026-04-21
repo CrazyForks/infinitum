@@ -8,7 +8,7 @@ type PageHeaderProps = {
 };
 
 export function PageHeader({
-  eyebrow = "Infinitum Console",
+  eyebrow = "Infinitum",
   title,
   description,
   className,

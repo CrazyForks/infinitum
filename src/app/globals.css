@@ -132,6 +132,10 @@ main {
   color: var(--text-3);
 }
 
+.logo-mark {
+  display: block;
+}
+
 .select-modern {
   appearance: none;
   background-color: var(--surface);

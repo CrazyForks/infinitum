@@ -179,7 +179,7 @@ model TaskSchedule {
   id                String                @id @default(cuid())
   key               String                @unique
   enabled           Boolean               @default(true)
-  intervalMinutes   Int
+  cronExpression    String                @default("0 * * * *")
   timezone          String
   lastHeartbeatAt   DateTime?
   lastRunStartedAt  DateTime?

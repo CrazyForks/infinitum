@@ -79,7 +79,7 @@ export function AdminLoginForm({ redirectPath }: AdminLoginFormProps) {
           <div className="grid gap-4 md:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
             <article className="rounded-[1.75rem] border border-[color:var(--line)] bg-[var(--surface)] p-5 shadow-[var(--shadow-sm)]">
               <p className="font-mono text-[11px] font-medium uppercase tracking-[0.24em] text-[var(--accent-strong)]">
-                Console Scope
+                Admin Scope
               </p>
               <h2 className="mt-3 text-xl font-semibold tracking-[-0.03em] text-[var(--foreground)]">统一管理入口</h2>
               <p className="mt-3 text-sm leading-7 text-[var(--muted)]">

@@ -1,25 +1,22 @@
 import { prisma } from "@/lib/db";
-import { computeNextRunAt } from "@/lib/tasks/scheduler";
-import type { EnqueueTaskRunInput } from "@/lib/tasks/types";
-
-const DEFAULT_SCHEDULE_KEY = "ingestion_default" as const;
-const DEFAULT_TIMEZONE = "Asia/Shanghai" as const;
-const DEFAULT_INTERVAL_MINUTES = 60;
+import { computeNextRunAt, DEFAULT_SCHEDULE_CRON_EXPRESSION, DEFAULT_SCHEDULE_TIMEZONE } from "@/lib/tasks/scheduler";
+import { DEFAULT_INGESTION_SCHEDULE_KEY, type EnqueueTaskRunInput } from "@/lib/tasks/types";
 
 export async function upsertDefaultIngestionSchedule() {
   const now = new Date();
 
   return prisma.taskSchedule.upsert({
-    where: { key: DEFAULT_SCHEDULE_KEY },
+    where: { key: DEFAULT_INGESTION_SCHEDULE_KEY },
     update: {},
     create: {
-      key: DEFAULT_SCHEDULE_KEY,
+      key: DEFAULT_INGESTION_SCHEDULE_KEY,
       enabled: true,
-      intervalMinutes: DEFAULT_INTERVAL_MINUTES,
-      timezone: DEFAULT_TIMEZONE,
+      cronExpression: DEFAULT_SCHEDULE_CRON_EXPRESSION,
+      timezone: DEFAULT_SCHEDULE_TIMEZONE,
       nextRunAt: computeNextRunAt({
-        intervalMinutes: DEFAULT_INTERVAL_MINUTES,
+        cronExpression: DEFAULT_SCHEDULE_CRON_EXPRESSION,
         now,
+        timezone: DEFAULT_SCHEDULE_TIMEZONE,
       }),
     },
   });

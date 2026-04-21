@@ -15,6 +15,7 @@ describe("PageShell", () => {
 
     expect(contentContainer).not.toBeNull();
     expect(contentContainer?.className).toContain("max-w-7xl");
+    expect(screen.getByText(/由 Infinitum 驱动/)).toBeInTheDocument();
   });
 
   it("keeps the workspace content width unchanged", () => {

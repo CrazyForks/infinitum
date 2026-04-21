@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
 import { FilterSelect } from "@/components/ui/filter-select";
@@ -8,7 +9,7 @@ import { ModalShell } from "@/components/ui/modal-shell";
 import { StatusTag } from "@/components/ui/status-tag";
 import { useToast } from "@/components/ui/toast";
 import { IconButton } from "@/components/ui/icon-button";
-import { IconRotateCw, IconSquare, IconEye } from "@/components/ui/icons";
+import { IconRotateCw, IconSquare } from "@/components/ui/icons";
 import type {
   BackgroundTaskRunStatus,
   TaskRunSnapshot,
@@ -305,6 +306,7 @@ export function TaskMonitorPanel({
   runningTasks,
   recentTasks,
 }: TaskMonitorPanelProps) {
+  const router = useRouter();
   const { showToast } = useToast();
   const [statusFilter, setStatusFilter] = useState<TaskStatusFilter>("");
   const [kindFilter, setKindFilter] = useState<TaskKindFilter>("");
@@ -316,7 +318,6 @@ export function TaskMonitorPanel({
     null
   );
   const [isDetailOpen, setIsDetailOpen] = useState(false);
-  const [refreshKey, setRefreshKey] = useState(0);
   const [retriggeringTaskId, setRetriggeringTaskId] = useState<string | null>(
     null
   );
@@ -337,7 +338,7 @@ export function TaskMonitorPanel({
       taskMap.set(task.id, task);
     }
     return Array.from(taskMap.values());
-  }, [runningTasks, recentTasks, refreshKey]);
+  }, [runningTasks, recentTasks]);
 
   const filteredTasks = useMemo(
     () => filterTasks(allTasks, statusFilter, kindFilter, timeRangeFilter),
@@ -354,7 +355,7 @@ export function TaskMonitorPanel({
 
   const handleRefresh = () => {
     startTransition(() => {
-      setRefreshKey((k) => k + 1);
+      router.refresh();
     });
   };
 

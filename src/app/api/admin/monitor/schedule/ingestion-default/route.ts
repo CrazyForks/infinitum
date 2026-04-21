@@ -6,7 +6,7 @@ import { toTaskScheduleSnapshot, updateDefaultIngestionSchedule } from "@/lib/ta
 
 const scheduleUpdateSchema = z.object({
   enabled: z.boolean(),
-  intervalMinutes: z.number().int(),
+  cronExpression: z.string().trim().min(1),
 });
 
 export async function PATCH(request: Request) {

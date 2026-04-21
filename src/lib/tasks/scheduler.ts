@@ -1,18 +1,40 @@
+import { CronExpressionParser } from "cron-parser";
+
 import type { ScheduleUpdateInput } from "@/lib/tasks/types";
 
-const MIN_INTERVAL_MINUTES = 5;
-const MAX_INTERVAL_MINUTES = 24 * 60;
+export const DEFAULT_SCHEDULE_TIMEZONE = "Asia/Shanghai";
+export const DEFAULT_SCHEDULE_CRON_EXPRESSION = "0 * * * *";
 
 export function normalizeScheduleInput(input: ScheduleUpdateInput): ScheduleUpdateInput {
+  const cronExpression = input.cronExpression.trim();
+
+  if (!cronExpression) {
+    throw new Error("Cron expression is required.");
+  }
+
+  CronExpressionParser.parse(cronExpression, {
+    currentDate: new Date(),
+    tz: DEFAULT_SCHEDULE_TIMEZONE,
+  });
+
   return {
     enabled: input.enabled,
-    intervalMinutes: Math.max(MIN_INTERVAL_MINUTES, Math.min(MAX_INTERVAL_MINUTES, Math.floor(input.intervalMinutes))),
+    cronExpression,
   };
 }
 
-export function computeNextRunAt(input: { intervalMinutes: number; now: Date; anchor?: Date | null }) {
-  const base = input.anchor ?? input.now;
-  return new Date(base.getTime() + input.intervalMinutes * 60_000);
+export function computeNextRunAt(input: {
+  cronExpression: string;
+  now: Date;
+  anchor?: Date | null;
+  timezone?: string;
+}) {
+  const interval = CronExpressionParser.parse(input.cronExpression, {
+    currentDate: input.anchor ?? input.now,
+    tz: input.timezone ?? DEFAULT_SCHEDULE_TIMEZONE,
+  });
+
+  return interval.next().toDate();
 }
 
 export function isSchedulerHeartbeatStale(input: { lastHeartbeatAt: Date | null; now: Date; maxAgeMs: number }) {

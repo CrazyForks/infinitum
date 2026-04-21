@@ -70,6 +70,18 @@ describe("/api/admin/settings", () => {
         },
       ],
       blacklistKeywords: ["layoffs"],
+      taskSchedule: {
+        key: "ingestion_default",
+        enabled: true,
+        cronExpression: "0 * * * *",
+        timezone: "Asia/Shanghai",
+        lastHeartbeatAt: "2026-04-20T10:00:00.000Z",
+        lastRunStartedAt: "2026-04-20T10:00:00.000Z",
+        lastRunFinishedAt: "2026-04-20T10:05:00.000Z",
+        lastRunStatus: "succeeded",
+        nextRunAt: "2026-04-20T11:00:00.000Z",
+        isHeartbeatStale: false,
+      },
       groups: [{ id: "group-1", name: "Core" }],
       sources: [],
     });
@@ -81,6 +93,7 @@ describe("/api/admin/settings", () => {
     expect(response.status).toBe(200);
     expect(json.modelApiConfigs[0].apiKeyMasked).toBe("••••••••••••");
     expect(json.promptConfigs[0].type).toBe("item_analysis");
+    expect(json.taskSchedule.key).toBe("ingestion_default");
   });
 
   it("returns raw api key only from the single model config detail endpoint", async () => {

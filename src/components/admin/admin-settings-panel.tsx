@@ -1,11 +1,12 @@
 "use client";
-import { type ChangeEvent, type ReactNode, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { type ChangeEvent, useMemo, useRef, useState, useTransition } from "react";
 
 import { AiSettingsPanel } from "@/components/admin/ai-settings-panel";
 import { Button } from "@/components/ui/button";
 import { PageShell } from "@/components/ui/page-shell";
 import { FilterInput } from "@/components/ui/filter-input";
 import { FilterSelect } from "@/components/ui/filter-select";
+import { FormField } from "@/components/ui/form-field";
 import { IconButton } from "@/components/ui/icon-button";
 import { IconCheck, IconEdit, IconPlus, IconTag, IconTrash, IconX } from "@/components/ui/icons";
 import { ModalShell } from "@/components/ui/modal-shell";
@@ -13,6 +14,7 @@ import { TextArea } from "@/components/ui/text-area";
 import { TextInput } from "@/components/ui/text-input";
 import { useToast } from "@/components/ui/toast";
 import type { AdminSettingsSnapshot } from "@/lib/settings/types";
+import { DEFAULT_SCHEDULE_TIMEZONE } from "@/lib/tasks/scheduler";
 import { cx } from "@/lib/ui/cx";
 
 type AdminSettingsPanelProps = {
@@ -27,14 +29,11 @@ type AdminSettingsSection =
   | "ai-prompt"
   | "blacklist"
   | "groups"
-  | "sources";
+  | "sources"
+  | "tasks";
 
 const surfaceCardClassName =
   "rounded-[1.1rem] border border-[color:var(--line)] bg-white/96 shadow-[var(--shadow-sm)]";
-const labelClassName = "text-sm font-medium leading-6 text-[var(--foreground)]";
-const helperTextClassName = "text-xs leading-6 text-[var(--muted)]";
-const checkboxClassName =
-  "inline-flex min-h-9 items-center gap-3 rounded-[0.9rem] border border-[color:var(--line)] bg-white px-3 py-2 text-sm font-medium text-[var(--foreground)] shadow-[var(--shadow-sm)]";
 const checkboxInputClassName =
   "h-4 w-4 rounded border-[color:var(--line-strong)] text-[var(--accent)] focus:ring-[color:var(--accent-soft)]";
 const settingsNavItems: Array<{
@@ -46,6 +45,7 @@ const settingsNavItems: Array<{
   { key: "blacklist", label: "黑名单" },
   { key: "groups", label: "分组" },
   { key: "sources", label: "信息源" },
+  { key: "tasks", label: "任务配置" },
 ] as const;
 
 const groupBadgePalette = [
@@ -88,8 +88,9 @@ export function AdminSettingsPanel({
 }: AdminSettingsPanelProps) {
   const [isPending, startTransition] = useTransition();
   const { showToast } = useToast();
-  const [activeSection, setActiveSection] =
+  const [internalActiveSection, setInternalActiveSection] =
     useState<AdminSettingsSection>(externalActiveSection ?? "ai-model-api");
+  const activeSection = externalActiveSection ?? internalActiveSection;
   const [blacklistText, setBlacklistText] = useState(
     initialSettings.blacklistKeywords.join("\n"),
   );
@@ -111,6 +112,15 @@ export function AdminSettingsPanel({
     fetchFullTextWhenMissing: true,
     groupId: "",
   });
+  const [taskScheduleEnabled, setTaskScheduleEnabled] = useState(
+    initialSettings.taskSchedule.enabled,
+  );
+  const [taskScheduleCronExpression, setTaskScheduleCronExpression] = useState(
+    initialSettings.taskSchedule.cronExpression,
+  );
+  const [taskScheduleSnapshot, setTaskScheduleSnapshot] = useState(
+    initialSettings.taskSchedule,
+  );
   const normalizedBlacklistKeywords = blacklistText
     .split("\n")
     .map((keyword) => keyword.trim())
@@ -171,11 +181,7 @@ export function AdminSettingsPanel({
         showToast(successMessage, "success");
 
         if (reload) {
-          onRefresh?.();
-
-          if (!onRefresh) {
-            refreshPage();
-          }
+          triggerRefresh();
         }
       } catch {
         showToast("保存失败", "error");
@@ -183,11 +189,13 @@ export function AdminSettingsPanel({
     });
   };
 
-  useEffect(() => {
-    if (externalActiveSection) {
-      setActiveSection(externalActiveSection);
+  const triggerRefresh = () => {
+    onRefresh?.();
+
+    if (!onRefresh) {
+      refreshPage();
     }
-  }, [externalActiveSection]);
+  };
 
   const openCreateSourceModal = () => {
     setSourceModalMode("create");
@@ -301,11 +309,7 @@ export function AdminSettingsPanel({
           opmlFileInputRef.current.value = "";
         }
         window.setTimeout(() => {
-          onRefresh?.();
-
-          if (!onRefresh) {
-            refreshPage();
-          }
+          triggerRefresh();
         }, 600);
       } catch {
         showToast("OPML 导入失败", "error");
@@ -343,6 +347,42 @@ export function AdminSettingsPanel({
       true,
     );
   };
+
+  const saveTaskSchedule = () => {
+    startTransition(async () => {
+      try {
+        const response = await fetch("/api/admin/monitor/schedule/ingestion-default", {
+          method: "PATCH",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            enabled: taskScheduleEnabled,
+            cronExpression: taskScheduleCronExpression,
+          }),
+        });
+        const payload = (await response.json()) as {
+          error?: string;
+          schedule?: AdminSettingsSnapshot["taskSchedule"];
+        };
+
+        if (!response.ok || payload.error || !payload.schedule) {
+          showToast(payload.error ?? "任务配置保存失败。", "error");
+          return;
+        }
+
+        setTaskScheduleSnapshot(payload.schedule);
+        setTaskScheduleEnabled(payload.schedule.enabled);
+        setTaskScheduleCronExpression(payload.schedule.cronExpression);
+        showToast("任务配置已保存。", "success");
+      } catch {
+        showToast("任务配置保存失败。", "error");
+      }
+    });
+  };
+  const taskScheduleIsDirty =
+    taskScheduleEnabled !== taskScheduleSnapshot.enabled ||
+    taskScheduleCronExpression.trim() !== taskScheduleSnapshot.cronExpression;
 
   const content = (
     <section aria-label="后台设置工作台" className="space-y-4">
@@ -429,7 +469,14 @@ export function AdminSettingsPanel({
         ) : null}
 
         {activeSection === "groups" ? (
-          <div className="w-full min-w-0 rounded-sm border border-[color:var(--line)] bg-[var(--surface)] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.06)]">
+          <div
+            className={cx(
+              "w-full min-w-0",
+              embedMode
+                ? ""
+                : "rounded-sm border border-[color:var(--line)] bg-[var(--surface)] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.06)]",
+            )}
+          >
             <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
               <div className="space-y-1">
                 <h2 className="text-lg font-semibold text-[var(--text-1)]" id="settings-groups">
@@ -856,6 +903,85 @@ export function AdminSettingsPanel({
             </ModalShell>
           </div>
         ) : null}
+
+        {activeSection === "tasks" ? (
+          <div
+            className={cx(
+              "w-full min-w-0 space-y-6",
+              embedMode
+                ? ""
+                : "rounded-sm border border-[color:var(--line)] bg-[var(--surface)] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.06)]",
+            )}
+          >
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="space-y-1">
+                <h2 className="text-lg font-semibold text-[var(--text-1)]">
+                  任务配置
+                </h2>
+                <p className="text-sm text-[var(--text-3)]">
+                  配置抓取任务的启用状态与 Cron 调度表达式
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="primary"
+                  size="md"
+                  onClick={saveTaskSchedule}
+                  disabled={isPending || !taskScheduleCronExpression.trim() || !taskScheduleIsDirty}
+                >
+                  保存配置
+                </Button>
+              </div>
+            </div>
+
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-[220px_minmax(0,1fr)] md:items-start">
+                <div className="space-y-1.5">
+                  <div className="block text-sm text-[var(--muted)]">任务开关</div>
+                  <label className="flex min-h-10 items-center gap-2 rounded-sm border border-[color:var(--line)] bg-[var(--surface)] px-3 text-sm text-[var(--text-2)]">
+                    <input
+                      aria-label="启用默认抓取任务"
+                      checked={taskScheduleEnabled}
+                      className={checkboxInputClassName}
+                      type="checkbox"
+                      onChange={(event) => setTaskScheduleEnabled(event.target.checked)}
+                    />
+                    <span>启用默认抓取任务</span>
+                  </label>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label
+                    htmlFor="task-schedule-cron"
+                    className="block text-sm text-[var(--muted)]"
+                  >
+                    Cron 表达式
+                  </label>
+                  <TextInput
+                    id="task-schedule-cron"
+                    value={taskScheduleCronExpression}
+                    onChange={(event) => setTaskScheduleCronExpression(event.target.value)}
+                    placeholder="例如 0 * * * *"
+                  />
+                  <div className="text-xs text-[var(--text-3)]">
+                    示例：`0 * * * *` 表示每小时执行一次，`*/15 * * * *` 表示每 15 分钟执行一次。
+                  </div>
+                </div>
+              </div>
+
+              {taskScheduleSnapshot.timezone !== DEFAULT_SCHEDULE_TIMEZONE ? (
+                <FormField label="时区" htmlFor="task-schedule-timezone">
+                  <TextInput
+                    id="task-schedule-timezone"
+                    value={taskScheduleSnapshot.timezone}
+                    readOnly
+                    disabled
+                  />
+                </FormField>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
       </section>
     </section>
   );
@@ -872,7 +998,7 @@ export function AdminSettingsPanel({
       sidebar={
         <AdminWorkspaceSidebar
           activeSection={activeSection}
-          onSelect={setActiveSection}
+          onSelect={setInternalActiveSection}
         />
       }
     >
@@ -927,38 +1053,6 @@ function AdminWorkspaceSidebar({
         })}
       </div>
     </aside>
-  );
-}
-
-function SectionCard({
-  title,
-  headingId,
-  className,
-  titleClassName,
-  children,
-}: {
-  title: string;
-  headingId: string;
-  className?: string;
-  titleClassName?: string;
-  children: ReactNode;
-}) {
-  return (
-    <section
-      aria-labelledby={headingId}
-      className={cx(surfaceCardClassName, "space-y-3.5 p-3.5", className)}
-    >
-      <h2
-        className={cx(
-          "text-[1rem] font-semibold tracking-[-0.03em] text-[var(--foreground)]",
-          titleClassName,
-        )}
-        id={headingId}
-      >
-        {title}
-      </h2>
-      {children}
-    </section>
   );
 }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 
 import { PageShell } from "@/components/ui/page-shell";
 import { FilterInput } from "@/components/ui/filter-input";
@@ -14,8 +14,6 @@ import {
   IconRotateCw,
   IconCheck,
   IconX,
-  IconFilter,
-  IconGlobe,
   IconExternalLink,
   IconTrash,
 } from "@/components/ui/icons";
@@ -74,14 +72,10 @@ const timeRangeOptions: Array<{ value: TimeRangeFilter; label: string }> = [
 
 type TimeRangeFilter = "" | "today" | "week" | "month";
 
-const surfaceCardClassName =
-  "rounded-[1.1rem] border border-[color:var(--line)] bg-white/96 shadow-[var(--shadow-sm)]";
 const subtleCardClassName =
   "rounded-[0.95rem] border border-[color:var(--line)] bg-[var(--surface-muted)]/82 shadow-[var(--shadow-sm)]";
 const secondaryButtonClassName =
   "inline-flex min-h-8 items-center justify-center rounded-[0.8rem] border border-[color:var(--line)] bg-white px-2.5 py-1.5 text-[13px] font-medium text-[var(--foreground)] shadow-[var(--shadow-sm)] transition hover:bg-[var(--surface)] disabled:cursor-not-allowed disabled:opacity-55";
-const primaryButtonClassName =
-  "inline-flex min-h-8 items-center justify-center rounded-[0.8rem] bg-[var(--accent)] px-2.5 py-1.5 text-[13px] font-semibold text-white shadow-[0_14px_24px_rgba(37,99,235,0.16)] transition hover:bg-[var(--accent-strong)] disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:bg-[var(--accent)]";
 
 const dateTimeFormatter = new Intl.DateTimeFormat("zh-CN", {
   dateStyle: "medium",
@@ -435,7 +429,7 @@ interface ContentReviewContentProps {
 
 function ContentReviewContent({ initialTab = "filtered" }: ContentReviewContentProps) {
   const { showToast } = useToast();
-  const [activeTab, setActiveTab] = useState<ReviewTab>(initialTab);
+  const activeTab = initialTab;
   const [filteredItems, setFilteredItems] = useState<ReviewItemDTO[]>([]);
   const [clusters, setClusters] = useState<ClusterDTO[]>([]);
   const [filteredSearch, setFilteredSearch] = useState("");
@@ -445,14 +439,6 @@ function ContentReviewContent({ initialTab = "filtered" }: ContentReviewContentP
   const [clusterStatus, setClusterStatus] = useState<ClusterDTO["status"] | "">("");
   const [clusterTimeRange, setClusterTimeRange] = useState<TimeRangeFilter>("");
   const [isPending, startTransition] = useTransition();
-
-  // Sync activeTab with initialTab prop and reset page
-  useEffect(() => {
-    setActiveTab(initialTab);
-    setPage(1);
-  }, [initialTab]);
-
-  // Pagination states
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
@@ -483,7 +469,7 @@ function ContentReviewContent({ initialTab = "filtered" }: ContentReviewContentP
     onConfirm: () => {},
   });
 
-  const fetchData = () => {
+  const fetchData = useCallback(() => {
     let cancelled = false;
 
     startTransition(async () => {
@@ -524,12 +510,12 @@ function ContentReviewContent({ initialTab = "filtered" }: ContentReviewContentP
     return () => {
       cancelled = true;
     };
-  };
+  }, [showToast]);
 
   useEffect(() => {
     const cleanup = fetchData();
     return cleanup;
-  }, [showToast]);
+  }, [fetchData]);
 
   const postAction = (
     url: string,
@@ -1167,12 +1153,12 @@ interface ContentReviewPanelProps {
 
 export function ContentReviewPanel({ embedMode, activeTab = "filtered" }: ContentReviewPanelProps) {
   if (embedMode) {
-    return <ContentReviewContent initialTab={activeTab} />;
+    return <ContentReviewContent key={activeTab} initialTab={activeTab} />;
   }
 
   return (
     <PageShell header={{ activeNav: null, isAdmin: true }} contentClassName="gap-3">
-      <ContentReviewContent initialTab={activeTab} />
+      <ContentReviewContent key={activeTab} initialTab={activeTab} />
     </PageShell>
   );
 }

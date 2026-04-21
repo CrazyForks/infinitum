@@ -42,6 +42,18 @@ export type AdminSettingsSnapshot = {
   modelApiConfigs: AdminModelApiConfig[];
   promptConfigs: AdminPromptConfig[];
   blacklistKeywords: string[];
+  taskSchedule: {
+    key: "ingestion_default";
+    enabled: boolean;
+    cronExpression: string;
+    timezone: string;
+    lastHeartbeatAt: string | null;
+    lastRunStartedAt: string | null;
+    lastRunFinishedAt: string | null;
+    lastRunStatus: "queued" | "running" | "succeeded" | "failed" | "partial" | "cancelled" | null;
+    nextRunAt: string;
+    isHeartbeatStale: boolean;
+  };
   groups: Array<{
     id: string;
     name: string;

@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { GlobalHeader } from "@/components/ui/global-header";
+import { AppFooter } from "@/components/ui/app-footer";
 import { ContentReviewPanel } from "@/components/admin/content-review-panel";
-import { AdminMonitorPanel } from "@/components/admin/admin-monitor-panel";
 import { AdminSettingsPanel } from "@/components/admin/admin-settings-panel";
 import { TaskMonitorPanel } from "@/components/admin/task-monitor-panel";
 import { SelectableButton } from "@/components/ui/selectable-button";
@@ -26,7 +27,7 @@ import {
 type PrimaryTab = "monitoring" | "settings";
 type MonitorSubSection = "content" | "tasks";
 type ContentSubSection = "filtered" | "clusters";
-type SettingsSection = "blacklist" | "groups" | "sources" | "ai";
+type SettingsSection = "blacklist" | "groups" | "sources" | "tasks" | "ai";
 type AISubSection = "model-api" | "prompt";
 
 type AdminPageProps = {
@@ -34,23 +35,121 @@ type AdminPageProps = {
   initialSnapshot: import("@/lib/tasks/types").BackgroundTaskMonitorSnapshot;
 };
 
+type AdminRouteState = {
+  primaryTab: PrimaryTab;
+  monitoringSubSection: MonitorSubSection;
+  contentSubSection: ContentSubSection;
+  settingsSection: SettingsSection;
+  aiSubSection: AISubSection;
+};
+
+type AdminSearchParams = {
+  get: (key: string) => string | null;
+};
+
+function normalizePrimaryTab(value: string | null): PrimaryTab {
+  return value === "settings" ? "settings" : "monitoring";
+}
+
+function normalizeMonitorSubSection(value: string | null): MonitorSubSection {
+  return value === "tasks" ? "tasks" : "content";
+}
+
+function normalizeContentSubSection(value: string | null): ContentSubSection {
+  return value === "clusters" ? "clusters" : "filtered";
+}
+
+function normalizeSettingsSection(value: string | null): SettingsSection {
+  if (value === "blacklist" || value === "groups" || value === "sources" || value === "tasks" || value === "ai") {
+    return value;
+  }
+
+  return "ai";
+}
+
+function normalizeAISubSection(value: string | null): AISubSection {
+  return value === "prompt" ? "prompt" : "model-api";
+}
+
+function resolveRouteState(searchParams: AdminSearchParams): AdminRouteState {
+  const primaryTab = normalizePrimaryTab(searchParams.get("tab"));
+
+  if (primaryTab === "monitoring") {
+    const monitoringSubSection = normalizeMonitorSubSection(searchParams.get("section"));
+    return {
+      primaryTab,
+      monitoringSubSection,
+      contentSubSection: normalizeContentSubSection(searchParams.get("view")),
+      settingsSection: "ai",
+      aiSubSection: "model-api",
+    };
+  }
+
+  const settingsSection = normalizeSettingsSection(searchParams.get("section"));
+  return {
+    primaryTab,
+    monitoringSubSection: "content",
+    contentSubSection: "filtered",
+    settingsSection,
+    aiSubSection: normalizeAISubSection(searchParams.get("view")),
+  };
+}
+
 export function AdminPageClient({
   initialSettings,
   initialSnapshot,
 }: AdminPageProps) {
-  const [primaryTab, setPrimaryTab] = useState<PrimaryTab>("monitoring");
-  const [monitoringSubSection, setMonitoringSubSection] =
-    useState<MonitorSubSection>("content");
-  const [contentSubSection, setContentSubSection] = useState<ContentSubSection>("filtered");
-  const [settingsSection, setSettingsSection] = useState<SettingsSection>("ai");
-  const [aiSubSection, setAiSubSection] = useState<AISubSection>("model-api");
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const routeState = useMemo(() => resolveRouteState(searchParams), [searchParams]);
+  const {
+    primaryTab,
+    monitoringSubSection,
+    contentSubSection,
+    settingsSection,
+    aiSubSection,
+  } = routeState;
   const [collapsedSections, setCollapsedSections] = useState<{
     ai: boolean;
     content: boolean;
-  }>({
-    ai: true,
-    content: false,
-  });
+  }>(() => ({
+    ai: !(routeState.primaryTab === "settings" && routeState.settingsSection === "ai"),
+    content: !(routeState.primaryTab === "monitoring" && routeState.monitoringSubSection === "content"),
+  }));
+
+  const navigateAdmin = useCallback((nextState: Partial<AdminRouteState>) => {
+    const resolvedPrimaryTab = nextState.primaryTab ?? primaryTab;
+    const params = new URLSearchParams();
+
+    params.set("tab", resolvedPrimaryTab);
+
+    if (resolvedPrimaryTab === "monitoring") {
+      const resolvedSection = nextState.monitoringSubSection ?? monitoringSubSection;
+      params.set("section", resolvedSection);
+
+      if (resolvedSection === "content") {
+        params.set("view", nextState.contentSubSection ?? contentSubSection);
+      }
+    } else {
+      const resolvedSection = nextState.settingsSection ?? settingsSection;
+      params.set("section", resolvedSection);
+
+      if (resolvedSection === "ai") {
+        params.set("view", nextState.aiSubSection ?? aiSubSection);
+      }
+    }
+
+    router.push(`${pathname}?${params.toString()}`, { scroll: false });
+  }, [
+    aiSubSection,
+    contentSubSection,
+    monitoringSubSection,
+    pathname,
+    primaryTab,
+    router,
+    settingsSection,
+  ]);
 
   const handleToggleAISection = useCallback(() => {
     const nextCollapsed = !collapsedSections.ai;
@@ -59,9 +158,12 @@ export function AdminPageClient({
       ai: nextCollapsed,
     }));
     if (!nextCollapsed) {
-      setSettingsSection("ai");
+      navigateAdmin({
+        primaryTab: "settings",
+        settingsSection: "ai",
+      });
     }
-  }, [collapsedSections.ai]);
+  }, [collapsedSections.ai, navigateAdmin]);
 
   const handleToggleContentSection = useCallback(() => {
     const nextCollapsed = !collapsedSections.content;
@@ -70,9 +172,12 @@ export function AdminPageClient({
       content: nextCollapsed,
     }));
     if (!nextCollapsed) {
-      setMonitoringSubSection("content");
+      navigateAdmin({
+        primaryTab: "monitoring",
+        monitoringSubSection: "content",
+      });
     }
-  }, [collapsedSections.content]);
+  }, [collapsedSections.content, navigateAdmin]);
 
   const renderMainContent = () => {
     // Monitoring - Content Review
@@ -127,20 +232,25 @@ export function AdminPageClient({
       return <AdminSettingsPanel initialSettings={initialSettings} activeSection="sources" embedMode />;
     }
 
+    if (primaryTab === "settings" && settingsSection === "tasks") {
+      return <AdminSettingsPanel initialSettings={initialSettings} activeSection="tasks" embedMode />;
+    }
+
     return null;
   };
 
   return (
     <>
       <GlobalHeader activeNav="admin" isAdmin={true} />
-      <div className="flex-1 bg-[var(--background)]">
-        {/* Primary Tabs - pt-6 matches Lumina exactly */}
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6">
+      <div className="flex min-h-screen flex-col bg-[var(--background)]">
+        <div className="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 pt-6">
           <div className="flex gap-1 border-b border-[color:var(--line)]">
             <SelectableButton
               onClick={() => {
-                setPrimaryTab("monitoring");
-                setMonitoringSubSection("content");
+                navigateAdmin({
+                  primaryTab: "monitoring",
+                  monitoringSubSection: "content",
+                });
               }}
               active={primaryTab === "monitoring"}
               variant="tab"
@@ -149,9 +259,11 @@ export function AdminPageClient({
             </SelectableButton>
             <SelectableButton
               onClick={() => {
-                setPrimaryTab("settings");
-                setSettingsSection("ai");
-                setAiSubSection("model-api");
+                navigateAdmin({
+                  primaryTab: "settings",
+                  settingsSection: "ai",
+                  aiSubSection: "model-api",
+                });
               }}
               active={primaryTab === "settings"}
               variant="tab"
@@ -161,10 +273,8 @@ export function AdminPageClient({
           </div>
         </div>
 
-        {/* Main Content Area - py-6 matches Lumina exactly */}
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <div className="max-w-7xl mx-auto w-full flex-1 px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex min-w-0 gap-6">
-            {/* Sidebar - w-64 matches Lumina exactly */}
             <aside className="w-64 flex-shrink-0">
               <div className="bg-[var(--surface)] rounded-lg shadow-[var(--shadow-sm)] border border-[color:var(--line)] p-4">
                 <h2 className="font-semibold text-[var(--foreground)] mb-4">
@@ -189,8 +299,11 @@ export function AdminPageClient({
                         <>
                           <SelectableButton
                             onClick={() => {
-                              setMonitoringSubSection("content");
-                              setContentSubSection("filtered");
+                              navigateAdmin({
+                                primaryTab: "monitoring",
+                                monitoringSubSection: "content",
+                                contentSubSection: "filtered",
+                              });
                             }}
                             active={
                               monitoringSubSection === "content" &&
@@ -205,8 +318,11 @@ export function AdminPageClient({
                           </SelectableButton>
                           <SelectableButton
                             onClick={() => {
-                              setMonitoringSubSection("content");
-                              setContentSubSection("clusters");
+                              navigateAdmin({
+                                primaryTab: "monitoring",
+                                monitoringSubSection: "content",
+                                contentSubSection: "clusters",
+                              });
                             }}
                             active={
                               monitoringSubSection === "content" &&
@@ -224,7 +340,10 @@ export function AdminPageClient({
 
                       <SelectableButton
                         onClick={() => {
-                          setMonitoringSubSection("tasks");
+                          navigateAdmin({
+                            primaryTab: "monitoring",
+                            monitoringSubSection: "tasks",
+                          });
                         }}
                         active={monitoringSubSection === "tasks"}
                         variant="menu"
@@ -253,8 +372,11 @@ export function AdminPageClient({
                         <>
                           <SelectableButton
                             onClick={() => {
-                              setSettingsSection("ai");
-                              setAiSubSection("model-api");
+                              navigateAdmin({
+                                primaryTab: "settings",
+                                settingsSection: "ai",
+                                aiSubSection: "model-api",
+                              });
                             }}
                             active={
                               settingsSection === "ai" &&
@@ -269,8 +391,11 @@ export function AdminPageClient({
                           </SelectableButton>
                           <SelectableButton
                             onClick={() => {
-                              setSettingsSection("ai");
-                              setAiSubSection("prompt");
+                              navigateAdmin({
+                                primaryTab: "settings",
+                                settingsSection: "ai",
+                                aiSubSection: "prompt",
+                              });
                             }}
                             active={
                               settingsSection === "ai" &&
@@ -287,7 +412,12 @@ export function AdminPageClient({
                       )}
 
                       <SelectableButton
-                        onClick={() => setSettingsSection("blacklist")}
+                        onClick={() =>
+                          navigateAdmin({
+                            primaryTab: "settings",
+                            settingsSection: "blacklist",
+                          })
+                        }
                         active={settingsSection === "blacklist"}
                         variant="menu"
                       >
@@ -298,7 +428,12 @@ export function AdminPageClient({
                       </SelectableButton>
 
                       <SelectableButton
-                        onClick={() => setSettingsSection("groups")}
+                        onClick={() =>
+                          navigateAdmin({
+                            primaryTab: "settings",
+                            settingsSection: "groups",
+                          })
+                        }
                         active={settingsSection === "groups"}
                         variant="menu"
                       >
@@ -309,13 +444,34 @@ export function AdminPageClient({
                       </SelectableButton>
 
                       <SelectableButton
-                        onClick={() => setSettingsSection("sources")}
+                        onClick={() =>
+                          navigateAdmin({
+                            primaryTab: "settings",
+                            settingsSection: "sources",
+                          })
+                        }
                         active={settingsSection === "sources"}
                         variant="menu"
                       >
                         <span className="inline-flex items-center gap-2">
                           <IconGlobe className="h-4 w-4" />
                           <span>信息源管理</span>
+                        </span>
+                      </SelectableButton>
+
+                      <SelectableButton
+                        onClick={() =>
+                          navigateAdmin({
+                            primaryTab: "settings",
+                            settingsSection: "tasks",
+                          })
+                        }
+                        active={settingsSection === "tasks"}
+                        variant="menu"
+                      >
+                        <span className="inline-flex items-center gap-2">
+                          <IconClock className="h-4 w-4" />
+                          <span>任务配置</span>
                         </span>
                       </SelectableButton>
                     </>
@@ -332,6 +488,7 @@ export function AdminPageClient({
             </main>
           </div>
         </div>
+        <AppFooter />
       </div>
     </>
   );

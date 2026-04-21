@@ -16,6 +16,7 @@ import type {
   PromptConfigType as PromptConfigTypeValue,
   ResolvedSourceMetadata,
 } from "@/lib/settings/types";
+import { ensureDefaultIngestionSchedule, toTaskScheduleSnapshot } from "@/lib/tasks/service";
 
 const DEFAULT_MODEL_CONFIG_NAME = "默认模型配置";
 
@@ -76,11 +77,6 @@ function normalizeKeyword(keyword: string) {
 
 function normalizeText(value: string | null | undefined) {
   return value?.trim() || "";
-}
-
-function normalizeNullableText(value: string | null | undefined) {
-  const normalized = normalizeText(value);
-  return normalized || null;
 }
 
 function toIsoString(value: Date): string {
@@ -574,7 +570,7 @@ export async function getIngestionRuntimeConfig(): Promise<RuntimeConfig> {
 export async function getAdminSettings(): Promise<AdminSettingsSnapshot> {
   await ensureRuntimeConfigSeeded();
 
-  const [modelApiConfigs, promptConfigs, blacklist, groups, sources] = await Promise.all([
+  const [modelApiConfigs, promptConfigs, blacklist, groups, sources, taskSchedule] = await Promise.all([
     prisma.modelApiConfig.findMany({
       orderBy: [{ isDefault: "desc" }, { createdAt: "desc" }],
     }),
@@ -598,12 +594,14 @@ export async function getAdminSettings(): Promise<AdminSettingsSnapshot> {
       include: { group: true },
       orderBy: [{ name: "asc" }],
     }),
+    ensureDefaultIngestionSchedule(),
   ]);
 
   return {
     modelApiConfigs: modelApiConfigs.map(serializeAdminModelApiConfig),
     promptConfigs: promptConfigs.map(serializeAdminPromptConfig),
     blacklistKeywords: blacklist.map((entry) => entry.keyword),
+    taskSchedule: toTaskScheduleSnapshot(taskSchedule),
     groups: groups.map((group) => ({
       id: group.id,
       name: group.name,

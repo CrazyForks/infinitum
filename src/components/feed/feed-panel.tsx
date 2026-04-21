@@ -1012,6 +1012,7 @@ export function FeedPanel({
         isAdmin,
       }}
       contentClassName="gap-5 sm:gap-6"
+      contentPaddingClassName="px-4 pt-3 pb-6 sm:px-6 sm:pt-4 sm:pb-8 lg:px-8 lg:pt-4 lg:pb-10"
       sidebarContainerClassName={cx(
         "flex-shrink-0 transition-all duration-300",
         groupSidebarExpanded ? "lg:w-56" : "lg:w-12",
@@ -1036,7 +1037,7 @@ export function FeedPanel({
         >
           <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex min-w-0 flex-wrap items-center gap-2 lg:flex-1 lg:flex-nowrap">
                 <button
                   aria-expanded={advancedFiltersOpen}
                   className={cx(
@@ -1066,10 +1067,14 @@ export function FeedPanel({
                     </span>
                   </button>
                 ) : null}
-                <span className="min-w-[200px] text-sm text-[var(--text-2)]">{latestRunSummary}</span>
+                {isAdmin ? (
+                  <span className="min-w-0 text-sm text-[var(--text-2)] lg:truncate">
+                    {latestRunSummary}
+                  </span>
+                ) : null}
               </div>
 
-              <div className="flex flex-wrap items-center gap-4 lg:justify-end">
+              <div className="flex items-center gap-3 lg:flex-nowrap lg:justify-end lg:pl-4">
                 <FilterSelectInline
                   label="创建时间："
                   ariaLabel="创建时间"
@@ -1161,7 +1166,7 @@ export function FeedPanel({
               items={activeFilterSummary}
               onClear={clearFilters}
               canClear={hasClearableFilters && !isPending}
-              details={latestRunDetail ? <span>{latestRunDetail}</span> : null}
+              details={isAdmin && latestRunDetail ? <span>{latestRunDetail}</span> : null}
             />
           </div>
         </section>

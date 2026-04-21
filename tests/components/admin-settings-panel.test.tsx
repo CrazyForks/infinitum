@@ -54,6 +54,18 @@ function buildInitialSettings() {
       },
     ],
     blacklistKeywords: ["layoffs"],
+    taskSchedule: {
+      key: "ingestion_default",
+      enabled: true,
+      cronExpression: "0 * * * *",
+      timezone: "Asia/Shanghai",
+      lastHeartbeatAt: "2026-04-20T10:00:00.000Z",
+      lastRunStartedAt: "2026-04-20T10:00:00.000Z",
+      lastRunFinishedAt: "2026-04-20T10:05:00.000Z",
+      lastRunStatus: "succeeded" as const,
+      nextRunAt: "2026-04-20T11:00:00.000Z",
+      isHeartbeatStale: false,
+    },
     groups: [{ id: "group-1", name: "Core" }],
     sources: [
       {
@@ -93,6 +105,7 @@ describe("AdminSettingsPanel", () => {
       "true",
     );
     expect(within(settingsNav).getByRole("tab", { name: "提示词" })).toBeInTheDocument();
+    expect(within(settingsNav).getByRole("tab", { name: "任务配置" })).toBeInTheDocument();
     expect(screen.getByText("模型API配置列表")).toBeInTheDocument();
     expect(screen.getAllByText("默认模型配置").length).toBeGreaterThan(0);
     expect(screen.getByText("抓取并发：")).toBeInTheDocument();
@@ -489,6 +502,57 @@ describe("AdminSettingsPanel", () => {
         },
         body: JSON.stringify({
           keywords: ["layoffs", "funding"],
+        }),
+      });
+    });
+  });
+
+  it("renders task settings after sources and submits the existing schedule API payload", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          schedule: {
+            ...buildInitialSettings().taskSchedule,
+            enabled: false,
+            cronExpression: "*/15 * * * *",
+          },
+        }),
+      ),
+    );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderWithProviders(<AdminSettingsPanel initialSettings={buildInitialSettings()} />);
+
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs.at(-1)).toHaveAccessibleName("任务配置");
+
+    await user.click(screen.getByRole("tab", { name: "任务配置" }));
+
+    const taskPanel = screen.getByRole("tabpanel");
+
+    expect(within(taskPanel).getByText("任务配置")).toBeInTheDocument();
+    expect(within(taskPanel).queryByText("默认抓取任务")).not.toBeInTheDocument();
+    expect(within(taskPanel).queryByText("调度状态")).not.toBeInTheDocument();
+    expect(within(taskPanel).queryByDisplayValue("调度器在线")).not.toBeInTheDocument();
+    expect(within(taskPanel).queryByDisplayValue("已成功")).not.toBeInTheDocument();
+    expect(within(taskPanel).getByLabelText("Cron 表达式")).toHaveValue("0 * * * *");
+
+    await user.clear(within(taskPanel).getByLabelText("Cron 表达式"));
+    await user.type(within(taskPanel).getByLabelText("Cron 表达式"), "*/15 * * * *");
+    await user.click(within(taskPanel).getByLabelText("启用默认抓取任务"));
+    await user.click(within(taskPanel).getByRole("button", { name: "保存配置" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/admin/monitor/schedule/ingestion-default", {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          enabled: false,
+          cronExpression: "*/15 * * * *",
         }),
       });
     });

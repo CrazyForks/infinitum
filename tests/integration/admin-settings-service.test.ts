@@ -16,6 +16,7 @@ describe("admin settings service", () => {
   beforeEach(async () => {
     await prisma.item.deleteMany();
     await prisma.fetchRun.deleteMany();
+    await prisma.taskSchedule.deleteMany();
     await prisma.promptConfig.deleteMany();
     await prisma.modelApiConfig.deleteMany();
     await prisma.source.deleteMany();
@@ -41,6 +42,8 @@ describe("admin settings service", () => {
     expect(settings.modelApiConfigs[0]?.apiKeyMasked).toBe("");
     expect(settings.modelApiConfigs[0]?.ingestionItemConcurrency).toBe(3);
     expect(settings.promptConfigs).toHaveLength(3);
+    expect(settings.taskSchedule.key).toBe("ingestion_default");
+    expect(settings.taskSchedule.cronExpression).toBe("0 * * * *");
     expect(settings.promptConfigs.find((config) => config.type === "item_analysis")?.systemPrompt).toContain(
       "字段说明",
     );

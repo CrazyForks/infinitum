@@ -1,6 +1,5 @@
 "use client";
 import type { ReactNode } from "react";
-import Link from "next/link";
 import { useEffect, useRef, useState, useTransition } from "react";
 
 import { PageShell } from "@/components/ui/page-shell";
@@ -64,21 +63,6 @@ const inputClassName =
   "min-h-10 rounded-xl border border-[color:var(--line)] bg-white px-3.5 py-2.5 text-sm text-[var(--foreground)] outline-none transition placeholder:text-[var(--muted)] focus:border-[color:var(--accent)] focus:ring-2 focus:ring-[color:var(--accent-soft)]";
 const chipBaseClassName =
   "inline-flex items-center rounded-full border px-2.5 py-1 font-mono text-[11px] font-medium uppercase tracking-[0.18em]";
-const adminWorkspaceNavItems = [
-  {
-    href: "/admin/monitor",
-    key: "monitor",
-    label: "任务监控",
-    note: "调度状态与运行队列",
-  },
-  {
-    href: "/admin/settings",
-    key: "admin",
-    label: "后台设置",
-    note: "模型、规则与信息源",
-  },
-] as const;
-
 function formatDateTime(value: string | null) {
   if (!value) {
     return "暂无";
@@ -260,8 +244,8 @@ export function AdminMonitorPanel({
   const { showToast } = useToast();
   const [snapshot, setSnapshot] = useState(initialSnapshot);
   const [enabled, setEnabled] = useState(initialSnapshot.schedule.enabled);
-  const [intervalMinutes, setIntervalMinutes] = useState(
-    String(initialSnapshot.schedule.intervalMinutes),
+  const [cronExpression, setCronExpression] = useState(
+    initialSnapshot.schedule.cronExpression,
   );
   const [isPending, startTransition] = useTransition();
   const [cancellingTaskId, setCancellingTaskId] = useState<string | null>(null);
@@ -269,7 +253,7 @@ export function AdminMonitorPanel({
   const hasShownRefreshErrorRef = useRef(false);
   const isScheduleDirty =
     enabled !== snapshot.schedule.enabled ||
-    intervalMinutes !== String(snapshot.schedule.intervalMinutes);
+    cronExpression.trim() !== snapshot.schedule.cronExpression;
 
   isScheduleDirtyRef.current = isScheduleDirty;
 
@@ -300,7 +284,7 @@ export function AdminMonitorPanel({
 
         if (!isScheduleDirtyRef.current) {
           setEnabled(payload.schedule.enabled);
-          setIntervalMinutes(String(payload.schedule.intervalMinutes));
+          setCronExpression(payload.schedule.cronExpression);
         }
       } catch {
         if (!disposed) {
@@ -337,7 +321,7 @@ export function AdminMonitorPanel({
             },
             body: JSON.stringify({
               enabled,
-              intervalMinutes: Number(intervalMinutes),
+              cronExpression,
             }),
           },
         );
@@ -430,18 +414,17 @@ export function AdminMonitorPanel({
           className={cx(subtleCardClassName, "flex flex-col gap-3 p-3.5")}
         >
           <span className="font-mono text-[11px] font-medium uppercase tracking-[0.22em] text-[var(--muted)]">
-            Interval
+            Cron
           </span>
           <span className="text-sm font-medium text-[var(--foreground)]">
-            抓取频率（分钟）
+            Cron 表达式
           </span>
           <input
-            aria-label="抓取频率（分钟）"
+            aria-label="Cron 表达式"
             className={inputClassName}
-            min={5}
-            type="number"
-            value={intervalMinutes}
-            onChange={(event) => setIntervalMinutes(event.target.value)}
+            type="text"
+            value={cronExpression}
+            onChange={(event) => setCronExpression(event.target.value)}
           />
         </label>
 
@@ -674,46 +657,5 @@ export function AdminMonitorPanel({
     >
       {content}
     </PageShell>
-  );
-}
-
-function AdminWorkspaceSidebar({
-  activeItem,
-}: {
-  activeItem: "admin" | "monitor";
-}) {
-  return (
-    <aside
-      aria-label="管理导航"
-      className={cx(
-        surfaceCardClassName,
-        "space-y-3 p-3.5 xl:sticky xl:top-24",
-      )}
-    >
-      <nav aria-label="管理页标签" className="space-y-1.5">
-        {adminWorkspaceNavItems.map((item) => {
-          const isActive = item.key === activeItem;
-
-          return (
-            <Link
-              key={item.href}
-              aria-label={item.label}
-              aria-current={isActive ? "page" : undefined}
-              className={cx(
-                "flex rounded-[1rem] border px-3 py-3 text-left transition",
-                isActive
-                  ? "border-[color:var(--line-strong)] bg-[var(--surface-highlight)] shadow-[var(--shadow-sm)]"
-                  : "border-transparent bg-transparent hover:border-[color:var(--line)] hover:bg-[var(--surface)]",
-              )}
-              href={item.href}
-            >
-              <span className="block text-sm font-semibold text-[var(--foreground)]">
-                {item.label}
-              </span>
-            </Link>
-          );
-        })}
-      </nav>
-    </aside>
   );
 }

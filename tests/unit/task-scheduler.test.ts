@@ -9,18 +9,19 @@ import {
 describe("task scheduler", () => {
   it("computes the next run from the latest finished time", () => {
     const nextRunAt = computeNextRunAt({
-      intervalMinutes: 30,
+      cronExpression: "*/30 * * * *",
       now: new Date("2026-04-12T00:00:00.000Z"),
       anchor: new Date("2026-04-12T00:10:00.000Z"),
+      timezone: "Asia/Shanghai",
     });
 
-    expect(nextRunAt.toISOString()).toBe("2026-04-12T00:40:00.000Z");
+    expect(nextRunAt.toISOString()).toBe("2026-04-12T00:30:00.000Z");
   });
 
-  it("clamps invalid schedule updates", () => {
-    expect(normalizeScheduleInput({ enabled: true, intervalMinutes: 3 })).toEqual({
+  it("normalizes valid cron updates", () => {
+    expect(normalizeScheduleInput({ enabled: true, cronExpression: " */15 * * * * " })).toEqual({
       enabled: true,
-      intervalMinutes: 5,
+      cronExpression: "*/15 * * * *",
     });
   });
 

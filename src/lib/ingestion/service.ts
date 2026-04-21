@@ -1,7 +1,7 @@
 import type { BackgroundTaskRun, FetchRun, FetchRunStatus } from "@prisma/client";
 
 import { createAiProvider } from "@/lib/ai/provider";
-import { assignItemToCluster, recomputeAllClusters, recomputeCluster } from "@/lib/clusters/service";
+import { assignItemToCluster, recomputeCluster } from "@/lib/clusters/service";
 import { prisma } from "@/lib/db";
 import {
   completeFetchRun,
@@ -22,6 +22,7 @@ import type {
   RunIngestionOptions,
 } from "@/lib/ingestion/types";
 import { getIngestionRuntimeConfig } from "@/lib/settings/service";
+import { DEFAULT_INGESTION_TASK_LABEL } from "@/lib/tasks/types";
 import {
   enqueueTaskRun,
   isTaskRunCancellationRequested,
@@ -777,7 +778,7 @@ export async function startIngestionTask(input?: { triggerType?: "scheduled" | "
   return enqueueTaskRun({
     kind: "ingestion",
     triggerType: input?.triggerType ?? "manual",
-    label: "默认抓取任务",
+    label: DEFAULT_INGESTION_TASK_LABEL,
   });
 }
 

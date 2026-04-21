@@ -37,7 +37,7 @@ describe("/api/admin/monitor", () => {
       schedule: {
         key: "ingestion_default",
         enabled: true,
-        intervalMinutes: 60,
+        cronExpression: "0 * * * *",
         timezone: "Asia/Shanghai",
         lastHeartbeatAt: "2026-04-12T00:00:00.000Z",
         lastRunStartedAt: null,
@@ -60,12 +60,12 @@ describe("/api/admin/monitor", () => {
     expect(Array.isArray(json.recentTasks)).toBe(true);
   });
 
-  it("updates enabled and intervalMinutes", async () => {
+  it("updates enabled and cronExpression", async () => {
     requireAdmin.mockResolvedValue(undefined);
     updateDefaultIngestionSchedule.mockResolvedValue({
       key: "ingestion_default",
       enabled: false,
-      intervalMinutes: 120,
+      cronExpression: "*/15 * * * *",
       timezone: "Asia/Shanghai",
       lastHeartbeatAt: null,
       lastRunStartedAt: null,
@@ -78,7 +78,7 @@ describe("/api/admin/monitor", () => {
     const response = await PATCH(
       new Request("http://localhost/api/admin/monitor/schedule/ingestion-default", {
         method: "PATCH",
-        body: JSON.stringify({ enabled: false, intervalMinutes: 120 }),
+        body: JSON.stringify({ enabled: false, cronExpression: "*/15 * * * *" }),
         headers: { "content-type": "application/json" },
       }),
     );
@@ -87,10 +87,10 @@ describe("/api/admin/monitor", () => {
     expect(response.status).toBe(200);
     expect(updateDefaultIngestionSchedule).toHaveBeenCalledWith({
       enabled: false,
-      intervalMinutes: 120,
+      cronExpression: "*/15 * * * *",
     });
     expect(json.schedule.enabled).toBe(false);
-    expect(json.schedule.intervalMinutes).toBe(120);
+    expect(json.schedule.cronExpression).toBe("*/15 * * * *");
   });
 
   it("requests cancellation for a running task", async () => {

@@ -8,6 +8,8 @@ import {
   enqueueTaskRun,
   listRecentTaskRuns,
   requestTaskRunCancellation,
+  TASK_RUN_CANCELLED_LABEL,
+  TASK_RUN_CANCELLED_MESSAGE,
   updateTaskRun,
   updateDefaultIngestionSchedule,
 } from "@/lib/tasks/service";
@@ -29,14 +31,14 @@ describe("background task persistence", () => {
       data: {
         key: "ingestion_default",
         enabled: true,
-        intervalMinutes: 60,
+        cronExpression: "0 * * * *",
         timezone: "Asia/Shanghai",
         nextRunAt: new Date("2026-04-12T01:00:00.000Z"),
       },
     });
 
     expect(schedule.key).toBe("ingestion_default");
-    expect(schedule.intervalMinutes).toBe(60);
+    expect(schedule.cronExpression).toBe("0 * * * *");
   });
 
   it("links fetch runs to a background task run", async () => {
@@ -64,7 +66,7 @@ describe("background task persistence", () => {
     const schedule = await ensureDefaultIngestionSchedule();
 
     expect(schedule.key).toBe("ingestion_default");
-    expect(schedule.intervalMinutes).toBe(60);
+    expect(schedule.cronExpression).toBe("0 * * * *");
   });
 
   it("claims a queued task only once", async () => {
@@ -135,6 +137,49 @@ describe("background task persistence", () => {
     expect(updatedFetchRun.finishedAt).not.toBeNull();
   });
 
+  it("reconciles cancellation-requested running tasks as cancelled during recovery", async () => {
+    const taskRun = await prisma.backgroundTaskRun.create({
+      data: {
+        kind: "ingestion",
+        triggerType: "manual",
+        status: "running",
+        label: "默认抓取任务",
+        startedAt: new Date("2026-04-12T00:10:00.000Z"),
+        cancelRequestedAt: new Date("2026-04-12T00:12:00.000Z"),
+        errorSummary: TASK_RUN_CANCELLED_MESSAGE,
+      },
+    });
+    const fetchRun = await prisma.fetchRun.create({
+      data: {
+        taskRunId: taskRun.id,
+        triggerType: "manual",
+        status: "running",
+        startedAt: new Date("2026-04-12T00:10:00.000Z"),
+        sourceCount: 1,
+        itemCount: 50,
+        successCount: 26,
+        itemsAdded: 17,
+      },
+    });
+
+    const recovered = await recoverStaleTaskRuns(new Date("2026-04-12T00:13:00.000Z"));
+    const updatedTaskRun = await prisma.backgroundTaskRun.findUniqueOrThrow({
+      where: { id: taskRun.id },
+    });
+    const updatedFetchRun = await prisma.fetchRun.findUniqueOrThrow({
+      where: { id: fetchRun.id },
+    });
+
+    expect(recovered).toBe(1);
+    expect(updatedTaskRun.status).toBe("cancelled");
+    expect(updatedTaskRun.finishedAt).not.toBeNull();
+    expect(updatedTaskRun.progressLabel).toBe(TASK_RUN_CANCELLED_LABEL);
+    expect(updatedTaskRun.errorSummary).toBe(TASK_RUN_CANCELLED_MESSAGE);
+    expect(updatedFetchRun.status).toBe("failed");
+    expect(updatedFetchRun.finishedAt).not.toBeNull();
+    expect(updatedFetchRun.errorSummary).toBe(TASK_RUN_CANCELLED_MESSAGE);
+  });
+
   it("reconciles running fetch runs whose linked task is already terminal", async () => {
     const taskRun = await prisma.backgroundTaskRun.create({
       data: {
@@ -172,7 +217,7 @@ describe("background task persistence", () => {
       data: {
         key: "ingestion_default",
         enabled: true,
-        intervalMinutes: 60,
+        cronExpression: "0 * * * *",
         timezone: "Asia/Shanghai",
         nextRunAt: new Date("2026-04-12T01:00:00.000Z"),
       },
@@ -198,11 +243,11 @@ describe("background task persistence", () => {
 
     const updated = await updateDefaultIngestionSchedule({
       enabled: false,
-      intervalMinutes: 120,
+      cronExpression: "*/15 * * * *",
     });
 
     expect(updated.enabled).toBe(false);
-    expect(updated.intervalMinutes).toBe(120);
+    expect(updated.cronExpression).toBe("*/15 * * * *");
   });
 
   it("builds a monitor snapshot with schedule and task lists", async () => {
@@ -265,7 +310,7 @@ describe("background task persistence", () => {
       data: {
         key: "ingestion_default",
         enabled: true,
-        intervalMinutes: 60,
+        cronExpression: "0 * * * *",
         timezone: "Asia/Shanghai",
         nextRunAt: new Date("2026-04-12T01:00:00.000Z"),
         lastHeartbeatAt: new Date("2026-04-12T00:00:00.000Z"),
