@@ -38,6 +38,23 @@ function buildInitialSettings(): AdminSettingsSnapshot {
     ],
     promptConfigs: [
       {
+        id: "prompt-0",
+        name: "默认条目摘要提示词",
+        type: "item_summary" as const,
+        prompt: "标题：{{title}}\n来源：{{sourceName}}\n正文：{{inputText}}",
+        systemPrompt: "请总结单条内容。",
+        temperature: 0.2,
+        maxTokens: 300,
+        topP: 1,
+        modelApiConfigId: "",
+        modelApiConfigName: "默认模型配置",
+        isUsingDefaultModel: true,
+        isEnabled: true,
+        isDefault: true,
+        createdAt: "2026-04-20T10:00:00.000Z",
+        updatedAt: "2026-04-20T10:00:00.000Z",
+      },
+      {
         id: "prompt-1",
         name: "默认内容分析提示词",
         type: "item_analysis" as const,
@@ -124,6 +141,7 @@ describe("AdminSettingsPanel", () => {
     await user.click(screen.getByRole("tab", { name: "提示词" }));
 
     expect(screen.getByText("提示词配置列表")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "条目摘要" })).toBeInTheDocument();
     expect(screen.getByText("默认内容分析提示词")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "预览" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "复制" })).toBeInTheDocument();
@@ -280,14 +298,14 @@ describe("AdminSettingsPanel", () => {
     renderWithProviders(<AdminSettingsPanel initialSettings={buildInitialSettings()} />);
 
     await user.click(screen.getByRole("tab", { name: "提示词" }));
-    await user.click(screen.getByRole("button", { name: "聚合摘要" }));
+    await user.click(screen.getByRole("button", { name: "条目摘要" }));
     await user.click(screen.getAllByRole("button", { name: /创建配置/i })[0]);
     await user.clear(screen.getByLabelText(/配置名称/));
-    await user.type(screen.getByLabelText(/配置名称/), "新的聚合摘要提示词");
+    await user.type(screen.getByLabelText(/配置名称/), "新的条目摘要提示词");
     await user.clear(screen.getByLabelText(/系统提示词/));
-    await user.type(screen.getByLabelText(/系统提示词/), "总结多条内容");
+    await user.type(screen.getByLabelText(/系统提示词/), "总结单条内容");
     fireEvent.change(screen.getByLabelText(/提示词模板/), {
-      target: { value: "主题：{{title}}" },
+      target: { value: "标题：{{title}}\n来源：{{sourceName}}\n正文：{{inputText}}" },
     });
     await user.click(screen.getByRole("button", { name: "创建" }));
 
@@ -298,10 +316,10 @@ describe("AdminSettingsPanel", () => {
           "content-type": "application/json",
         },
         body: JSON.stringify({
-          name: "新的聚合摘要提示词",
-          type: "cluster_summary",
-          prompt: "主题：{{title}}",
-          systemPrompt: "总结多条内容",
+          name: "新的条目摘要提示词",
+          type: "item_summary",
+          prompt: "标题：{{title}}\n来源：{{sourceName}}\n正文：{{inputText}}",
+          systemPrompt: "总结单条内容",
           temperature: null,
           maxTokens: null,
           topP: null,
@@ -372,7 +390,7 @@ describe("AdminSettingsPanel", () => {
           rssUrl: "https://feeds.example.com/normalized.xml",
           siteUrl: "https://feeds.example.com",
           enabled: true,
-          aiParsingEnabled: true,
+          aiParsingEnabled: false,
           groupId: "group-1",
         }),
       });

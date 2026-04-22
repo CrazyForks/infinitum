@@ -400,18 +400,8 @@ async function ensureModelAndPromptConfigsSeeded(
       modelConfigCount === 0 &&
       promptConfigCount === 0;
 
-    let defaultGeneralModel =
-      modelConfigCount === 0
-        ? null
-        : await tx.modelApiConfig.findFirst({
-            where: {
-              isDefault: true,
-            },
-            orderBy: { createdAt: "asc" },
-          });
-
     if (modelConfigCount === 0) {
-      defaultGeneralModel = await tx.modelApiConfig.create({
+      await tx.modelApiConfig.create({
         data: {
           name: DEFAULT_MODEL_CONFIG_NAME,
           baseUrl: fileConfig.modelApi.baseURL,
@@ -427,6 +417,7 @@ async function ensureModelAndPromptConfigsSeeded(
     if (promptConfigCount === 0) {
       await tx.promptConfig.createMany({
         data: [
+          PromptConfigType.item_summary,
           PromptConfigType.item_analysis,
           PromptConfigType.cluster_summary,
           PromptConfigType.cluster_match,
@@ -438,7 +429,9 @@ async function ensureModelAndPromptConfigsSeeded(
             type,
             prompt: getDefaultPromptTemplate(type),
             systemPrompt:
-              type === PromptConfigType.item_analysis
+              type === PromptConfigType.item_summary
+                ? fileConfig.prompts.itemSummary
+                : type === PromptConfigType.item_analysis
                 ? fileConfig.prompts.itemAnalysis
                 : type === PromptConfigType.cluster_summary
                   ? fileConfig.prompts.clusterSummary
@@ -575,6 +568,7 @@ export async function getIngestionRuntimeConfig(): Promise<RuntimeConfig> {
   }
 
   const itemAnalysisConfig = pickPromptConfigByType(promptConfigs, PromptConfigType.item_analysis);
+  const itemSummaryConfig = pickPromptConfigByType(promptConfigs, PromptConfigType.item_summary);
   const clusterSummaryConfig = pickPromptConfigByType(promptConfigs, PromptConfigType.cluster_summary);
   const clusterMatchConfig = pickPromptConfigByType(promptConfigs, PromptConfigType.cluster_match);
 
@@ -589,11 +583,13 @@ export async function getIngestionRuntimeConfig(): Promise<RuntimeConfig> {
     },
     modelApi: serializeRuntimeModelApi(defaultModelConfig),
     prompts: {
+      itemSummary: itemSummaryConfig.systemPrompt || itemSummaryConfig.prompt,
       itemAnalysis: itemAnalysisConfig.systemPrompt || itemAnalysisConfig.prompt,
       clusterSummary: clusterSummaryConfig.systemPrompt || clusterSummaryConfig.prompt,
       clusterMatch: clusterMatchConfig.systemPrompt || clusterMatchConfig.prompt,
     },
     selectedPromptConfigs: {
+      itemSummary: serializeSelectedPromptConfig(itemSummaryConfig),
       itemAnalysis: serializeSelectedPromptConfig(itemAnalysisConfig),
       clusterSummary: serializeSelectedPromptConfig(clusterSummaryConfig),
       clusterMatch: serializeSelectedPromptConfig(clusterMatchConfig),

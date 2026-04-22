@@ -1,4 +1,5 @@
 export type PromptConfigType =
+  | "item_summary"
   | "item_analysis"
   | "cluster_summary"
   | "cluster_match";

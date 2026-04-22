@@ -29,6 +29,31 @@ function buildEventSignature(
   };
 }
 
+function buildAiProviderMock(
+  overrides?: Partial<{
+    summarizeItem: ReturnType<typeof vi.fn>;
+    enrichContent: ReturnType<typeof vi.fn>;
+    summarizeCluster: ReturnType<typeof vi.fn>;
+    matchClusterCandidate: ReturnType<typeof vi.fn>;
+  }>,
+) {
+  return {
+    summarizeItem: vi.fn().mockResolvedValue("默认条目摘要"),
+    enrichContent: vi.fn().mockResolvedValue({
+      translatedTitle: "默认中文标题",
+      moderationStatus: "allowed",
+      moderationReason: null,
+      moderationDetail: null,
+      qualityScore: 80,
+      qualityRationale: "高质量",
+      eventSignature: buildEventSignature(),
+    }),
+    summarizeCluster: vi.fn().mockResolvedValue("默认聚合摘要"),
+    matchClusterCandidate: vi.fn().mockResolvedValue(null),
+    ...overrides,
+  };
+}
+
 describe("regenerateItemContent", () => {
   beforeEach(async () => {
     await prisma.item.deleteMany();
@@ -86,10 +111,9 @@ describe("regenerateItemContent", () => {
     });
 
     const regenerated = await regenerateItemContent(item.id, "translation", {
-      aiProvider: {
+      aiProvider: buildAiProviderMock({
         enrichContent: vi.fn().mockResolvedValue({
           translatedTitle: "新的中文标题",
-          summary: "不会被使用的摘要",
           moderationStatus: "allowed",
           moderationReason: null,
           moderationDetail: null,
@@ -104,7 +128,7 @@ describe("regenerateItemContent", () => {
         }),
         summarizeCluster: vi.fn().mockResolvedValue("聚合摘要"),
         matchClusterCandidate: vi.fn().mockResolvedValue(null),
-      },
+      }),
     });
 
     expect(regenerated.translatedTitle).toBe("新的中文标题");
@@ -140,25 +164,11 @@ describe("regenerateItemContent", () => {
     });
 
     const regenerated = await regenerateItemContent(item.id, "summary", {
-      aiProvider: {
-        enrichContent: vi.fn().mockResolvedValue({
-          translatedTitle: "不应该被采用的新标题",
-          summary: "新的摘要内容",
-          moderationStatus: "allowed",
-          moderationReason: null,
-          moderationDetail: null,
-          qualityScore: 80,
-          qualityRationale: "高质量",
-          eventSignature: buildEventSignature({
-            eventType: "research",
-            eventSubject: "OpenAI",
-            eventAction: "发布",
-            eventObject: "benchmark",
-          }),
-        }),
+      aiProvider: buildAiProviderMock({
+        summarizeItem: vi.fn().mockResolvedValue("新的摘要内容"),
         summarizeCluster: vi.fn().mockResolvedValue("聚合摘要"),
         matchClusterCandidate: vi.fn().mockResolvedValue(null),
-      },
+      }),
     });
 
     expect(regenerated.translatedTitle).toBe("现有中文标题");
@@ -194,11 +204,11 @@ describe("regenerateItemContent", () => {
     });
 
     const regenerated = await regenerateItemContent(item.id, "summary", {
-      aiProvider: {
-        enrichContent: vi.fn().mockRejectedValue(new Error("Upstream regeneration failed")),
+      aiProvider: buildAiProviderMock({
+        summarizeItem: vi.fn().mockRejectedValue(new Error("Upstream regeneration failed")),
         summarizeCluster: vi.fn().mockResolvedValue("聚合摘要"),
         matchClusterCandidate: vi.fn().mockResolvedValue(null),
-      },
+      }),
     });
 
     expect(regenerated.summaryText).toBe("保留原摘要");
@@ -283,25 +293,11 @@ describe("regenerateItemContent", () => {
     });
 
     await executeItemRegenerationTask(taskRun, "summary", {
-      aiProvider: {
-        enrichContent: vi.fn().mockResolvedValue({
-          translatedTitle: "不会被采用的新标题",
-          summary: "新的摘要内容",
-          moderationStatus: "allowed",
-          moderationReason: null,
-          moderationDetail: null,
-          qualityScore: 80,
-          qualityRationale: "高质量",
-          eventSignature: buildEventSignature({
-            eventType: "launch",
-            eventSubject: "OpenAI",
-            eventAction: "发布",
-            eventObject: "toolkit",
-          }),
-        }),
+      aiProvider: buildAiProviderMock({
+        summarizeItem: vi.fn().mockResolvedValue("新的摘要内容"),
         summarizeCluster: vi.fn().mockResolvedValue("新的聚合摘要"),
         matchClusterCandidate: vi.fn().mockResolvedValue(null),
-      },
+      }),
     });
 
     const storedTaskRun = await prisma.backgroundTaskRun.findUniqueOrThrow({
@@ -390,10 +386,10 @@ describe("regenerateItemContent", () => {
     });
 
     await executeItemReanalyzeTask(taskRun, {
-      aiProvider: {
+      aiProvider: buildAiProviderMock({
+        summarizeItem: vi.fn().mockResolvedValue("新的重分析摘要"),
         enrichContent: vi.fn().mockResolvedValue({
           translatedTitle: "另一篇 OpenAI 工具包报道",
-          summary: "新的重分析摘要",
           moderationStatus: "allowed",
           moderationReason: null,
           moderationDetail: null,
@@ -410,7 +406,7 @@ describe("regenerateItemContent", () => {
         matchClusterCandidate: vi.fn().mockImplementation(async (_input, metadata: { candidates: Array<{ id: string }> }) => {
           return metadata.candidates[0]?.id ?? null;
         }),
-      },
+      }),
     });
 
     const storedTaskRun = await prisma.backgroundTaskRun.findUniqueOrThrow({
@@ -421,8 +417,8 @@ describe("regenerateItemContent", () => {
     });
 
     expect(storedTaskRun.status).toBe("succeeded");
-    expect(storedTaskRun.aiCallCountActual).toBe(2);
-    expect(storedTaskRun.aiCallCountEstimated).toBe(2);
+    expect(storedTaskRun.aiCallCountActual).toBe(3);
+    expect(storedTaskRun.aiCallCountEstimated).toBe(4);
     expect(updatedItem.eventType).toBe("launch");
     expect(updatedItem.eventSubject).toBe("OpenAI");
     expect(updatedItem.eventAction).toBe("发布");
@@ -567,20 +563,10 @@ describe("regenerateItemContent", () => {
     const summarizeCluster = vi.fn().mockResolvedValue("新的聚合摘要");
 
     await executeClusterSummaryTask(taskRun, {
-      aiProvider: {
-        enrichContent: vi.fn().mockResolvedValue({
-          translatedTitle: null,
-          summary: "不会被使用",
-          moderationStatus: "allowed",
-          moderationReason: null,
-          moderationDetail: null,
-          qualityScore: 80,
-          qualityRationale: "高质量",
-          eventSignature: buildEventSignature(),
-        }),
+      aiProvider: buildAiProviderMock({
         summarizeCluster,
         matchClusterCandidate: vi.fn().mockResolvedValue(null),
-      },
+      }),
     });
 
     const storedTaskRun = await prisma.backgroundTaskRun.findUniqueOrThrow({

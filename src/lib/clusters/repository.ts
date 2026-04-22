@@ -5,6 +5,11 @@ export type ClusterAssignmentCandidate = {
   title: string;
   summary: string;
   fingerprint: string;
+  eventType: string | null;
+  eventSubject: string | null;
+  eventAction: string | null;
+  eventObject: string | null;
+  eventDate: string | null;
   latestPublishedAt: Date;
   itemCount: number;
 };
@@ -53,6 +58,11 @@ export async function findRecentActiveClusterCandidates(options: { since: Date; 
       title: true,
       summary: true,
       fingerprint: true,
+      eventType: true,
+      eventSubject: true,
+      eventAction: true,
+      eventObject: true,
+      eventDate: true,
       latestPublishedAt: true,
       itemCount: true,
     },
@@ -66,6 +76,11 @@ export async function createContentCluster(data: {
   summary: string;
   score: number;
   latestPublishedAt: Date;
+  eventType?: string | null;
+  eventSubject?: string | null;
+  eventAction?: string | null;
+  eventObject?: string | null;
+  eventDate?: string | null;
 }) {
   return prisma.contentCluster.upsert({
     where: { fingerprint: data.fingerprint },
@@ -79,6 +94,11 @@ export async function createContentCluster(data: {
       latestPublishedAt: data.latestPublishedAt,
       status: "active",
       fingerprint: data.fingerprint,
+      eventType: data.eventType ?? null,
+      eventSubject: data.eventSubject ?? null,
+      eventAction: data.eventAction ?? null,
+      eventObject: data.eventObject ?? null,
+      eventDate: data.eventDate ?? null,
     },
   });
 }
@@ -119,6 +139,11 @@ export async function updateClusterSummary(
     itemCount: number;
     latestPublishedAt: Date;
     status?: "active" | "hidden";
+    eventType?: string | null;
+    eventSubject?: string | null;
+    eventAction?: string | null;
+    eventObject?: string | null;
+    eventDate?: string | null;
   },
 ) {
   return prisma.contentCluster.update({

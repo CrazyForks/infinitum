@@ -74,6 +74,7 @@ enum ContentClusterStatus {
 }
 
 enum PromptConfigType {
+  item_summary
   item_analysis
   cluster_summary
   cluster_match
@@ -152,6 +153,11 @@ model ContentCluster {
   latestPublishedAt DateTime
   status          ContentClusterStatus @default(active)
   fingerprint     String @unique
+  eventType       String?
+  eventSubject    String?
+  eventAction     String?
+  eventObject     String?
+  eventDate       String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   items           Item[]
@@ -220,6 +226,7 @@ model BackgroundTaskRun {
   finishedAt      DateTime?
   errorSummary    String?
   stageTimingsJson String?
+  taskTimelineJson String?
   createdAt       DateTime              @default(now())
   updatedAt       DateTime              @updatedAt
   fetchRuns       FetchRun[]

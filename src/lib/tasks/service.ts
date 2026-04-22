@@ -13,6 +13,10 @@ import {
   type BackgroundTaskMonitorSnapshot,
   type EnqueueTaskRunInput,
   type TaskStageTimingSnapshot,
+  type TaskTimelineMetricSnapshot,
+  type TaskTimelineNodeKey,
+  type TaskTimelineNodeSnapshot,
+  type TaskTimelineNodeStatus,
   type TaskRunSnapshot,
   type TaskScheduleSnapshot,
 } from "@/lib/tasks/types";
@@ -22,6 +26,7 @@ export const TASK_RUN_CANCELLED_MESSAGE = "管理员手动终止任务。";
 export const TASK_RUN_CANCELLED_LABEL = "任务已终止";
 
 const TASK_AI_CALL_BREAKDOWN_LABELS: Record<TaskAiCallBreakdownKey, string> = {
+  item_summary: "条目摘要",
   item_analysis: "内容分析",
   cluster_match: "聚合匹配",
   cluster_summary: "聚合摘要",
@@ -44,6 +49,7 @@ function normalizeTaskAiCallBreakdownSnapshot(value: unknown): TaskAiCallBreakdo
   const maybeSnapshot = value as Record<string, unknown>;
 
   if (
+    maybeSnapshot.key !== "item_summary" &&
     maybeSnapshot.key !== "item_analysis" &&
     maybeSnapshot.key !== "cluster_match" &&
     maybeSnapshot.key !== "cluster_summary"
@@ -162,6 +168,123 @@ function serializeTaskStageTimings(stageTimings: TaskStageTimingSnapshot[] | nul
   return JSON.stringify(stageTimings);
 }
 
+function normalizeTaskTimelineMetricSnapshot(value: unknown): TaskTimelineMetricSnapshot | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const maybeMetric = value as Record<string, unknown>;
+
+  if (typeof maybeMetric.label !== "string") {
+    return null;
+  }
+
+  return {
+    label: maybeMetric.label,
+    value:
+      typeof maybeMetric.value === "number" && Number.isFinite(maybeMetric.value)
+        ? maybeMetric.value
+        : 0,
+  };
+}
+
+function normalizeTaskTimelineNodeSnapshot(value: unknown): TaskTimelineNodeSnapshot | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const maybeNode = value as Record<string, unknown>;
+  const key = maybeNode.key;
+  const status = maybeNode.status;
+  const supportedKeys = new Set<TaskTimelineNodeKey>([
+    "source_fetch",
+    "rule_filter",
+    "item_summary",
+    "item_analysis",
+    "cluster_assignment",
+    "cluster_finalize",
+  ]);
+  const supportedStatuses = new Set<TaskTimelineNodeStatus>([
+    "pending",
+    "running",
+    "succeeded",
+    "failed",
+    "partial",
+    "skipped",
+  ]);
+
+  if (
+    typeof key !== "string" ||
+    !supportedKeys.has(key as TaskTimelineNodeKey) ||
+    typeof maybeNode.label !== "string" ||
+    typeof status !== "string" ||
+    !supportedStatuses.has(status as TaskTimelineNodeStatus)
+  ) {
+    return null;
+  }
+
+  const startedAt =
+    typeof maybeNode.startedAt === "string" || maybeNode.startedAt === null
+      ? maybeNode.startedAt
+      : null;
+  const finishedAt =
+    typeof maybeNode.finishedAt === "string" || maybeNode.finishedAt === null
+      ? maybeNode.finishedAt
+      : null;
+  const durationMs =
+    typeof maybeNode.durationMs === "number" && Number.isFinite(maybeNode.durationMs)
+      ? maybeNode.durationMs
+      : null;
+  const modelName =
+    typeof maybeNode.modelName === "string" || maybeNode.modelName === null
+      ? maybeNode.modelName
+      : null;
+  const metrics = Array.isArray(maybeNode.metrics)
+    ? maybeNode.metrics
+        .map(normalizeTaskTimelineMetricSnapshot)
+        .filter((metric): metric is TaskTimelineMetricSnapshot => metric !== null)
+    : [];
+
+  return {
+    key: key as TaskTimelineNodeKey,
+    label: maybeNode.label,
+    status: status as TaskTimelineNodeStatus,
+    startedAt,
+    finishedAt,
+    durationMs,
+    modelName,
+    metrics,
+  };
+}
+
+function parseTaskTimelineJson(value: string | null | undefined): TaskTimelineNodeSnapshot[] {
+  if (!value) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed
+      .map(normalizeTaskTimelineNodeSnapshot)
+      .filter((node): node is TaskTimelineNodeSnapshot => node !== null);
+  } catch {
+    return [];
+  }
+}
+
+function serializeTaskTimeline(taskTimeline: TaskTimelineNodeSnapshot[] | null) {
+  if (!taskTimeline) {
+    return null;
+  }
+
+  return JSON.stringify(taskTimeline);
+}
+
 export async function ensureDefaultIngestionSchedule() {
   return upsertDefaultIngestionSchedule();
 }
@@ -201,10 +324,11 @@ export async function updateTaskRun(
     finishedAt?: Date | null;
     errorSummary?: string | null;
     stageTimings?: TaskStageTimingSnapshot[] | null;
+    taskTimeline?: TaskTimelineNodeSnapshot[] | null;
   },
 ) {
   const now = new Date();
-  const { stageTimings, aiCallBreakdown, ...taskRunData } = data;
+  const { stageTimings, aiCallBreakdown, taskTimeline, ...taskRunData } = data;
   const [taskRun] = await prisma.$transaction([
     prisma.backgroundTaskRun.update({
       where: { id },
@@ -214,6 +338,8 @@ export async function updateTaskRun(
           aiCallBreakdown === undefined ? undefined : serializeTaskAiCallBreakdown(aiCallBreakdown),
         stageTimingsJson:
           stageTimings === undefined ? undefined : serializeTaskStageTimings(stageTimings),
+        taskTimelineJson:
+          taskTimeline === undefined ? undefined : serializeTaskTimeline(taskTimeline),
       },
     }),
     prisma.taskSchedule.updateMany({
@@ -247,6 +373,7 @@ export function toTaskRunSnapshot(taskRun: {
   finishedAt: Date | null;
   errorSummary: string | null;
   stageTimingsJson: string | null;
+  taskTimelineJson: string | null;
 }): TaskRunSnapshot {
   return {
     id: taskRun.id,
@@ -268,6 +395,7 @@ export function toTaskRunSnapshot(taskRun: {
     finishedAt: taskRun.finishedAt?.toISOString() ?? null,
     errorSummary: taskRun.errorSummary,
     stageTimings: parseTaskStageTimingsJson(taskRun.stageTimingsJson),
+    taskTimeline: parseTaskTimelineJson(taskRun.taskTimelineJson),
   };
 }
 

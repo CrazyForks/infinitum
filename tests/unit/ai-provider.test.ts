@@ -10,7 +10,6 @@ describe("ai provider", () => {
           message: {
             content: JSON.stringify({
               translatedTitle: "中文标题",
-              summary: "中文摘要",
               moderationStatus: "allowed",
               moderationReason: null,
               moderationDetail: "高信息密度内容",
@@ -51,7 +50,6 @@ describe("ai provider", () => {
 
     expect(enriched).toEqual({
       translatedTitle: "中文标题",
-      summary: "中文摘要",
       moderationStatus: "allowed",
       moderationReason: null,
       moderationDetail: "高信息密度内容",
@@ -75,7 +73,6 @@ describe("ai provider", () => {
           message: {
             content: JSON.stringify({
               translatedTitle: "中文标题",
-              summary: "中文摘要",
               moderationStatus: "allowed",
               moderationReason: null,
               moderationDetail: "解释",
@@ -121,30 +118,17 @@ describe("ai provider", () => {
     expect(systemPrompt).toContain("qualityRationale");
     expect(systemPrompt).toContain("eventType");
     expect(systemPrompt).toContain("eventSubject");
-    expect(systemPrompt).toContain("100 到 200 字中文摘要");
+    expect(systemPrompt).toContain("只基于输入标题、来源和摘要判断");
     expect(systemPrompt).toContain('"moderationStatus":"allowed|filtered"');
     expect(systemPrompt).not.toContain("restored");
   });
 
-  it("passes the full body text to item analysis without truncation", async () => {
+  it("passes the full body text to item summarization without truncation", async () => {
     const create = vi.fn().mockResolvedValue({
       choices: [
         {
           message: {
-            content: JSON.stringify({
-              translatedTitle: "",
-              summary: "中文摘要",
-              moderationStatus: "allowed",
-              moderationReason: null,
-              moderationDetail: "信息明确",
-              qualityScore: 80,
-              qualityRationale: "事实较完整",
-              eventType: "launch",
-              eventSubject: "OpenAI",
-              eventAction: "发布",
-              eventObject: "事件线索",
-              eventDate: null,
-            }),
+            content: "中文摘要",
           },
         },
       ],
@@ -168,14 +152,13 @@ describe("ai provider", () => {
 
     const longBody = "正文片段".repeat(1200);
 
-    await provider.enrichContent(longBody, {
+    await provider.summarizeItem(longBody, {
       title: "Original title",
       sourceName: "Example Feed",
-      translateTitle: false,
     });
 
     const userPrompt = create.mock.calls[0]?.[0]?.messages?.[1]?.content as string;
-    expect(userPrompt).toContain(longBody);
+    expect(userPrompt).toContain(longBody.slice(0, 4000));
   });
 
   it("falls back to the original title and truncated plain text when no api key is configured", async () => {
@@ -195,7 +178,6 @@ describe("ai provider", () => {
     );
 
     expect(enriched.translatedTitle).toBe("Original title");
-    expect(enriched.summary).toContain("This is a long body");
     expect(enriched.moderationStatus).toBe("allowed");
     expect(enriched.qualityScore).toBe(50);
     expect(enriched.qualityRationale).toBe("AI analysis unavailable");
@@ -226,7 +208,6 @@ describe("ai provider", () => {
             message: {
               content: JSON.stringify({
                 translatedTitle: "",
-                summary: "重试后的中文摘要",
               }),
             },
           },
@@ -255,9 +236,9 @@ describe("ai provider", () => {
       translateTitle: false,
     });
 
-    expect(enriched.summary).toBe("重试后的中文摘要");
+    expect(enriched.translatedTitle).toBeNull();
     expect(enriched.moderationStatus).toBe("allowed");
-    expect(create).toHaveBeenCalledTimes(2);
+    expect(create).toHaveBeenCalledTimes(1);
   });
 
   it("parses common json-like responses that are not strict json", async () => {
@@ -295,7 +276,6 @@ describe("ai provider", () => {
 
     expect(enriched).toEqual({
       translatedTitle: null,
-      summary: "可容错解析的摘要",
       moderationStatus: "allowed",
       moderationReason: null,
       moderationDetail: null,
@@ -309,7 +289,45 @@ describe("ai provider", () => {
         eventDate: null,
       },
     });
-    expect(create).toHaveBeenCalledTimes(2);
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses the item summary prompt for pre-analysis summarization", async () => {
+    const create = vi.fn().mockResolvedValue({
+      choices: [
+        {
+          message: {
+            content: "条目摘要结果",
+          },
+        },
+      ],
+    });
+
+    const provider = createAiProvider(
+      {
+        apiKey: "sk-test",
+        baseURL: "https://example.com/v1",
+        model: "test-model",
+      },
+      undefined,
+      {
+        chat: {
+          completions: {
+            create,
+          },
+        },
+      },
+    );
+
+    const summary = await provider.summarizeItem("A long body for summarization", {
+      title: "Original title",
+      sourceName: "Example Feed",
+    });
+
+    expect(summary).toBe("条目摘要结果");
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(create.mock.calls[0]?.[0]?.messages?.[0]?.content).toContain("新闻摘要助手");
+    expect(create.mock.calls[0]?.[0]?.messages?.[0]?.content).toContain("只输出摘要正文");
   });
 
   it("throws a descriptive error after repeated invalid responses", async () => {
@@ -354,9 +372,7 @@ describe("ai provider", () => {
       choices: [
         {
           message: {
-            content: JSON.stringify({
-              summary: "聚合摘要结果",
-            }),
+            content: "聚合摘要结果",
           },
         },
       ],

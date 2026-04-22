@@ -12,6 +12,14 @@ import {
   updateClusterStatus,
   updateClusterSummary,
 } from "@/lib/clusters/repository";
+import {
+  normalizeEventActionForStorage,
+  normalizeEventObjectForStorage,
+  normalizeEventSignatureForMatch,
+  normalizeEventSignatureForStorage,
+  normalizeEventSubjectForStorage,
+  normalizeStoredEventType,
+} from "@/lib/clusters/normalization";
 import { prisma } from "@/lib/db";
 import { invalidateFeedCache } from "@/lib/feed/cache";
 import { getDisplaySummary, getDisplayTitle } from "@/lib/feed/presentation";
@@ -20,24 +28,33 @@ import { createTaskAiUsageTracker } from "@/lib/tasks/ai-usage";
 import { enqueueTaskRun, updateTaskRun } from "@/lib/tasks/service";
 
 const CLUSTER_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
+const CLUSTER_AI_CANDIDATE_LIMIT = 10;
+const CLUSTER_DIRECT_MATCH_MIN_SCORE = 105;
+const CLUSTER_DIRECT_MATCH_MIN_GAP = 20;
+const CLUSTER_AI_MIN_SCORE = 35;
 const clusterAssignmentQueues = new Map<string, Promise<void>>();
-const EVENT_TYPES = new Set<NonNullable<AiEventSignature["eventType"]>>([
-  "release",
-  "launch",
-  "update",
-  "funding",
-  "acquisition",
-  "partnership",
-  "policy",
-  "research",
-  "security",
-  "other",
-]);
 
 type ItemWithSource = Item & { source: Source };
 type ClusterAssignmentCoordinator = {
   exactMatches: Map<string, ClusterAssignmentCandidate | null>;
   recentCandidates: Map<string, { sinceMs: number; untilMs: number; candidates: ClusterAssignmentCandidate[] }>;
+};
+
+export type ClusterAssignmentSource = "exact_match" | "cheap_rank_direct" | "ai_match";
+
+export type ClusterAssignmentResult = {
+  clusterId: string | null;
+  matchSource: ClusterAssignmentSource | null;
+  skippedIncompleteSignature: boolean;
+  createdNewCluster: boolean;
+};
+
+export type ClusterRecomputeResult = {
+  clusterId: string;
+  deleted: boolean;
+  updated: boolean;
+  summaryAttempted: boolean;
+  summarySucceeded: boolean;
 };
 
 export function createClusterAssignmentCoordinator(): ClusterAssignmentCoordinator {
@@ -60,10 +77,13 @@ function buildItemSummary(item: ItemWithSource): string {
   return getDisplaySummary(item.summaryText, item.rssExcerpt, item.fullText ?? item.rssContent);
 }
 
-function normalizeStoredEventType(value: string | null | undefined): AiEventSignature["eventType"] {
-  return value && EVENT_TYPES.has(value as NonNullable<AiEventSignature["eventType"]>)
-    ? (value as NonNullable<AiEventSignature["eventType"]>)
-    : null;
+function normalizeOptionalText(value: string | null | undefined): string | null {
+  const trimmed = value?.trim() ?? "";
+  return trimmed || null;
+}
+
+function normalizeComparableText(value: string | null | undefined): string {
+  return (value ?? "").trim().toLowerCase();
 }
 
 function getItemEventSignature(item: {
@@ -73,17 +93,39 @@ function getItemEventSignature(item: {
   eventObject?: string | null;
   eventDate?: string | null;
 }): AiEventSignature | null {
-  return {
+  return normalizeEventSignatureForStorage({
     eventType: normalizeStoredEventType(item.eventType),
     eventSubject: item.eventSubject ?? null,
     eventAction: item.eventAction ?? null,
     eventObject: item.eventObject ?? null,
     eventDate: item.eventDate ?? null,
+  });
+}
+
+function getCandidateEventSignature(candidate: {
+  eventType?: string | null;
+  eventSubject?: string | null;
+  eventAction?: string | null;
+  eventObject?: string | null;
+  eventDate?: string | null;
+}): AiEventSignature {
+  return normalizeEventSignatureForStorage({
+    eventType: normalizeStoredEventType(candidate.eventType),
+    eventSubject: normalizeOptionalText(candidate.eventSubject),
+    eventAction: normalizeOptionalText(candidate.eventAction),
+    eventObject: normalizeOptionalText(candidate.eventObject),
+    eventDate: normalizeOptionalText(candidate.eventDate),
+  }) ?? {
+    eventType: null,
+    eventSubject: null,
+    eventAction: null,
+    eventObject: null,
+    eventDate: null,
   };
 }
 
 function buildClusterFingerprintSeed(options: { eventSignature?: AiEventSignature | null }) {
-  const signature = options.eventSignature;
+  const signature = normalizeEventSignatureForStorage(options.eventSignature);
 
   if (!signature?.eventSubject || !signature.eventObject) {
     return "";
@@ -102,6 +144,14 @@ function buildClusterFingerprintSeed(options: { eventSignature?: AiEventSignatur
     signature.eventObject,
     signature.eventDate || "",
   ].join("|");
+}
+
+function hasCompleteClusterMatchSignature(eventSignature?: AiEventSignature | null) {
+  return Boolean(
+    eventSignature?.eventSubject &&
+      eventSignature.eventObject &&
+      (eventSignature.eventAction || eventSignature.eventType),
+  );
 }
 
 function buildCandidateRange(item: ItemWithSource) {
@@ -124,6 +174,11 @@ function toClusterAssignmentCandidate(cluster: {
   title: string;
   summary: string;
   fingerprint: string;
+  eventType?: string | null;
+  eventSubject?: string | null;
+  eventAction?: string | null;
+  eventObject?: string | null;
+  eventDate?: string | null;
   latestPublishedAt: Date;
   itemCount?: number;
 }): ClusterAssignmentCandidate {
@@ -132,9 +187,211 @@ function toClusterAssignmentCandidate(cluster: {
     title: cluster.title,
     summary: cluster.summary,
     fingerprint: cluster.fingerprint,
+    eventType: cluster.eventType ?? null,
+    eventSubject: cluster.eventSubject ?? null,
+    eventAction: cluster.eventAction ?? null,
+    eventObject: cluster.eventObject ?? null,
+    eventDate: cluster.eventDate ?? null,
     latestPublishedAt: cluster.latestPublishedAt,
     itemCount: cluster.itemCount ?? 1,
   };
+}
+
+function pickDominantSignatureValue<T extends string>(
+  values: Array<{
+    value: T | null;
+    qualityScore: number;
+    publishedAt: Date;
+  }>,
+) {
+  const scoreMap = new Map<
+    string,
+    {
+      value: T;
+      count: number;
+      bestQualityScore: number;
+      latestPublishedAtMs: number;
+    }
+  >();
+
+  for (const entry of values) {
+    if (!entry.value) {
+      continue;
+    }
+
+    const existing = scoreMap.get(entry.value);
+    if (!existing) {
+      scoreMap.set(entry.value, {
+        value: entry.value,
+        count: 1,
+        bestQualityScore: entry.qualityScore,
+        latestPublishedAtMs: entry.publishedAt.getTime(),
+      });
+      continue;
+    }
+
+    existing.count += 1;
+    existing.bestQualityScore = Math.max(existing.bestQualityScore, entry.qualityScore);
+    existing.latestPublishedAtMs = Math.max(existing.latestPublishedAtMs, entry.publishedAt.getTime());
+  }
+
+  return [...scoreMap.values()]
+    .sort((left, right) => {
+      if (right.count !== left.count) {
+        return right.count - left.count;
+      }
+      if (right.bestQualityScore !== left.bestQualityScore) {
+        return right.bestQualityScore - left.bestQualityScore;
+      }
+      return right.latestPublishedAtMs - left.latestPublishedAtMs;
+    })[0]?.value ?? null;
+}
+
+function buildClusterEventSignature(clusterItems: ItemWithSource[]): AiEventSignature | null {
+  const eventType = pickDominantSignatureValue(
+    clusterItems.map((item) => ({
+      value: normalizeStoredEventType(item.eventType),
+      qualityScore: item.qualityScore,
+      publishedAt: item.publishedAt,
+    })),
+  );
+  const eventSubject = pickDominantSignatureValue(
+    clusterItems.map((item) => ({
+      value: normalizeEventSubjectForStorage(item.eventSubject),
+      qualityScore: item.qualityScore,
+      publishedAt: item.publishedAt,
+    })),
+  );
+  const eventAction = pickDominantSignatureValue(
+    clusterItems.map((item) => ({
+      value: normalizeEventActionForStorage(item.eventAction),
+      qualityScore: item.qualityScore,
+      publishedAt: item.publishedAt,
+    })),
+  );
+  const eventObject = pickDominantSignatureValue(
+    clusterItems.map((item) => ({
+      value: normalizeEventObjectForStorage(item.eventObject),
+      qualityScore: item.qualityScore,
+      publishedAt: item.publishedAt,
+    })),
+  );
+  const eventDate = pickDominantSignatureValue(
+    clusterItems.map((item) => ({
+      value: normalizeOptionalText(item.eventDate),
+      qualityScore: item.qualityScore,
+      publishedAt: item.publishedAt,
+    })),
+  );
+
+  if (!eventType && !eventSubject && !eventAction && !eventObject && !eventDate) {
+    return null;
+  }
+
+  return normalizeEventSignatureForStorage({
+    eventType,
+    eventSubject,
+    eventAction,
+    eventObject,
+    eventDate,
+  });
+}
+
+function scoreClusterCandidate(
+  item: ItemWithSource,
+  eventSignature: AiEventSignature,
+  candidate: ClusterAssignmentCandidate,
+) {
+  const candidateSignature = getCandidateEventSignature(candidate);
+  const currentTitle = normalizeComparableText(getDisplayTitle(item.originalTitle, item.translatedTitle));
+  const currentSummary = normalizeComparableText(buildItemSummary(item));
+  const candidateTitle = normalizeComparableText(candidate.title);
+  const candidateSummary = normalizeComparableText(candidate.summary);
+  const normalizedCurrentSignature = normalizeEventSignatureForMatch(eventSignature);
+  const normalizedCandidateSignature = normalizeEventSignatureForMatch(candidateSignature);
+  const currentSubject = normalizeComparableText(normalizedCurrentSignature.eventSubject);
+  const currentAction = normalizeComparableText(normalizedCurrentSignature.eventAction || normalizedCurrentSignature.eventType);
+  const currentObject = normalizeComparableText(normalizedCurrentSignature.eventObject);
+  const currentDate = normalizeComparableText(normalizedCurrentSignature.eventDate);
+  const candidateSubject = normalizeComparableText(normalizedCandidateSignature.eventSubject);
+  const candidateAction = normalizeComparableText(normalizedCandidateSignature.eventAction || normalizedCandidateSignature.eventType);
+  const candidateObject = normalizeComparableText(normalizedCandidateSignature.eventObject);
+  const candidateDate = normalizeComparableText(normalizedCandidateSignature.eventDate);
+
+  let score = 0;
+  const subjectExact = Boolean(currentSubject && candidateSubject && currentSubject === candidateSubject);
+  const actionExact = Boolean(currentAction && candidateAction && currentAction === candidateAction);
+  const objectExact = Boolean(currentObject && candidateObject && currentObject === candidateObject);
+  const dateExact = Boolean(currentDate && candidateDate && currentDate === candidateDate);
+
+  if (subjectExact) {
+    score += 45;
+  } else if (currentSubject && candidateSubject) {
+    score -= 30;
+  } else if (currentSubject && (candidateTitle.includes(currentSubject) || candidateSummary.includes(currentSubject))) {
+    score += 18;
+  }
+
+  if (objectExact) {
+    score += 40;
+  } else if (currentObject && candidateObject) {
+    score -= 18;
+  } else if (currentObject && (candidateTitle.includes(currentObject) || candidateSummary.includes(currentObject))) {
+    score += 15;
+  } else if (currentObject && (currentTitle.includes(candidateObject) || currentSummary.includes(candidateObject))) {
+    score += 8;
+  }
+
+  if (actionExact) {
+    score += 20;
+  } else if (currentAction && candidateAction) {
+    score -= 10;
+  }
+
+  if (
+    normalizedCurrentSignature.eventType &&
+    normalizedCandidateSignature.eventType &&
+    normalizedCurrentSignature.eventType === normalizedCandidateSignature.eventType
+  ) {
+    score += 12;
+  }
+
+  if (dateExact) {
+    score += 15;
+  } else if (currentDate && candidateDate) {
+    score -= 25;
+  }
+
+  const publishedAtDiffMs = Math.abs(item.publishedAt.getTime() - candidate.latestPublishedAt.getTime());
+  if (publishedAtDiffMs <= 24 * 60 * 60 * 1000) {
+    score += 8;
+  } else if (publishedAtDiffMs <= 72 * 60 * 60 * 1000) {
+    score += 4;
+  }
+
+  return {
+    candidate,
+    score,
+    strongMatch:
+      subjectExact &&
+      objectExact &&
+      Boolean(actionExact || normalizedCurrentSignature.eventType === normalizedCandidateSignature.eventType),
+  };
+}
+
+function rankClusterCandidates(
+  item: ItemWithSource,
+  eventSignature: AiEventSignature,
+  candidates: ClusterAssignmentCandidate[],
+) {
+  return candidates
+    .map((candidate) => scoreClusterCandidate(item, eventSignature, candidate))
+    .sort((left, right) => {
+      if (right.score !== left.score) {
+        return right.score - left.score;
+      }
+      return right.candidate.latestPublishedAt.getTime() - left.candidate.latestPublishedAt.getTime();
+    });
 }
 
 function rememberRecentCandidate(
@@ -218,7 +475,11 @@ async function generateClusterPresentation(clusterItems: ItemWithSource[], exist
   const fallback = buildClusterFallback(clusterItems, existingTitle);
 
   if (!shouldGenerateAiClusterSummary(clusterItems, aiProvider)) {
-    return fallback;
+    return {
+      ...fallback,
+      summaryAttempted: false,
+      summarySucceeded: false,
+    };
   }
 
   const summaryProvider = aiProvider!;
@@ -240,9 +501,15 @@ async function generateClusterPresentation(clusterItems: ItemWithSource[], exist
     return {
       title: fallback.title,
       summary: (await summaryProvider.summarizeCluster(summarySeed, { title: fallback.title })) || fallback.summary,
+      summaryAttempted: true,
+      summarySucceeded: true,
     };
   } catch {
-    return fallback;
+    return {
+      ...fallback,
+      summaryAttempted: true,
+      summarySucceeded: false,
+    };
   }
 }
 
@@ -253,7 +520,12 @@ async function findClusterForItem(
     aiProvider?: AiProvider;
     coordinator?: ClusterAssignmentCoordinator;
   },
-) {
+): Promise<{
+  cluster: ClusterAssignmentCandidate | null;
+  fingerprint: string;
+  matchSource: ClusterAssignmentSource | null;
+  skippedIncompleteSignature: boolean;
+}> {
   const fingerprintSeed = buildClusterFingerprintSeed(options);
   const fingerprint = fingerprintSeed ? normalizeFingerprint(fingerprintSeed) : "";
   const { since, until } = buildCandidateRange(item);
@@ -264,6 +536,33 @@ async function findClusterForItem(
   if (fingerprint && typeof exactMatch === "undefined") {
     exactMatch = await findActiveClusterByFingerprint(fingerprint, since, until);
     options.coordinator?.exactMatches.set(exactMatchKey, exactMatch ? toClusterAssignmentCandidate(exactMatch) : null);
+  }
+
+  if (exactMatch) {
+    return {
+      cluster: exactMatch,
+      fingerprint,
+      matchSource: "exact_match" as const,
+      skippedIncompleteSignature: false,
+    };
+  }
+
+  if (!options.aiProvider) {
+    return {
+      cluster: null,
+      fingerprint,
+      matchSource: null,
+      skippedIncompleteSignature: false,
+    };
+  }
+
+  if (!hasCompleteClusterMatchSignature(options.eventSignature)) {
+    return {
+      cluster: null,
+      fingerprint,
+      matchSource: null,
+      skippedIncompleteSignature: true,
+    };
   }
 
   let recentCandidateEntry = options.coordinator?.recentCandidates.get(rangeKey);
@@ -281,35 +580,71 @@ async function findClusterForItem(
   }
 
   const recentCandidates = recentCandidateEntry.candidates;
-  const candidates = exactMatch
-    ? [exactMatch, ...recentCandidates.filter((candidate) => candidate.id !== exactMatch.id)]
-    : recentCandidates;
+  const candidates = recentCandidates;
 
-  if (!options.aiProvider || candidates.length === 0) {
+  if (candidates.length === 0) {
     return {
-      cluster: exactMatch,
+      cluster: null,
       fingerprint,
+      matchSource: null,
+      skippedIncompleteSignature: false,
     };
   }
+
+  const rankedCandidates = rankClusterCandidates(item, options.eventSignature!, candidates).filter(
+    (entry) => entry.score >= CLUSTER_AI_MIN_SCORE,
+  );
+
+  if (rankedCandidates.length === 0) {
+    return {
+      cluster: null,
+      fingerprint,
+      matchSource: null,
+      skippedIncompleteSignature: false,
+    };
+  }
+
+  const topCandidate = rankedCandidates[0]!;
+  const secondCandidateScore = rankedCandidates[1]?.score ?? Number.NEGATIVE_INFINITY;
+
+  if (
+    topCandidate.strongMatch &&
+    topCandidate.score >= CLUSTER_DIRECT_MATCH_MIN_SCORE &&
+    topCandidate.score - secondCandidateScore >= CLUSTER_DIRECT_MATCH_MIN_GAP
+  ) {
+    return {
+      cluster: topCandidate.candidate,
+      fingerprint,
+      matchSource: "cheap_rank_direct" as const,
+      skippedIncompleteSignature: false,
+    };
+  }
+
+  const aiCandidates = rankedCandidates.slice(0, CLUSTER_AI_CANDIDATE_LIMIT).map((entry) => entry.candidate);
 
   try {
     const matchedClusterId = await options.aiProvider.matchClusterCandidate(buildClusterMatchInput(item, options), {
       title: getDisplayTitle(item.originalTitle, item.translatedTitle),
-      candidates: candidates.map((candidate) => ({
+      candidates: aiCandidates.map((candidate) => ({
         id: candidate.id,
         title: candidate.title,
         summary: candidate.summary,
       })),
     });
+    const matchedCluster = aiCandidates.find((candidate) => candidate.id === matchedClusterId) ?? null;
 
     return {
-      cluster: candidates.find((candidate) => candidate.id === matchedClusterId) ?? exactMatch ?? null,
+      cluster: matchedCluster,
       fingerprint,
+      matchSource: matchedCluster ? "ai_match" : null,
+      skippedIncompleteSignature: false,
     };
   } catch {
     return {
-      cluster: exactMatch,
+      cluster: null,
       fingerprint,
+      matchSource: null,
+      skippedIncompleteSignature: false,
     };
   }
 }
@@ -370,7 +705,12 @@ export async function assignItemToCluster(
   });
 
   if (!item || (item.moderationStatus !== "allowed" && item.moderationStatus !== "restored")) {
-    return null;
+    return {
+      clusterId: null,
+      matchSource: null,
+      skippedIncompleteSignature: false,
+      createdNewCluster: false,
+    } satisfies ClusterAssignmentResult;
   }
 
   return runWithClusterAssignmentWindowLocks(getClusterAssignmentWindowKeys(item.publishedAt), async () => {
@@ -380,15 +720,22 @@ export async function assignItemToCluster(
     });
 
     if (!item || (item.moderationStatus !== "allowed" && item.moderationStatus !== "restored")) {
-      return null;
+      return {
+        clusterId: null,
+        matchSource: null,
+        skippedIncompleteSignature: false,
+        createdNewCluster: false,
+      } satisfies ClusterAssignmentResult;
     }
 
-    const resolvedEventSignature = options.eventSignature ?? getItemEventSignature(item);
-    const { cluster: matchedCluster, fingerprint } = await findClusterForItem(item, {
+    const resolvedEventSignature = normalizeEventSignatureForStorage(options.eventSignature ?? getItemEventSignature(item));
+    const { cluster: matchedCluster, fingerprint, matchSource, skippedIncompleteSignature } =
+      await findClusterForItem(item, {
       ...options,
       eventSignature: resolvedEventSignature,
     });
     const eventDisplayTitle = buildEventDisplayTitle(resolvedEventSignature);
+    const createdNewCluster = !matchedCluster;
     const cluster =
       matchedCluster ??
       (await createContentCluster({
@@ -397,6 +744,11 @@ export async function assignItemToCluster(
         summary: buildItemSummary(item),
         score: item.qualityScore,
         latestPublishedAt: item.publishedAt,
+        eventType: resolvedEventSignature?.eventType ?? null,
+        eventSubject: resolvedEventSignature?.eventSubject ?? null,
+        eventAction: resolvedEventSignature?.eventAction ?? null,
+        eventObject: resolvedEventSignature?.eventObject ?? null,
+        eventDate: resolvedEventSignature?.eventDate ?? null,
       }));
 
     if (options.coordinator) {
@@ -413,7 +765,12 @@ export async function assignItemToCluster(
     await setItemCluster(item.id, cluster.id);
     // Note: Cluster summary recomputation is now handled at batch level in executeIngestion
 
-    return cluster.id;
+    return {
+      clusterId: cluster.id,
+      matchSource,
+      skippedIncompleteSignature,
+      createdNewCluster,
+    } satisfies ClusterAssignmentResult;
   });
 }
 
@@ -421,15 +778,28 @@ export async function recomputeCluster(clusterId: string, aiProvider?: AiProvide
   const cluster = await getClusterWithItems(clusterId);
 
   if (!cluster) {
-    return null;
+    return {
+      clusterId,
+      deleted: false,
+      updated: false,
+      summaryAttempted: false,
+      summarySucceeded: false,
+    } satisfies ClusterRecomputeResult;
   }
 
   if (cluster.items.length === 0) {
     await deleteCluster(clusterId);
-    return null;
+    return {
+      clusterId,
+      deleted: true,
+      updated: false,
+      summaryAttempted: false,
+      summarySucceeded: false,
+    } satisfies ClusterRecomputeResult;
   }
 
   const presentation = await generateClusterPresentation(cluster.items, cluster.title, aiProvider);
+  const eventSignature = buildClusterEventSignature(cluster.items);
   const score = Math.max(...cluster.items.map((item) => item.qualityScore));
   const latestPublishedAt = cluster.items[0]!.publishedAt;
   const nextItemCount = cluster.items.length;
@@ -438,19 +808,43 @@ export async function recomputeCluster(clusterId: string, aiProvider?: AiProvide
     cluster.summary === presentation.summary &&
     cluster.score === score &&
     cluster.itemCount === nextItemCount &&
-    cluster.latestPublishedAt.getTime() === latestPublishedAt.getTime();
+    cluster.latestPublishedAt.getTime() === latestPublishedAt.getTime() &&
+    cluster.eventType === (eventSignature?.eventType ?? null) &&
+    cluster.eventSubject === (eventSignature?.eventSubject ?? null) &&
+    cluster.eventAction === (eventSignature?.eventAction ?? null) &&
+    cluster.eventObject === (eventSignature?.eventObject ?? null) &&
+    cluster.eventDate === (eventSignature?.eventDate ?? null);
 
   if (shouldSkipUpdate) {
-    return cluster;
+    return {
+      clusterId,
+      deleted: false,
+      updated: false,
+      summaryAttempted: presentation.summaryAttempted,
+      summarySucceeded: presentation.summarySucceeded,
+    } satisfies ClusterRecomputeResult;
   }
 
-  return updateClusterSummary(clusterId, {
+  await updateClusterSummary(clusterId, {
     title: presentation.title,
     summary: presentation.summary,
     score,
     itemCount: nextItemCount,
     latestPublishedAt,
+    eventType: eventSignature?.eventType ?? null,
+    eventSubject: eventSignature?.eventSubject ?? null,
+    eventAction: eventSignature?.eventAction ?? null,
+    eventObject: eventSignature?.eventObject ?? null,
+    eventDate: eventSignature?.eventDate ?? null,
   });
+
+  return {
+    clusterId,
+    deleted: false,
+    updated: true,
+    summaryAttempted: presentation.summaryAttempted,
+    summarySucceeded: presentation.summarySucceeded,
+  } satisfies ClusterRecomputeResult;
 }
 
 export async function detachItemFromCluster(itemId: string, aiProvider?: AiProvider) {
@@ -565,6 +959,7 @@ export async function executeClusterSummaryTask(
     const trackedAiProvider = aiUsage.wrapProvider(
       options?.aiProvider ??
         createAiProvider(runtimeConfig!.modelApi, {
+          itemSummary: runtimeConfig!.selectedPromptConfigs?.itemSummary,
           itemAnalysis: runtimeConfig!.selectedPromptConfigs?.itemAnalysis,
           clusterSummary: runtimeConfig!.selectedPromptConfigs?.clusterSummary,
           clusterMatch: runtimeConfig!.selectedPromptConfigs?.clusterMatch,

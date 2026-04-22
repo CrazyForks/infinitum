@@ -37,6 +37,8 @@ describe("admin settings service", () => {
     expect(runtimeConfig.modelApi.apiKey).toBe("");
     expect(runtimeConfig.modelApi.baseURL).toBe("");
     expect(runtimeConfig.modelApi.model).toBe("gpt-4.1-mini");
+    expect(runtimeConfig.prompts.itemSummary.length).toBeGreaterThan(0);
+    expect(runtimeConfig.selectedPromptConfigs?.itemSummary.promptTemplate).toContain("{{sourceName}}");
     expect(runtimeConfig.prompts.itemAnalysis.length).toBeGreaterThan(0);
     expect(runtimeConfig.selectedPromptConfigs?.itemAnalysis.promptTemplate).toContain("{{title}}");
 
@@ -44,11 +46,19 @@ describe("admin settings service", () => {
     expect(settings.modelApiConfigs[0]?.baseUrl).toBe("");
     expect(settings.modelApiConfigs[0]?.apiKeyMasked).toBe("");
     expect(settings.modelApiConfigs[0]?.ingestionItemConcurrency).toBe(3);
-    expect(settings.promptConfigs).toHaveLength(3);
+    expect(settings.promptConfigs).toHaveLength(4);
     expect(settings.taskSchedule.key).toBe("ingestion_default");
     expect(settings.taskSchedule.cronExpression).toBe("0 * * * *");
     expect(settings.taskSchedule.sourceConcurrency).toBe(2);
     expect(settings.taskSchedule.fullTextFetchThreshold).toBe(80);
+    expect(settings.promptConfigs.find((config) => config.type === "item_summary")?.systemPrompt).toContain(
+      "单条新闻摘要助手",
+    );
+    expect(settings.promptConfigs.find((config) => config.type === "item_summary")).toMatchObject({
+      temperature: 0.2,
+      maxTokens: 300,
+      topP: null,
+    });
     expect(settings.promptConfigs.find((config) => config.type === "item_analysis")?.systemPrompt).toContain(
       "固定输出格式",
     );
@@ -80,6 +90,18 @@ describe("admin settings service", () => {
       isDefault: true,
     });
 
+    await createPromptConfig({
+      name: "默认条目摘要提示词",
+      type: "item_summary",
+      systemPrompt: "条目摘要系统提示词",
+      prompt: "标题：{{title}}\n来源：{{sourceName}}\n正文：{{inputText}}",
+      temperature: 0.2,
+      maxTokens: 300,
+      topP: null,
+      modelApiConfigId: null,
+      isEnabled: true,
+      isDefault: true,
+    });
     await createPromptConfig({
       name: "默认内容分析提示词",
       type: "item_analysis",
@@ -123,6 +145,8 @@ describe("admin settings service", () => {
     expect(runtimeConfig.ingestion.sourceConcurrency).toBe(2);
     expect(runtimeConfig.ingestion.fullTextFetchThreshold).toBe(80);
     expect(runtimeConfig.modelApi.model).toBe("gpt-live");
+    expect(runtimeConfig.selectedPromptConfigs?.itemSummary.systemPrompt).toBe("条目摘要系统提示词");
+    expect(runtimeConfig.selectedPromptConfigs?.itemSummary.maxTokens).toBe(300);
     expect(runtimeConfig.selectedPromptConfigs?.itemAnalysis.systemPrompt).toBe("分析系统提示词");
     expect(runtimeConfig.selectedPromptConfigs?.itemAnalysis.modelApi?.model).toBe("gpt-live");
     expect(runtimeConfig.selectedPromptConfigs?.itemAnalysis.maxTokens).toBe(1000);

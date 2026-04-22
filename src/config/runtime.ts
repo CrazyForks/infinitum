@@ -3,6 +3,7 @@ import {
   DEFAULT_CLUSTER_MATCH_PROMPT,
   DEFAULT_CLUSTER_SUMMARY_PROMPT,
   DEFAULT_ITEM_ANALYSIS_PROMPT,
+  DEFAULT_ITEM_SUMMARY_PROMPT,
 } from "@/config/prompts";
 import { DEFAULT_SOURCE_CONFIGS } from "@/config/sources";
 import type { SourceConfig } from "@/lib/feed/types";
@@ -26,11 +27,21 @@ export type RuntimeConfig = {
     model: string;
   };
   prompts: {
+    itemSummary: string;
     itemAnalysis: string;
     clusterSummary: string;
     clusterMatch: string;
   };
   selectedPromptConfigs?: {
+    itemSummary: {
+      name: string;
+      systemPrompt: string;
+      promptTemplate: string;
+      temperature?: number | null;
+      maxTokens?: number | null;
+      topP?: number | null;
+      modelApi?: RuntimeConfig["modelApi"] | null;
+    };
     itemAnalysis: {
       name: string;
       systemPrompt: string;
@@ -77,6 +88,7 @@ export function getRuntimeConfig(): RuntimeConfig {
       model: "gpt-4.1-mini",
     },
     prompts: {
+      itemSummary: DEFAULT_ITEM_SUMMARY_PROMPT,
       itemAnalysis: DEFAULT_ITEM_ANALYSIS_PROMPT,
       clusterSummary: DEFAULT_CLUSTER_SUMMARY_PROMPT,
       clusterMatch: DEFAULT_CLUSTER_MATCH_PROMPT,

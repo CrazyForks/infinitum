@@ -124,7 +124,7 @@ export function AiSettingsPanel({ initialSettings, mode }: AiSettingsPanelProps)
   const { showToast } = useToast();
   const [modelConfigs, setModelConfigs] = useState(initialSettings.modelApiConfigs);
   const [promptConfigs, setPromptConfigs] = useState(initialSettings.promptConfigs);
-  const [selectedPromptType, setSelectedPromptType] = useState<PromptConfigType>("item_analysis");
+  const [selectedPromptType, setSelectedPromptType] = useState<PromptConfigType>("item_summary");
 
   const [showModelModal, setShowModelModal] = useState(false);
   const [editingModelConfig, setEditingModelConfig] = useState<AdminModelApiConfig | null>(null);
@@ -146,7 +146,7 @@ export function AiSettingsPanel({ initialSettings, mode }: AiSettingsPanelProps)
   const [showPromptModal, setShowPromptModal] = useState(false);
   const [promptModalMode, setPromptModalMode] = useState<"create" | "edit" | "duplicate">("create");
   const [editingPromptConfig, setEditingPromptConfig] = useState<AdminPromptConfig | null>(null);
-  const [promptForm, setPromptForm] = useState<PromptFormState>(buildEmptyPromptForm("item_analysis"));
+  const [promptForm, setPromptForm] = useState<PromptFormState>(buildEmptyPromptForm("item_summary"));
   const [showPromptAdvanced, setShowPromptAdvanced] = useState(false);
   const [promptSaving, setPromptSaving] = useState(false);
   const [showPromptPreview, setShowPromptPreview] = useState<AdminPromptConfig | null>(null);
@@ -1159,7 +1159,9 @@ export function AiSettingsPanel({ initialSettings, mode }: AiSettingsPanelProps)
           />
           <p className="text-xs text-[var(--text-3)]">
             可使用占位符：
-            {promptForm.type === "item_analysis"
+            {promptForm.type === "item_summary"
+              ? " {{title}} / {{sourceName}} / {{inputText}}"
+              : promptForm.type === "item_analysis"
               ? " {{title}} / {{sourceName}} / {{translateTitle}} / {{inputText}}"
               : promptForm.type === "cluster_summary"
                 ? " {{title}} / {{inputText}}"

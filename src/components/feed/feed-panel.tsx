@@ -12,7 +12,7 @@ import { FilterSelect } from "@/components/ui/filter-select";
 import { FilterSelectInline } from "@/components/ui/filter-select-inline";
 import { FilterSummary } from "@/components/ui/filter-summary";
 import { FormField } from "@/components/ui/form-field";
-import { IconFilter, IconPlus } from "@/components/ui/icons";
+import { IconFilter, IconPlus, IconTrash } from "@/components/ui/icons";
 import { ModalShell } from "@/components/ui/modal-shell";
 import { SelectField } from "@/components/ui/select-field";
 import { TextInput } from "@/components/ui/text-input";
@@ -91,6 +91,11 @@ type AssignClusterDialogState = {
 } | null;
 
 type ManualFilterDialogState = {
+  itemId: string;
+  itemTitle: string;
+} | null;
+
+type DeleteItemDialogState = {
   itemId: string;
   itemTitle: string;
 } | null;
@@ -508,6 +513,7 @@ export function FeedPanel({
   const [regenerateMode, setRegenerateMode] = useState<RegenerateMode>("summary");
   const [assignClusterDialog, setAssignClusterDialog] = useState<AssignClusterDialogState>(null);
   const [manualFilterDialog, setManualFilterDialog] = useState<ManualFilterDialogState>(null);
+  const [deleteItemDialog, setDeleteItemDialog] = useState<DeleteItemDialogState>(null);
   const [clusterOptions, setClusterOptions] = useState<ClusterDTO[]>([]);
   const [clusterSearch, setClusterSearch] = useState("");
   const [selectedClusterId, setSelectedClusterId] = useState<string | null>(null);
@@ -896,6 +902,48 @@ export function FeedPanel({
     });
   };
 
+  const confirmDeleteItem = () => {
+    if (!deleteItemDialog) {
+      return;
+    }
+
+    const { itemId } = deleteItemDialog;
+    setDeleteItemDialog(null);
+
+    startTransition(async () => {
+      try {
+        const response = await fetch(`/api/admin/items/${itemId}`, {
+          method: "DELETE",
+          headers: {
+            "content-type": "application/json",
+          },
+        });
+        const payload = (await response.json()) as {
+          error?: string;
+        };
+
+        if (!response.ok || payload.error) {
+          setRefreshFeedback({
+            tone: "error",
+            message: payload.error ?? "删除内容失败，请稍后重试。",
+          });
+          return;
+        }
+
+        reloadCurrentFeed();
+        setRefreshFeedback({
+          tone: "success",
+          message: "已删除该内容。",
+        });
+      } catch {
+        setRefreshFeedback({
+          tone: "error",
+          message: "删除内容失败，请稍后重试。",
+        });
+      }
+    });
+  };
+
   const runRegeneration = (targets: Array<"translation" | "summary">) => {
     if (!regenerateDialog) {
       return;
@@ -905,6 +953,8 @@ export function FeedPanel({
     setRegenerateDialog(null);
 
     startTransition(async () => {
+      const createdTaskRunIds: string[] = [];
+
       for (const target of targets) {
         const payload = await requestRegeneration(itemId, target);
 
@@ -917,16 +967,21 @@ export function FeedPanel({
           setRefreshFeedback({ tone: "error", message: "未返回后台任务信息。" });
           return;
         }
+
+        createdTaskRunIds.push(payload.taskRun.id);
       }
 
-      setRefreshFeedback({
-        tone: "success",
-        message: shouldAnnounceClusterRefresh
-          ? "已创建后台任务，完成后会自动重算所属聚合。"
-          : targets.length > 1
-            ? "已创建摘要与翻译后台任务，正在处理中。"
-            : "已创建后台任务，正在处理中。",
-      });
+      const primaryTaskRunId = createdTaskRunIds[0];
+      if (!primaryTaskRunId) {
+        setRefreshFeedback({ tone: "error", message: "未返回后台任务信息。" });
+        return;
+      }
+
+      router.push(`/admin?tab=monitoring&section=tasks&task=${encodeURIComponent(primaryTaskRunId)}`);
+
+      if (shouldAnnounceClusterRefresh) {
+        setRefreshFeedback(null);
+      }
     });
   };
 
@@ -1454,6 +1509,18 @@ export function FeedPanel({
                                   >
                                     <RefreshIcon />
                                   </button>
+                                  <button
+                                    aria-label={`删除内容：${clusterItem.title}`}
+                                    title="删除内容"
+                                    className={iconButtonClassName}
+                                    type="button"
+                                    onClick={() =>
+                                      setDeleteItemDialog({ itemId: clusterItem.id, itemTitle: clusterItem.title })
+                                    }
+                                    disabled={isPending}
+                                  >
+                                    <IconTrash className="h-4 w-4" />
+                                  </button>
                                 </div>
                               ) : null}
                             </div>
@@ -1515,6 +1582,16 @@ export function FeedPanel({
                             disabled={isPending}
                           >
                             <RefreshIcon />
+                          </button>
+                          <button
+                            aria-label={`删除内容：${entry.title}`}
+                            title="删除内容"
+                            className={iconButtonClassName}
+                            type="button"
+                            onClick={() => setDeleteItemDialog({ itemId: entry.id, itemTitle: entry.title })}
+                            disabled={isPending}
+                          >
+                            <IconTrash className="h-4 w-4" />
                           </button>
                         </div>
                       ) : null}
@@ -1695,6 +1772,29 @@ export function FeedPanel({
         </ModalShell>
 
         <ModalShell
+          isOpen={Boolean(deleteItemDialog)}
+          onClose={() => setDeleteItemDialog(null)}
+          title="确认删除内容"
+          widthClassName="max-w-md"
+          bodyClassName="space-y-3 p-4"
+          footer={
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="secondary" onClick={() => setDeleteItemDialog(null)} disabled={isPending}>
+                取消
+              </Button>
+              <Button type="button" variant="danger" onClick={confirmDeleteItem} disabled={isPending}>
+                确认删除
+              </Button>
+            </div>
+          }
+        >
+          <div className="space-y-3 text-sm text-[var(--muted)]">
+            <p>将永久删除“{deleteItemDialog?.itemTitle ?? ""}”。</p>
+            <p>删除后会立即从主页列表移除，并自动重算所属聚合。</p>
+          </div>
+        </ModalShell>
+
+        <ModalShell
           isOpen={Boolean(regenerateDialog)}
           onClose={() => setRegenerateDialog(null)}
           title="选择重新生成内容"
@@ -1714,12 +1814,13 @@ export function FeedPanel({
         >
           <div className="space-y-4">
             <p className="text-sm text-[var(--muted)]">请选择要重新生成的内容范围。</p>
-            <FormField label="重新生成范围">
+            <FormField label="重新生成范围" className="w-full">
               <SelectField
                 aria-label="重新生成范围"
                 value={regenerateMode}
                 onChange={(value) => setRegenerateMode((value as RegenerateMode | null) ?? "summary")}
                 showSearch={false}
+                className="w-full"
                 options={[
                   { value: "summary", label: "仅摘要" },
                   ...(regenerateDialog?.canRegenerateTranslation

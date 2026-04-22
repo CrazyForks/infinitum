@@ -45,6 +45,12 @@ function buildMonitorSnapshot(): BackgroundTaskMonitorSnapshot {
         aiCallCountEstimated: 5,
         aiCallBreakdown: [
           {
+            key: "item_summary",
+            label: "条目摘要",
+            actual: 1,
+            estimated: 2,
+          },
+          {
             key: "item_analysis",
             label: "内容分析",
             actual: 1,
@@ -83,6 +89,91 @@ function buildMonitorSnapshot(): BackgroundTaskMonitorSnapshot {
             durationMs: null,
           },
         ],
+        taskTimeline: [
+          {
+            key: "source_fetch",
+            label: "信息抓取",
+            status: "succeeded",
+            startedAt: "2026-04-21T00:00:00.000Z",
+            finishedAt: "2026-04-21T00:00:08.000Z",
+            durationMs: 8_000,
+            metrics: [
+              { label: "抓取源", value: 1 },
+              { label: "抓取内容", value: 10 },
+              { label: "正文补抓", value: 2 },
+            ],
+          },
+          {
+            key: "rule_filter",
+            label: "规则过滤",
+            status: "running",
+            startedAt: "2026-04-21T00:00:08.000Z",
+            finishedAt: null,
+            durationMs: null,
+            metrics: [
+              { label: "命中黑名单", value: 2 },
+              { label: "复用已有处理", value: 1 },
+            ],
+          },
+          {
+            key: "item_summary",
+            label: "条目摘要",
+            status: "partial",
+            startedAt: "2026-04-21T00:00:08.000Z",
+            finishedAt: null,
+            durationMs: null,
+            modelName: "gpt-4.1-mini-summary",
+            metrics: [
+              { label: "完成", value: 5 },
+              { label: "失败", value: 1 },
+            ],
+          },
+          {
+            key: "item_analysis",
+            label: "内容分析",
+            status: "running",
+            startedAt: "2026-04-21T00:00:08.000Z",
+            finishedAt: null,
+            durationMs: null,
+            modelName: "gpt-4.1-mini-analysis",
+            metrics: [
+              { label: "完成", value: 4 },
+              { label: "过滤", value: 2 },
+            ],
+          },
+          {
+            key: "cluster_assignment",
+            label: "归组决策",
+            status: "running",
+            startedAt: "2026-04-21T00:00:08.000Z",
+            finishedAt: null,
+            durationMs: null,
+            modelName: "gpt-4.1-mini-match",
+            metrics: [
+              { label: "指纹命中", value: 1 },
+              { label: "本地直连", value: 2 },
+              { label: "AI归组", value: 1 },
+              { label: "跳过", value: 0 },
+              { label: "新建", value: 1 },
+            ],
+          },
+          {
+            key: "cluster_finalize",
+            label: "聚合收尾",
+            status: "running",
+            startedAt: "2026-04-21T00:00:08.000Z",
+            finishedAt: null,
+            durationMs: null,
+            modelName: "gpt-4.1-mini-cluster",
+            metrics: [
+              { label: "参与重算", value: 2 },
+              { label: "完成更新", value: 2 },
+              { label: "摘要完成", value: 1 },
+              { label: "摘要失败", value: 0 },
+              { label: "已删除", value: 0 },
+            ],
+          },
+        ],
       },
     ],
     recentTasks: [],
@@ -107,19 +198,19 @@ describe("TaskMonitorPanel", () => {
     const dialog = await screen.findByRole("dialog", { name: "任务详情" });
     expect(dialog).toBeInTheDocument();
     expect(within(dialog).getByText("默认抓取任务")).toBeInTheDocument();
-    expect(within(dialog).getByText(/已处理 1\/10 条内容/)).toBeInTheDocument();
-    expect(
-      within(dialog).getByText(/实际新增 1 条内容 · 正文补抓 2 篇/),
-    ).toBeInTheDocument();
-    expect(
-      within(dialog).getByText(/内容分析 1 条，聚合匹配 0 条，聚合摘要 0 条/),
-    ).toBeInTheDocument();
     expect(dialog.querySelector(".overflow-y-auto.p-6")).toBeTruthy();
-    expect(within(dialog).getByText("任务开始")).toBeInTheDocument();
-    expect(within(dialog).getByText("信息源同步完成")).toBeInTheDocument();
-    expect(within(dialog).getByText("内容处理进行中")).toBeInTheDocument();
-    expect(within(dialog).getByText("耗时 8.0s")).toBeInTheDocument();
-    expect(within(dialog).getByText("耗时 进行中")).toBeInTheDocument();
+    expect(within(dialog).queryByText("AI 调用")).not.toBeInTheDocument();
+    expect(within(dialog).getByText("信息抓取")).toBeInTheDocument();
+    expect(within(dialog).getByText("规则过滤")).toBeInTheDocument();
+    expect(within(dialog).getByText("条目摘要")).toBeInTheDocument();
+    expect(within(dialog).getByText("内容分析")).toBeInTheDocument();
+    expect(within(dialog).queryByText("进度")).not.toBeInTheDocument();
+    expect(within(dialog).getByText("抓取 1 个源 · 10 篇内容 · 正文补抓 2 篇")).toBeInTheDocument();
+    expect(within(dialog).getByText("黑名单 2 · 复用 1")).toBeInTheDocument();
+    expect(within(dialog).getByText("完成 5 · 失败 1 · 模型 gpt-4.1-mini-summary")).toBeInTheDocument();
+    expect(within(dialog).getByText("完成 4 · 过滤 2 · 模型 gpt-4.1-mini-analysis")).toBeInTheDocument();
+    expect(within(dialog).getByText("指纹命中 1 · 本地直连 2 · AI归组 1 · 跳过 0 · 新建 1 · 模型 gpt-4.1-mini-match")).toBeInTheDocument();
+    expect(within(dialog).getByText("参与重算 2 · 完成更新 2 · 摘要完成 1 · 摘要失败 0 · 已删除 0 · 模型 gpt-4.1-mini-cluster")).toBeInTheDocument();
   });
 
   it("refreshes task progress from the task detail modal", async () => {
@@ -135,6 +226,33 @@ describe("TaskMonitorPanel", () => {
               progressLabel: "已处理 4/10 条内容，来自 1 个源，失败 0 项，正文补抓 3 篇",
               itemsAdded: 3,
               fullTextFetchedCount: 3,
+              taskTimeline: [
+                {
+                  key: "source_fetch",
+                  label: "信息抓取",
+                  status: "succeeded",
+                  startedAt: "2026-04-21T00:00:00.000Z",
+                  finishedAt: "2026-04-21T00:00:08.000Z",
+                  durationMs: 8_000,
+                  metrics: [
+                    { label: "抓取源", value: 1 },
+                    { label: "抓取内容", value: 10 },
+                    { label: "正文补抓", value: 3 },
+                  ],
+                },
+                {
+                  key: "rule_filter",
+                  label: "规则过滤",
+                  status: "running",
+                  startedAt: "2026-04-21T00:00:08.000Z",
+                  finishedAt: null,
+                  durationMs: null,
+                  metrics: [
+                    { label: "命中黑名单", value: 2 },
+                    { label: "复用已有处理", value: 1 },
+                  ],
+                },
+              ],
             },
           ],
         }),
@@ -159,9 +277,11 @@ describe("TaskMonitorPanel", () => {
     });
 
     const dialog = await screen.findByRole("dialog", { name: "任务详情" });
-    expect(await within(dialog).findByText(/已处理 4\/10 条内容/)).toBeInTheDocument();
     expect(
-      within(dialog).getByText(/实际新增 3 条内容 · 正文补抓 3 篇/),
+      await within(dialog).findByText("抓取 1 个源 · 10 篇内容 · 正文补抓 3 篇"),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).getByText("黑名单 2 · 复用 1"),
     ).toBeInTheDocument();
   });
 });

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const requireAdmin = vi.fn();
 const enqueueItemReanalyzeTask = vi.fn();
 const enqueueItemRegenerationTask = vi.fn();
+const deleteItem = vi.fn();
 
 vi.mock("@/lib/admin/session", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/admin/session")>();
@@ -14,6 +15,7 @@ vi.mock("@/lib/admin/session", async (importOriginal) => {
 });
 
 vi.mock("@/lib/items/service", () => ({
+  deleteItem,
   enqueueItemReanalyzeTask,
   enqueueItemRegenerationTask,
 }));
@@ -99,5 +101,49 @@ describe("/api/admin/items/[id]/regenerate", () => {
     expect(enqueueItemReanalyzeTask).toHaveBeenCalledWith("item-1");
     expect(json.taskRun.id).toBe("task-2");
     expect(json.taskRun.kind).toBe("item_reanalyze");
+  });
+});
+
+describe("/api/admin/items/[id]", () => {
+  it("rejects anonymous delete requests", async () => {
+    requireAdmin.mockRejectedValue(new Error("Unauthorized"));
+
+    const { DELETE } = await import("@/app/api/admin/items/[id]/route");
+    const response = await DELETE(
+      new Request("http://localhost/api/admin/items/item-1", {
+        method: "DELETE",
+      }),
+      {
+        params: Promise.resolve({ id: "item-1" }),
+      },
+    );
+    const json = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(json.error).toBe("Unauthorized");
+    expect(deleteItem).not.toHaveBeenCalled();
+  });
+
+  it("deletes an item for admins", async () => {
+    requireAdmin.mockResolvedValue(undefined);
+    deleteItem.mockResolvedValue({
+      id: "item-1",
+      previousClusterId: "cluster-1",
+    });
+
+    const { DELETE } = await import("@/app/api/admin/items/[id]/route");
+    const response = await DELETE(
+      new Request("http://localhost/api/admin/items/item-1", {
+        method: "DELETE",
+      }),
+      {
+        params: Promise.resolve({ id: "item-1" }),
+      },
+    );
+    const json = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(deleteItem).toHaveBeenCalledWith("item-1");
+    expect(json.success).toBe(true);
   });
 });

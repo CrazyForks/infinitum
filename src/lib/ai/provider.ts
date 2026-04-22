@@ -7,6 +7,8 @@ import {
   DEFAULT_CLUSTER_SUMMARY_USER_PROMPT_TEMPLATE,
   DEFAULT_ITEM_ANALYSIS_PROMPT,
   DEFAULT_ITEM_ANALYSIS_USER_PROMPT_TEMPLATE,
+  DEFAULT_ITEM_SUMMARY_PROMPT,
+  DEFAULT_ITEM_SUMMARY_USER_PROMPT_TEMPLATE,
 } from "@/config/prompts";
 import type { RuntimeConfig } from "@/config/runtime";
 
@@ -31,7 +33,6 @@ export type AiEventSignature = {
 
 export type AiEnrichment = {
   translatedTitle: string | null;
-  summary: string;
   moderationStatus: "allowed" | "filtered" | "restored";
   moderationReason: "marketing" | "low_quality" | "duplicate_noise" | "rule_blacklist" | "other" | null;
   moderationDetail: string | null;
@@ -52,6 +53,7 @@ type ParsedEnrichmentResult =
     };
 
 export type AiProvider = {
+  summarizeItem(inputText: string, metadata: { title: string; sourceName?: string }): Promise<string>;
   enrichContent(
     inputText: string,
     metadata: { title: string; sourceName?: string; translateTitle: boolean },
@@ -87,6 +89,7 @@ type PromptRuntimeConfig = {
 };
 
 type PromptOverrides = {
+  itemSummary?: PromptRuntimeConfig;
   itemAnalysis?: PromptRuntimeConfig;
   clusterSummary?: PromptRuntimeConfig;
   clusterMatch?: PromptRuntimeConfig;
@@ -135,12 +138,10 @@ function renderPromptTemplate(template: string, values: Record<string, string>):
 }
 
 function getFallbackEnrichment(
-  inputText: string,
   metadata: { title: string; translateTitle: boolean },
 ): AiEnrichment {
   return {
     translatedTitle: metadata.translateTitle ? metadata.title : null,
-    summary: truncate(inputText.trim(), 180),
     moderationStatus: "allowed",
     moderationReason: null,
     moderationDetail: null,
@@ -156,8 +157,17 @@ function getFallbackEnrichment(
   };
 }
 
+function getFallbackSummary(inputText: string): string {
+  return truncate(inputText.trim(), 180);
+}
+
 function stripCodeFence(value: string): string {
   return value.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+}
+
+function parseSummaryOutput(rawContent: string, fallback: string): string {
+  const normalized = stripCodeFence(rawContent);
+  return normalized || fallback;
 }
 
 function parseJsonLikeEnrichment(
@@ -170,7 +180,6 @@ function parseJsonLikeEnrichment(
   try {
     const parsed = JSON.parse(normalized) as {
       translatedTitle?: string | null;
-      summary?: string | null;
       moderationStatus?: string | null;
       moderationReason?: string | null;
       moderationDetail?: string | null;
@@ -190,13 +199,11 @@ function parseJsonLikeEnrichment(
       } | null;
     };
 
-    if (parsed.summary?.trim()) {
-      return {
-        ok: true,
-        recovered: false,
-        value: buildEnrichmentFromParsed(parsed, fallback, translateTitle),
-      };
-    }
+    return {
+      ok: true,
+      recovered: false,
+      value: buildEnrichmentFromParsed(parsed, fallback, translateTitle),
+    };
   } catch {
     // Fall through to tolerant parsing below.
   }
@@ -204,9 +211,14 @@ function parseJsonLikeEnrichment(
   const translatedTitleMatch = normalized.match(
     /"?translatedTitle"?\s*:\s*(?:"([^"]*)"|'([^']*)'|([^,\n}]+))/i,
   );
-  const summaryMatch = normalized.match(/"?summary"?\s*:\s*(?:"([^"]*)"|'([^']*)'|([^,\n}]+))/i);
+  const hasStructuredField =
+    translatedTitleMatch ||
+    /"?moderationStatus"?\s*:/i.test(normalized) ||
+    /"?qualityScore"?\s*:/i.test(normalized) ||
+    /"?eventType"?\s*:/i.test(normalized) ||
+    /"?eventSignature"?\s*:/i.test(normalized);
 
-  if (!summaryMatch) {
+  if (!hasStructuredField) {
     return {
       ok: false,
       reason: `Unable to parse model response: ${normalized.slice(0, 200)}`,
@@ -216,14 +228,12 @@ function parseJsonLikeEnrichment(
   const translatedCandidate = translatedTitleMatch
     ? translatedTitleMatch[1] ?? translatedTitleMatch[2] ?? translatedTitleMatch[3] ?? ""
     : "";
-  const summaryCandidate = summaryMatch[1] ?? summaryMatch[2] ?? summaryMatch[3] ?? "";
 
   return {
     ok: true,
     recovered: true,
     value: {
       translatedTitle: translateTitle ? translatedCandidate.trim() || fallback.translatedTitle : null,
-      summary: summaryCandidate.trim() || fallback.summary,
       moderationStatus: fallback.moderationStatus,
       moderationReason: fallback.moderationReason,
       moderationDetail: fallback.moderationDetail,
@@ -314,7 +324,6 @@ function buildEventSignatureFromParsed(
 function buildEnrichmentFromParsed(
   parsed: {
     translatedTitle?: string | null;
-    summary?: string | null;
     moderationStatus?: string | null;
     moderationReason?: string | null;
     moderationDetail?: string | null;
@@ -338,7 +347,6 @@ function buildEnrichmentFromParsed(
 ): AiEnrichment {
   return {
     translatedTitle: translateTitle ? parsed.translatedTitle?.trim() || fallback.translatedTitle : null,
-    summary: parsed.summary?.trim() || fallback.summary,
     moderationStatus: normalizeModerationStatus(parsed.moderationStatus),
     moderationReason: normalizeModerationReason(parsed.moderationReason),
     moderationDetail: parsed.moderationDetail?.trim() || fallback.moderationDetail,
@@ -423,6 +431,11 @@ export function createAiProvider(
 ): AiProvider {
   const globalClient = clientOverrideArg ?? getClient(config);
   const clientCache = new Map<string, OpenAICompatibleClient | null>();
+  const itemSummaryConfig = resolvePromptConfig(
+    DEFAULT_ITEM_SUMMARY_PROMPT,
+    DEFAULT_ITEM_SUMMARY_USER_PROMPT_TEMPLATE,
+    promptOverrides?.itemSummary,
+  );
   const itemAnalysisConfig = resolvePromptConfig(
     DEFAULT_ITEM_ANALYSIS_PROMPT,
     DEFAULT_ITEM_ANALYSIS_USER_PROMPT_TEMPLATE,
@@ -453,8 +466,30 @@ export function createAiProvider(
   };
 
   return {
+    async summarizeItem(inputText, metadata) {
+      const fallback = getFallbackSummary(inputText);
+      const executionClient = getExecutionClient(itemSummaryConfig);
+      const executionConfig = getExecutionConfig(itemSummaryConfig);
+
+      if (!executionClient) {
+        return fallback;
+      }
+
+      const output = await completeText(
+        executionClient,
+        executionConfig,
+        itemSummaryConfig,
+        renderPromptTemplate(itemSummaryConfig.promptTemplate, {
+          title: metadata.title,
+          sourceName: metadata.sourceName ?? "未知来源",
+          inputText: truncate(inputText, 4000),
+        }),
+      );
+
+      return parseSummaryOutput(output, fallback);
+    },
     async enrichContent(inputText, metadata) {
-      const fallback = getFallbackEnrichment(inputText, metadata);
+      const fallback = getFallbackEnrichment(metadata);
       const executionClient = getExecutionClient(itemAnalysisConfig);
       const executionConfig = getExecutionConfig(itemAnalysisConfig);
 
@@ -505,7 +540,7 @@ export function createAiProvider(
       const executionConfig = getExecutionConfig(clusterSummaryConfig);
 
       if (!executionClient) {
-        return truncate(inputText.trim(), 180);
+        return getFallbackSummary(inputText);
       }
 
       const output = await completeText(
@@ -518,18 +553,7 @@ export function createAiProvider(
         }),
       );
 
-      const normalized = stripCodeFence(output);
-
-      try {
-        const parsed = JSON.parse(normalized) as { summary?: string | null };
-        if (parsed.summary?.trim()) {
-          return parsed.summary.trim();
-        }
-      } catch {
-        // Fall through to plain text handling.
-      }
-
-      return normalized || truncate(inputText.trim(), 180);
+      return parseSummaryOutput(output, getFallbackSummary(inputText));
     },
     async matchClusterCandidate(inputText, metadata) {
       const executionClient = getExecutionClient(clusterMatchConfig);

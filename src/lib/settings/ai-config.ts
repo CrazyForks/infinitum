@@ -2,6 +2,7 @@ import {
   DEFAULT_CLUSTER_MATCH_USER_PROMPT_TEMPLATE,
   DEFAULT_CLUSTER_SUMMARY_USER_PROMPT_TEMPLATE,
   DEFAULT_ITEM_ANALYSIS_USER_PROMPT_TEMPLATE,
+  DEFAULT_ITEM_SUMMARY_USER_PROMPT_TEMPLATE,
 } from "@/config/prompts";
 import type { PromptConfigType } from "@/lib/settings/types";
 
@@ -9,6 +10,7 @@ export const PROMPT_TYPE_OPTIONS: Array<{
   value: PromptConfigType;
   label: string;
 }> = [
+  { value: "item_summary", label: "条目摘要" },
   { value: "item_analysis", label: "内容分析" },
   { value: "cluster_summary", label: "聚合摘要" },
   { value: "cluster_match", label: "归组判定" },
@@ -20,6 +22,8 @@ export function getPromptTypeLabel(type: PromptConfigType): string {
 
 export function getDefaultPromptConfigName(type: PromptConfigType): string {
   switch (type) {
+    case "item_summary":
+      return "默认条目摘要提示词";
     case "item_analysis":
       return "默认内容分析提示词";
     case "cluster_summary":
@@ -31,6 +35,8 @@ export function getDefaultPromptConfigName(type: PromptConfigType): string {
 
 export function getDefaultPromptTemplate(type: PromptConfigType): string {
   switch (type) {
+    case "item_summary":
+      return DEFAULT_ITEM_SUMMARY_USER_PROMPT_TEMPLATE;
     case "item_analysis":
       return DEFAULT_ITEM_ANALYSIS_USER_PROMPT_TEMPLATE;
     case "cluster_summary":
@@ -46,6 +52,12 @@ export function getDefaultPromptSampling(type: PromptConfigType): {
   topP: number | null;
 } {
   switch (type) {
+    case "item_summary":
+      return {
+        temperature: 0.2,
+        maxTokens: 300,
+        topP: null,
+      };
     case "item_analysis":
       return {
         temperature: 0.2,

@@ -9,7 +9,7 @@ import {
 
 const promptConfigSchema = z.object({
   name: z.string().min(1),
-  type: z.enum(["item_analysis", "cluster_summary", "cluster_match"]),
+  type: z.enum(["item_summary", "item_analysis", "cluster_summary", "cluster_match"]),
   prompt: z.string().min(1),
   systemPrompt: z.string().min(1),
   temperature: z.number().min(0).max(2).nullable().optional(),

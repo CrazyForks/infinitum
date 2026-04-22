@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { GlobalHeader } from "@/components/ui/global-header";
@@ -123,14 +123,10 @@ export function AdminPageClient({
     ai: !(routeState.primaryTab === "settings" && routeState.settingsSection === "ai"),
     content: !(routeState.primaryTab === "monitoring" && routeState.monitoringSubSection === "content"),
   }));
-
-  // Auto-expand sections when tab changes
-  useEffect(() => {
-    setCollapsedSections((prev) => ({
-      ai: !(primaryTab === "settings" && settingsSection === "ai") ? prev.ai : false,
-      content: !(primaryTab === "monitoring" && monitoringSubSection === "content") ? prev.content : false,
-    }));
-  }, [primaryTab, settingsSection, monitoringSubSection]);
+  const isAISectionCollapsed =
+    primaryTab === "settings" && settingsSection === "ai" ? false : collapsedSections.ai;
+  const isContentSectionCollapsed =
+    primaryTab === "monitoring" && monitoringSubSection === "content" ? false : collapsedSections.content;
 
   const navigateAdmin = useCallback((nextState: Partial<AdminRouteState>) => {
     const resolvedPrimaryTab = nextState.primaryTab ?? primaryTab;
@@ -166,7 +162,7 @@ export function AdminPageClient({
   ]);
 
   const handleToggleAISection = useCallback(() => {
-    const nextCollapsed = !collapsedSections.ai;
+    const nextCollapsed = !isAISectionCollapsed;
     setCollapsedSections((prev) => ({
       ...prev,
       ai: nextCollapsed,
@@ -177,10 +173,10 @@ export function AdminPageClient({
         settingsSection: "ai",
       });
     }
-  }, [collapsedSections.ai, navigateAdmin]);
+  }, [isAISectionCollapsed, navigateAdmin]);
 
   const handleToggleContentSection = useCallback(() => {
-    const nextCollapsed = !collapsedSections.content;
+    const nextCollapsed = !isContentSectionCollapsed;
     setCollapsedSections((prev) => ({
       ...prev,
       content: nextCollapsed,
@@ -191,7 +187,7 @@ export function AdminPageClient({
         monitoringSubSection: "content",
       });
     }
-  }, [collapsedSections.content, navigateAdmin]);
+  }, [isContentSectionCollapsed, navigateAdmin]);
 
   const renderMainContent = () => {
     // Monitoring - Content Review
@@ -301,16 +297,16 @@ export function AdminPageClient({
                       <SectionToggleButton
                         label="内容审核"
                         active={monitoringSubSection === "content"}
-                        expanded={!collapsedSections.content}
+                        expanded={!isContentSectionCollapsed}
                         onMainClick={handleToggleContentSection}
                         onToggle={handleToggleContentSection}
-                        toggleAriaLabel={collapsedSections.content ? "展开" : "收起"}
+                        toggleAriaLabel={isContentSectionCollapsed ? "展开" : "收起"}
                         icon={<IconShield className="h-4 w-4" />}
                         expandedIndicator={<IconArrowUp className="h-4 w-4" />}
                         collapsedIndicator={<IconArrowDown className="h-4 w-4" />}
                       />
 
-                      {!collapsedSections.content && (
+                      {!isContentSectionCollapsed && (
                         <>
                           <SelectableButton
                             onClick={() => {
@@ -374,16 +370,16 @@ export function AdminPageClient({
                       <SectionToggleButton
                         label="AI配置"
                         active={settingsSection === "ai"}
-                        expanded={!collapsedSections.ai}
+                        expanded={!isAISectionCollapsed}
                         onMainClick={handleToggleAISection}
                         onToggle={handleToggleAISection}
-                        toggleAriaLabel={collapsedSections.ai ? "展开" : "收起"}
+                        toggleAriaLabel={isAISectionCollapsed ? "展开" : "收起"}
                         icon={<IconRobot className="h-4 w-4" />}
                         expandedIndicator={<IconArrowUp className="h-4 w-4" />}
                         collapsedIndicator={<IconArrowDown className="h-4 w-4" />}
                       />
 
-                      {!collapsedSections.ai && (
+                      {!isAISectionCollapsed && (
                         <>
                           <SelectableButton
                             onClick={() => {

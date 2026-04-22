@@ -11,6 +11,7 @@ type TaskAiUsageSnapshot = {
 };
 
 const AI_CALL_BREAKDOWN_LABELS: Record<TaskAiCallBreakdownKey, string> = {
+  item_summary: "条目摘要",
   item_analysis: "内容分析",
   cluster_match: "聚合匹配",
   cluster_summary: "聚合摘要",
@@ -20,6 +21,7 @@ type TaskAiUsageBreakdownState = Record<TaskAiCallBreakdownKey, { actual: number
 
 function createEmptyBreakdownState(): TaskAiUsageBreakdownState {
   return {
+    item_summary: { actual: 0, estimated: 0 },
     item_analysis: { actual: 0, estimated: 0 },
     cluster_match: { actual: 0, estimated: 0 },
     cluster_summary: { actual: 0, estimated: 0 },
@@ -98,12 +100,21 @@ export function createTaskAiUsageTracker(
     wrapProvider(
       aiProvider: AiProvider,
       options?: {
+        summarizeItemEstimated?: boolean;
         enrichContentEstimated?: boolean;
         summarizeClusterEstimated?: boolean;
         matchClusterCandidateEstimated?: boolean;
       },
     ): AiProvider {
       return {
+        async summarizeItem(inputText, metadata) {
+          incrementActual("item_summary");
+          if (options?.summarizeItemEstimated ?? true) {
+            incrementEstimated("item_summary");
+          }
+          syncEstimateFloor();
+          return aiProvider.summarizeItem(inputText, metadata);
+        },
         async enrichContent(inputText, metadata) {
           incrementActual("item_analysis");
           if (options?.enrichContentEstimated) {

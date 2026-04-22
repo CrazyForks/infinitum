@@ -304,6 +304,21 @@ describe("background task persistence", () => {
           durationMs: 9_000,
         },
       ],
+      taskTimeline: [
+        {
+          key: "source_fetch",
+          label: "信息抓取",
+          status: "succeeded",
+          startedAt: "2026-04-12T00:00:00.000Z",
+          finishedAt: "2026-04-12T00:00:09.000Z",
+          durationMs: 9_000,
+          metrics: [
+            { label: "抓取源", value: 2 },
+            { label: "抓取内容", value: 20 },
+            { label: "正文补抓", value: 3 },
+          ],
+        },
+      ],
     });
 
     const storedTaskRun = await prisma.backgroundTaskRun.findUniqueOrThrow({
@@ -313,6 +328,8 @@ describe("background task persistence", () => {
 
     expect(storedTaskRun.stageTimingsJson).not.toBeNull();
     expect(storedTaskRun.stageTimingsJson).toContain("\"source_sync\"");
+    expect(storedTaskRun.taskTimelineJson).not.toBeNull();
+    expect(storedTaskRun.taskTimelineJson).toContain("\"source_fetch\"");
     expect(storedTaskRun.aiCallBreakdownJson).not.toBeNull();
     expect(snapshot.schedule.key).toBe("ingestion_default");
     expect(snapshot.schedule.sourceConcurrency).toBe(2);
@@ -324,6 +341,12 @@ describe("background task persistence", () => {
     expect(snapshot.recentTasks[0]?.aiCallCountActual).toBe(3);
     expect(snapshot.recentTasks[0]?.aiCallCountEstimated).toBe(8);
     expect(snapshot.recentTasks[0]?.aiCallBreakdown).toEqual([
+      {
+        key: "item_summary",
+        label: "条目摘要",
+        actual: 0,
+        estimated: 0,
+      },
       {
         key: "item_analysis",
         label: "内容分析",
@@ -350,6 +373,21 @@ describe("background task persistence", () => {
         startedAt: "2026-04-12T00:00:00.000Z",
         finishedAt: "2026-04-12T00:00:09.000Z",
         durationMs: 9_000,
+      },
+    ]);
+    expect(snapshot.recentTasks[0]?.taskTimeline).toEqual([
+      {
+        key: "source_fetch",
+        label: "信息抓取",
+        status: "succeeded",
+        startedAt: "2026-04-12T00:00:00.000Z",
+        finishedAt: "2026-04-12T00:00:09.000Z",
+        durationMs: 9_000,
+        metrics: [
+          { label: "抓取源", value: 2 },
+          { label: "抓取内容", value: 20 },
+          { label: "正文补抓", value: 3 },
+        ],
       },
     ]);
   });

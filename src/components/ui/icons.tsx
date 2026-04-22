@@ -134,6 +134,18 @@ export function IconFilter(props: IconProps) {
   );
 }
 
+export function IconTrash(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M3 6h18" />
+      <path d="M8 6V4h8v2" />
+      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+      <path d="M10 11v6" />
+      <path d="M14 11v6" />
+    </IconBase>
+  );
+}
+
 export function IconArrowDown(props: IconProps) {
   return (
     <IconBase {...props}>
@@ -192,16 +204,6 @@ export function IconEdit(props: IconProps) {
     <IconBase {...props}>
       <path d="M12 20h9" />
       <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
-    </IconBase>
-  );
-}
-
-export function IconTrash(props: IconProps) {
-  return (
-    <IconBase {...props}>
-      <path d="M3 6h18" />
-      <path d="M8 6V4h8v2" />
-      <path d="M6 6l1 14a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-14" />
     </IconBase>
   );
 }

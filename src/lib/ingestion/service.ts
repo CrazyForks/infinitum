@@ -1,7 +1,13 @@
 import type { BackgroundTaskRun, FetchRun, FetchRunStatus } from "@prisma/client";
 
 import { createAiProvider, type AiEventSignature } from "@/lib/ai/provider";
-import { assignItemToCluster, createClusterAssignmentCoordinator, recomputeCluster } from "@/lib/clusters/service";
+import type { RuntimeConfig } from "@/config/runtime";
+import {
+  assignItemToCluster,
+  createClusterAssignmentCoordinator,
+  recomputeCluster,
+  type ClusterRecomputeResult,
+} from "@/lib/clusters/service";
 import { prisma } from "@/lib/db";
 import {
   completeFetchRun,
@@ -28,6 +34,8 @@ import {
   DEFAULT_INGESTION_TASK_LABEL,
   type TaskAiCallBreakdownSnapshot,
   type TaskStageTimingSnapshot,
+  type TaskTimelineNodeSnapshot,
+  type TaskTimelineNodeStatus,
 } from "@/lib/tasks/types";
 import {
   enqueueTaskRun,
@@ -47,6 +55,7 @@ type PreparedFeedItem = {
 
 type ResolvedRunOptions = RunIngestionOptions & {
   now: Date;
+  taskTimelineModelNames: IngestionTimelineModelNames;
 };
 
 const INGESTION_PROGRESS_FLUSH_INTERVAL_MS = 750;
@@ -57,6 +66,60 @@ type IngestionStageTiming = {
   finishedAt: Date | null;
   durationMs: number | null;
 };
+
+type IngestionTimelineCounters = {
+  sourceFetch: {
+    sourcesFetched: number;
+    itemsFetched: number;
+    fullTextFetched: number;
+  };
+  ruleFilter: {
+    blacklistFiltered: number;
+    reusedExisting: number;
+  };
+  itemSummary: {
+    completed: number;
+    failed: number;
+  };
+  itemAnalysis: {
+    completed: number;
+    filtered: number;
+  };
+  clusterAssignment: {
+    exactMatch: number;
+    cheapRankDirect: number;
+    aiMatch: number;
+    skippedIncompleteSignature: number;
+    newCluster: number;
+  };
+  clusterFinalize: {
+    recomputed: number;
+    updated: number;
+    deleted: number;
+    summarySucceeded: number;
+    summaryFailed: number;
+  };
+};
+
+type IngestionTaskStageState = {
+  sourceSync: IngestionStageTiming | null;
+  itemProcessing: IngestionStageTiming | null;
+  clusterFinalize: IngestionStageTiming | null;
+};
+
+type IngestionTimelineModelNames = {
+  itemSummary: string | null;
+  itemAnalysis: string | null;
+  clusterMatch: string | null;
+  clusterSummary: string | null;
+};
+
+type RuntimePromptConfigs = NonNullable<RuntimeConfig["selectedPromptConfigs"]>;
+type RuntimePromptConfig =
+  | RuntimePromptConfigs["itemSummary"]
+  | RuntimePromptConfigs["itemAnalysis"]
+  | RuntimePromptConfigs["clusterSummary"]
+  | RuntimePromptConfigs["clusterMatch"];
 
 const EVENT_TYPES = new Set<NonNullable<AiEventSignature["eventType"]>>([
   "release",
@@ -81,6 +144,7 @@ class TaskRunCancellationError extends Error {
     fullTextFetchedCount: number;
     errorSummary: string | null;
     stageTimings: TaskStageTimingSnapshot[];
+    taskTimeline: TaskTimelineNodeSnapshot[];
   };
 
   constructor(snapshot: {
@@ -92,6 +156,7 @@ class TaskRunCancellationError extends Error {
     fullTextFetchedCount: number;
     errorSummary: string | null;
     stageTimings: TaskStageTimingSnapshot[];
+    taskTimeline: TaskTimelineNodeSnapshot[];
   }) {
     super(TASK_RUN_CANCELLED_MESSAGE);
     this.name = "TaskRunCancellationError";
@@ -138,6 +203,223 @@ function createIngestionStageTracker() {
       stageTiming.durationMs = stageTiming.startedAt ? finishedAt.getTime() - stageTiming.startedAt.getTime() : null;
     },
   };
+}
+
+function createIngestionTimelineCounters(): IngestionTimelineCounters {
+  return {
+    sourceFetch: {
+      sourcesFetched: 0,
+      itemsFetched: 0,
+      fullTextFetched: 0,
+    },
+    ruleFilter: {
+      blacklistFiltered: 0,
+      reusedExisting: 0,
+    },
+    itemSummary: {
+      completed: 0,
+      failed: 0,
+    },
+    itemAnalysis: {
+      completed: 0,
+      filtered: 0,
+    },
+    clusterAssignment: {
+      exactMatch: 0,
+      cheapRankDirect: 0,
+      aiMatch: 0,
+      skippedIncompleteSignature: 0,
+      newCluster: 0,
+    },
+    clusterFinalize: {
+      recomputed: 0,
+      updated: 0,
+      deleted: 0,
+      summarySucceeded: 0,
+      summaryFailed: 0,
+    },
+  };
+}
+
+function createIngestionTimelineModelNames(): IngestionTimelineModelNames {
+  return {
+    itemSummary: null,
+    itemAnalysis: null,
+    clusterMatch: null,
+    clusterSummary: null,
+  };
+}
+
+function resolvePromptModelName(
+  promptConfig: RuntimePromptConfig | undefined,
+  defaultModelName: string | null,
+): string | null {
+  return promptConfig?.modelApi?.model ?? defaultModelName;
+}
+
+function createInitialIngestionTaskTimeline(): TaskTimelineNodeSnapshot[] {
+  return [
+    { key: "source_fetch", label: "信息抓取", status: "running", startedAt: null, finishedAt: null, durationMs: null, metrics: [] },
+    { key: "rule_filter", label: "规则过滤", status: "pending", startedAt: null, finishedAt: null, durationMs: null, metrics: [] },
+    { key: "item_summary", label: "条目摘要", status: "pending", startedAt: null, finishedAt: null, durationMs: null, metrics: [] },
+    { key: "item_analysis", label: "内容分析", status: "pending", startedAt: null, finishedAt: null, durationMs: null, metrics: [] },
+    { key: "cluster_assignment", label: "归组决策", status: "pending", startedAt: null, finishedAt: null, durationMs: null, metrics: [] },
+    { key: "cluster_finalize", label: "聚合收尾", status: "pending", startedAt: null, finishedAt: null, durationMs: null, metrics: [] },
+  ];
+}
+
+function toNodeTiming(stageTiming: IngestionStageTiming | null) {
+  return {
+    startedAt: stageTiming?.startedAt?.toISOString() ?? null,
+    finishedAt: stageTiming?.finishedAt?.toISOString() ?? null,
+    durationMs: stageTiming?.durationMs ?? null,
+  };
+}
+
+function resolveNodeStatusFromCounts(options: {
+  stageTiming: IngestionStageTiming | null;
+  successCount: number;
+  failureCount?: number;
+  allowEmptySuccess?: boolean;
+}): TaskTimelineNodeStatus {
+  const { stageTiming, successCount, failureCount = 0, allowEmptySuccess = false } = options;
+
+  if (!stageTiming) {
+    return "pending";
+  }
+
+  if (!stageTiming.finishedAt) {
+    return "running";
+  }
+
+  if (successCount === 0 && failureCount === 0) {
+    return allowEmptySuccess ? "succeeded" : "skipped";
+  }
+
+  if (failureCount > 0 && successCount === 0) {
+    return "failed";
+  }
+
+  if (failureCount > 0) {
+    return "partial";
+  }
+
+  return "succeeded";
+}
+
+function buildIngestionTaskTimeline(input: {
+  counters: IngestionTimelineCounters;
+  stages: IngestionTaskStageState;
+  modelNames: IngestionTimelineModelNames;
+}): TaskTimelineNodeSnapshot[] {
+  const { counters, stages, modelNames } = input;
+  const clusterFinalizeCounts =
+    counters.clusterFinalize.recomputed +
+    counters.clusterFinalize.updated +
+    counters.clusterFinalize.deleted +
+    counters.clusterFinalize.summarySucceeded +
+    counters.clusterFinalize.summaryFailed;
+
+  return [
+    {
+      key: "source_fetch",
+      label: "信息抓取",
+      status: stages.sourceSync ? (stages.sourceSync.finishedAt ? "succeeded" : "running") : "running",
+      ...toNodeTiming(stages.sourceSync),
+      metrics: [
+        { label: "抓取源", value: counters.sourceFetch.sourcesFetched },
+        { label: "抓取内容", value: counters.sourceFetch.itemsFetched },
+        { label: "正文补抓", value: counters.sourceFetch.fullTextFetched },
+      ],
+    },
+    {
+      key: "rule_filter",
+      label: "规则过滤",
+      status: resolveNodeStatusFromCounts({
+        stageTiming: stages.itemProcessing,
+        successCount: counters.ruleFilter.blacklistFiltered + counters.ruleFilter.reusedExisting,
+      }),
+      ...toNodeTiming(stages.itemProcessing),
+      metrics: [
+        { label: "命中黑名单", value: counters.ruleFilter.blacklistFiltered },
+        { label: "复用已有处理", value: counters.ruleFilter.reusedExisting },
+      ],
+    },
+    {
+      key: "item_summary",
+      label: "条目摘要",
+      status: resolveNodeStatusFromCounts({
+        stageTiming: stages.itemProcessing,
+        successCount: counters.itemSummary.completed,
+        failureCount: counters.itemSummary.failed,
+      }),
+      ...toNodeTiming(stages.itemProcessing),
+      modelName: modelNames.itemSummary,
+      metrics: [
+        { label: "完成", value: counters.itemSummary.completed },
+        { label: "失败", value: counters.itemSummary.failed },
+      ],
+    },
+    {
+      key: "item_analysis",
+      label: "内容分析",
+      status: resolveNodeStatusFromCounts({
+        stageTiming: stages.itemProcessing,
+        successCount: counters.itemAnalysis.completed,
+      }),
+      ...toNodeTiming(stages.itemProcessing),
+      modelName: modelNames.itemAnalysis,
+      metrics: [
+        { label: "完成", value: counters.itemAnalysis.completed },
+        { label: "过滤", value: counters.itemAnalysis.filtered },
+      ],
+    },
+    {
+      key: "cluster_assignment",
+      label: "归组决策",
+      status: resolveNodeStatusFromCounts({
+        stageTiming: stages.itemProcessing,
+        successCount:
+          counters.clusterAssignment.exactMatch +
+          counters.clusterAssignment.cheapRankDirect +
+          counters.clusterAssignment.aiMatch +
+          counters.clusterAssignment.skippedIncompleteSignature +
+          counters.clusterAssignment.newCluster,
+      }),
+      ...toNodeTiming(stages.itemProcessing),
+      modelName: modelNames.clusterMatch,
+      metrics: [
+        { label: "指纹命中", value: counters.clusterAssignment.exactMatch },
+        { label: "本地直连", value: counters.clusterAssignment.cheapRankDirect },
+        { label: "AI归组", value: counters.clusterAssignment.aiMatch },
+        { label: "跳过", value: counters.clusterAssignment.skippedIncompleteSignature },
+        { label: "新建", value: counters.clusterAssignment.newCluster },
+      ],
+    },
+    {
+      key: "cluster_finalize",
+      label: "聚合收尾",
+      status: resolveNodeStatusFromCounts({
+        stageTiming: stages.clusterFinalize,
+        successCount:
+          counters.clusterFinalize.recomputed +
+          counters.clusterFinalize.updated +
+          counters.clusterFinalize.deleted +
+          counters.clusterFinalize.summarySucceeded,
+        failureCount: counters.clusterFinalize.summaryFailed,
+        allowEmptySuccess: Boolean(stages.clusterFinalize?.finishedAt) && clusterFinalizeCounts === 0,
+      }),
+      ...toNodeTiming(stages.clusterFinalize),
+      modelName: modelNames.clusterSummary,
+      metrics: [
+        { label: "参与重算", value: counters.clusterFinalize.recomputed },
+        { label: "完成更新", value: counters.clusterFinalize.updated },
+        { label: "摘要完成", value: counters.clusterFinalize.summarySucceeded },
+        { label: "摘要失败", value: counters.clusterFinalize.summaryFailed },
+        { label: "已删除", value: counters.clusterFinalize.deleted },
+      ],
+    },
+  ];
 }
 
 function getBestContent(item: ParsedFeedItem): string {
@@ -265,6 +547,7 @@ async function resolveRunOptions(options?: Partial<RunIngestionOptions>): Promis
   const now = options?.now ?? new Date();
   const runtimeConfig =
     !options?.aiProvider || !options?.sourceConfigs || !options?.blacklist ? await getIngestionRuntimeConfig() : null;
+  const defaultModelName = runtimeConfig?.modelApi.model ?? null;
 
   return {
     trigger: options?.trigger ?? "manual",
@@ -276,6 +559,7 @@ async function resolveRunOptions(options?: Partial<RunIngestionOptions>): Promis
         runtimeConfig?.modelApi ?? { apiKey: "", baseURL: "", model: "gpt-4.1-mini" },
         runtimeConfig?.selectedPromptConfigs
           ? {
+              itemSummary: runtimeConfig.selectedPromptConfigs.itemSummary,
               itemAnalysis: runtimeConfig.selectedPromptConfigs.itemAnalysis,
               clusterSummary: runtimeConfig.selectedPromptConfigs.clusterSummary,
               clusterMatch: runtimeConfig.selectedPromptConfigs.clusterMatch,
@@ -296,6 +580,14 @@ async function resolveRunOptions(options?: Partial<RunIngestionOptions>): Promis
     perSourceItemLimit:
       options?.perSourceItemLimit ?? runtimeConfig?.ingestion.perSourceItemLimit ?? 20,
     now,
+    taskTimelineModelNames: runtimeConfig?.selectedPromptConfigs
+      ? {
+          itemSummary: resolvePromptModelName(runtimeConfig.selectedPromptConfigs.itemSummary, defaultModelName),
+          itemAnalysis: resolvePromptModelName(runtimeConfig.selectedPromptConfigs.itemAnalysis, defaultModelName),
+          clusterSummary: resolvePromptModelName(runtimeConfig.selectedPromptConfigs.clusterSummary, defaultModelName),
+          clusterMatch: resolvePromptModelName(runtimeConfig.selectedPromptConfigs.clusterMatch, defaultModelName),
+        }
+      : createIngestionTimelineModelNames(),
   };
 }
 
@@ -392,6 +684,9 @@ async function processFeedItem({
   let qualityRationale = existing?.qualityRationale ?? "AI analysis unavailable";
   let eventSignature: AiEventSignature | null = readStoredEventSignature(existing);
   let fullTextFetched = false;
+  let summaryCompleted = false;
+  let summaryFailed = false;
+  let analysisCompleted = false;
   const issues: string[] = [];
   const contentForFullTextDecision = fullText || rssContent || rssExcerpt || "";
   const canReuseExistingAnalysis = Boolean(
@@ -454,6 +749,9 @@ async function processFeedItem({
       isNew,
       affectedClusterId: existing?.clusterId ?? null,
       fullTextFetched,
+      metrics: {
+        blacklistFiltered: true,
+      },
     };
   }
 
@@ -497,7 +795,15 @@ async function processFeedItem({
       },
     );
 
-    return { id: stored.id, status: stored.status, isNew, fullTextFetched };
+    return {
+      id: stored.id,
+      status: stored.status,
+      isNew,
+      fullTextFetched,
+      metrics: {
+        reusedExisting: true,
+      },
+    };
   }
 
   // 只有开启 AI 解析时才需要补抓全文
@@ -527,10 +833,24 @@ async function processFeedItem({
     moderationDetail = `Matched blacklist keyword: ${filterMatch}`;
   } else if (aiParsingEnabled) {
     const translateTitle = shouldTranslateTitle(originalTitle);
-    const enrichmentInput = fullText || rssContent || rssExcerpt || originalTitle;
+    const summarySourceText = fullText || rssContent || rssExcerpt || originalTitle;
 
     try {
-      const enrichment = await aiProvider.enrichContent(enrichmentInput, {
+      summaryText = stripHtmlTags(
+        await aiProvider.summarizeItem(summarySourceText, {
+          title: originalTitle,
+          sourceName,
+        }),
+      ) || buildFallbackSummary(rssExcerpt, fullText || rssContent);
+      summaryCompleted = true;
+    } catch (error) {
+      appendIssue(issues, error, "Unknown item summary error");
+      summaryFailed = true;
+      summaryText = buildFallbackSummary(rssExcerpt, fullText || rssContent);
+    }
+
+    try {
+      const enrichment = await aiProvider.enrichContent(summaryText || originalTitle, {
         title: originalTitle,
         sourceName,
         translateTitle,
@@ -540,13 +860,13 @@ async function processFeedItem({
         translatedTitle = enrichment.translatedTitle?.trim() || originalTitle;
       }
 
-      summaryText = stripHtmlTags(enrichment.summary) || summaryText;
       moderationStatus = enrichment.moderationStatus === "restored" ? "allowed" : enrichment.moderationStatus;
       moderationReason = enrichment.moderationReason;
       moderationDetail = enrichment.moderationDetail;
       qualityScore = enrichment.qualityScore;
       qualityRationale = enrichment.qualityRationale;
       eventSignature = enrichment.eventSignature;
+      analysisCompleted = true;
     } catch (error) {
       appendIssue(issues, error, "Unknown ai enrichment error");
       moderationStatus = "allowed";
@@ -555,10 +875,6 @@ async function processFeedItem({
       qualityScore = 50;
       qualityRationale = "AI analysis unavailable";
       eventSignature = null;
-    }
-
-    if (!summaryText) {
-      summaryText = buildFallbackSummary(rssExcerpt, fullText || rssContent);
     }
 
     status = moderationStatus === "filtered" ? "filtered" : "processed";
@@ -621,23 +937,50 @@ async function processFeedItem({
 
   // Track cluster changes
   let affectedClusterId: string | null = null;
+  let clusterAssignmentMetrics: NonNullable<ProcessedItemRecord["metrics"]>["clusterAssignment"] | undefined;
 
   if (moderationStatus === "filtered") {
     if (existing?.clusterId) {
       affectedClusterId = existing.clusterId;
     }
   } else {
-    const clusterId = await assignItemToCluster(stored.id, {
+    const clusterAssignment = await assignItemToCluster(stored.id, {
       eventSignature,
       aiProvider,
       coordinator: clusterAssignmentCoordinator,
     });
-    if (clusterId && (isNew || existing?.clusterId !== clusterId)) {
-      affectedClusterId = clusterId;
+
+    clusterAssignmentMetrics = {
+      exactMatch: clusterAssignment.matchSource === "exact_match",
+      cheapRankDirect: clusterAssignment.matchSource === "cheap_rank_direct",
+      aiMatch: clusterAssignment.matchSource === "ai_match",
+      skippedIncompleteSignature: clusterAssignment.skippedIncompleteSignature,
+      newCluster: clusterAssignment.createdNewCluster,
+    };
+
+    if (
+      clusterAssignment.clusterId &&
+      (isNew || existing?.clusterId !== clusterAssignment.clusterId)
+    ) {
+      affectedClusterId = clusterAssignment.clusterId;
     }
   }
 
-  return { id: stored.id, status: stored.status, isNew, affectedClusterId, fullTextFetched };
+  return {
+    id: stored.id,
+    status: stored.status,
+    isNew,
+    affectedClusterId,
+    fullTextFetched,
+    metrics: {
+      blacklistFiltered: Boolean(filterMatch),
+      summaryCompleted,
+      summaryFailed,
+      analysisCompleted,
+      analysisFiltered: analysisCompleted && moderationStatus === "filtered",
+      clusterAssignment: clusterAssignmentMetrics,
+    },
+  };
 }
 
 async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
@@ -652,11 +995,20 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
     fullTextFetchThreshold,
     perSourceItemLimit,
     now,
+    taskTimelineModelNames,
   } = options;
   const stageTracker = createIngestionStageTracker();
+  const timelineCounters = createIngestionTimelineCounters();
+  const taskStages: IngestionTaskStageState = {
+    sourceSync: null,
+    itemProcessing: null,
+    clusterFinalize: null,
+  };
   let sources: Awaited<ReturnType<typeof syncSources>> = [];
   const aiUsage = createTaskAiUsageTracker();
-  const trackedAiProvider = aiUsage.wrapProvider(aiProvider);
+  const trackedAiProvider = aiUsage.wrapProvider(aiProvider, {
+    summarizeItemEstimated: false,
+  });
   const preparedItems: PreparedFeedItem[] = [];
   const errors: string[] = [];
   let successCount = 0;
@@ -675,6 +1027,11 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
     fullTextFetchedCount,
     errorSummary: errors.length > 0 ? errors.join(" | ") : null,
     stageTimings: stageTracker.snapshot(),
+    taskTimeline: buildIngestionTaskTimeline({
+      counters: timelineCounters,
+      stages: taskStages,
+      modelNames: taskTimelineModelNames,
+    }),
   });
   const emitTaskProgress = async (status: FetchRunStatus | "running") => {
     const aiUsageSnapshot = aiUsage.snapshot();
@@ -701,6 +1058,7 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
   };
 
   const sourceSyncStage = stageTracker.startStage("source_sync", "信息源同步");
+  taskStages.sourceSync = sourceSyncStage;
 
   try {
     sources = await syncSources(sourceConfigs);
@@ -732,9 +1090,13 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
     );
   } finally {
     stageTracker.finishStage(sourceSyncStage);
+    timelineCounters.sourceFetch.sourcesFetched = sources.length;
+    timelineCounters.sourceFetch.itemsFetched = preparedItems.length;
   }
 
-  aiUsage.setEstimated(preparedItems.filter((preparedItem) => willRequireAiAnalysis(preparedItem, blacklist)).length);
+  const estimatedAiItemCount = preparedItems.filter((preparedItem) => willRequireAiAnalysis(preparedItem, blacklist)).length;
+  aiUsage.setEstimated(estimatedAiItemCount, "item_summary");
+  aiUsage.setEstimated(estimatedAiItemCount, "item_analysis");
 
   await updateFetchRunProgress(run.id, {
     sourceCount: sources.length,
@@ -785,6 +1147,51 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
 
       if (result?.fullTextFetched) {
         fullTextFetchedCount += 1;
+        timelineCounters.sourceFetch.fullTextFetched += 1;
+      }
+
+      if (result?.metrics?.blacklistFiltered) {
+        timelineCounters.ruleFilter.blacklistFiltered += 1;
+      }
+
+      if (result?.metrics?.reusedExisting) {
+        timelineCounters.ruleFilter.reusedExisting += 1;
+      }
+
+      if (result?.metrics?.summaryCompleted) {
+        timelineCounters.itemSummary.completed += 1;
+      }
+
+      if (result?.metrics?.summaryFailed) {
+        timelineCounters.itemSummary.failed += 1;
+      }
+
+      if (result?.metrics?.analysisCompleted) {
+        timelineCounters.itemAnalysis.completed += 1;
+      }
+
+      if (result?.metrics?.analysisFiltered) {
+        timelineCounters.itemAnalysis.filtered += 1;
+      }
+
+      if (result?.metrics?.clusterAssignment?.exactMatch) {
+        timelineCounters.clusterAssignment.exactMatch += 1;
+      }
+
+      if (result?.metrics?.clusterAssignment?.cheapRankDirect) {
+        timelineCounters.clusterAssignment.cheapRankDirect += 1;
+      }
+
+      if (result?.metrics?.clusterAssignment?.aiMatch) {
+        timelineCounters.clusterAssignment.aiMatch += 1;
+      }
+
+      if (result?.metrics?.clusterAssignment?.skippedIncompleteSignature) {
+        timelineCounters.clusterAssignment.skippedIncompleteSignature += 1;
+      }
+
+      if (result?.metrics?.clusterAssignment?.newCluster) {
+        timelineCounters.clusterAssignment.newCluster += 1;
       }
 
       // Collect affected clusters for batch recomputation
@@ -807,6 +1214,7 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
   };
 
   const itemProcessingStage = stageTracker.startStage("item_processing", "内容处理");
+  taskStages.itemProcessing = itemProcessingStage;
   try {
     await runWithConcurrency(
       preparedItems.map((preparedItem) => async () => {
@@ -844,15 +1252,39 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
   await throwIfCancellationRequested();
 
   const clusterFinalizeStage = stageTracker.startStage("cluster_finalize", "聚合收尾");
+  taskStages.clusterFinalize = clusterFinalizeStage;
   await emitTaskProgress("running");
   try {
+    const recomputeResults: ClusterRecomputeResult[] = [];
+
     // Recompute only affected clusters instead of all clusters
     await runWithConcurrency(
       [...affectedClusterIds].map((clusterId) => async () => {
-        await recomputeCluster(clusterId, trackedAiProvider);
+        const result = await recomputeCluster(clusterId, trackedAiProvider);
+        recomputeResults.push(result);
       }),
       Math.max(1, Math.min(3, sourceConcurrency)),
     );
+
+    for (const result of recomputeResults) {
+      timelineCounters.clusterFinalize.recomputed += 1;
+
+      if (result.updated) {
+        timelineCounters.clusterFinalize.updated += 1;
+      }
+
+      if (result.deleted) {
+        timelineCounters.clusterFinalize.deleted += 1;
+      }
+
+      if (result.summaryAttempted) {
+        if (result.summarySucceeded) {
+          timelineCounters.clusterFinalize.summarySucceeded += 1;
+        } else {
+          timelineCounters.clusterFinalize.summaryFailed += 1;
+        }
+      }
+    }
   } finally {
     stageTracker.finishStage(clusterFinalizeStage);
   }
@@ -888,6 +1320,11 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
     aiCallBreakdown: aiUsage.snapshot().breakdown,
     errorSummary: completedRun.errorSummary,
     stageTimings: stageTracker.snapshot(),
+    taskTimeline: buildIngestionTaskTimeline({
+      counters: timelineCounters,
+      stages: taskStages,
+      modelNames: taskTimelineModelNames,
+    }),
   });
 
   return completedRun;
@@ -921,6 +1358,7 @@ async function runExistingFetchRun(run: FetchRun, options: ResolvedRunOptions) {
         fullTextFetchedCount: error.snapshot.fullTextFetchedCount,
         errorSummary: cancelledRun.errorSummary,
         stageTimings: error.snapshot.stageTimings,
+        taskTimeline: error.snapshot.taskTimeline,
       });
 
       invalidateFeedCache();
@@ -947,6 +1385,7 @@ async function runExistingFetchRun(run: FetchRun, options: ResolvedRunOptions) {
       itemsAdded: failedRun.itemsAdded,
       fullTextFetchedCount: 0,
       errorSummary: failedRun.errorSummary,
+      taskTimeline: [],
     });
 
     invalidateFeedCache();
@@ -1013,6 +1452,7 @@ export async function runIngestionTask(taskRun: BackgroundTaskRun, options?: Par
   let latestAiCallCountEstimated = 0;
   let latestAiCallBreakdown: TaskAiCallBreakdownSnapshot[] = [];
   let latestStageTimings: TaskStageTimingSnapshot[] = [];
+  let latestTaskTimeline: TaskTimelineNodeSnapshot[] = createInitialIngestionTaskTimeline();
   let latestFullTextFetchedCount = 0;
 
   await updateTaskRun(taskRun.id, {
@@ -1023,6 +1463,7 @@ export async function runIngestionTask(taskRun: BackgroundTaskRun, options?: Par
     aiCallCountActual: 0,
     aiCallCountEstimated: 0,
     aiCallBreakdown: [],
+    taskTimeline: latestTaskTimeline,
   });
 
   const completedRun = await runExistingFetchRun(run, {
@@ -1032,6 +1473,7 @@ export async function runIngestionTask(taskRun: BackgroundTaskRun, options?: Par
       latestAiCallCountEstimated = snapshot.aiCallCountEstimated ?? latestAiCallCountEstimated;
       latestAiCallBreakdown = snapshot.aiCallBreakdown ?? latestAiCallBreakdown;
       latestStageTimings = snapshot.stageTimings ?? latestStageTimings;
+      latestTaskTimeline = snapshot.taskTimeline ?? latestTaskTimeline;
       latestFullTextFetchedCount = snapshot.fullTextFetchedCount;
       await updateTaskRun(taskRun.id, {
         status: snapshot.status,
@@ -1045,6 +1487,7 @@ export async function runIngestionTask(taskRun: BackgroundTaskRun, options?: Par
         aiCallBreakdown: latestAiCallBreakdown,
         errorSummary: snapshot.errorSummary ?? null,
         stageTimings: snapshot.stageTimings ?? [],
+        taskTimeline: snapshot.taskTimeline ?? latestTaskTimeline,
         finishedAt:
           snapshot.status === "running"
             ? null
@@ -1071,6 +1514,7 @@ export async function runIngestionTask(taskRun: BackgroundTaskRun, options?: Par
     aiCallBreakdown: latestAiCallBreakdown,
     errorSummary: completedRun.errorSummary ?? null,
     stageTimings: latestStageTimings,
+    taskTimeline: latestTaskTimeline,
     finishedAt: completedRun.finishedAt,
   });
 

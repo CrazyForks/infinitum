@@ -4,6 +4,7 @@ import type { AiProvider } from "@/lib/ai/provider";
 import type {
   TaskAiCallBreakdownSnapshot,
   TaskStageTimingSnapshot,
+  TaskTimelineNodeSnapshot,
 } from "@/lib/tasks/types";
 
 export type ParsedFeedItem = {
@@ -37,6 +38,21 @@ export type ProcessedItemRecord = {
   isNew: boolean;
   affectedClusterId?: string | null;
   fullTextFetched?: boolean;
+  metrics?: {
+    blacklistFiltered?: boolean;
+    reusedExisting?: boolean;
+    summaryCompleted?: boolean;
+    summaryFailed?: boolean;
+    analysisCompleted?: boolean;
+    analysisFiltered?: boolean;
+    clusterAssignment?: {
+      exactMatch?: boolean;
+      cheapRankDirect?: boolean;
+      aiMatch?: boolean;
+      skippedIncompleteSignature?: boolean;
+      newCluster?: boolean;
+    };
+  };
 };
 
 export type RunIngestionOptions = {
@@ -64,5 +80,6 @@ export type RunIngestionOptions = {
     aiCallBreakdown?: TaskAiCallBreakdownSnapshot[];
     errorSummary?: string | null;
     stageTimings?: TaskStageTimingSnapshot[];
+    taskTimeline?: TaskTimelineNodeSnapshot[];
   }) => Promise<void> | void;
 };

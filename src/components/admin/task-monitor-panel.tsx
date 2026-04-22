@@ -97,16 +97,39 @@ function formatDuration(durationMs: number | null) {
   return `${minutes}分 ${seconds}s`;
 }
 
-function formatAiCallBreakdown(task: TaskRunSnapshot) {
-  const breakdownMap = new Map((task.aiCallBreakdown ?? []).map((entry) => [entry.key, entry]));
-  const itemAnalysisCount = breakdownMap.get("item_analysis")?.actual ?? 0;
-  const clusterMatchCount = breakdownMap.get("cluster_match")?.actual ?? 0;
-  const clusterSummaryCount = breakdownMap.get("cluster_summary")?.actual ?? 0;
+function formatTaskTimelineDetail(task: TaskRunSnapshot, node: NonNullable<TaskRunSnapshot["taskTimeline"]>[number]) {
+  const metricMap = new Map(node.metrics.map((metric) => [metric.label, metric.value]));
+  const getValue = (label: string) => metricMap.get(label) ?? 0;
 
-  return `内容分析 ${itemAnalysisCount} 条，聚合匹配 ${clusterMatchCount} 条，聚合摘要 ${clusterSummaryCount} 条`;
+  switch (node.key) {
+    case "source_fetch":
+      return `抓取 ${getValue("抓取源")} 个源 · ${getValue("抓取内容")} 篇内容 · 正文补抓 ${getValue("正文补抓")} 篇`;
+    case "rule_filter":
+      return `黑名单 ${getValue("命中黑名单")} · 复用 ${getValue("复用已有处理")}`;
+    case "item_summary":
+      return `完成 ${getValue("完成")} · 失败 ${getValue("失败")}${node.modelName ? ` · 模型 ${node.modelName}` : ""}`;
+    case "item_analysis":
+      return `完成 ${getValue("完成")} · 过滤 ${getValue("过滤")}${node.modelName ? ` · 模型 ${node.modelName}` : ""}`;
+    case "cluster_assignment":
+      return `指纹命中 ${getValue("指纹命中")} · 本地直连 ${getValue("本地直连")} · AI归组 ${getValue("AI归组")} · 跳过 ${getValue("跳过")} · 新建 ${getValue("新建")}${node.modelName ? ` · 模型 ${node.modelName}` : ""}`;
+    case "cluster_finalize":
+      return `参与重算 ${getValue("参与重算")} · 完成更新 ${getValue("完成更新")} · 摘要完成 ${getValue("摘要完成")} · 摘要失败 ${getValue("摘要失败")} · 已删除 ${getValue("已删除")}${node.modelName ? ` · 模型 ${node.modelName}` : ""}`;
+    default:
+      return task.progressLabel ?? statusLabels[task.status];
+  }
 }
 
 function buildTaskTimeline(task: TaskRunSnapshot) {
+  if (task.taskTimeline && task.taskTimeline.length > 0) {
+    return task.taskTimeline.map((node) => ({
+      key: node.key,
+      title: node.label,
+      time: node.finishedAt ?? node.startedAt,
+      detail: formatTaskTimelineDetail(task, node),
+      isActive: node.status === "running",
+    }));
+  }
+
   const timeline: Array<{
     key: string;
     title: string;
@@ -118,9 +141,9 @@ function buildTaskTimeline(task: TaskRunSnapshot) {
   if (task.startedAt) {
     timeline.push({
       key: "task_started",
-      title: "任务开始",
+      title: kindLabels[task.kind],
       time: task.startedAt,
-      detail: kindLabels[task.kind],
+      detail: "开始",
       isActive: task.status === "running" && task.stageTimings.length === 0,
     });
   }
@@ -128,9 +151,9 @@ function buildTaskTimeline(task: TaskRunSnapshot) {
   for (const stageTiming of task.stageTimings) {
     timeline.push({
       key: stageTiming.key,
-      title: stageTiming.finishedAt ? `${stageTiming.label}完成` : `${stageTiming.label}进行中`,
+      title: stageTiming.label,
       time: stageTiming.finishedAt ?? stageTiming.startedAt,
-      detail: `耗时 ${formatDuration(stageTiming.durationMs)}`,
+      detail: stageTiming.finishedAt ? `耗时 ${formatDuration(stageTiming.durationMs)}` : "进行中",
       isActive: !stageTiming.finishedAt,
     });
   }
@@ -140,12 +163,14 @@ function buildTaskTimeline(task: TaskRunSnapshot) {
       key: "task_finished",
       title:
         task.status === "cancelled"
-          ? "任务已取消"
+          ? "已取消"
           : task.status === "failed"
-            ? "任务失败"
-            : "任务完成",
+            ? "失败"
+            : task.status === "partial"
+              ? "部分成功"
+              : "已完成",
       time: task.finishedAt,
-      detail: task.errorSummary ?? statusLabels[task.status],
+      detail: task.errorSummary ?? task.progressLabel ?? statusLabels[task.status],
       isActive: false,
     });
   }
@@ -308,71 +333,24 @@ function TaskDetailModal({
           </div>
         </div>
 
-        {/* Progress */}
-        {task.progressTotal > 0 && (
-          <div className="space-y-2">
-            <div className="flex items-center justify-between gap-3">
-              <h4 className="text-sm font-semibold text-[var(--text-1)]">
-                进度
-              </h4>
-              {onRefresh ? (
-                <IconButton
-                  onClick={onRefresh}
-                  variant="secondary"
-                  size="sm"
-                  title="刷新进度"
-                  disabled={isRefreshing}
-                >
-                  <IconRotateCw className={cx("h-4 w-4", isRefreshing && "animate-spin")} />
-                </IconButton>
-              ) : null}
-            </div>
-            <div className="w-full bg-[var(--surface)] rounded-full h-2">
-              <div
-                className="bg-[var(--accent)] h-2 rounded-full transition-all"
-                style={{
-                  width: `${Math.round((task.progressCurrent / task.progressTotal) * 100)}%`,
-                }}
-              />
-            </div>
-            <div className="text-sm text-[var(--text-2)]">
-              {task.progressCurrent} / {task.progressTotal}
-              {task.progressLabel ? ` · ${task.progressLabel}` : ""}
-            </div>
-            <div
-              className={cx(
-                "text-sm",
-                task.itemsAdded > 0 || (task.fullTextFetchedCount ?? 0) > 0
-                  ? "text-[var(--success-ink)]"
-                  : "text-[var(--text-3)]",
-              )}
-            >
-              实际新增 {task.itemsAdded} 条内容 · 正文补抓 {task.fullTextFetchedCount ?? 0} 篇
-            </div>
-          </div>
-        )}
-
-        {/* AI Calls */}
-        {(task.aiCallCountActual > 0 || task.aiCallCountEstimated > 0) && (
-          <div className="space-y-2">
-            <h4 className="text-sm font-semibold text-[var(--text-1)]">
-              AI 调用
-            </h4>
-            <div className="text-sm text-[var(--text-2)]">
-              实际: {task.aiCallCountActual}
-              {task.aiCallCountEstimated > 0
-                ? ` / 预估: ${task.aiCallCountEstimated}`
-                : ""}
-              {` · ${formatAiCallBreakdown(task)}`}
-            </div>
-          </div>
-        )}
-
         {/* Timeline */}
         <div className="space-y-2">
-          <h4 className="text-sm font-semibold text-[var(--text-1)]">
-            时间线
-          </h4>
+          <div className="flex items-center justify-between gap-3">
+            <h4 className="text-sm font-semibold text-[var(--text-1)]">
+              时间线
+            </h4>
+            {onRefresh ? (
+              <IconButton
+                onClick={onRefresh}
+                variant="secondary"
+                size="sm"
+                title="刷新进度"
+                disabled={isRefreshing}
+              >
+                <IconRotateCw className={cx("h-4 w-4", isRefreshing && "animate-spin")} />
+              </IconButton>
+            ) : null}
+          </div>
           <div className="space-y-3">
             {buildTaskTimeline(task).length === 0 ? (
               <div className="rounded-md border border-[color:var(--line)] bg-[var(--bg-muted)] px-3 py-2 text-sm text-[var(--text-3)]">

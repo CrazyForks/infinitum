@@ -15,12 +15,33 @@ type RegenerationOptions = {
   aiProvider?: AiProvider;
 };
 
-function getItemAnalysisInput(item: Item): string {
+function getItemSourceText(item: Item): string {
   return item.fullText || item.rssContent || item.rssExcerpt || item.originalTitle;
 }
 
 function normalizeSummary(summary: string | null | undefined): string | null {
   return stripHtmlTags(summary) || null;
+}
+
+async function resolveItemSummary(
+  aiProvider: AiProvider,
+  item: Item & { source: { name: string } },
+  options?: {
+    reuseExisting?: boolean;
+  },
+): Promise<string | null> {
+  const existingSummary = options?.reuseExisting ? normalizeSummary(item.summaryText) : null;
+
+  if (existingSummary) {
+    return existingSummary;
+  }
+
+  return normalizeSummary(
+    await aiProvider.summarizeItem(getItemSourceText(item), {
+      title: item.originalTitle,
+      sourceName: item.source.name,
+    }),
+  );
 }
 
 function serializeEventSignature(eventSignature?: {
@@ -46,6 +67,7 @@ async function resolveAiProvider(aiProvider?: AiProvider) {
 
   const runtimeConfig = await getIngestionRuntimeConfig();
   return createAiProvider(runtimeConfig.modelApi, {
+    itemSummary: runtimeConfig.selectedPromptConfigs?.itemSummary,
     itemAnalysis: runtimeConfig.selectedPromptConfigs?.itemAnalysis,
     clusterSummary: runtimeConfig.selectedPromptConfigs?.clusterSummary,
     clusterMatch: runtimeConfig.selectedPromptConfigs?.clusterMatch,
@@ -87,26 +109,33 @@ export async function regenerateItemContent(
   const aiProvider = await resolveAiProvider(options?.aiProvider);
 
   try {
-    const enrichment = await aiProvider.enrichContent(getItemAnalysisInput(item), {
-      title: item.originalTitle,
-      sourceName: item.source.name,
-      translateTitle: target === "translation" && shouldTranslateTitle(item.originalTitle),
-    });
+    if (target === "translation") {
+      const summaryInput = (await resolveItemSummary(aiProvider, item, { reuseExisting: true })) || item.originalTitle;
+      const enrichment = await aiProvider.enrichContent(summaryInput, {
+        title: item.originalTitle,
+        sourceName: item.source.name,
+        translateTitle: shouldTranslateTitle(item.originalTitle),
+      });
 
-    await prisma.item.update({
-      where: { id: item.id },
-      data:
-        target === "translation"
-          ? {
-              translatedTitle:
-                shouldTranslateTitle(item.originalTitle) ? enrichment.translatedTitle?.trim() || item.originalTitle : item.translatedTitle,
-              errorMessage: null,
-            }
-          : {
-              summaryText: normalizeSummary(enrichment.summary) || item.summaryText,
-              errorMessage: null,
-            },
-    });
+      await prisma.item.update({
+        where: { id: item.id },
+        data: {
+          translatedTitle:
+            shouldTranslateTitle(item.originalTitle) ? enrichment.translatedTitle?.trim() || item.originalTitle : item.translatedTitle,
+          errorMessage: null,
+        },
+      });
+    } else {
+      const summaryText = await resolveItemSummary(aiProvider, item);
+
+      await prisma.item.update({
+        where: { id: item.id },
+        data: {
+          summaryText: summaryText || item.summaryText,
+          errorMessage: null,
+        },
+      });
+    }
 
     if (item.clusterId) {
       await recomputeCluster(item.clusterId, aiProvider);
@@ -137,8 +166,10 @@ export async function executeItemRegenerationTask(
     throw new Error("Task entityId is required.");
   }
 
-  const aiUsage = createTaskAiUsageTracker(1);
-  const trackedAiProvider = aiUsage.wrapProvider(await resolveAiProvider(options?.aiProvider));
+  const aiUsage = createTaskAiUsageTracker(target === "translation" ? 1 : 1, target === "translation" ? "item_analysis" : "item_summary");
+  const trackedAiProvider = aiUsage.wrapProvider(await resolveAiProvider(options?.aiProvider), {
+    summarizeItemEstimated: target === "translation",
+  });
   const initialAiUsage = aiUsage.snapshot();
 
   await updateTaskRun(taskRun.id, {
@@ -239,6 +270,34 @@ export async function manuallyFilterItem(itemId: string, options?: RegenerationO
   });
 }
 
+export async function deleteItem(itemId: string, options?: RegenerationOptions) {
+  const item = await prisma.item.findUnique({
+    where: { id: itemId },
+    include: { source: true },
+  });
+
+  if (!item) {
+    throw new Error("Item not found");
+  }
+
+  const previousClusterId = item.clusterId;
+
+  await prisma.item.delete({
+    where: { id: item.id },
+  });
+
+  if (previousClusterId) {
+    await recomputeCluster(previousClusterId, options?.aiProvider);
+  }
+
+  invalidateFeedCache();
+
+  return {
+    id: item.id,
+    previousClusterId,
+  };
+}
+
 export async function reanalyzeItem(itemId: string, options?: RegenerationOptions) {
   const item = await prisma.item.findUnique({
     where: { id: itemId },
@@ -250,7 +309,8 @@ export async function reanalyzeItem(itemId: string, options?: RegenerationOption
   }
 
   const aiProvider = await resolveAiProvider(options?.aiProvider);
-  const analysis = await aiProvider.enrichContent(getItemAnalysisInput(item), {
+  const summaryText = (await resolveItemSummary(aiProvider, item)) || item.originalTitle;
+  const analysis = await aiProvider.enrichContent(summaryText, {
     title: item.originalTitle,
     sourceName: item.source.name,
     translateTitle: shouldTranslateTitle(item.originalTitle),
@@ -265,7 +325,7 @@ export async function reanalyzeItem(itemId: string, options?: RegenerationOption
     data: {
       translatedTitle:
         shouldTranslateTitle(item.originalTitle) ? analysis.translatedTitle?.trim() || item.originalTitle : item.translatedTitle,
-      summaryText: normalizeSummary(analysis.summary) || item.summaryText,
+      summaryText: summaryText || item.summaryText,
       moderationStatus,
       moderationReason: analysis.moderationReason,
       moderationDetail: analysis.moderationDetail,
@@ -312,7 +372,10 @@ export async function executeItemReanalyzeTask(
   }
 
   const aiUsage = createTaskAiUsageTracker(1);
-  const trackedAiProvider = aiUsage.wrapProvider(await resolveAiProvider(options?.aiProvider));
+  aiUsage.addEstimated(1, "item_analysis");
+  const trackedAiProvider = aiUsage.wrapProvider(await resolveAiProvider(options?.aiProvider), {
+    summarizeItemEstimated: false,
+  });
   const initialAiUsage = aiUsage.snapshot();
 
   await updateTaskRun(taskRun.id, {

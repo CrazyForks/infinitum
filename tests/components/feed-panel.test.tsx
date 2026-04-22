@@ -971,7 +971,9 @@ describe("FeedPanel", () => {
       });
     });
 
-    expect(await screen.findByText("已创建后台任务，完成后会自动重算所属聚合。")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(pushMock).toHaveBeenCalledWith("/admin?tab=monitoring&section=tasks&task=task-cluster-child-1");
+    });
   });
 
   it("renders an admin-specific empty state hint", () => {
@@ -1288,8 +1290,9 @@ describe("FeedPanel", () => {
       });
     });
 
-    expect(await screen.findByText("已创建后台任务，正在处理中。")).toBeInTheDocument();
-    expect(screen.getByText("已创建后台任务，正在处理中。").closest('[role="status"]')).not.toBeNull();
+    await waitFor(() => {
+      expect(pushMock).toHaveBeenCalledWith("/admin?tab=monitoring&section=tasks&task=task-2");
+    });
     expect(screen.getByText("摘要内容")).toBeInTheDocument();
   });
 
@@ -1482,6 +1485,81 @@ describe("FeedPanel", () => {
     expect(await screen.findByText("已手动过滤该内容。")).toBeInTheDocument();
   });
 
+  it("shows a confirmation dialog before deleting a homepage card", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
+      const url = getFetchUrl(input);
+
+      if (url === "/api/admin/items/item-1") {
+        expect(init?.method).toBe("DELETE");
+
+        return new Response(
+          JSON.stringify({
+            success: true,
+          }),
+        );
+      }
+
+      if (url === "/api/feed?range=7d&sort=time_desc&tzOffsetMinutes=-480") {
+        return new Response(
+          JSON.stringify({
+            items: [initialEntries[0]],
+            pagination: {
+              page: 1,
+              size: 20,
+              total: 1,
+              totalPages: 1,
+            },
+            range: "7d" satisfies FeedRange,
+            sort: "time_desc" satisfies FeedSort,
+            start: null,
+            end: null,
+            groupId: null,
+            sourceId: null,
+            title: null,
+          }),
+        );
+      }
+
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <FeedPanel
+        initialItems={initialEntries}
+        initialRange="7d"
+        initialSort="time_desc"
+        initialStartDate={null}
+        initialEndDate={null}
+        initialNextCursor={null}
+        initialStatus={null}
+        isAdmin
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "删除内容：中文标题" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "确认删除内容" });
+    expect(within(dialog).getByText("删除后会立即从主页列表移除，并自动重算所属聚合。")).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/admin/items/item-1", {
+        method: "DELETE",
+        headers: {
+          "content-type": "application/json",
+        },
+      });
+    });
+
+    expect(await screen.findByText("已删除该内容。")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByRole("heading", { name: "中文标题" })).not.toBeInTheDocument();
+    });
+  });
+
   it("can queue both translation and summary from the regenerate dialog", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input) => {
@@ -1530,6 +1608,10 @@ describe("FeedPanel", () => {
         body: JSON.stringify({ target: "summary" }),
       });
     });
+
+    await waitFor(() => {
+      expect(pushMock).toHaveBeenCalledWith("/admin?tab=monitoring&section=tasks&task=task-both");
+    });
   });
 
   it("renders homepage cards with a top-right icon action area and full-width summary copy", () => {
@@ -1556,6 +1638,30 @@ describe("FeedPanel", () => {
     expect(regenerateButton.querySelector("svg")?.getAttribute("viewBox")).toBe("0 0 24 24");
     expect(singleSummary.className).not.toContain("max-w-4xl");
     expect(clusterSummary.className).not.toContain("max-w-4xl");
+  });
+
+  it("renders the regenerate range select at full width inside the dialog", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <FeedPanel
+        initialItems={initialEntries}
+        initialRange="7d"
+        initialSort="time_desc"
+        initialStartDate={null}
+        initialEndDate={null}
+        initialNextCursor={null}
+        initialStatus={null}
+        isAdmin
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "重新生成内容" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "选择重新生成内容" });
+    const select = within(dialog).getByRole("combobox", { name: "重新生成范围" });
+
+    expect(select.className).toContain("w-full");
   });
 
   it("keeps homepage cards visually close to Lumina's text-led article rows", () => {

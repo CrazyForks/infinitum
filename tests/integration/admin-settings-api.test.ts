@@ -54,15 +54,16 @@ describe("/api/admin/settings", () => {
       promptConfigs: [
         {
           id: "prompt-1",
-          name: "默认内容分析提示词",
-          type: "item_analysis",
-          prompt: "标题：{{title}}",
-          systemPrompt: "分析内容",
+          name: "默认条目摘要提示词",
+          type: "item_summary",
+          prompt: "标题：{{title}}\n来源：{{sourceName}}\n正文：{{inputText}}",
+          systemPrompt: "摘要内容",
           temperature: null,
           maxTokens: null,
           topP: null,
           modelApiConfigId: "model-1",
           modelApiConfigName: "默认模型配置",
+          isUsingDefaultModel: false,
           isEnabled: true,
           isDefault: true,
           createdAt: "2026-04-20T10:00:00.000Z",
@@ -94,7 +95,7 @@ describe("/api/admin/settings", () => {
 
     expect(response.status).toBe(200);
     expect(json.modelApiConfigs[0].apiKeyMasked).toBe("••••••••••••");
-    expect(json.promptConfigs[0].type).toBe("item_analysis");
+    expect(json.promptConfigs[0].type).toBe("item_summary");
     expect(json.taskSchedule.key).toBe("ingestion_default");
   });
 
@@ -171,10 +172,10 @@ describe("/api/admin/settings", () => {
       new Request("http://localhost/api/admin/settings/prompt-configs", {
         method: "POST",
         body: JSON.stringify({
-          name: "默认内容分析提示词",
-          type: "item_analysis",
-          prompt: "标题：{{title}}",
-          systemPrompt: "分析内容",
+          name: "默认条目摘要提示词",
+          type: "item_summary",
+          prompt: "标题：{{title}}\n来源：{{sourceName}}\n正文：{{inputText}}",
+          systemPrompt: "摘要内容",
           temperature: null,
           maxTokens: null,
           topP: null,
@@ -190,10 +191,10 @@ describe("/api/admin/settings", () => {
 
     expect(response.status).toBe(201);
     expect(createPromptConfig).toHaveBeenCalledWith({
-      name: "默认内容分析提示词",
-      type: "item_analysis",
-      prompt: "标题：{{title}}",
-      systemPrompt: "分析内容",
+      name: "默认条目摘要提示词",
+      type: "item_summary",
+      prompt: "标题：{{title}}\n来源：{{sourceName}}\n正文：{{inputText}}",
+      systemPrompt: "摘要内容",
       temperature: null,
       maxTokens: null,
       topP: null,

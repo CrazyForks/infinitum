@@ -37,7 +37,40 @@ export type TaskStageTimingSnapshot = {
   durationMs: number | null;
 };
 
+export type TaskTimelineNodeKey =
+  | "source_fetch"
+  | "rule_filter"
+  | "item_summary"
+  | "item_analysis"
+  | "cluster_assignment"
+  | "cluster_finalize";
+
+export type TaskTimelineNodeStatus =
+  | "pending"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "partial"
+  | "skipped";
+
+export type TaskTimelineMetricSnapshot = {
+  label: string;
+  value: number;
+};
+
+export type TaskTimelineNodeSnapshot = {
+  key: TaskTimelineNodeKey;
+  label: string;
+  status: TaskTimelineNodeStatus;
+  startedAt: string | null;
+  finishedAt: string | null;
+  durationMs: number | null;
+  modelName?: string | null;
+  metrics: TaskTimelineMetricSnapshot[];
+};
+
 export type TaskAiCallBreakdownKey =
+  | "item_summary"
   | "item_analysis"
   | "cluster_match"
   | "cluster_summary";
@@ -69,6 +102,7 @@ export type TaskRunSnapshot = {
   finishedAt: string | null;
   errorSummary: string | null;
   stageTimings: TaskStageTimingSnapshot[];
+  taskTimeline?: TaskTimelineNodeSnapshot[];
 };
 
 export type TaskScheduleSnapshot = {
