@@ -4,7 +4,7 @@ import { startTransition, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-import { IconGithub, IconLock, IconLogout, IconSettings } from "@/components/ui/icons";
+import { IconGithub, IconLock, IconLogout, IconRss, IconSettings } from "@/components/ui/icons";
 import { cx } from "@/lib/ui/cx";
 
 type GlobalHeaderProps = {
@@ -44,6 +44,14 @@ export function GlobalHeader({ activeNav, isAdmin }: GlobalHeaderProps) {
         setIsPending(false);
       }
     });
+  };
+
+  const openRss = () => {
+    if (typeof window === "undefined") return;
+    // 构建 RSS URL，使用当前页面的查询参数
+    const currentUrl = new URL(window.location.href);
+    const rssUrl = `/api/feed/rss${currentUrl.search}`;
+    window.open(rssUrl, "_blank", "noopener,noreferrer");
   };
 
   return (
@@ -101,6 +109,15 @@ export function GlobalHeader({ activeNav, isAdmin }: GlobalHeaderProps) {
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={openRss}
+            className={headerIconButtonClass}
+            aria-label="RSS 订阅"
+            title="RSS 订阅"
+          >
+            <IconRss className="h-4 w-4" />
+          </button>
           <a
             href="https://github.com/shawnxie94/infinitum"
             target="_blank"

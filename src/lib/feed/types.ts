@@ -29,6 +29,7 @@ export type FeedSingleEntryDTO = {
   title: string;
   originalUrl: string;
   publishedAt: string;
+  createdAt: string;
   latestPublishedAt: string;
   sourceName: string;
   author?: string | null;
@@ -57,6 +58,7 @@ export type FeedClusterEntryDTO = {
   title: string;
   summary: string;
   publishedAt: string;
+  createdAt: string;
   latestPublishedAt: string;
   score: number;
   sourceCount: number;

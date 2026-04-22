@@ -1,7 +1,7 @@
 import { listFeedFilterOptions, listFeedItems, getLatestFetchRun, toFetchRunSnapshot } from "@/lib/feed/repository";
 import { withFeedCache } from "@/lib/feed/cache";
 
-const FEED_LIST_CACHE_TTL_MS = 30_000;
+const FEED_LIST_CACHE_TTL_MS = 60 * 60 * 1000; // 1 小时
 const FEED_FILTER_OPTIONS_CACHE_TTL_MS = 5 * 60_000;
 const FEED_STATUS_CACHE_TTL_MS = 15_000;
 

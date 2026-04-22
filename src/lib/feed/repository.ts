@@ -31,6 +31,7 @@ type FeedEntryRow = {
   title: string;
   summary: string | null;
   latestPublishedAt: Date | string;
+  createdAt: Date | string;
   score: number | bigint;
   sourceCount: number | bigint;
   itemCount: number | bigint;
@@ -192,6 +193,7 @@ export function mapItemToFeedItem(item: ItemWithSource): FeedItemDTO {
     title: getDisplayTitle(item.originalTitle, item.translatedTitle),
     originalUrl: item.originalUrl,
     publishedAt: item.publishedAt.toISOString(),
+    createdAt: item.createdAt.toISOString(),
     latestPublishedAt: item.publishedAt.toISOString(),
     sourceName: item.source.name,
     author: item.author,
@@ -303,6 +305,7 @@ function buildFeedEntryCandidatesCte(filters: FeedFilters & { rangeStart: Date |
         i."clusterId" AS "clusterId",
         i."sourceId" AS "sourceId",
         i."publishedAt" AS "publishedAt",
+        i."createdAt" AS "createdAt",
         i."qualityScore" AS "qualityScore",
         i."originalTitle" AS "originalTitle",
         i."translatedTitle" AS "translatedTitle",
@@ -319,6 +322,7 @@ function buildFeedEntryCandidatesCte(filters: FeedFilters & { rangeStart: Date |
         MIN(fi."clusterTitle") AS title,
         MIN(fi."clusterSummary") AS summary,
         MAX(fi."publishedAt") AS "latestPublishedAt",
+        MAX(fi."createdAt") AS "createdAt",
         CAST(ROUND(AVG(fi."qualityScore")) AS INTEGER) AS score,
         COUNT(*) AS "itemCount",
         COUNT(DISTINCT fi."sourceId") AS "sourceCount"
@@ -333,6 +337,7 @@ function buildFeedEntryCandidatesCte(filters: FeedFilters & { rangeStart: Date |
         COALESCE(NULLIF(TRIM(fi."translatedTitle"), ''), fi."originalTitle") AS title,
         NULL AS summary,
         fi."publishedAt" AS "latestPublishedAt",
+        fi."createdAt" AS "createdAt",
         fi."qualityScore" AS score,
         1 AS "sourceCount",
         1 AS "itemCount"
@@ -347,6 +352,7 @@ function buildFeedEntryCandidatesCte(filters: FeedFilters & { rangeStart: Date |
         cg.title AS title,
         cg.summary AS summary,
         cg."latestPublishedAt" AS "latestPublishedAt",
+        cg."createdAt" AS "createdAt",
         cg.score AS score,
         cg."sourceCount" AS "sourceCount",
         cg."itemCount" AS "itemCount"
@@ -354,10 +360,10 @@ function buildFeedEntryCandidatesCte(filters: FeedFilters & { rangeStart: Date |
       WHERE cg."itemCount" > 1
     ),
     entry_candidates AS (
-      SELECT id, type, title, summary, "latestPublishedAt", score, "sourceCount", "itemCount"
+      SELECT id, type, title, summary, "latestPublishedAt", "createdAt", score, "sourceCount", "itemCount"
       FROM cluster_entries
       UNION ALL
-      SELECT id, type, title, summary, "latestPublishedAt", score, "sourceCount", "itemCount"
+      SELECT id, type, title, summary, "latestPublishedAt", "createdAt", score, "sourceCount", "itemCount"
       FROM single_entries
     )
   `;
@@ -487,6 +493,7 @@ export async function listFeedItems(
       title,
       summary,
       "latestPublishedAt",
+      "createdAt",
       score,
       "sourceCount",
       "itemCount"
@@ -551,6 +558,7 @@ export async function listFeedItems(
         title: row.title,
         summary: row.summary ?? "",
         publishedAt: toIsoString(row.latestPublishedAt),
+        createdAt: toIsoString(row.createdAt),
         latestPublishedAt: toIsoString(row.latestPublishedAt),
         score: toNumber(row.score),
         sourceCount: toNumber(row.sourceCount),
