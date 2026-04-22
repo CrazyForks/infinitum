@@ -107,23 +107,27 @@ function formatTaskTimelineDetail(task: TaskRunSnapshot, node: NonNullable<TaskR
     case "rule_filter":
       return `黑名单 ${getValue("命中黑名单")} · 复用 ${getValue("复用已有处理")}`;
     case "item_summary":
-      return `完成 ${getValue("完成")} · 失败 ${getValue("失败")}${node.modelName ? ` · 模型 ${node.modelName}` : ""}`;
+      return `完成 ${getValue("完成")} · 失败 ${getValue("失败")}`;
     case "item_analysis":
-      return `完成 ${getValue("完成")} · 过滤 ${getValue("过滤")}${node.modelName ? ` · 模型 ${node.modelName}` : ""}`;
+      return `完成 ${getValue("完成")} · 过滤 ${getValue("过滤")}`;
     case "cluster_assignment":
-      return `指纹命中 ${getValue("指纹命中")} · 本地直连 ${getValue("本地直连")} · AI归组 ${getValue("AI归组")} · 跳过 ${getValue("跳过")} · 新建 ${getValue("新建")}${node.modelName ? ` · 模型 ${node.modelName}` : ""}`;
+      return `指纹命中 ${getValue("指纹命中")} · 本地直连 ${getValue("本地直连")} · AI归组 ${getValue("AI归组")} · 跳过 ${getValue("跳过")} · 新建 ${getValue("新建")}`;
     case "cluster_finalize":
-      return `参与重算 ${getValue("参与重算")} · 完成更新 ${getValue("完成更新")} · 摘要完成 ${getValue("摘要完成")} · 摘要失败 ${getValue("摘要失败")} · 已删除 ${getValue("已删除")}${node.modelName ? ` · 模型 ${node.modelName}` : ""}`;
+      return `参与重算 ${getValue("参与重算")} · 完成更新 ${getValue("完成更新")} · 摘要完成 ${getValue("摘要完成")} · 摘要失败 ${getValue("摘要失败")} · 已删除 ${getValue("已删除")}`;
     default:
       return task.progressLabel ?? statusLabels[task.status];
   }
+}
+
+function formatTaskTimelineTitle(node: NonNullable<TaskRunSnapshot["taskTimeline"]>[number]) {
+  return node.modelName ? `${node.label} · 模型 ${node.modelName}` : node.label;
 }
 
 function buildTaskTimeline(task: TaskRunSnapshot) {
   if (task.taskTimeline && task.taskTimeline.length > 0) {
     return task.taskTimeline.map((node) => ({
       key: node.key,
-      title: node.label,
+      title: formatTaskTimelineTitle(node),
       time: node.finishedAt ?? node.startedAt,
       detail: formatTaskTimelineDetail(task, node),
       isActive: node.status === "running",

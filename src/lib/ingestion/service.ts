@@ -480,6 +480,19 @@ function buildFallbackSummary(rssExcerpt: string | null, fallbackBody: string | 
   return null;
 }
 
+function hasSucceededSummary(existing?: {
+  summaryStatus?: string | null;
+  summaryText?: string | null;
+} | null) {
+  return existing?.summaryStatus === "succeeded" && Boolean(stripHtmlTags(existing.summaryText));
+}
+
+function hasSucceededAnalysis(existing?: {
+  analysisStatus?: string | null;
+} | null) {
+  return existing?.analysisStatus === "succeeded";
+}
+
 function normalizeStoredEventType(value: string | null | undefined): AiEventSignature["eventType"] {
   return value && EVENT_TYPES.has(value as NonNullable<AiEventSignature["eventType"]>)
     ? (value as NonNullable<AiEventSignature["eventType"]>)
@@ -676,6 +689,12 @@ async function processFeedItem({
   let translatedTitle = existing?.translatedTitle ?? null;
   let summaryText = existing?.summaryText ?? null;
   let status: ProcessedItemRecord["status"] = existing?.status ?? "new";
+  let summaryStatus: "pending" | "succeeded" | "failed" = existing?.summaryStatus === "succeeded" || existing?.summaryStatus === "failed"
+    ? existing.summaryStatus
+    : "pending";
+  let analysisStatus: "pending" | "succeeded" | "failed" = existing?.analysisStatus === "succeeded" || existing?.analysisStatus === "failed"
+    ? existing.analysisStatus
+    : "pending";
   let filterReason: string | null = existing?.filterReason ?? null;
   let moderationStatus = existing?.moderationStatus ?? "allowed";
   let moderationReason = existing?.moderationReason ?? null;
@@ -692,7 +711,8 @@ async function processFeedItem({
   const canReuseExistingAnalysis = Boolean(
     existing &&
       !analysisInputsChanged &&
-      existing.aiProcessedAt &&
+      hasSucceededSummary(existing) &&
+      hasSucceededAnalysis(existing) &&
       existing.status !== "new" &&
       existing.status !== "fetched" &&
       existing.status !== "failed",
@@ -726,6 +746,8 @@ async function processFeedItem({
         summaryText,
         language: shouldTranslateTitle(originalTitle) ? "en" : "unknown",
         status: "filtered",
+        summaryStatus: "pending",
+        analysisStatus: "pending",
         filterReason: initialFilterMatch,
         moderationStatus: "filtered",
         moderationReason: "rule_blacklist",
@@ -737,7 +759,7 @@ async function processFeedItem({
         eventAction: eventSignature?.eventAction ?? null,
         eventObject: eventSignature?.eventObject ?? null,
         eventDate: eventSignature?.eventDate ?? null,
-        aiProcessedAt: new Date(),
+        aiProcessedAt: null,
         clusterId: null,
         errorMessage: null,
       },
@@ -778,6 +800,8 @@ async function processFeedItem({
         summaryText,
         language: existing?.language ?? (shouldTranslateTitle(originalTitle) ? "en" : "unknown"),
         status,
+        summaryStatus,
+        analysisStatus,
         filterReason,
         moderationStatus,
         moderationReason,
@@ -827,6 +851,8 @@ async function processFeedItem({
 
   if (filterMatch) {
     status = "filtered";
+    summaryStatus = "pending";
+    analysisStatus = "pending";
     filterReason = filterMatch;
     moderationStatus = "filtered";
     moderationReason = "rule_blacklist";
@@ -834,47 +860,62 @@ async function processFeedItem({
   } else if (aiParsingEnabled) {
     const translateTitle = shouldTranslateTitle(originalTitle);
     const summarySourceText = fullText || rssContent || rssExcerpt || originalTitle;
+    const canReuseExistingSummary = Boolean(existing && !analysisInputsChanged && hasSucceededSummary(existing));
+    const canReuseExistingCompletedAnalysis = Boolean(existing && !analysisInputsChanged && hasSucceededAnalysis(existing));
 
-    try {
-      summaryText = stripHtmlTags(
-        await aiProvider.summarizeItem(summarySourceText, {
-          title: originalTitle,
-          sourceName,
-        }),
-      ) || buildFallbackSummary(rssExcerpt, fullText || rssContent);
-      summaryCompleted = true;
-    } catch (error) {
-      appendIssue(issues, error, "Unknown item summary error");
-      summaryFailed = true;
-      summaryText = buildFallbackSummary(rssExcerpt, fullText || rssContent);
+    if (canReuseExistingSummary) {
+      summaryText = stripHtmlTags(existing?.summaryText) || buildFallbackSummary(rssExcerpt, fullText || rssContent);
+      summaryStatus = "succeeded";
+    } else {
+      try {
+        summaryText = stripHtmlTags(
+          await aiProvider.summarizeItem(summarySourceText, {
+            title: originalTitle,
+            sourceName,
+          }),
+        ) || buildFallbackSummary(rssExcerpt, fullText || rssContent);
+        summaryCompleted = true;
+        summaryStatus = "succeeded";
+      } catch (error) {
+        appendIssue(issues, error, "Unknown item summary error");
+        summaryFailed = true;
+        summaryStatus = "failed";
+        summaryText = buildFallbackSummary(rssExcerpt, fullText || rssContent);
+      }
     }
 
-    try {
-      const enrichment = await aiProvider.enrichContent(summaryText || originalTitle, {
-        title: originalTitle,
-        sourceName,
-        translateTitle,
-      });
+    if (canReuseExistingCompletedAnalysis) {
+      analysisStatus = "succeeded";
+    } else {
+      try {
+        const enrichment = await aiProvider.enrichContent(summaryText || originalTitle, {
+          title: originalTitle,
+          sourceName,
+          translateTitle,
+        });
 
-      if (translateTitle) {
-        translatedTitle = enrichment.translatedTitle?.trim() || originalTitle;
+        if (translateTitle) {
+          translatedTitle = enrichment.translatedTitle?.trim() || originalTitle;
+        }
+
+        moderationStatus = enrichment.moderationStatus === "restored" ? "allowed" : enrichment.moderationStatus;
+        moderationReason = enrichment.moderationReason;
+        moderationDetail = enrichment.moderationDetail;
+        qualityScore = enrichment.qualityScore;
+        qualityRationale = enrichment.qualityRationale;
+        eventSignature = enrichment.eventSignature;
+        analysisCompleted = true;
+        analysisStatus = "succeeded";
+      } catch (error) {
+        appendIssue(issues, error, "Unknown ai enrichment error");
+        moderationStatus = "allowed";
+        moderationReason = null;
+        moderationDetail = null;
+        qualityScore = 50;
+        qualityRationale = "AI analysis unavailable";
+        eventSignature = null;
+        analysisStatus = "failed";
       }
-
-      moderationStatus = enrichment.moderationStatus === "restored" ? "allowed" : enrichment.moderationStatus;
-      moderationReason = enrichment.moderationReason;
-      moderationDetail = enrichment.moderationDetail;
-      qualityScore = enrichment.qualityScore;
-      qualityRationale = enrichment.qualityRationale;
-      eventSignature = enrichment.eventSignature;
-      analysisCompleted = true;
-    } catch (error) {
-      appendIssue(issues, error, "Unknown ai enrichment error");
-      moderationStatus = "allowed";
-      moderationReason = null;
-      moderationDetail = null;
-      qualityScore = 50;
-      qualityRationale = "AI analysis unavailable";
-      eventSignature = null;
     }
 
     status = moderationStatus === "filtered" ? "filtered" : "processed";
@@ -887,6 +928,8 @@ async function processFeedItem({
     }
 
     summaryText = buildFallbackSummary(rssExcerpt, fullText || rssContent);
+    summaryStatus = "pending";
+    analysisStatus = "pending";
     moderationStatus = "allowed";
     moderationReason = null;
     moderationDetail = null;
@@ -918,6 +961,8 @@ async function processFeedItem({
       summaryText,
       language: shouldTranslateTitle(originalTitle) ? "en" : "unknown",
       status,
+      summaryStatus,
+      analysisStatus,
       filterReason,
       moderationStatus,
       moderationReason,
@@ -929,7 +974,7 @@ async function processFeedItem({
       eventAction: eventSignature?.eventAction ?? null,
       eventObject: eventSignature?.eventObject ?? null,
       eventDate: eventSignature?.eventDate ?? null,
-      aiProcessedAt: new Date(),
+      aiProcessedAt: analysisStatus === "succeeded" ? new Date() : null,
       clusterId: moderationStatus === "filtered" ? null : existing?.clusterId ?? null,
       errorMessage: issues.length > 0 ? issues.join(" | ") : null,
     },

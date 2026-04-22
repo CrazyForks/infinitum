@@ -17,7 +17,7 @@ export async function upsertDefaultIngestionSchedule() {
     update: {},
     create: {
       key: DEFAULT_INGESTION_SCHEDULE_KEY,
-      enabled: true,
+      enabled: false,
       cronExpression: DEFAULT_SCHEDULE_CRON_EXPRESSION,
       sourceConcurrency: DEFAULT_SOURCE_CONCURRENCY,
       fullTextFetchThreshold: DEFAULT_FULL_TEXT_FETCH_THRESHOLD,

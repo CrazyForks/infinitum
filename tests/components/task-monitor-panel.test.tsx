@@ -202,15 +202,17 @@ describe("TaskMonitorPanel", () => {
     expect(within(dialog).queryByText("AI 调用")).not.toBeInTheDocument();
     expect(within(dialog).getByText("信息抓取")).toBeInTheDocument();
     expect(within(dialog).getByText("规则过滤")).toBeInTheDocument();
-    expect(within(dialog).getByText("条目摘要")).toBeInTheDocument();
-    expect(within(dialog).getByText("内容分析")).toBeInTheDocument();
+    expect(within(dialog).getByText("条目摘要 · 模型 gpt-4.1-mini-summary")).toBeInTheDocument();
+    expect(within(dialog).getByText("内容分析 · 模型 gpt-4.1-mini-analysis")).toBeInTheDocument();
+    expect(within(dialog).getByText("归组决策 · 模型 gpt-4.1-mini-match")).toBeInTheDocument();
+    expect(within(dialog).getByText("聚合收尾 · 模型 gpt-4.1-mini-cluster")).toBeInTheDocument();
     expect(within(dialog).queryByText("进度")).not.toBeInTheDocument();
     expect(within(dialog).getByText("抓取 1 个源 · 10 篇内容 · 正文补抓 2 篇")).toBeInTheDocument();
     expect(within(dialog).getByText("黑名单 2 · 复用 1")).toBeInTheDocument();
-    expect(within(dialog).getByText("完成 5 · 失败 1 · 模型 gpt-4.1-mini-summary")).toBeInTheDocument();
-    expect(within(dialog).getByText("完成 4 · 过滤 2 · 模型 gpt-4.1-mini-analysis")).toBeInTheDocument();
-    expect(within(dialog).getByText("指纹命中 1 · 本地直连 2 · AI归组 1 · 跳过 0 · 新建 1 · 模型 gpt-4.1-mini-match")).toBeInTheDocument();
-    expect(within(dialog).getByText("参与重算 2 · 完成更新 2 · 摘要完成 1 · 摘要失败 0 · 已删除 0 · 模型 gpt-4.1-mini-cluster")).toBeInTheDocument();
+    expect(within(dialog).getByText("完成 5 · 失败 1")).toBeInTheDocument();
+    expect(within(dialog).getByText("完成 4 · 过滤 2")).toBeInTheDocument();
+    expect(within(dialog).getByText("指纹命中 1 · 本地直连 2 · AI归组 1 · 跳过 0 · 新建 1")).toBeInTheDocument();
+    expect(within(dialog).getByText("参与重算 2 · 完成更新 2 · 摘要完成 1 · 摘要失败 0 · 已删除 0")).toBeInTheDocument();
   });
 
   it("refreshes task progress from the task detail modal", async () => {

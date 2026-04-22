@@ -95,6 +95,10 @@ type PromptOverrides = {
   clusterMatch?: PromptRuntimeConfig;
 };
 
+type CompletionResponseFormat = {
+  type: "json_object";
+};
+
 function getClient(config: RuntimeConfig["modelApi"]): OpenAICompatibleClient | null {
   const apiKey = config.apiKey;
 
@@ -403,6 +407,9 @@ async function completeText(
   config: RuntimeConfig["modelApi"],
   promptConfig: PromptRuntimeConfig,
   userContent: string,
+  options?: {
+    responseFormat?: CompletionResponseFormat;
+  },
 ): Promise<string> {
   const response = await client.chat.completions.create({
     model: config.model,
@@ -419,6 +426,7 @@ async function completeText(
     max_tokens: promptConfig.maxTokens ?? undefined,
     temperature: promptConfig.temperature ?? undefined,
     top_p: promptConfig.topP ?? undefined,
+    response_format: options?.responseFormat,
   });
 
   return response.choices?.[0]?.message?.content?.trim() || "";
@@ -512,6 +520,9 @@ export function createAiProvider(
           executionConfig,
           itemAnalysisConfig,
           userContent,
+          {
+            responseFormat: { type: "json_object" },
+          },
         );
 
         const parsed = parseJsonLikeEnrichment(output, fallback, metadata.translateTitle);
@@ -572,6 +583,9 @@ export function createAiProvider(
           inputText: truncate(inputText, 2000),
           candidatesJson: JSON.stringify(metadata.candidates),
         }),
+        {
+          responseFormat: { type: "json_object" },
+        },
       );
 
       return parseClusterMatchCandidateId(

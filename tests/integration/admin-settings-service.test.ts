@@ -48,6 +48,7 @@ describe("admin settings service", () => {
     expect(settings.modelApiConfigs[0]?.ingestionItemConcurrency).toBe(3);
     expect(settings.promptConfigs).toHaveLength(4);
     expect(settings.taskSchedule.key).toBe("ingestion_default");
+    expect(settings.taskSchedule.enabled).toBe(false);
     expect(settings.taskSchedule.cronExpression).toBe("0 * * * *");
     expect(settings.taskSchedule.sourceConcurrency).toBe(2);
     expect(settings.taskSchedule.fullTextFetchThreshold).toBe(80);

@@ -70,6 +70,7 @@ describe("background task persistence", () => {
     const schedule = await ensureDefaultIngestionSchedule();
 
     expect(schedule.key).toBe("ingestion_default");
+    expect(schedule.enabled).toBe(false);
     expect(schedule.cronExpression).toBe("0 * * * *");
     expect(schedule.sourceConcurrency).toBe(2);
     expect(schedule.fullTextFetchThreshold).toBe(80);
@@ -383,6 +384,7 @@ describe("background task persistence", () => {
         startedAt: "2026-04-12T00:00:00.000Z",
         finishedAt: "2026-04-12T00:00:09.000Z",
         durationMs: 9_000,
+        modelName: null,
         metrics: [
           { label: "抓取源", value: 2 },
           { label: "抓取内容", value: 20 },

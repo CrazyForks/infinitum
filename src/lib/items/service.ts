@@ -122,6 +122,8 @@ export async function regenerateItemContent(
         data: {
           translatedTitle:
             shouldTranslateTitle(item.originalTitle) ? enrichment.translatedTitle?.trim() || item.originalTitle : item.translatedTitle,
+          analysisStatus: "succeeded",
+          aiProcessedAt: new Date(),
           errorMessage: null,
         },
       });
@@ -132,6 +134,9 @@ export async function regenerateItemContent(
         where: { id: item.id },
         data: {
           summaryText: summaryText || item.summaryText,
+          summaryStatus: "succeeded",
+          analysisStatus: "pending",
+          aiProcessedAt: null,
           errorMessage: null,
         },
       });
@@ -146,6 +151,13 @@ export async function regenerateItemContent(
     await prisma.item.update({
       where: { id: item.id },
       data: {
+        ...(target === "summary"
+          ? {
+              summaryStatus: "failed" as const,
+              analysisStatus: "pending" as const,
+              aiProcessedAt: null,
+            }
+          : {}),
         errorMessage: error instanceof Error ? error.message : "Unknown regeneration error",
       },
     });
@@ -326,6 +338,8 @@ export async function reanalyzeItem(itemId: string, options?: RegenerationOption
       translatedTitle:
         shouldTranslateTitle(item.originalTitle) ? analysis.translatedTitle?.trim() || item.originalTitle : item.translatedTitle,
       summaryText: summaryText || item.summaryText,
+      summaryStatus: "succeeded",
+      analysisStatus: "succeeded",
       moderationStatus,
       moderationReason: analysis.moderationReason,
       moderationDetail: analysis.moderationDetail,

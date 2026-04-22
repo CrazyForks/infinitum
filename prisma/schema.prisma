@@ -29,6 +29,12 @@ enum ModerationReason {
   other
 }
 
+enum ProcessingCheckpointStatus {
+  pending
+  succeeded
+  failed
+}
+
 enum FetchRunStatus {
   running
   succeeded
@@ -115,6 +121,8 @@ model Item {
   summaryText      String?
   language         String?
   status           ItemStatus @default(new)
+  summaryStatus    ProcessingCheckpointStatus @default(pending)
+  analysisStatus   ProcessingCheckpointStatus @default(pending)
   filterReason     String?
   moderationStatus ModerationStatus @default(allowed)
   moderationReason ModerationReason?
@@ -189,7 +197,7 @@ model FetchRun {
 model TaskSchedule {
   id                String                @id @default(cuid())
   key               String                @unique
-  enabled           Boolean               @default(true)
+  enabled           Boolean               @default(false)
   cronExpression    String                @default("0 * * * *")
   sourceConcurrency Int                   @default(2)
   fullTextFetchThreshold Int              @default(80)

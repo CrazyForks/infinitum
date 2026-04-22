@@ -121,6 +121,7 @@ describe("ai provider", () => {
     expect(systemPrompt).toContain("只基于输入标题、来源和摘要判断");
     expect(systemPrompt).toContain('"moderationStatus":"allowed|filtered"');
     expect(systemPrompt).not.toContain("restored");
+    expect(create.mock.calls[0]?.[0]?.response_format).toEqual({ type: "json_object" });
   });
 
   it("passes the full body text to item summarization without truncation", async () => {
@@ -328,6 +329,7 @@ describe("ai provider", () => {
     expect(create).toHaveBeenCalledTimes(1);
     expect(create.mock.calls[0]?.[0]?.messages?.[0]?.content).toContain("新闻摘要助手");
     expect(create.mock.calls[0]?.[0]?.messages?.[0]?.content).toContain("只输出摘要正文");
+    expect(create.mock.calls[0]?.[0]?.response_format).toBeUndefined();
   });
 
   it("throws a descriptive error after repeated invalid responses", async () => {
@@ -514,5 +516,6 @@ describe("ai provider", () => {
     expect(systemPrompt).toContain("同一具体事件");
     expect(systemPrompt).toContain("如果只是主题接近");
     expect(systemPrompt).toContain("当前内容缺少明确事件线索时");
+    expect(create.mock.calls[0]?.[0]?.response_format).toEqual({ type: "json_object" });
   });
 });

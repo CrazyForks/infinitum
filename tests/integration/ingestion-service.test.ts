@@ -1430,6 +1430,8 @@ describe("runIngestion", () => {
         rssContent,
         summaryText: "保留已有摘要",
         status: "processed",
+        summaryStatus: "succeeded",
+        analysisStatus: "succeeded",
         moderationStatus: "allowed",
         qualityScore: 91,
         qualityRationale: "多事实点且时效性强",
@@ -1527,6 +1529,8 @@ describe("runIngestion", () => {
         rssContent: "Old summary",
         summaryText: "旧摘要",
         status: "processed",
+        summaryStatus: "succeeded",
+        analysisStatus: "succeeded",
         moderationStatus: "allowed",
         qualityScore: 70,
         qualityRationale: "旧评分",
@@ -1593,6 +1597,116 @@ describe("runIngestion", () => {
     expect(storedItem.summaryText).toBe("更新后的摘要");
     expect(storedItem.qualityScore).toBe(95);
     expect(storedItem.rssExcerpt).toBe("Updated summary with new facts");
+  });
+
+  it("reuses succeeded summary but reruns failed analysis when inputs are unchanged", async () => {
+    const source = await prisma.source.create({
+      data: {
+        name: "Example Feed",
+        rssUrl: "https://example.com/feed.xml",
+        siteUrl: "https://example.com",
+        enabled: true,
+        aiParsingEnabled: false,
+      },
+    });
+    const publishedAt = new Date("2026-04-10T09:00:00.000Z");
+    const originalUrl = "https://example.com/posts/openai-toolkit";
+    const originalTitle = "OpenAI ships a new agent toolkit";
+    const rssContent = "Brief summary";
+    const dedupeKeys = buildDedupeKeys({
+      sourceName: source.name,
+      canonicalUrl: originalUrl,
+      title: originalTitle,
+      publishedAt,
+    });
+
+    await prisma.item.create({
+      data: {
+        sourceId: source.id,
+        originalUrl,
+        canonicalUrl: dedupeKeys.canonicalUrl,
+        urlHash: dedupeKeys.urlHash,
+        dedupeSignature: dedupeKeys.signature,
+        originalTitle,
+        translatedTitle: null,
+        author: "Alex",
+        publishedAt,
+        rssExcerpt: rssContent,
+        rssContent,
+        summaryText: "保留已有摘要",
+        status: "processed",
+        summaryStatus: "succeeded",
+        analysisStatus: "failed",
+        moderationStatus: "allowed",
+        qualityScore: 50,
+        qualityRationale: "AI analysis unavailable",
+        aiProcessedAt: null,
+        errorMessage: "Invalid AI enrichment response after retry.",
+      },
+    });
+
+    const parser = {
+      parseURL: vi.fn().mockResolvedValue({
+        items: [
+          {
+            title: originalTitle,
+            link: originalUrl,
+            isoDate: "2026-04-10T09:00:00.000Z",
+            contentSnippet: rssContent,
+            creator: "Alex",
+          },
+        ],
+      }),
+    };
+    const aiProvider = buildAiProviderMock({
+      summarizeItem: vi.fn().mockResolvedValue("不应该被调用"),
+      enrichContent: vi.fn().mockResolvedValue({
+        translatedTitle: "OpenAI 发布新的 Agent 工具包",
+        moderationStatus: "allowed",
+        moderationReason: null,
+        moderationDetail: "信息充足",
+        qualityScore: 92,
+        qualityRationale: "分析补齐成功",
+        eventSignature: buildEventSignature({
+          eventType: "launch",
+          eventSubject: "OpenAI",
+          eventAction: "发布",
+          eventObject: "agent toolkit",
+        }),
+      }),
+      summarizeCluster: vi.fn().mockResolvedValue("不会被使用"),
+      matchClusterCandidate: vi.fn().mockResolvedValue(null),
+    });
+
+    await runIngestion({
+      trigger: "manual",
+      parser,
+      articleFetcher: vi.fn(),
+      aiProvider,
+      sourceConfigs: [
+        {
+          name: "Example Feed",
+          rssUrl: "https://example.com/feed.xml",
+          siteUrl: "https://example.com",
+          enabled: true,
+          aiParsingEnabled: true,
+        },
+      ],
+      blacklist: [],
+      now: new Date("2026-04-10T10:00:00.000Z"),
+    });
+
+    expect(aiProvider.summarizeItem).not.toHaveBeenCalled();
+    expect(aiProvider.enrichContent).toHaveBeenCalledOnce();
+
+    const storedItem = await prisma.item.findFirstOrThrow({
+      where: { sourceId: source.id },
+    });
+    expect(storedItem.summaryText).toBe("保留已有摘要");
+    expect(storedItem.summaryStatus).toBe("succeeded");
+    expect(storedItem.analysisStatus).toBe("succeeded");
+    expect(storedItem.qualityScore).toBe(92);
+    expect(storedItem.errorMessage).toBeNull();
   });
 
   it("uses database-backed runtime settings when explicit ingestion options are omitted", async () => {
