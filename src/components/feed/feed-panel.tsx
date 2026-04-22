@@ -100,6 +100,14 @@ type DeleteItemDialogState = {
   itemTitle: string;
 } | null;
 
+type BatchActionType = "regenerate" | "filter" | "delete";
+
+type BatchActionDialogState = {
+  type: BatchActionType;
+  itemIds: string[];
+  itemTitles: string[];
+} | null;
+
 type DateRangeValue = [Dayjs | null, Dayjs | null] | null;
 
 const TITLE_SEARCH_DEBOUNCE_MS = 320;
@@ -514,6 +522,9 @@ export function FeedPanel({
   const [assignClusterDialog, setAssignClusterDialog] = useState<AssignClusterDialogState>(null);
   const [manualFilterDialog, setManualFilterDialog] = useState<ManualFilterDialogState>(null);
   const [deleteItemDialog, setDeleteItemDialog] = useState<DeleteItemDialogState>(null);
+  const [batchActionDialog, setBatchActionDialog] = useState<BatchActionDialogState>(null);
+  const [batchRegenerateMode, setBatchRegenerateMode] = useState<RegenerateMode>("summary");
+  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [clusterOptions, setClusterOptions] = useState<ClusterDTO[]>([]);
   const [clusterSearch, setClusterSearch] = useState("");
   const [selectedClusterId, setSelectedClusterId] = useState<string | null>(null);
@@ -1037,6 +1048,208 @@ export function FeedPanel({
     });
   };
 
+  // 批量操作相关函数
+  const extractItemIdsFromEntry = (entry: FeedEntryDTO): string[] => {
+    if (entry.type === "single") {
+      return [entry.id];
+    }
+    // 对于聚合，返回聚合内所有条目的ID
+    return entry.itemsPreview.map((item) => item.id);
+  };
+
+  const getAllSelectableItemIds = (): string[] => {
+    const ids: string[] = [];
+    for (const entry of items) {
+      ids.push(...extractItemIdsFromEntry(entry));
+    }
+    return ids;
+  };
+
+  const handleToggleSelect = (itemId: string) => {
+    setSelectedItems((prev) => {
+      const next = new Set(prev);
+      if (next.has(itemId)) {
+        next.delete(itemId);
+      } else {
+        next.add(itemId);
+      }
+      return next;
+    });
+  };
+
+  const handleSelectAll = () => {
+    const allIds = getAllSelectableItemIds();
+    if (selectedItems.size === allIds.length && allIds.length > 0) {
+      setSelectedItems(new Set());
+    } else {
+      setSelectedItems(new Set(allIds));
+    }
+  };
+
+  const handleClearSelection = () => {
+    setSelectedItems(new Set());
+  };
+
+  const openBatchRegenerateDialog = () => {
+    if (selectedItems.size === 0) return;
+    setBatchActionDialog({
+      type: "regenerate",
+      itemIds: Array.from(selectedItems),
+      itemTitles: [],
+    });
+    setBatchRegenerateMode("summary");
+  };
+
+  const openBatchFilterDialog = () => {
+    if (selectedItems.size === 0) return;
+    setBatchActionDialog({
+      type: "filter",
+      itemIds: Array.from(selectedItems),
+      itemTitles: [],
+    });
+  };
+
+  const openBatchDeleteDialog = () => {
+    if (selectedItems.size === 0) return;
+    setBatchActionDialog({
+      type: "delete",
+      itemIds: Array.from(selectedItems),
+      itemTitles: [],
+    });
+  };
+
+  const runBatchRegeneration = async (targets: Array<"translation" | "summary">) => {
+    if (!batchActionDialog || batchActionDialog.type !== "regenerate") return;
+
+    const itemIds = batchActionDialog.itemIds;
+    const results = { success: 0, failed: 0 };
+
+    for (const itemId of itemIds) {
+      for (const target of targets) {
+        try {
+          const response = await fetch(`/api/admin/items/${itemId}/regenerate`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ target }),
+          });
+          if (response.ok) {
+            results.success++;
+          } else {
+            results.failed++;
+          }
+        } catch {
+          results.failed++;
+        }
+      }
+    }
+
+    setBatchActionDialog(null);
+
+    if (results.failed === 0) {
+      setRefreshFeedback({
+        tone: "success",
+        message: `已成功为 ${itemIds.length} 条内容创建重新生成任务。`,
+      });
+    } else {
+      setRefreshFeedback({
+        tone: "error",
+        message: `批量重新生成完成：成功 ${results.success} 条，失败 ${results.failed} 条。`,
+      });
+    }
+
+    setSelectedItems(new Set());
+  };
+
+  const confirmBatchRegeneration = () => {
+    if (batchRegenerateMode === "translation") {
+      runBatchRegeneration(["translation"]);
+    } else if (batchRegenerateMode === "both") {
+      runBatchRegeneration(["translation", "summary"]);
+    } else {
+      runBatchRegeneration(["summary"]);
+    }
+  };
+
+  const confirmBatchFilter = async () => {
+    if (!batchActionDialog || batchActionDialog.type !== "filter") return;
+
+    const itemIds = batchActionDialog.itemIds;
+    const results = { success: 0, failed: 0 };
+
+    for (const itemId of itemIds) {
+      try {
+        const response = await fetch(`/api/admin/items/${itemId}/filter`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+        });
+        if (response.ok) {
+          results.success++;
+        } else {
+          results.failed++;
+        }
+      } catch {
+        results.failed++;
+      }
+    }
+
+    setBatchActionDialog(null);
+    reloadCurrentFeed();
+
+    if (results.failed === 0) {
+      setRefreshFeedback({
+        tone: "success",
+        message: `已成功过滤 ${results.success} 条内容。`,
+      });
+    } else {
+      setRefreshFeedback({
+        tone: "error",
+        message: `批量过滤完成：成功 ${results.success} 条，失败 ${results.failed} 条。`,
+      });
+    }
+
+    setSelectedItems(new Set());
+  };
+
+  const confirmBatchDelete = async () => {
+    if (!batchActionDialog || batchActionDialog.type !== "delete") return;
+
+    const itemIds = batchActionDialog.itemIds;
+    const results = { success: 0, failed: 0 };
+
+    for (const itemId of itemIds) {
+      try {
+        const response = await fetch(`/api/admin/items/${itemId}`, {
+          method: "DELETE",
+          headers: { "content-type": "application/json" },
+        });
+        if (response.ok) {
+          results.success++;
+        } else {
+          results.failed++;
+        }
+      } catch {
+        results.failed++;
+      }
+    }
+
+    setBatchActionDialog(null);
+    reloadCurrentFeed();
+
+    if (results.failed === 0) {
+      setRefreshFeedback({
+        tone: "success",
+        message: `已成功删除 ${results.success} 条内容。`,
+      });
+    } else {
+      setRefreshFeedback({
+        tone: "error",
+        message: `批量删除完成：成功 ${results.success} 条，失败 ${results.failed} 条。`,
+      });
+    }
+
+    setSelectedItems(new Set());
+  };
+
   useEffect(() => {
     latestQueryRef.current = {
       range,
@@ -1405,7 +1618,54 @@ export function FeedPanel({
               onClear={clearFilters}
               canClear={hasClearableFilters && !isPending}
               details={isAdmin && latestRunDetail ? <span>{latestRunDetail}</span> : null}
+              className="pt-1"
             />
+
+            {/* 批量操作工具栏 */}
+            {isAdmin && selectedItems.size > 0 && (
+              <div className="border-t border-[color:var(--line)] pt-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-[var(--text-2)]">
+                      已选 {selectedItems.size} 条
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleClearSelection}
+                      className="text-sm text-[var(--muted)] hover:text-[var(--text-1)] transition"
+                    >
+                      清空选择
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={openBatchRegenerateDialog}
+                      disabled={isPending}
+                      className="inline-flex items-center gap-1 rounded-sm bg-[var(--bg-muted)] px-3 py-1.5 text-sm font-medium text-[var(--text-2)] transition hover:bg-[var(--accent-soft)] hover:text-[var(--accent-strong)] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      重新生成
+                    </button>
+                    <button
+                      type="button"
+                      onClick={openBatchFilterDialog}
+                      disabled={isPending}
+                      className="inline-flex items-center gap-1 rounded-sm bg-[var(--bg-muted)] px-3 py-1.5 text-sm font-medium text-[var(--text-2)] transition hover:bg-[var(--accent-soft)] hover:text-[var(--accent-strong)] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      批量过滤
+                    </button>
+                    <button
+                      type="button"
+                      onClick={openBatchDeleteDialog}
+                      disabled={isPending}
+                      className="inline-flex items-center gap-1 rounded-sm bg-[var(--danger-surface)] px-3 py-1.5 text-sm font-medium text-[var(--danger-ink)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      批量删除
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </section>
 
@@ -1416,6 +1676,22 @@ export function FeedPanel({
         ) : null}
 
         <section role="region" aria-label="信息流结果" className="space-y-2.5">
+          {/* 全选按钮（仅管理员可见） */}
+          {isAdmin && items.length > 0 && (
+            <div className="flex items-center gap-2 px-1">
+              <input
+                type="checkbox"
+                id="select-all-items"
+                checked={selectedItems.size > 0 && selectedItems.size === getAllSelectableItemIds().length}
+                onChange={handleSelectAll}
+                className="h-4 w-4 rounded border-[color:var(--line)] text-[var(--accent)] focus:ring-[var(--accent)]"
+              />
+              <label htmlFor="select-all-items" className="text-sm text-[var(--text-2)] cursor-pointer">
+                全选 ({selectedItems.size}/{getAllSelectableItemIds().length})
+              </label>
+            </div>
+          )}
+
           {items.length === 0 ? (
             <div className="rounded-[1.15rem] border border-dashed border-[color:var(--line-strong)] bg-white/80 px-5 py-8 text-sm leading-7 text-[var(--muted)] shadow-[var(--shadow-sm)]">
               {isAdmin
@@ -1426,30 +1702,55 @@ export function FeedPanel({
             items.map((entry) =>
               entry.type === "cluster" ? (
                 <article key={entry.id} className={denseCardClassName}>
-                  <div className="space-y-3">
-                    <h2 className={cardTitleClassName}>{entry.title}</h2>
-                    <div className={cardMetaRowClassName}>
-                      <span className="rounded-sm bg-[var(--accent-soft)] px-2 py-1 text-[11px] text-[var(--accent-strong)]">聚合</span>
-                      <span className={neutralBadgeClassName}>{formatScore(entry.score)}</span>
-                      <span className={metaTextClassName}>{formatMetaLabel("来源", formatClusterSourceLabel(entry))}</span>
-                      <span className={metaTextClassName}>{formatMetaLabel("作者", formatClusterAuthorLabel(entry))}</span>
-                      <span className={metaTextClassName}>{formatMetaLabel("发表", formatDate(entry.latestPublishedAt))}</span>
-                    </div>
-                    <p className={cardSummaryClassName}>{entry.summary}</p>
-                    <div className="mt-4">
-                      <div className="flex items-center gap-3">
-                        <button
-                          aria-label={openClusters[entry.id] ? "收起相关内容" : "展开相关内容"}
-                          aria-expanded={Boolean(openClusters[entry.id])}
-                          className={clusterToggleClassName}
-                          type="button"
-                          onClick={() => toggleCluster(entry.id)}
-                          disabled={isPending}
-                        >
-                          <ChevronIcon expanded={Boolean(openClusters[entry.id])} className="h-3.5 w-3.5" />
-                          <span>{entry.itemCount} 条</span>
-                        </button>
-                        <div aria-hidden="true" className="h-px flex-1 bg-[color:var(--line)]" />
+                  {/* 聚合条目头部 */}
+                  <div className="flex items-start gap-3">
+                    {isAdmin && (
+                      <div className="flex flex-col gap-1 pt-1">
+                        <input
+                          type="checkbox"
+                          checked={entry.itemsPreview.every((item) => selectedItems.has(item.id))}
+                          onChange={() => {
+                            const ids = entry.itemsPreview.map((item) => item.id);
+                            const allSelected = ids.every((id) => selectedItems.has(id));
+                            setSelectedItems((prev) => {
+                              const next = new Set(prev);
+                              if (allSelected) {
+                                ids.forEach((id) => next.delete(id));
+                              } else {
+                                ids.forEach((id) => next.add(id));
+                              }
+                              return next;
+                            });
+                          }}
+                          className="h-4 w-4 rounded border-[color:var(--line)] text-[var(--accent)] focus:ring-[var(--accent)]"
+                        />
+                      </div>
+                    )}
+                    <div className="flex-1 space-y-3">
+                      <h2 className={cardTitleClassName}>{entry.title}</h2>
+                      <div className={cardMetaRowClassName}>
+                        <span className="rounded-sm bg-[var(--accent-soft)] px-2 py-1 text-[11px] text-[var(--accent-strong)]">聚合</span>
+                        <span className={neutralBadgeClassName}>{formatScore(entry.score)}</span>
+                        <span className={metaTextClassName}>{formatMetaLabel("来源", formatClusterSourceLabel(entry))}</span>
+                        <span className={metaTextClassName}>{formatMetaLabel("作者", formatClusterAuthorLabel(entry))}</span>
+                        <span className={metaTextClassName}>{formatMetaLabel("发表", formatDate(entry.latestPublishedAt))}</span>
+                      </div>
+                      <p className={cardSummaryClassName}>{entry.summary}</p>
+                      <div className="mt-4">
+                        <div className="flex items-center gap-3">
+                          <button
+                            aria-label={openClusters[entry.id] ? "收起相关内容" : "展开相关内容"}
+                            aria-expanded={Boolean(openClusters[entry.id])}
+                            className={clusterToggleClassName}
+                            type="button"
+                            onClick={() => toggleCluster(entry.id)}
+                            disabled={isPending}
+                          >
+                            <ChevronIcon expanded={Boolean(openClusters[entry.id])} className="h-3.5 w-3.5" />
+                            <span>{entry.itemCount} 条</span>
+                          </button>
+                          <div aria-hidden="true" className="h-px flex-1 bg-[color:var(--line)]" />
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -1461,76 +1762,86 @@ export function FeedPanel({
                           key={clusterItem.id}
                           className="rounded-sm border border-[color:var(--line)] bg-[var(--surface)] px-3 py-3"
                         >
-                          <div className="space-y-2">
-                            <div className="flex items-start justify-between gap-3">
-                              <a
-                                className="block min-w-0 flex-1 text-base font-medium leading-6 text-[var(--foreground)] underline decoration-transparent underline-offset-4 transition hover:decoration-[var(--accent)]"
-                                href={clusterItem.originalUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                              >
-                                {clusterItem.title}
-                              </a>
-                              {isAdmin ? (
-                                <div className="flex shrink-0 items-center gap-0.5">
-                                  <button
-                                    aria-label={`加入聚合组：${clusterItem.title}`}
-                                    title="加入聚合组"
-                                    className={iconButtonClassName}
-                                    type="button"
-                                    onClick={() => openAssignClusterDialog(clusterItem.id, clusterItem.title, entry.id)}
-                                    disabled={isPending}
-                                  >
-                                    <IconPlus className="h-4 w-4" />
-                                  </button>
-                                  <button
-                                    aria-label={`手动过滤：${clusterItem.title}`}
-                                    title="手动过滤"
-                                    className={iconButtonClassName}
-                                    type="button"
-                                    onClick={() =>
-                                      setManualFilterDialog({ itemId: clusterItem.id, itemTitle: clusterItem.title })
-                                    }
-                                    disabled={isPending}
-                                  >
-                                    <IconFilter className="h-4 w-4" />
-                                  </button>
-                                  <button
-                                    aria-label={`重新生成内容：${clusterItem.title}`}
-                                    title="重新生成内容"
-                                    className={iconButtonClassName}
-                                    type="button"
-                                    onClick={() =>
-                                      openRegenerateDialog(clusterItem.id, Boolean(clusterItem.canRegenerateTranslation), {
-                                        shouldAnnounceClusterRefresh: true,
-                                      })
-                                    }
-                                    disabled={isPending}
-                                  >
-                                    <RefreshIcon />
-                                  </button>
-                                  <button
-                                    aria-label={`删除内容：${clusterItem.title}`}
-                                    title="删除内容"
-                                    className={iconButtonClassName}
-                                    type="button"
-                                    onClick={() =>
-                                      setDeleteItemDialog({ itemId: clusterItem.id, itemTitle: clusterItem.title })
-                                    }
-                                    disabled={isPending}
-                                  >
-                                    <IconTrash className="h-4 w-4" />
-                                  </button>
-                                </div>
-                              ) : null}
+                          <div className="flex items-start gap-3">
+                            {isAdmin && (
+                              <input
+                                type="checkbox"
+                                checked={selectedItems.has(clusterItem.id)}
+                                onChange={() => handleToggleSelect(clusterItem.id)}
+                                className="mt-1 h-4 w-4 rounded border-[color:var(--line)] text-[var(--accent)] focus:ring-[var(--accent)]"
+                              />
+                            )}
+                            <div className="flex-1 space-y-2">
+                              <div className="flex items-start justify-between gap-3">
+                                <a
+                                  className="block min-w-0 flex-1 text-base font-medium leading-6 text-[var(--foreground)] underline decoration-transparent underline-offset-4 transition hover:decoration-[var(--accent)]"
+                                  href={clusterItem.originalUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  {clusterItem.title}
+                                </a>
+                                {isAdmin ? (
+                                  <div className="flex shrink-0 items-center gap-0.5">
+                                    <button
+                                      aria-label={`加入聚合组：${clusterItem.title}`}
+                                      title="加入聚合组"
+                                      className={iconButtonClassName}
+                                      type="button"
+                                      onClick={() => openAssignClusterDialog(clusterItem.id, clusterItem.title, entry.id)}
+                                      disabled={isPending}
+                                    >
+                                      <IconPlus className="h-4 w-4" />
+                                    </button>
+                                    <button
+                                      aria-label={`手动过滤：${clusterItem.title}`}
+                                      title="手动过滤"
+                                      className={iconButtonClassName}
+                                      type="button"
+                                      onClick={() =>
+                                        setManualFilterDialog({ itemId: clusterItem.id, itemTitle: clusterItem.title })
+                                      }
+                                      disabled={isPending}
+                                    >
+                                      <IconFilter className="h-4 w-4" />
+                                    </button>
+                                    <button
+                                      aria-label={`重新生成内容：${clusterItem.title}`}
+                                      title="重新生成内容"
+                                      className={iconButtonClassName}
+                                      type="button"
+                                      onClick={() =>
+                                        openRegenerateDialog(clusterItem.id, Boolean(clusterItem.canRegenerateTranslation), {
+                                          shouldAnnounceClusterRefresh: true,
+                                        })
+                                      }
+                                      disabled={isPending}
+                                    >
+                                      <RefreshIcon />
+                                    </button>
+                                    <button
+                                      aria-label={`删除内容：${clusterItem.title}`}
+                                      title="删除内容"
+                                      className={iconButtonClassName}
+                                      type="button"
+                                      onClick={() =>
+                                        setDeleteItemDialog({ itemId: clusterItem.id, itemTitle: clusterItem.title })
+                                      }
+                                      disabled={isPending}
+                                    >
+                                      <IconTrash className="h-4 w-4" />
+                                    </button>
+                                  </div>
+                                ) : null}
+                              </div>
+                              <div className={cardMetaRowClassName}>
+                                <span className={neutralBadgeClassName}>{formatScore(clusterItem.score)}</span>
+                                <span className={metaTextClassName}>{formatMetaLabel("来源", clusterItem.sourceName)}</span>
+                                <span className={metaTextClassName}>{formatMetaLabel("作者", clusterItem.author || "未知作者")}</span>
+                                <span className={metaTextClassName}>{formatMetaLabel("发表", formatDate(clusterItem.publishedAt))}</span>
+                              </div>
+                              <p className={cardSummaryClassName}>{clusterItem.summary}</p>
                             </div>
-                            <div className={cardMetaRowClassName}>
-                              <span className={neutralBadgeClassName}>{formatScore(clusterItem.score)}</span>
-                              <span className={metaTextClassName}>{formatMetaLabel("来源", clusterItem.sourceName)}</span>
-                              <span className={metaTextClassName}>{formatMetaLabel("作者", clusterItem.author || "未知作者")}</span>
-                              <span className={metaTextClassName}>{formatMetaLabel("发表", formatDate(clusterItem.publishedAt))}</span>
-                            </div>
-                            <p className={cardSummaryClassName}>{clusterItem.summary}</p>
                           </div>
                         </div>
                       ))}
@@ -1539,63 +1850,72 @@ export function FeedPanel({
                 </article>
               ) : (
                 <article key={entry.id} className={denseCardClassName}>
-                  <div className="space-y-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <h2 className={cx(cardTitleClassName, "min-w-0 flex-1")}>
-                        <a
-                          className="underline decoration-transparent underline-offset-4 transition hover:decoration-[var(--accent)]"
-                          href={entry.originalUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          {entry.title}
-                        </a>
-                      </h2>
-                      {isAdmin ? (
-                        <div className="flex shrink-0 items-center gap-0.5">
-                          <button
-                            aria-label={`加入聚合组：${entry.title}`}
-                            title="加入聚合组"
-                            className={iconButtonClassName}
-                            type="button"
-                            onClick={() => openAssignClusterDialog(entry.id, entry.title)}
-                            disabled={isPending}
+                  <div className="flex items-start gap-3">
+                    {isAdmin && (
+                      <input
+                        type="checkbox"
+                        checked={selectedItems.has(entry.id)}
+                        onChange={() => handleToggleSelect(entry.id)}
+                        className="mt-1 h-4 w-4 rounded border-[color:var(--line)] text-[var(--accent)] focus:ring-[var(--accent)]"
+                      />
+                    )}
+                    <div className="flex-1 space-y-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <h2 className={cx(cardTitleClassName, "min-w-0 flex-1")}>
+                          <a
+                            className="underline decoration-transparent underline-offset-4 transition hover:decoration-[var(--accent)]"
+                            href={entry.originalUrl}
+                            target="_blank"
+                            rel="noreferrer"
                           >
-                            <IconPlus className="h-4 w-4" />
-                          </button>
-                          <button
-                            aria-label={`手动过滤：${entry.title}`}
-                            title="手动过滤"
-                            className={iconButtonClassName}
-                            type="button"
-                            onClick={() => setManualFilterDialog({ itemId: entry.id, itemTitle: entry.title })}
-                            disabled={isPending}
-                          >
-                            <IconFilter className="h-4 w-4" />
-                          </button>
-                          <button
-                            aria-label="重新生成内容"
-                            title="重新生成内容"
-                            className={iconButtonClassName}
-                            type="button"
-                            onClick={() => openRegenerateDialog(entry.id, Boolean(entry.canRegenerateTranslation))}
-                            disabled={isPending}
-                          >
-                            <RefreshIcon />
-                          </button>
-                          <button
-                            aria-label={`删除内容：${entry.title}`}
-                            title="删除内容"
-                            className={iconButtonClassName}
-                            type="button"
-                            onClick={() => setDeleteItemDialog({ itemId: entry.id, itemTitle: entry.title })}
-                            disabled={isPending}
-                          >
-                            <IconTrash className="h-4 w-4" />
-                          </button>
-                        </div>
-                      ) : null}
-                    </div>
+                            {entry.title}
+                          </a>
+                        </h2>
+                        {isAdmin ? (
+                          <div className="flex shrink-0 items-center gap-0.5">
+                            <button
+                              aria-label={`加入聚合组：${entry.title}`}
+                              title="加入聚合组"
+                              className={iconButtonClassName}
+                              type="button"
+                              onClick={() => openAssignClusterDialog(entry.id, entry.title)}
+                              disabled={isPending}
+                            >
+                              <IconPlus className="h-4 w-4" />
+                            </button>
+                            <button
+                              aria-label={`手动过滤：${entry.title}`}
+                              title="手动过滤"
+                              className={iconButtonClassName}
+                              type="button"
+                              onClick={() => setManualFilterDialog({ itemId: entry.id, itemTitle: entry.title })}
+                              disabled={isPending}
+                            >
+                              <IconFilter className="h-4 w-4" />
+                            </button>
+                            <button
+                              aria-label="重新生成内容"
+                              title="重新生成内容"
+                              className={iconButtonClassName}
+                              type="button"
+                              onClick={() => openRegenerateDialog(entry.id, Boolean(entry.canRegenerateTranslation))}
+                              disabled={isPending}
+                            >
+                              <RefreshIcon />
+                            </button>
+                            <button
+                              aria-label={`删除内容：${entry.title}`}
+                              title="删除内容"
+                              className={iconButtonClassName}
+                              type="button"
+                              onClick={() => setDeleteItemDialog({ itemId: entry.id, itemTitle: entry.title })}
+                              disabled={isPending}
+                            >
+                              <IconTrash className="h-4 w-4" />
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
                     <div className={cardMetaRowClassName}>
                       <span className={neutralBadgeClassName}>{formatScore(entry.score)}</span>
                       <span className={metaTextClassName}>{formatMetaLabel("来源", entry.sourceName)}</span>
@@ -1604,7 +1924,8 @@ export function FeedPanel({
                     </div>
                     <p className={cardSummaryClassName}>{entry.summary}</p>
                   </div>
-                </article>
+                </div>
+              </article>
               ),
             )
           )}
@@ -1832,6 +2153,92 @@ export function FeedPanel({
                 ]}
               />
             </FormField>
+          </div>
+        </ModalShell>
+
+        {/* 批量操作对话框 */}
+        <ModalShell
+          isOpen={Boolean(batchActionDialog) && batchActionDialog?.type === "regenerate"}
+          onClose={() => setBatchActionDialog(null)}
+          title="批量重新生成"
+          widthClassName="max-w-sm"
+          showCloseButton={false}
+          bodyClassName="space-y-4 p-4"
+          footer={
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="secondary" onClick={() => setBatchActionDialog(null)} disabled={isPending}>
+                取消
+              </Button>
+              <Button type="button" variant="primary" onClick={confirmBatchRegeneration} disabled={isPending}>
+                确认
+              </Button>
+            </div>
+          }
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-[var(--muted)]">
+              将为 {batchActionDialog?.itemIds.length ?? 0} 条内容创建重新生成任务。
+            </p>
+            <FormField label="重新生成范围" className="w-full">
+              <SelectField
+                aria-label="重新生成范围"
+                value={batchRegenerateMode}
+                onChange={(value) => setBatchRegenerateMode((value as RegenerateMode | null) ?? "summary")}
+                showSearch={false}
+                className="w-full"
+                options={[
+                  { value: "summary", label: "仅摘要" },
+                  { value: "translation", label: "仅翻译" },
+                  { value: "both", label: "全部重新生成" },
+                ]}
+              />
+            </FormField>
+          </div>
+        </ModalShell>
+
+        <ModalShell
+          isOpen={Boolean(batchActionDialog) && batchActionDialog?.type === "filter"}
+          onClose={() => setBatchActionDialog(null)}
+          title="确认批量过滤"
+          widthClassName="max-w-md"
+          bodyClassName="space-y-3 p-4"
+          footer={
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="secondary" onClick={() => setBatchActionDialog(null)} disabled={isPending}>
+                取消
+              </Button>
+              <Button type="button" variant="primary" onClick={confirmBatchFilter} disabled={isPending}>
+                确认过滤
+              </Button>
+            </div>
+          }
+        >
+          <div className="space-y-3 text-sm text-[var(--muted)]">
+            <p>将批量过滤 {batchActionDialog?.itemIds.length ?? 0} 条内容。</p>
+            <p>过滤后这些内容会立即从主页列表中移除。</p>
+          </div>
+        </ModalShell>
+
+        <ModalShell
+          isOpen={Boolean(batchActionDialog) && batchActionDialog?.type === "delete"}
+          onClose={() => setBatchActionDialog(null)}
+          title="确认批量删除"
+          widthClassName="max-w-md"
+          bodyClassName="space-y-3 p-4"
+          footer={
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="secondary" onClick={() => setBatchActionDialog(null)} disabled={isPending}>
+                取消
+              </Button>
+              <Button type="button" variant="danger" onClick={confirmBatchDelete} disabled={isPending}>
+                确认删除
+              </Button>
+            </div>
+          }
+        >
+          <div className="space-y-3 text-sm text-[var(--muted)]">
+            <p>将永久删除 {batchActionDialog?.itemIds.length ?? 0} 条内容。</p>
+            <p>删除后会立即从主页列表移除，此操作不可恢复。</p>
           </div>
         </ModalShell>
       </section>
