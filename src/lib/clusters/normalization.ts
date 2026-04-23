@@ -1,4 +1,5 @@
 import type { AiEventSignature } from "@/lib/ai/provider";
+import { collapseWhitespace, trimBoundaryPunctuation } from "@/lib/utils/text";
 
 const EVENT_TYPES = new Set<NonNullable<AiEventSignature["eventType"]>>([
   "release",
@@ -33,14 +34,6 @@ const ACTION_ALIASES = new Map<string, string>([
   ["发布论文", "发布论文"],
   ["出台政策", "出台政策"],
 ]);
-
-function collapseWhitespace(value: string) {
-  return value.replace(/\s+/g, " ").trim();
-}
-
-function trimBoundaryPunctuation(value: string) {
-  return value.replace(/^[\s,.;:()[\]{}\-_/]+|[\s,.;:()[\]{}\-_/]+$/g, "").trim();
-}
 
 function normalizeOptionalText(value: string | null | undefined) {
   const normalized = trimBoundaryPunctuation(collapseWhitespace(value ?? ""));

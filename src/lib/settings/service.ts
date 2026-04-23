@@ -17,6 +17,7 @@ import type {
   ResolvedSourceMetadata,
 } from "@/lib/settings/types";
 import { ensureDefaultIngestionSchedule, toTaskScheduleSnapshot } from "@/lib/tasks/service";
+import { normalizeKeyword, normalizeText, normalizeUrl } from "@/lib/utils/text";
 
 const DEFAULT_MODEL_CONFIG_NAME = "默认模型配置";
 
@@ -71,32 +72,8 @@ export type SavePromptConfigInput = {
   isDefault: boolean;
 };
 
-function normalizeKeyword(keyword: string) {
-  return keyword.trim();
-}
-
-function normalizeText(value: string | null | undefined) {
-  return value?.trim() || "";
-}
-
 function toIsoString(value: Date): string {
   return value.toISOString();
-}
-
-function tryParseUrl(value: string | null | undefined): URL | null {
-  if (!value) {
-    return null;
-  }
-
-  try {
-    return new URL(value.trim());
-  } catch {
-    return null;
-  }
-}
-
-function normalizeUrl(value: string | null | undefined): string | null {
-  return tryParseUrl(value)?.toString() ?? null;
 }
 
 function buildSiteUrlFromRssUrl(rssUrl: string): string {

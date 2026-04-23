@@ -1,3 +1,5 @@
+import { DEFAULT_FEED_CACHE_TTL_MS } from "@/config/constants";
+
 type FeedCacheEntry = {
   expiresAt: number;
   value: unknown;
@@ -8,7 +10,6 @@ declare global {
   var __infinitumFeedCacheInFlight__: Map<string, Promise<unknown>> | undefined;
 }
 
-const DEFAULT_FEED_CACHE_TTL_MS = 30_000;
 const MAX_FEED_CACHE_ENTRIES = 200;
 
 function getFeedCacheStore() {

@@ -2,6 +2,8 @@
 
 import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from "react";
 
+import { TOAST_DURATION_MS, TOAST_DEDUPE_MS } from "@/config/constants";
+
 type ToastType = "success" | "error" | "info";
 
 type ToastItem = {
@@ -15,8 +17,6 @@ type ToastContextValue = {
 };
 
 const ToastContext = createContext<ToastContextValue | undefined>(undefined);
-const TOAST_DURATION_MS = 3000;
-const TOAST_DEDUPE_MS = 1200;
 
 export function useToast() {
   const context = useContext(ToastContext);

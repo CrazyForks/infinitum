@@ -1,7 +1,8 @@
 import type { BackgroundTaskRun, FetchRun, FetchRunStatus } from "@prisma/client";
 
-import { createAiProvider, type AiEventSignature } from "@/lib/ai/provider";
+import { INGESTION_PROGRESS_FLUSH_INTERVAL_MS } from "@/config/constants";
 import type { RuntimeConfig } from "@/config/runtime";
+import { createAiProvider, type AiEventSignature } from "@/lib/ai/provider";
 import {
   assignItemToCluster,
   createClusterAssignmentCoordinator,
@@ -58,7 +59,8 @@ type ResolvedRunOptions = RunIngestionOptions & {
   taskTimelineModelNames: IngestionTimelineModelNames;
 };
 
-const INGESTION_PROGRESS_FLUSH_INTERVAL_MS = 750;
+// 摄入进度刷新间隔常量已移至 @/config/constants
+
 type IngestionStageTiming = {
   key: string;
   label: string;

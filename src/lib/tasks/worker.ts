@@ -1,5 +1,6 @@
 import type { BackgroundTaskRun } from "@prisma/client";
 
+import { DEFAULT_POLL_INTERVAL_MS, DEFAULT_TASK_STALE_MS } from "@/config/constants";
 import { prisma } from "@/lib/db";
 import { executeTaskRun as defaultExecuteTaskRun } from "@/lib/tasks/handlers";
 import { computeNextRunAt } from "@/lib/tasks/scheduler";
@@ -11,9 +12,6 @@ import {
   TASK_RUN_CANCELLED_LABEL,
   TASK_RUN_CANCELLED_MESSAGE,
 } from "@/lib/tasks/service";
-
-const DEFAULT_TASK_STALE_MS = 15 * 60_000;
-const DEFAULT_POLL_INTERVAL_MS = 2_000;
 
 function sleep(ms: number) {
   return new Promise((resolve) => {

@@ -1,0 +1,98 @@
+/**
+ * 全局常量配置
+ * 集中管理所有时间、阈值、限制等常量
+ */
+
+// =============================================================================
+// 时间常量 (毫秒)
+// =============================================================================
+
+/** 1 分钟的毫秒数 */
+export const MINUTE_MS = 60 * 1000;
+
+/** 1 小时的毫秒数 */
+export const HOUR_MS = 60 * MINUTE_MS;
+
+/** 1 天的毫秒数 */
+export const DAY_MS = 24 * HOUR_MS;
+
+/** 1 周的毫秒数 */
+export const WEEK_MS = 7 * DAY_MS;
+
+// =============================================================================
+// Feed 缓存 TTL
+// =============================================================================
+
+/** Feed 列表缓存时间: 1 小时 */
+export const FEED_LIST_CACHE_TTL_MS = HOUR_MS;
+
+/** Feed 筛选选项缓存时间: 5 分钟 */
+export const FEED_FILTER_OPTIONS_CACHE_TTL_MS = 5 * MINUTE_MS;
+
+/** Feed 状态缓存时间: 15 秒 */
+export const FEED_STATUS_CACHE_TTL_MS = 15 * 1000;
+
+/** 默认 Feed 缓存时间: 30 秒 */
+export const DEFAULT_FEED_CACHE_TTL_MS = 30 * 1000;
+
+// =============================================================================
+// Admin Session
+// =============================================================================
+
+/** Admin Session 过期时间 (秒): 7 天 */
+export const ADMIN_SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
+
+/** Admin Session 过期时间 (毫秒): 7 天 */
+export const ADMIN_SESSION_TTL_MS = WEEK_MS;
+
+// =============================================================================
+// Clusters
+// =============================================================================
+
+/** 聚类查询回溯时间: 7 天 */
+export const CLUSTER_LOOKBACK_MS = 7 * DAY_MS;
+
+/** 聚类 AI 候选限制 */
+export const CLUSTER_AI_CANDIDATE_LIMIT = 10;
+
+/** 聚类直接匹配最小分数 */
+export const CLUSTER_DIRECT_MATCH_MIN_SCORE = 105;
+
+/** 聚类直接匹配最小差距 */
+export const CLUSTER_DIRECT_MATCH_MIN_GAP = 20;
+
+/** 聚类 AI 最小分数 */
+export const CLUSTER_AI_MIN_SCORE = 35;
+
+// =============================================================================
+// Tasks / Worker
+// =============================================================================
+
+/** 任务过期时间: 15 分钟 */
+export const DEFAULT_TASK_STALE_MS = 15 * MINUTE_MS;
+
+/** 任务轮询间隔: 2 秒 */
+export const DEFAULT_POLL_INTERVAL_MS = 2 * 1000;
+
+// =============================================================================
+// Ingestion
+// =============================================================================
+
+/** 摄入进度刷新间隔: 750ms */
+export const INGESTION_PROGRESS_FLUSH_INTERVAL_MS = 750;
+
+// =============================================================================
+// UI / Components
+// =============================================================================
+
+/** Toast 显示时长: 3 秒 */
+export const TOAST_DURATION_MS = 3000;
+
+/** Toast 去重时间窗口: 1.2 秒 */
+export const TOAST_DEDUPE_MS = 1200;
+
+/** Feed 状态轮询间隔: 30 秒 */
+export const STATUS_POLL_INTERVAL_MS = 30 * 1000;
+
+/** 标题搜索防抖延迟: 320ms */
+export const TITLE_SEARCH_DEBOUNCE_MS = 320;

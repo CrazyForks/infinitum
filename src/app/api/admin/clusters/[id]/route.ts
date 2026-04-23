@@ -9,7 +9,7 @@ export async function GET(_request: Request, context: RouteContext<"/api/admin/c
     const cluster = await getAdminCluster(id);
 
     if (!cluster) {
-      return Response.json({ error: "Cluster not found" }, { status: 404 });
+      return adminErrorResponse(new Error("聚合组不存在"), 404);
     }
 
     return Response.json({ cluster });

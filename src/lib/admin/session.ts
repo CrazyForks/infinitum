@@ -1,9 +1,9 @@
+import { ADMIN_SESSION_TTL_SECONDS } from "@/config/constants";
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 import { cookies } from "next/headers";
 
 const ADMIN_SESSION_COOKIE_NAME = "infinitum_admin_session";
-const ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 24 * 7;
 
 type AdminSessionPayload = {
   exp: number;

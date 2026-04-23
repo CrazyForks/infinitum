@@ -11,6 +11,7 @@ import {
   DEFAULT_ITEM_SUMMARY_USER_PROMPT_TEMPLATE,
 } from "@/config/prompts";
 import type { RuntimeConfig } from "@/config/runtime";
+import { normalizeOptionalText } from "@/lib/utils/text";
 
 export type AiEventSignature = {
   eventType:
@@ -290,11 +291,6 @@ function normalizeEventType(value: string | null | undefined): AiEventSignature[
 function normalizeEventDate(value: string | null | undefined): string | null {
   const trimmed = value?.trim() ?? "";
   return /^\d{4}-\d{2}-\d{2}$/.test(trimmed) ? trimmed : null;
-}
-
-function normalizeOptionalText(value: string | null | undefined, fallback: string | null): string | null {
-  const trimmed = value?.trim() ?? "";
-  return trimmed || fallback;
 }
 
 function buildEventSignatureFromParsed(

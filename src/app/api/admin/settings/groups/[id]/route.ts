@@ -1,7 +1,7 @@
 import { z } from "zod";
 
-import { adminErrorResponse, getAdminErrorStatus, getErrorMessage } from "@/lib/admin/http";
-import { AdminAuthError, requireAdmin } from "@/lib/admin/session";
+import { adminErrorResponse } from "@/lib/admin/http";
+import { requireAdmin } from "@/lib/admin/session";
 import { deleteSourceGroup, renameSourceGroup } from "@/lib/settings/service";
 
 const updateGroupSchema = z.object({
@@ -29,14 +29,9 @@ export async function DELETE(_request: Request, context: RouteContext<"/api/admi
 
     return Response.json({ ok: true });
   } catch (error) {
-    const message = getErrorMessage(error);
-    const status =
-      error instanceof AdminAuthError
-        ? error.status
-        : message.includes("move sources")
-          ? 409
-          : getAdminErrorStatus(error);
-
-    return Response.json({ error: message }, { status });
+    if (error instanceof Error && error.message.includes("move sources")) {
+      return Response.json({ error: error.message }, { status: 409 });
+    }
+    return adminErrorResponse(error);
   }
 }

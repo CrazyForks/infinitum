@@ -1,7 +1,6 @@
+import { DAY_MS, MINUTE_MS } from "@/config/constants";
 import type { FeedFilters, FeedRange, FeedSort } from "@/lib/feed/types";
 
-const MINUTE_MS = 60 * 1000;
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 export const RANGE_OPTIONS: Array<{ value: FeedRange; label: string }> = [
   { value: "today", label: "当天" },

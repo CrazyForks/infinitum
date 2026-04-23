@@ -1,3 +1,10 @@
+import {
+  CLUSTER_AI_CANDIDATE_LIMIT,
+  CLUSTER_AI_MIN_SCORE,
+  CLUSTER_DIRECT_MATCH_MIN_GAP,
+  CLUSTER_DIRECT_MATCH_MIN_SCORE,
+  CLUSTER_LOOKBACK_MS,
+} from "@/config/constants";
 import type { Item, Source } from "@prisma/client";
 
 import { createAiProvider, type AiEventSignature, type AiProvider } from "@/lib/ai/provider";
@@ -26,12 +33,6 @@ import { getDisplaySummary, getDisplayTitle } from "@/lib/feed/presentation";
 import { getIngestionRuntimeConfig } from "@/lib/settings/service";
 import { createTaskAiUsageTracker } from "@/lib/tasks/ai-usage";
 import { enqueueTaskRun, updateTaskRun } from "@/lib/tasks/service";
-
-const CLUSTER_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
-const CLUSTER_AI_CANDIDATE_LIMIT = 10;
-const CLUSTER_DIRECT_MATCH_MIN_SCORE = 105;
-const CLUSTER_DIRECT_MATCH_MIN_GAP = 20;
-const CLUSTER_AI_MIN_SCORE = 35;
 const clusterAssignmentQueues = new Map<string, Promise<void>>();
 
 type ItemWithSource = Item & { source: Source };

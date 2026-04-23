@@ -4,6 +4,7 @@ import dayjs, { type Dayjs } from "dayjs";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition, useCallback } from "react";
 
+import { STATUS_POLL_INTERVAL_MS, TITLE_SEARCH_DEBOUNCE_MS } from "@/config/constants";
 import { PageShell } from "@/components/ui/page-shell";
 import { StatusBanner } from "@/components/ui/status-banner";
 import { DateRangePicker } from "@/components/ui/date-range-picker";
@@ -33,7 +34,7 @@ import { DEFAULT_FEED_PAGE_SIZE, FEED_PAGE_SIZE_OPTIONS } from "@/lib/feed/types
 import { cx } from "@/lib/ui/cx";
 import { Button } from "@/components/ui/button";
 
-const STATUS_POLL_INTERVAL_MS = 30_000;
+// UI 常量已移至 @/config/constants
 const DISPLAY_TIME_ZONE = "Asia/Shanghai";
 const FETCH_STATUS_LABELS = {
   running: "运行中",
@@ -110,8 +111,6 @@ type BatchActionDialogState = {
 } | null;
 
 type DateRangeValue = [Dayjs | null, Dayjs | null] | null;
-
-const TITLE_SEARCH_DEBOUNCE_MS = 320;
 
 function formatDate(value: string): string {
   return new Intl.DateTimeFormat("zh-CN", {
