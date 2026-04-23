@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { AiProvider } from "@/lib/ai/provider";
 import { findRecentActiveClusterCandidates } from "@/lib/clusters/repository";
 import { prisma } from "@/lib/db";
 import { runIngestion, runIngestionTask, startIngestionTask } from "@/lib/ingestion/service";
@@ -31,8 +32,8 @@ function buildAiProviderMock(
     summarizeCluster: ReturnType<typeof vi.fn>;
     matchClusterCandidate: ReturnType<typeof vi.fn>;
   }>,
-) {
-  return {
+): AiProvider {
+  const base = {
     summarizeItem: vi.fn().mockResolvedValue("默认条目摘要"),
     enrichContent: vi.fn().mockResolvedValue({
       translatedTitle: "默认中文标题",
@@ -45,8 +46,8 @@ function buildAiProviderMock(
     }),
     summarizeCluster: vi.fn().mockResolvedValue("默认聚合摘要"),
     matchClusterCandidate: vi.fn().mockResolvedValue(null),
-    ...overrides,
   };
+  return { ...base, ...(overrides as unknown as Partial<AiProvider>) } as AiProvider;
 }
 
 describe("runIngestion", () => {

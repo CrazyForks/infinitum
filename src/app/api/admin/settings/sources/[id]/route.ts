@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { getAdminErrorStatus } from "@/lib/admin/http";
+import { adminErrorResponse } from "@/lib/admin/http";
 import { requireAdmin } from "@/lib/admin/session";
 import { deleteSource, updateSource } from "@/lib/settings/service";
 
@@ -22,12 +22,7 @@ export async function PATCH(request: Request, context: RouteContext<"/api/admin/
 
     return Response.json({ source });
   } catch (error) {
-    return Response.json(
-      {
-        error: error instanceof Error ? error.message : "Invalid request",
-      },
-      { status: getAdminErrorStatus(error) },
-    );
+    return adminErrorResponse(error);
   }
 }
 
@@ -39,11 +34,6 @@ export async function DELETE(_request: Request, context: RouteContext<"/api/admi
 
     return Response.json({ ok: true });
   } catch (error) {
-    return Response.json(
-      {
-        error: error instanceof Error ? error.message : "Invalid request",
-      },
-      { status: getAdminErrorStatus(error) },
-    );
+    return adminErrorResponse(error);
   }
 }

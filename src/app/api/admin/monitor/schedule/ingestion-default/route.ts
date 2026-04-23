@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { getAdminErrorStatus } from "@/lib/admin/http";
+import { adminErrorResponse } from "@/lib/admin/http";
 import { requireAdmin } from "@/lib/admin/session";
 import {
   MAX_FULL_TEXT_FETCH_THRESHOLD,
@@ -34,11 +34,6 @@ export async function PATCH(request: Request) {
       schedule: toTaskScheduleSnapshot(schedule),
     });
   } catch (error) {
-    return Response.json(
-      {
-        error: error instanceof Error ? error.message : "Invalid request",
-      },
-      { status: getAdminErrorStatus(error) },
-    );
+    return adminErrorResponse(error);
   }
 }

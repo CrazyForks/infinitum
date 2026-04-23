@@ -1,4 +1,4 @@
-import { getAdminErrorStatus } from "@/lib/admin/http";
+import { adminErrorResponse } from "@/lib/admin/http";
 import { requireAdmin } from "@/lib/admin/session";
 import { mergeClusters } from "@/lib/clusters/service";
 
@@ -37,11 +37,6 @@ export async function POST(request: Request) {
       result,
     });
   } catch (error) {
-    return Response.json(
-      {
-        error: error instanceof Error ? error.message : "合并聚合组失败",
-      },
-      { status: getAdminErrorStatus(error) }
-    );
+    return adminErrorResponse(error, 400, "合并聚合组失败");
   }
 }

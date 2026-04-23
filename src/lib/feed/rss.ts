@@ -1,6 +1,6 @@
 import type { FeedClusterPreviewItemDTO, FeedEntryDTO } from "@/lib/feed/types";
 
-export type RssItem = {
+type RssItem = {
   title: string;
   description: string;
   link: string;
@@ -10,7 +10,7 @@ export type RssItem = {
   author?: string | null;
 };
 
-export type RssFeed = {
+type RssFeed = {
   title: string;
   description: string;
   link: string;

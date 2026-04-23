@@ -1,5 +1,5 @@
 import { requireAdmin } from "@/lib/admin/session";
-import { getAdminErrorStatus } from "@/lib/admin/http";
+import { adminErrorResponse } from "@/lib/admin/http";
 import { getAdminSettings } from "@/lib/settings/service";
 
 export async function GET() {
@@ -8,11 +8,6 @@ export async function GET() {
 
     return Response.json(await getAdminSettings());
   } catch (error) {
-    return Response.json(
-      {
-        error: error instanceof Error ? error.message : "Unauthorized",
-      },
-      { status: getAdminErrorStatus(error, 401) },
-    );
+    return adminErrorResponse(error, 401, "Unauthorized");
   }
 }

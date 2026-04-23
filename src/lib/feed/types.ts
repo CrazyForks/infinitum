@@ -14,8 +14,6 @@ export type FeedFilters = {
 export const DEFAULT_FEED_PAGE_SIZE = 20;
 export const FEED_PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const;
 
-export type FeedPageSize = (typeof FEED_PAGE_SIZE_OPTIONS)[number];
-
 export type FeedPagination = {
   page: number;
   size: number;

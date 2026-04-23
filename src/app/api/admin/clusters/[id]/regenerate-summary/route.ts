@@ -1,4 +1,4 @@
-import { getAdminErrorStatus } from "@/lib/admin/http";
+import { adminErrorResponse } from "@/lib/admin/http";
 import { requireAdmin } from "@/lib/admin/session";
 import { enqueueClusterSummaryTask } from "@/lib/clusters/service";
 
@@ -12,11 +12,6 @@ export async function POST(_request: Request, context: RouteContext<"/api/admin/
       taskRun,
     }, { status: 202 });
   } catch (error) {
-    return Response.json(
-      {
-        error: error instanceof Error ? error.message : "Invalid request",
-      },
-      { status: getAdminErrorStatus(error) },
-    );
+    return adminErrorResponse(error);
   }
 }

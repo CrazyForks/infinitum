@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { getAdminErrorStatus } from "@/lib/admin/http";
+import { adminErrorResponse } from "@/lib/admin/http";
 import { requireAdmin } from "@/lib/admin/session";
 import { resolveSourceMetadata } from "@/lib/settings/service";
 
@@ -16,11 +16,6 @@ export async function POST(request: Request) {
 
     return Response.json({ source });
   } catch (error) {
-    return Response.json(
-      {
-        error: error instanceof Error ? error.message : "Invalid request",
-      },
-      { status: getAdminErrorStatus(error) },
-    );
+    return adminErrorResponse(error);
   }
 }

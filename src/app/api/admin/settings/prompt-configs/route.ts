@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { getAdminErrorStatus } from "@/lib/admin/http";
+import { adminErrorResponse } from "@/lib/admin/http";
 import { requireAdmin } from "@/lib/admin/session";
 import {
   createPromptConfig,
@@ -26,12 +26,7 @@ export async function GET() {
 
     return Response.json(await listPromptConfigs());
   } catch (error) {
-    return Response.json(
-      {
-        error: error instanceof Error ? error.message : "Unauthorized",
-      },
-      { status: getAdminErrorStatus(error, 401) },
-    );
+    return adminErrorResponse(error, 401, "Unauthorized");
   }
 }
 
@@ -43,11 +38,6 @@ export async function POST(request: Request) {
 
     return Response.json({ config }, { status: 201 });
   } catch (error) {
-    return Response.json(
-      {
-        error: error instanceof Error ? error.message : "Invalid request",
-      },
-      { status: getAdminErrorStatus(error) },
-    );
+    return adminErrorResponse(error);
   }
 }

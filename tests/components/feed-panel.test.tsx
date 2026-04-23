@@ -1,21 +1,35 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render as testingRender, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { pushMock, refreshMock } = vi.hoisted(() => ({
+const { pushMock, refreshMock, replaceMock } = vi.hoisted(() => ({
   pushMock: vi.fn(),
   refreshMock: vi.fn(),
+  replaceMock: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
     push: pushMock,
     refresh: refreshMock,
+    replace: replaceMock,
   }),
 }));
 
 import { FeedPanel } from "@/components/feed/feed-panel";
 import type { FeedEntryDTO, FeedGroupOption, FeedRange, FeedSort, FeedSourceOption } from "@/lib/feed/types";
+
+type TestingRenderParameters = Parameters<typeof testingRender>;
+
+function render(ui: TestingRenderParameters[0], options?: TestingRenderParameters[1]) {
+  const getTimezoneOffsetSpy = vi.spyOn(Date.prototype, "getTimezoneOffset").mockReturnValue(0);
+
+  try {
+    return testingRender(ui, options);
+  } finally {
+    getTimezoneOffsetSpy.mockRestore();
+  }
+}
 
 const initialEntries: FeedEntryDTO[] = [
   {
@@ -50,6 +64,7 @@ const initialEntries: FeedEntryDTO[] = [
   {
     id: "item-1",
     type: "single",
+    clusterId: "item-1",
     title: "中文标题",
     originalUrl: "https://example.com/posts/1",
     publishedAt: "2026-04-09T09:00:00.000Z",
@@ -126,6 +141,7 @@ async function selectFilterOption(user: ReturnType<typeof userEvent.setup>, name
 afterEach(() => {
   pushMock.mockReset();
   refreshMock.mockReset();
+  replaceMock.mockReset();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   vi.useRealTimers();

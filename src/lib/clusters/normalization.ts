@@ -103,7 +103,7 @@ export function normalizeEventObjectForStorage(value: string | null | undefined)
   return normalized || null;
 }
 
-export function normalizeEventDateForStorage(value: string | null | undefined) {
+function normalizeEventDateForStorage(value: string | null | undefined) {
   const normalized = normalizeOptionalText(value);
   return normalized || null;
 }

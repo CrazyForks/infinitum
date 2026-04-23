@@ -11,7 +11,7 @@ import {
 type SearchParamRecord = Record<string, string | string[] | undefined>;
 type SearchParamSource = URLSearchParams | SearchParamRecord;
 
-export type ResolvedFeedRequest = {
+type ResolvedFeedRequest = {
   filters: ReturnType<typeof resolveFeedFilters>;
   pagination: {
     page: number;

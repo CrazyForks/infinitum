@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { getAdminErrorStatus } from "@/lib/admin/http";
+import { adminErrorResponse } from "@/lib/admin/http";
 import { requireAdmin } from "@/lib/admin/session";
 import {
   deleteModelApiConfig,
@@ -32,12 +32,7 @@ export async function GET(_request: Request, context: RouteContext) {
 
     return Response.json(await getModelApiConfig(id));
   } catch (error) {
-    return Response.json(
-      {
-        error: error instanceof Error ? error.message : "Invalid request",
-      },
-      { status: getAdminErrorStatus(error) },
-    );
+    return adminErrorResponse(error);
   }
 }
 
@@ -50,12 +45,7 @@ export async function PUT(request: Request, context: RouteContext) {
 
     return Response.json({ config });
   } catch (error) {
-    return Response.json(
-      {
-        error: error instanceof Error ? error.message : "Invalid request",
-      },
-      { status: getAdminErrorStatus(error) },
-    );
+    return adminErrorResponse(error);
   }
 }
 
@@ -68,11 +58,6 @@ export async function DELETE(_request: Request, context: RouteContext) {
 
     return Response.json({ ok: true });
   } catch (error) {
-    return Response.json(
-      {
-        error: error instanceof Error ? error.message : "Invalid request",
-      },
-      { status: getAdminErrorStatus(error) },
-    );
+    return adminErrorResponse(error);
   }
 }

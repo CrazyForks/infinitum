@@ -168,15 +168,7 @@ export function toFetchRunSnapshot(run: FetchRun): FetchRunSnapshot {
   };
 }
 
-export async function hasActiveFetchRun() {
-  const count = await prisma.fetchRun.count({
-    where: { status: "running" },
-  });
-
-  return count > 0;
-}
-
-export function mapItemToClusterPreview(item: ItemWithSource): FeedClusterPreviewItemDTO {
+function mapItemToClusterPreview(item: ItemWithSource): FeedClusterPreviewItemDTO {
   return {
     id: item.id,
     title: getDisplayTitle(item.originalTitle, item.translatedTitle),
@@ -190,7 +182,7 @@ export function mapItemToClusterPreview(item: ItemWithSource): FeedClusterPrevie
   };
 }
 
-export function mapItemToFeedItem(item: ItemWithSource): FeedItemDTO {
+function mapItemToFeedItem(item: ItemWithSource): FeedItemDTO {
   return {
     id: item.id,
     type: "single",
@@ -473,7 +465,7 @@ export async function listFeedFilterOptions(): Promise<{
   };
 }
 
-export async function listFeedGroupCounts(
+async function listFeedGroupCounts(
   filters: FeedFilters & { rangeStart: Date | null; rangeEnd: Date | null },
 ): Promise<{
   groups: FeedGroupOption[];

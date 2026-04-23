@@ -40,9 +40,9 @@ type ClusterAssignmentCoordinator = {
   recentCandidates: Map<string, { sinceMs: number; untilMs: number; candidates: ClusterAssignmentCandidate[] }>;
 };
 
-export type ClusterAssignmentSource = "exact_match" | "cheap_rank_direct" | "ai_match";
+type ClusterAssignmentSource = "exact_match" | "cheap_rank_direct" | "ai_match";
 
-export type ClusterAssignmentResult = {
+type ClusterAssignmentResult = {
   clusterId: string | null;
   matchSource: ClusterAssignmentSource | null;
   skippedIncompleteSignature: boolean;
@@ -922,16 +922,6 @@ export async function setClusterVisibility(clusterId: string, visible: boolean) 
   return cluster;
 }
 
-export async function recomputeAllClusters(aiProvider?: AiProvider) {
-  const clusters = await prisma.contentCluster.findMany({
-    select: { id: true },
-  });
-
-  for (const cluster of clusters) {
-    await recomputeCluster(cluster.id, aiProvider);
-  }
-}
-
 export async function enqueueClusterSummaryTask(clusterId: string, label?: string) {
   return enqueueTaskRun({
     kind: "cluster_regenerate_summary",
@@ -1015,7 +1005,7 @@ export async function executeClusterSummaryTask(
   }
 }
 
-export type ClusterMergeResult = {
+type ClusterMergeResult = {
   targetClusterId: string;
   mergedClusterIds: string[];
   itemsMoved: number;

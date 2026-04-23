@@ -1,4 +1,4 @@
-import { getAdminErrorStatus } from "@/lib/admin/http";
+import { adminErrorResponse } from "@/lib/admin/http";
 import { requireAdmin } from "@/lib/admin/session";
 import { requestTaskRunCancellation, toTaskRunSnapshot } from "@/lib/tasks/service";
 
@@ -12,11 +12,6 @@ export async function POST(_request: Request, context: RouteContext<"/api/admin/
       task: toTaskRunSnapshot(taskRun),
     });
   } catch (error) {
-    return Response.json(
-      {
-        error: error instanceof Error ? error.message : "Invalid request",
-      },
-      { status: getAdminErrorStatus(error) },
-    );
+    return adminErrorResponse(error);
   }
 }

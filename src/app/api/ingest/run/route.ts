@@ -1,18 +1,12 @@
-import { AdminAuthError, requireAdmin } from "@/lib/admin/session";
+import { adminErrorResponse } from "@/lib/admin/http";
+import { requireAdmin } from "@/lib/admin/session";
 import { startIngestionTask } from "@/lib/ingestion/service";
 
 export async function POST() {
   try {
     await requireAdmin();
   } catch (error) {
-    if (error instanceof AdminAuthError || error instanceof Error) {
-      return Response.json(
-        {
-          error: error.message,
-        },
-        { status: error instanceof AdminAuthError ? error.status : 401 },
-      );
-    }
+    return adminErrorResponse(error, 401, "Unauthorized");
   }
 
   try {
@@ -25,11 +19,6 @@ export async function POST() {
       { status: 202 },
     );
   } catch (error) {
-    return Response.json(
-      {
-        error: error instanceof Error ? error.message : "Failed to queue ingestion task.",
-      },
-      { status: 409 },
-    );
+    return adminErrorResponse(error, 409, "Failed to queue ingestion task.");
   }
 }

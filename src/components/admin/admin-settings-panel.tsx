@@ -1,8 +1,9 @@
 "use client";
-import { type ChangeEvent, useMemo, useRef, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 
 import { AiSettingsPanel } from "@/components/admin/ai-settings-panel";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import { PageShell } from "@/components/ui/page-shell";
 import { FilterInput } from "@/components/ui/filter-input";
 import { FilterSelect } from "@/components/ui/filter-select";
@@ -10,6 +11,7 @@ import { FormField } from "@/components/ui/form-field";
 import { IconButton } from "@/components/ui/icon-button";
 import { IconCheck, IconEdit, IconPlus, IconTag, IconTrash, IconX } from "@/components/ui/icons";
 import { ModalShell } from "@/components/ui/modal-shell";
+import { PaginationControls } from "@/components/ui/pagination-controls";
 import { TextArea } from "@/components/ui/text-area";
 import { TextInput } from "@/components/ui/text-input";
 import { useToast } from "@/components/ui/toast";
@@ -333,8 +335,8 @@ export function AdminSettingsPanel({
     });
   };
 
-  const handleSourcePageSizeChange = (event: ChangeEvent<HTMLSelectElement>) => {
-    setSourcePageSize(Number(event.target.value));
+  const handleSourcePageSizeChange = (nextPageSize: number) => {
+    setSourcePageSize(nextPageSize);
     setSourcePage(1);
   };
 
@@ -650,16 +652,16 @@ export function AdminSettingsPanel({
                 ))}
               </div>
             ) : (
-              <div className="rounded-sm border border-[color:var(--line)] bg-[var(--bg-muted)] px-4 py-8 text-center text-sm text-[var(--text-3)]">
-                <div className="mb-4">暂无分组</div>
-                <Button
-                  variant="primary"
-                  size="md"
-                  onClick={() => setShowCreateGroupComposer(true)}
-                >
-                  新增分组
-                </Button>
-              </div>
+              <EmptyState
+                className="text-[var(--text-3)]"
+                action={
+                  <Button variant="primary" size="md" onClick={() => setShowCreateGroupComposer(true)}>
+                    新增分组
+                  </Button>
+                }
+              >
+                暂无分组
+              </EmptyState>
             )}
           </div>
         ) : null}
@@ -748,11 +750,11 @@ export function AdminSettingsPanel({
             </div>
 
             {paginatedSources.length === 0 ? (
-              <div className="rounded-sm border border-[color:var(--line)] bg-[var(--bg-muted)] px-4 py-8 text-center text-sm text-[var(--muted)]">
+              <EmptyState>
                 {filteredSources.length === 0 && initialSettings.sources.length > 0
                   ? "暂无匹配信息源"
                   : "暂无信息源"}
-              </div>
+              </EmptyState>
             ) : (
               <div className="w-full overflow-x-auto">
                 <table className="w-full table-auto text-sm">
@@ -824,44 +826,14 @@ export function AdminSettingsPanel({
             )}
 
             {filteredSources.length > 0 ? (
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-sm text-[var(--muted)]">
-                  <span>每页显示</span>
-                  <select
-                    value={sourcePageSize}
-                    onChange={handleSourcePageSizeChange}
-                    className="rounded-sm border border-[color:var(--line)] bg-[var(--surface)] px-2 py-1 text-sm"
-                  >
-                    <option value={10}>10</option>
-                    <option value={20}>20</option>
-                    <option value={50}>50</option>
-                  </select>
-                  <span>条，共 {filteredSources.length} 条</span>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => setSourcePage((current) => Math.max(1, current - 1))}
-                    disabled={sourcePage === 1}
-                  >
-                    上一页
-                  </Button>
-                  <span className="min-w-[100px] rounded-sm border border-[color:var(--line)] bg-[var(--surface)] px-4 py-2 text-center text-sm text-[var(--muted)]">
-                    第 {sourcePage} / {sourceTotalPages} 页
-                  </span>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() =>
-                      setSourcePage((current) => Math.min(sourceTotalPages, current + 1))
-                    }
-                    disabled={sourcePage >= sourceTotalPages}
-                  >
-                    下一页
-                  </Button>
-                </div>
-              </div>
+              <PaginationControls
+                totalItems={filteredSources.length}
+                page={sourcePage}
+                totalPages={sourceTotalPages}
+                pageSize={sourcePageSize}
+                onPageChange={setSourcePage}
+                onPageSizeChange={handleSourcePageSizeChange}
+              />
             ) : null}
 
             <ModalShell

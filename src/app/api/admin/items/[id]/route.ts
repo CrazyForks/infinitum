@@ -1,4 +1,4 @@
-import { getAdminErrorStatus } from "@/lib/admin/http";
+import { adminErrorResponse } from "@/lib/admin/http";
 import { requireAdmin } from "@/lib/admin/session";
 import { deleteItem } from "@/lib/items/service";
 
@@ -18,11 +18,6 @@ export async function DELETE(_request: Request, context: RouteContext) {
       success: true,
     });
   } catch (error) {
-    return Response.json(
-      {
-        error: error instanceof Error ? error.message : "删除内容失败。",
-      },
-      { status: getAdminErrorStatus(error) },
-    );
+    return adminErrorResponse(error, 400, "删除内容失败。");
   }
 }

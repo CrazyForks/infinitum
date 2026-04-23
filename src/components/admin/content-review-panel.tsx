@@ -4,9 +4,11 @@ import type { Dispatch, SetStateAction } from "react";
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 
 import { PageShell } from "@/components/ui/page-shell";
+import { EmptyState } from "@/components/ui/empty-state";
 import { FilterInput } from "@/components/ui/filter-input";
 import { FilterSelect } from "@/components/ui/filter-select";
 import { ModalShell } from "@/components/ui/modal-shell";
+import { PaginationControls } from "@/components/ui/pagination-controls";
 import { IconButton } from "@/components/ui/icon-button";
 import { Button } from "@/components/ui/button";
 import { StatusTag } from "@/components/ui/status-tag";
@@ -76,8 +78,6 @@ type TimeRangeFilter = "" | "today" | "week" | "month";
 
 const subtleCardClassName =
   "rounded-[0.95rem] border border-[color:var(--line)] bg-[var(--surface-muted)]/82 shadow-[var(--shadow-sm)]";
-const secondaryButtonClassName =
-  "inline-flex min-h-8 items-center justify-center rounded-[0.8rem] border border-[color:var(--line)] bg-white px-2.5 py-1.5 text-[13px] font-medium text-[var(--foreground)] shadow-[var(--shadow-sm)] transition hover:bg-[var(--surface)] disabled:cursor-not-allowed disabled:opacity-55";
 
 const dateTimeFormatter = new Intl.DateTimeFormat("zh-CN", {
   dateStyle: "medium",
@@ -1055,13 +1055,11 @@ function ContentReviewContent({ initialTab = "filtered" }: ContentReviewContentP
 
       {/* List */}
       {isPending ? (
-        <div className="rounded-sm border border-[color:var(--line)] bg-[var(--bg-muted)] px-4 py-8 text-center text-sm text-[var(--muted)]">
-          加载中...
-        </div>
+        <EmptyState>加载中...</EmptyState>
       ) : paginatedItems.length === 0 ? (
-        <div className="rounded-sm border border-[color:var(--line)] bg-[var(--bg-muted)] px-4 py-8 text-center text-sm text-[var(--muted)]">
+        <EmptyState>
           {hasFilters ? "暂无匹配内容" : activeTab === "filtered" ? "当前没有待处理的过滤内容" : "当前没有可管理的聚合结果"}
-        </div>
+        </EmptyState>
       ) : activeTab === "filtered" ? (
         <div className="w-full overflow-x-auto">
           <table className="w-full table-auto text-sm">
@@ -1208,43 +1206,17 @@ function ContentReviewContent({ initialTab = "filtered" }: ContentReviewContentP
 
       {/* Pagination */}
       {currentItems.length > 0 && (
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2 text-sm text-[var(--muted)]">
-            <span>每页显示</span>
-            <select
-              value={pageSize}
-              onChange={(e) => {
-                setPageSize(Number(e.target.value));
-                setPage(1);
-              }}
-              className="rounded-sm border border-[color:var(--line)] bg-[var(--surface)] px-2 py-1 text-sm"
-            >
-              <option value={10}>10</option>
-              <option value={20}>20</option>
-              <option value={50}>50</option>
-            </select>
-            <span>条，共 {currentItems.length} 条</span>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              className={secondaryButtonClassName}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={currentPage === 1}
-            >
-              上一页
-            </button>
-            <span className="min-w-[100px] px-4 py-2 text-center text-sm bg-[var(--surface)] border border-[color:var(--line)] rounded-sm text-[var(--muted)]">
-              第 {currentPage} / {totalPages} 页
-            </span>
-            <button
-              className={secondaryButtonClassName}
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={currentPage >= totalPages}
-            >
-              下一页
-            </button>
-          </div>
-        </div>
+        <PaginationControls
+          totalItems={currentItems.length}
+          page={currentPage}
+          totalPages={totalPages}
+          pageSize={pageSize}
+          onPageChange={setPage}
+          onPageSizeChange={(nextPageSize) => {
+            setPageSize(nextPageSize);
+            setPage(1);
+          }}
+        />
       )}
 
       {/* Detail Modals */}

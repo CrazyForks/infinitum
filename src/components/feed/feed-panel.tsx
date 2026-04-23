@@ -14,6 +14,7 @@ import { FilterSummary } from "@/components/ui/filter-summary";
 import { FormField } from "@/components/ui/form-field";
 import { IconFilter, IconPlus, IconTrash, IconThumbsUp, IconThumbsDown } from "@/components/ui/icons";
 import { ModalShell } from "@/components/ui/modal-shell";
+import { PaginationControls } from "@/components/ui/pagination-controls";
 import { SelectField } from "@/components/ui/select-field";
 import { TextInput } from "@/components/ui/text-input";
 import { RANGE_OPTIONS, SORT_OPTIONS } from "@/lib/feed/range";
@@ -548,8 +549,6 @@ export function FeedPanel({
   const pageSize = pagination.size;
   const total = pagination.total;
   const totalPages = pagination.totalPages;
-  const canGoPreviousPage = currentPage > 1;
-  const canGoNextPage = currentPage < totalPages;
   const shouldShowPagination = total > 0;
 
   const summary = useMemo(
@@ -1438,20 +1437,6 @@ export function FeedPanel({
     setJumpToPage(String(currentPage));
   }, [currentPage]);
 
-  const goToPreviousPage = () => {
-    if (!canGoPreviousPage) {
-      return;
-    }
-    loadFeed(buildQuery(), currentPage - 1, pageSize);
-  };
-
-  const goToNextPage = () => {
-    if (!canGoNextPage) {
-      return;
-    }
-    loadFeed(buildQuery(), currentPage + 1, pageSize);
-  };
-
   const handlePageSizeChange = (value: unknown) => {
     const nextSize = Number(value);
     if (!FEED_PAGE_SIZE_OPTIONS.includes(nextSize as (typeof FEED_PAGE_SIZE_OPTIONS)[number])) {
@@ -1488,10 +1473,6 @@ export function FeedPanel({
     "feed-card-icon-button inline-flex items-center justify-center rounded-sm border border-transparent bg-transparent p-1.5 text-[var(--text-2)] transition hover:bg-[var(--bg-muted)] hover:text-[var(--text-1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]/35 disabled:cursor-not-allowed disabled:opacity-50";
   const clusterToggleClassName =
     "inline-flex shrink-0 items-center gap-1 bg-transparent px-0 py-0 text-left text-[11px] leading-none text-[var(--muted)] transition hover:text-[var(--foreground)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(59,130,246,0.28)] focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:cursor-not-allowed disabled:opacity-55";
-  const paginationButtonClassName =
-    "inline-flex items-center justify-center rounded-sm px-3 py-1.5 text-sm font-medium border border-[color:var(--line)] transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(59,130,246,0.35)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)]";
-  const paginationBadgeClassName =
-    "px-4 py-2 text-sm rounded-sm border border-[color:var(--line)] bg-[var(--surface)] text-[var(--muted)]";
   const hasClearableFilters = activeFilterSummary.length > 0;
   const latestRunSummary = formatRunSummary(status);
   const latestRunDetail = formatRunDetail(status);
@@ -2055,73 +2036,21 @@ export function FeedPanel({
         </section>
 
         {shouldShowPagination ? (
-          <div className="mt-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex flex-wrap items-center gap-2 text-sm text-[var(--muted)]">
-              <span>每页显示</span>
-              <SelectField
-                aria-label="每页显示"
-                value={pageSize}
-                onChange={handlePageSizeChange}
-                className="w-20"
-                options={FEED_PAGE_SIZE_OPTIONS.map((option) => ({
-                  value: option,
-                  label: String(option),
-                }))}
-              />
-              <span>条，共 {total} 条</span>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={goToPreviousPage}
-                disabled={!canGoPreviousPage || isPending}
-                className={cx(
-                  paginationButtonClassName,
-                  canGoPreviousPage && !isPending
-                    ? "bg-[var(--surface)] text-[var(--muted)] hover:bg-[var(--surface-muted)] hover:text-[var(--foreground)]"
-                    : "cursor-not-allowed bg-[var(--surface-muted)] text-[var(--muted)]/70",
-                )}
-              >
-                上一页
-              </button>
-              <span className={paginationBadgeClassName}>
-                第 {currentPage} / {totalPages} 页
-              </span>
-              <button
-                type="button"
-                onClick={goToNextPage}
-                disabled={!canGoNextPage || isPending}
-                className={cx(
-                  paginationButtonClassName,
-                  canGoNextPage && !isPending
-                    ? "bg-[var(--surface)] text-[var(--muted)] hover:bg-[var(--surface-muted)] hover:text-[var(--foreground)]"
-                    : "cursor-not-allowed bg-[var(--surface-muted)] text-[var(--muted)]/70",
-                )}
-              >
-                {isPending ? "加载中..." : "下一页"}
-              </button>
-              <div className="ml-2 flex flex-none items-center gap-1 whitespace-nowrap">
-                <TextInput
-                  aria-label="跳转页码"
-                  type="number"
-                  value={jumpToPage}
-                  onChange={(event) => setJumpToPage(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      handleJumpToPage();
-                    }
-                  }}
-                  className="w-16 text-center"
-                  compact
-                  min={1}
-                  max={totalPages}
-                />
-                <Button onClick={handleJumpToPage} variant="primary" size="sm" className="whitespace-nowrap">
-                  跳转
-                </Button>
-              </div>
-            </div>
-          </div>
+          <PaginationControls
+            className="mt-6"
+            totalItems={total}
+            page={currentPage}
+            totalPages={totalPages}
+            pageSize={pageSize}
+            pageSizeOptions={FEED_PAGE_SIZE_OPTIONS}
+            onPageChange={(nextPage) => loadFeed(buildQuery(), nextPage, pageSize)}
+            onPageSizeChange={handlePageSizeChange}
+            disabled={isPending}
+            nextLabel={isPending ? "加载中..." : "下一页"}
+            jumpValue={jumpToPage}
+            onJumpValueChange={setJumpToPage}
+            onJump={handleJumpToPage}
+          />
         ) : null}
 
         <ModalShell

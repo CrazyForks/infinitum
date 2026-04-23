@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { getAdminErrorStatus } from "@/lib/admin/http";
+import { adminErrorResponse } from "@/lib/admin/http";
 import { requireAdmin } from "@/lib/admin/session";
 import { moveItemToCluster } from "@/lib/clusters/service";
 import { getAdminCluster } from "@/lib/feed/repository";
@@ -21,11 +21,6 @@ export async function POST(request: Request, context: RouteContext<"/api/admin/i
       cluster: await getAdminCluster(body.clusterId),
     });
   } catch (error) {
-    return Response.json(
-      {
-        error: error instanceof Error ? error.message : "Invalid request",
-      },
-      { status: getAdminErrorStatus(error) },
-    );
+    return adminErrorResponse(error);
   }
 }

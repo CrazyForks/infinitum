@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
   IconCopy,
   IconEdit,
@@ -75,8 +76,6 @@ type DeleteModalState =
 const surfaceCardClassName =
   "w-full min-w-0 rounded-sm border border-[color:var(--line)] bg-[var(--surface)] p-6 shadow-sm";
 const itemCardClassName = "rounded-lg border border-[color:var(--line)] p-4 transition hover:shadow-md";
-const emptyStateClassName =
-  "rounded-sm border border-[color:var(--line)] bg-[var(--bg-muted)] px-4 py-8 text-center text-sm text-[var(--muted)]";
 const labelClassName = "block text-sm text-[var(--text-2)]";
 const codeClassName = "rounded bg-[var(--bg-muted)] px-2 py-1 text-xs";
 const checkboxInputClassName =
@@ -547,12 +546,15 @@ export function AiSettingsPanel({ initialSettings, mode }: AiSettingsPanelProps)
           </div>
 
           {modelConfigs.length === 0 ? (
-            <div className={emptyStateClassName}>
-              <div className="mb-4">暂无模型配置</div>
-              <Button onClick={openCreateModelModal} variant="primary">
-                创建配置
-              </Button>
-            </div>
+            <EmptyState
+              action={
+                <Button onClick={openCreateModelModal} variant="primary">
+                  创建配置
+                </Button>
+              }
+            >
+              暂无模型配置
+            </EmptyState>
           ) : (
             <div className="space-y-4">
               {[...modelConfigs]
@@ -993,12 +995,15 @@ export function AiSettingsPanel({ initialSettings, mode }: AiSettingsPanelProps)
         </div>
 
         {filteredPromptConfigs.length === 0 ? (
-          <div className={emptyStateClassName}>
-            <div className="mb-4">暂无{getPromptTypeLabel(selectedPromptType)}配置</div>
-            <Button onClick={openCreatePromptModal} variant="primary">
-              创建配置
-            </Button>
-          </div>
+          <EmptyState
+            action={
+              <Button onClick={openCreatePromptModal} variant="primary">
+                创建配置
+              </Button>
+            }
+          >
+            暂无{getPromptTypeLabel(selectedPromptType)}配置
+          </EmptyState>
         ) : (
           <div className="space-y-4">
             {[...filteredPromptConfigs]

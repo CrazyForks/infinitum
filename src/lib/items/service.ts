@@ -310,7 +310,7 @@ export async function deleteItem(itemId: string, options?: RegenerationOptions) 
   };
 }
 
-export async function reanalyzeItem(itemId: string, options?: RegenerationOptions) {
+async function reanalyzeItem(itemId: string, options?: RegenerationOptions) {
   const item = await prisma.item.findUnique({
     where: { id: itemId },
     include: { source: true },

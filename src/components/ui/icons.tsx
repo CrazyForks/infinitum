@@ -251,14 +251,6 @@ export function IconX(props: IconProps) {
   );
 }
 
-export function IconPlay(props: IconProps) {
-  return (
-    <IconBase {...props}>
-      <path d="M5 3l14 9-14 9V3z" />
-    </IconBase>
-  );
-}
-
 export function IconEye(props: IconProps) {
   return (
     <IconBase {...props}>
@@ -290,15 +282,6 @@ export function IconSquare(props: IconProps) {
   return (
     <IconBase {...props}>
       <rect x="4" y="4" width="16" height="16" rx="2" />
-    </IconBase>
-  );
-}
-
-export function IconSearch(props: IconProps) {
-  return (
-    <IconBase {...props}>
-      <circle cx="11" cy="11" r="7" />
-      <path d="m21 21-4.3-4.3" />
     </IconBase>
   );
 }
@@ -340,15 +323,6 @@ export function IconMerge(props: IconProps) {
       <path d="M14 12h4" />
       <path d="M8 6v6c0 1.1.9 2 2 2h4c1.1 0 2-.9 2-2V6" />
       <path d="M12 14v6" />
-    </IconBase>
-  );
-}
-
-export function IconArrowRight(props: IconProps) {
-  return (
-    <IconBase {...props}>
-      <path d="M5 12h14" />
-      <path d="m12 5 7 7-7 7" />
     </IconBase>
   );
 }
