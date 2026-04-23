@@ -1,209 +1,181 @@
 # infinitum
 
-一个基于 Next.js + SQLite 的信息流面板，支持：
+Infinitum 是一个基于 Next.js 16、SQLite 和后台 Worker 的资讯聚合工作台，用来完成 RSS 抓取、正文补抓、AI 摘要分析、事件归组，以及面向访客和管理员的信息流浏览与管理。
 
-- 从配置文件定义 RSS 源
-- RSS 缺全文时补抓原文正文
-- 基于关键词黑名单过滤
-- 英文标题自动翻译为中文
-- 通过 OpenAI-compatible API 生成中文摘要
-- 管理员登录后触发刷新、重生成翻译与摘要
-- 后台配置页管理信息源、分组、黑名单和 AI 配置（模型 API、提示词）
-- 按时间范围浏览信息流
-- 支持本地运行与 Docker Compose 部署
+## Infinitum 是什么？
 
-## 配置文件
+Infinitum 面向“持续跟踪信息流”这个场景，提供一条完整流水线：
 
-首次启动时，应用会把这个文件里的配置导入数据库作为初始值：
+- 从多个 RSS 源同步内容
+- 在 RSS 缺失正文时补抓原文
+- 使用 OpenAI-compatible 模型生成摘要、标题翻译和内容分析
+- 将多篇报道归并为同一事件聚合组
+- 在公开信息流中按时间、来源、分组和标题检索浏览
+- 在后台完成抓取调度、内容治理、聚合维护和模型配置
 
-- [infinitum.config.json](/Users/shawn/Documents/GitHub/infinitum/config/infinitum.config.json)
+## 核心功能
 
-文件结构如下：
+- **RSS 抓取与正文补全**：支持多源 RSS 同步，并在 RSS 内容不足时自动补抓正文。
+- **AI 摘要与分析**：支持标题翻译、摘要生成、内容质量判断、事件结构化分析。
+- **事件归组**：将描述同一事件的多条内容聚合为 cluster，减少信息流重复噪声。
+- **公开信息流浏览**：支持按时间范围、来源、分组、标题关键词筛选，支持聚合内容与单条内容混合展示。
+- **访客互动能力**：支持对聚合内容进行投票，并输出公开 RSS。
+- **管理员工作台**：支持手动触发抓取、查看任务状态、过滤/恢复内容、重跑 AI、调整聚合关系、隐藏或合并聚合组。
+- **后台配置中心**：支持维护信息源、来源分组、黑名单、模型 API 配置、提示词配置和抓取调度。
+- **后台任务体系**：Web 负责入队，Worker 负责异步执行，支持监控、取消、重试和异常恢复。
+- **Docker 部署**：提供 app/worker 双服务 Compose 配置，默认带 SQLite 持久化卷。
 
-```json
-{
-  "rssSources": [
-    {
-      "name": "OpenAI News",
-      "rssUrl": "https://openai.com/news/rss.xml",
-      "siteUrl": "https://openai.com/news",
-      "enabled": true,
-      "fetchFullTextWhenMissing": true
-    }
-  ],
-  "blacklistKeywords": ["layoffs", "funding"],
-  "ingestion": {
-    "itemConcurrency": 3
-  },
-  "modelApi": {
-    "apiKey": "sk-xxx",
-    "baseURL": "https://api.openai.com/v1",
-    "model": "gpt-4.1-mini"
-  }
-}
+## 使用流程
+
+```mermaid
+flowchart LR
+    A["配置来源与模型参数"] --> B["Worker 拉取 RSS"]
+    B --> C["补抓正文"]
+    C --> D["AI 摘要与分析"]
+    D --> E["事件归组并写入 SQLite"]
+    E --> F["公开信息流展示"]
+    E --> G["后台监控与管理"]
 ```
 
-字段说明：
+## 快速开始
 
-- `rssSources`: RSS 源列表
-- `blacklistKeywords`: 关键词黑名单数组
-- `ingestion.itemConcurrency`: 单次抓取时的条目并发数，建议保持在 `2-5`
-- `modelApi.apiKey`: 模型接口密钥
-- `modelApi.baseURL`: OpenAI-compatible 接口基地址，官方接口可填 `https://api.openai.com/v1`
-- `modelApi.model`: 模型名
-
-如果 `modelApi.apiKey` 留空：
-
-- 标题翻译会回退为原始标题
-- 摘要会回退为 RSS 摘要或正文截断
-
-可以直接编辑 [infinitum.config.json](/Users/shawn/Documents/GitHub/infinitum/config/infinitum.config.json)，也可以从 [infinitum.config.example.json](/Users/shawn/Documents/GitHub/infinitum/config/infinitum.config.example.json) 复制一份新模板再改。
-
-导入完成后：
-
-- 运行时抓取配置以数据库为准
-- 后续请通过后台设置页修改信息源、分组、黑名单和模型 API
-- 原配置文件不再作为运行时唯一来源
-
-## 管理员环境变量
-
-除了 `DATABASE_URL`，还需要配置：
-
-- `ADMIN_PASSWORD`: 管理员登录密码
-- `ADMIN_SESSION_SECRET`: 用于签名管理员会话 cookie 的随机密钥
-
-登录入口：
-
-- `http://localhost:3000/admin/login`
-
-登录成功后：
-
-- 首页会显示管理员概览与“立即更新”
-- 每条信息会显示“重新生成翻译 / 重新生成摘要”
-- 设置页位于 `http://localhost:3000/admin/settings`
-
-## 本地启动
-
-1. 安装依赖
-
-```bash
-npm install
-```
-
-2. 准备环境变量
-
-```bash
-cp .env.example .env
-```
-
-3. 按需修改配置文件
-
-直接编辑 [infinitum.config.json](/Users/shawn/Documents/GitHub/infinitum/config/infinitum.config.json)。
-
-4. 初始化或升级 SQLite 数据库
-
-```bash
-npm run db:setup
-```
-
-说明：
-
-- 这个命令会在首次运行时建表
-- 如果本地数据库字段落后于当前版本，也会自动补齐当前运行所需字段
-
-5. 启动开发服务器
-
-```bash
-npm run dev
-```
-
-打开 [http://localhost:3000](http://localhost:3000) 即可访问。
-
-## Docker Compose 部署
-
-1. 准备 Docker 环境变量
+### 1. 准备环境变量
 
 ```bash
 cp .env.docker.example .env.docker
 ```
 
-2. 按需修改配置文件
+至少需要配置：
 
-直接编辑 [infinitum.config.json](/Users/shawn/Documents/GitHub/infinitum/config/infinitum.config.json)。
+- `DATABASE_URL`
+- `ADMIN_PASSWORD`
+- `ADMIN_SESSION_SECRET`
 
-3. 启动服务
+默认 Docker 环境示例：
+
+```env
+DATABASE_URL=file:/app/data/dev.db
+ADMIN_PASSWORD=change-me
+ADMIN_SESSION_SECRET=replace-with-a-long-random-secret
+```
+
+### 2. 启动服务
 
 ```bash
 docker compose up -d --build
 ```
 
-4. 查看日志
+### 3. 验证状态
 
 ```bash
-docker compose logs -f app
+docker compose ps
+docker compose logs -f app worker
 ```
 
-5. 停止服务
+默认访问地址：
+
+- Web：[http://localhost:3001](http://localhost:3001)
+- 管理员登录：[http://localhost:3001/login](http://localhost:3001/login)
+
+## 本地开发
+
+### 1. 安装依赖
 
 ```bash
-docker compose down
+npm install
 ```
 
-说明：
-
-- SQLite 数据库存放在容器内的 `/app/data/dev.db`
-- `docker-compose.yml` 通过命名卷 `infinitum-data` 持久化数据库
-- `docker-compose.yml` 会把宿主机的 `./config` 目录只读挂载到容器 `/app/config`
-- 容器启动时会自动执行数据库初始化，不需要额外手工建表
-
-## RSS 配置示例
-
-```json
-{
-  "rssSources": [
-    {
-      "name": "OpenAI News",
-      "rssUrl": "https://openai.com/news/rss.xml",
-      "siteUrl": "https://openai.com/news",
-      "enabled": true,
-      "fetchFullTextWhenMissing": true
-    },
-    {
-      "name": "Hacker News Frontpage",
-      "rssUrl": "https://hnrss.org/frontpage",
-      "siteUrl": "https://news.ycombinator.com/",
-      "enabled": true,
-      "fetchFullTextWhenMissing": false
-    }
-  ],
-  "blacklistKeywords": [],
-  "ingestion": {
-    "itemConcurrency": 3
-  },
-  "modelApi": {
-    "apiKey": "",
-    "baseURL": "",
-    "model": "gpt-4.1-mini"
-  }
-}
-```
-
-## 常用命令
+### 2. 准备环境变量
 
 ```bash
-npm run dev
-npm run lint
-npm test
-npm run build
+cp .env.example .env
+```
+
+默认本地环境变量：
+
+```env
+DATABASE_URL="file:./prisma/dev.db"
+ADMIN_PASSWORD="change-me"
+ADMIN_SESSION_SECRET="replace-with-a-long-random-secret"
+```
+
+### 3. 初始化数据库
+
+```bash
+npm run prisma:generate
 npm run db:setup
-docker compose up -d --build
-docker compose logs -f app
 ```
 
-## 定时抓取
-
-首版通过调用 `POST /api/ingest/run` 触发抓取。部署到单机后，可用系统 `cron` 周期性调用，例如：
+### 4. 启动 Web 和 Worker
 
 ```bash
-curl -X POST http://localhost:3000/api/ingest/run
+# 终端 1
+npm run dev
+
+# 终端 2
+npm run worker
 ```
+
+本地默认访问地址：
+
+- Web：[http://localhost:3000](http://localhost:3000)
+- 管理后台登录：[http://localhost:3000/login](http://localhost:3000/login)
+
+## 运行配置
+
+首次启动会初始化，后续通过后台设置页维护：
+
+- 信息源与来源分组
+- 黑名单关键词
+- 模型 API 配置
+- Prompt 配置
+- 抓取调度参数
+
+默认模型配置为空时：
+
+- 标题翻译会回退为原标题
+- 摘要会回退为 RSS 摘要或正文截断
+- 内容分析会回退为基础默认值
+
+## FAQ
+
+### 为什么我改了源码里的默认来源或提示词，线上没有变化？
+
+因为这些默认值只在初始化阶段导入一次。系统启动并写入数据库后，后续运行以数据库中的配置为准，应通过后台设置页修改。
+
+### 为什么手动触发抓取后没有执行？
+
+先检查 `worker` 服务是否在运行：
+
+```bash
+docker compose ps
+docker compose logs -f worker
+```
+
+Web 只负责创建任务，真正执行抓取、AI 分析和归组的是 Worker。
+
+### 为什么调用 `/api/ingest/run` 返回 401？
+
+这个接口要求管理员登录态。请先访问 `/login` 登录，再从页面操作或携带管理员会话调用接口。
+
+### 为什么 Docker 启动后访问不了 `localhost:3000`？
+
+因为默认 Compose 端口映射是 `3001:3000`，宿主机应该访问 [http://localhost:3001](http://localhost:3001)。
+
+### 为什么后台可以打开，但信息流一直没有更新？
+
+通常有三类原因：
+
+- 没有可用的信息源配置
+- Worker 未运行或持续异常退出
+- 模型 API 未配置，导致 AI 能力回退，但这一般不会阻止基础抓取
+
+建议先检查：
+
+```bash
+docker compose logs -f app worker
+```
+
+## 许可证
+
+CC BY 4.0 License
