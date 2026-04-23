@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 const args = process.argv.slice(2);
@@ -32,6 +32,12 @@ function resolvePrismaCliPath() {
 }
 
 function loadSchemaSql() {
+  const prebuiltSchemaSqlPath = path.resolve(root, "prisma", "schema.sql");
+
+  if (existsSync(prebuiltSchemaSqlPath)) {
+    return readFileSync(prebuiltSchemaSqlPath, "utf8");
+  }
+
   const prismaSchemaPath = path.resolve(root, "prisma", "schema.prisma");
 
   return execFileSync(

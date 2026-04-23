@@ -21,4 +21,8 @@ esac
 mkdir -p "$(dirname "$DB_PATH")"
 node scripts/setup-sqlite.mjs "$DB_PATH"
 
+if [ -f /app/worker.cjs ]; then
+  exec node worker.cjs
+fi
+
 exec npm run worker

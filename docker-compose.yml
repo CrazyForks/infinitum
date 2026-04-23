@@ -3,7 +3,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: infinitum:latest
+      target: app-runner
+    image: infinitum-app:latest
     container_name: infinitum
     restart: unless-stopped
     env_file:
@@ -20,7 +21,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: infinitum:latest
+      target: worker-runner
+    image: infinitum-worker:latest
     restart: unless-stopped
     env_file:
       - .env.docker

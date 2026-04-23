@@ -21,4 +21,8 @@ esac
 mkdir -p "$(dirname "$DB_PATH")"
 node scripts/setup-sqlite.mjs "$DB_PATH"
 
+if [ -f /app/server.js ]; then
+  exec node server.js
+fi
+
 exec npm start
