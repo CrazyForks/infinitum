@@ -166,12 +166,35 @@ model ContentCluster {
   eventAction     String?
   eventObject     String?
   eventDate       String?
+  upvotes         Int @default(0)
+  downvotes       Int @default(0)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   items           Item[]
+  visitorVotes    VisitorClusterVote[]
 
   @@index([status, latestPublishedAt])
+  @@index([upvotes, downvotes])
   @@map("content_clusters")
+}
+
+model VisitorClusterVote {
+  id            String   @id @default(cuid())
+  clusterId     String
+  visitorId     String
+  voteType      VoteType
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  cluster       ContentCluster @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+
+  @@unique([clusterId, visitorId])
+  @@index([visitorId])
+  @@map("visitor_cluster_votes")
+}
+
+enum VoteType {
+  upvote
+  downvote
 }
 
 model FetchRun {

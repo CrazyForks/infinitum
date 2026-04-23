@@ -28,6 +28,7 @@ type ItemWithSource = Item & { source: Source };
 type FeedEntryRow = {
   id: string;
   entryType: "single" | "cluster";
+  clusterId?: string | null;
   title: string;
   summary: string | null;
   latestPublishedAt: Date | string;
@@ -35,6 +36,8 @@ type FeedEntryRow = {
   score: number | bigint;
   sourceCount: number | bigint;
   itemCount: number | bigint;
+  upvotes?: number | bigint;
+  downvotes?: number | bigint;
 };
 
 type CountRow = {
@@ -190,6 +193,7 @@ export function mapItemToFeedItem(item: ItemWithSource): FeedItemDTO {
   return {
     id: item.id,
     type: "single",
+    clusterId: item.clusterId ?? item.id, // 用于投票的聚类ID
     title: getDisplayTitle(item.originalTitle, item.translatedTitle),
     originalUrl: item.originalUrl,
     publishedAt: item.publishedAt.toISOString(),
@@ -201,6 +205,9 @@ export function mapItemToFeedItem(item: ItemWithSource): FeedItemDTO {
     score: item.qualityScore,
     sourceCount: 1,
     itemCount: 1,
+    upvotes: 0,
+    downvotes: 0,
+    userVote: null,
     canRegenerateTranslation: shouldTranslateTitle(item.originalTitle),
   };
 }
@@ -325,8 +332,11 @@ function buildFeedEntryCandidatesCte(filters: FeedFilters & { rangeStart: Date |
         MAX(fi."createdAt") AS "createdAt",
         CAST(ROUND(AVG(fi."qualityScore")) AS INTEGER) AS score,
         COUNT(*) AS "itemCount",
-        COUNT(DISTINCT fi."sourceId") AS "sourceCount"
+        COUNT(DISTINCT fi."sourceId") AS "sourceCount",
+        COALESCE(MIN(cc.upvotes), 0) AS upvotes,
+        COALESCE(MIN(cc.downvotes), 0) AS downvotes
       FROM filtered_items fi
+      INNER JOIN "content_clusters" cc ON cc.id = fi."clusterId"
       WHERE fi."clusterId" IS NOT NULL
       GROUP BY fi."clusterId"
     ),
@@ -334,13 +344,16 @@ function buildFeedEntryCandidatesCte(filters: FeedFilters & { rangeStart: Date |
       SELECT
         fi."itemId" AS id,
         'single' AS type,
+        fi."clusterId" AS "clusterId",
         COALESCE(NULLIF(TRIM(fi."translatedTitle"), ''), fi."originalTitle") AS title,
         NULL AS summary,
         fi."publishedAt" AS "latestPublishedAt",
         fi."createdAt" AS "createdAt",
         fi."qualityScore" AS score,
         1 AS "sourceCount",
-        1 AS "itemCount"
+        1 AS "itemCount",
+        COALESCE(cg.upvotes, 0) AS upvotes,
+        COALESCE(cg.downvotes, 0) AS downvotes
       FROM filtered_items fi
       LEFT JOIN cluster_groups cg ON cg.id = fi."clusterId"
       WHERE fi."clusterId" IS NULL OR cg."itemCount" = 1
@@ -349,21 +362,25 @@ function buildFeedEntryCandidatesCte(filters: FeedFilters & { rangeStart: Date |
       SELECT
         cg.id AS id,
         'cluster' AS type,
+        cg.id AS "clusterId",
         cg.title AS title,
         cg.summary AS summary,
         cg."latestPublishedAt" AS "latestPublishedAt",
         cg."createdAt" AS "createdAt",
         cg.score AS score,
         cg."sourceCount" AS "sourceCount",
-        cg."itemCount" AS "itemCount"
+        cg."itemCount" AS "itemCount",
+        cg.upvotes AS upvotes,
+        cg.downvotes AS downvotes,
+        (cg.upvotes - cg.downvotes) AS "voteScore"
       FROM cluster_groups cg
       WHERE cg."itemCount" > 1
     ),
     entry_candidates AS (
-      SELECT id, type, title, summary, "latestPublishedAt", "createdAt", score, "sourceCount", "itemCount"
+      SELECT id, type, NULL AS "clusterId", title, summary, "latestPublishedAt", "createdAt", score, "sourceCount", "itemCount", upvotes, downvotes, (upvotes - downvotes) AS "voteScore"
       FROM cluster_entries
       UNION ALL
-      SELECT id, type, title, summary, "latestPublishedAt", "createdAt", score, "sourceCount", "itemCount"
+      SELECT id, type, "clusterId", title, summary, "latestPublishedAt", "createdAt", score, "sourceCount", "itemCount", upvotes, downvotes, (upvotes - downvotes) AS "voteScore"
       FROM single_entries
     )
   `;
@@ -382,6 +399,10 @@ function buildFeedEntryTitleFilter(title: string | null) {
 function buildFeedEntryOrderBy(sort: FeedFilters["sort"]) {
   if (sort === "score_desc") {
     return Prisma.sql`ORDER BY score DESC, "latestPublishedAt" DESC, "itemCount" DESC, id DESC`;
+  }
+
+  if (sort === "votes_desc") {
+    return Prisma.sql`ORDER BY "voteScore" DESC, "latestPublishedAt" DESC, score DESC, id DESC`;
   }
 
   return Prisma.sql`ORDER BY "latestPublishedAt" DESC, score DESC, "itemCount" DESC, id DESC`;
@@ -471,6 +492,7 @@ export async function listFeedItems(
     page: number;
     size: number;
   },
+  visitorId?: string | undefined,
 ) {
   const entryCandidatesCte = buildFeedEntryCandidatesCte(filters);
   const titleFilter = buildFeedEntryTitleFilter(filters.title);
@@ -490,13 +512,16 @@ export async function listFeedItems(
     SELECT
       id,
       type AS "entryType",
+      "clusterId",
       title,
       summary,
       "latestPublishedAt",
       "createdAt",
       score,
       "sourceCount",
-      "itemCount"
+      "itemCount",
+      upvotes,
+      downvotes
     FROM entry_candidates
     ${titleFilter}
     ${buildFeedEntryOrderBy(filters.sort)}
@@ -542,10 +567,39 @@ export async function listFeedItems(
     clusterItemMap.set(item.clusterId, current);
   }
 
+  // 获取访客对聚类的投票状态（包括聚合和单条）
+  const votedClusterIds = pageRows
+    .map((row) => row.entryType === "cluster" ? row.id : row.clusterId)
+    .filter((id): id is string => id != null);
+
+  const userVotes = new Map<string, "upvote" | "downvote">();
+  if (visitorId && votedClusterIds.length > 0) {
+    const votes = await prisma.visitorClusterVote.findMany({
+      where: {
+        clusterId: { in: votedClusterIds },
+        visitorId,
+      },
+    });
+    for (const vote of votes) {
+      userVotes.set(vote.clusterId, vote.voteType as "upvote" | "downvote");
+    }
+  }
+
   const items = pageRows.flatMap<FeedEntryDTO>((row) => {
     if (row.entryType === "single") {
       const item = singleItemMap.get(row.id);
-      return item ? [item] : [];
+      if (!item) {
+        return [];
+      }
+      // 为单条卡片注入 clusterId（用于投票）和正确的投票数
+      const clusterId = row.clusterId ?? item.id;
+      return [{
+        ...item,
+        clusterId,
+        upvotes: toNumber(row.upvotes ?? 0),
+        downvotes: toNumber(row.downvotes ?? 0),
+        userVote: userVotes.get(clusterId) ?? null,
+      }];
     }
 
     const previewItems = (clusterItemMap.get(row.id) ?? []).slice(0, 3).map(mapItemToClusterPreview);
@@ -563,6 +617,9 @@ export async function listFeedItems(
         score: toNumber(row.score),
         sourceCount: toNumber(row.sourceCount),
         itemCount,
+        upvotes: toNumber(row.upvotes ?? 0),
+        downvotes: toNumber(row.downvotes ?? 0),
+        userVote: userVotes.get(row.id) ?? null,
         itemsPreview: previewItems,
         hasMoreItems: itemCount > previewItems.length,
       },

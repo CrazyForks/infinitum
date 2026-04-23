@@ -1,5 +1,5 @@
 export type FeedRange = "today" | "3d" | "7d" | "1m" | "1y" | "all";
-export type FeedSort = "time_desc" | "score_desc";
+export type FeedSort = "time_desc" | "score_desc" | "votes_desc";
 
 export type FeedFilters = {
   range: FeedRange;
@@ -26,6 +26,7 @@ export type FeedPagination = {
 export type FeedSingleEntryDTO = {
   id: string;
   type: "single";
+  clusterId: string; // 用于投票的聚类ID
   title: string;
   originalUrl: string;
   publishedAt: string;
@@ -37,6 +38,9 @@ export type FeedSingleEntryDTO = {
   score: number;
   sourceCount: number;
   itemCount: number;
+  upvotes: number;
+  downvotes: number;
+  userVote: "upvote" | "downvote" | null;
   canRegenerateTranslation?: boolean;
 };
 
@@ -63,6 +67,9 @@ export type FeedClusterEntryDTO = {
   score: number;
   sourceCount: number;
   itemCount: number;
+  upvotes: number;
+  downvotes: number;
+  userVote: "upvote" | "downvote" | null;
   itemsPreview: FeedClusterPreviewItemDTO[];
   hasMoreItems: boolean;
 };

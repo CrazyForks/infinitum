@@ -8,11 +8,12 @@ const FEED_STATUS_CACHE_TTL_MS = 15_000;
 type FeedFiltersInput = Parameters<typeof listFeedItems>[0];
 type FeedPaginationInput = Parameters<typeof listFeedItems>[1];
 
-function serializeFeedFilters(filters: FeedFiltersInput) {
+function serializeFeedFilters(filters: FeedFiltersInput, visitorId?: string) {
   return JSON.stringify({
     ...filters,
     rangeStart: filters.rangeStart?.toISOString() ?? null,
     rangeEnd: filters.rangeEnd?.toISOString() ?? null,
+    visitorId: visitorId ?? null,
   });
 }
 
@@ -20,10 +21,10 @@ function serializeFeedPagination(pagination: FeedPaginationInput) {
   return `${pagination.page}:${pagination.size}`;
 }
 
-export async function getCachedFeedItems(filters: FeedFiltersInput, pagination: FeedPaginationInput) {
+export async function getCachedFeedItems(filters: FeedFiltersInput, pagination: FeedPaginationInput, visitorId?: string) {
   return withFeedCache(
-    `feed:list:${serializeFeedFilters(filters)}:${serializeFeedPagination(pagination)}`,
-    () => listFeedItems(filters, pagination),
+    `feed:list:${serializeFeedFilters(filters, visitorId)}:${serializeFeedPagination(pagination)}`,
+    () => listFeedItems(filters, pagination, visitorId),
     FEED_LIST_CACHE_TTL_MS,
   );
 }

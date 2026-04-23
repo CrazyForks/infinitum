@@ -538,14 +538,16 @@ describe("ContentReviewPanel", () => {
       failingUrl: "/api/admin/items?moderationStatus=filtered",
       okUrl: "/api/admin/clusters",
       okBody: { clusters: [] },
+      activeTab: "filtered" as const,
     },
     {
       name: "cluster request returns a non-2xx response",
       failingUrl: "/api/admin/clusters",
       okUrl: "/api/admin/items?moderationStatus=filtered",
       okBody: { items: [] },
+      activeTab: "clusters" as const,
     },
-  ])("shows a load failure when $name", async ({ failingUrl, okUrl, okBody }) => {
+  ])("shows a load failure when $name", async ({ failingUrl, okUrl, okBody, activeTab }) => {
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input) => {
       const url = getFetchUrl(input);
 
@@ -562,7 +564,7 @@ describe("ContentReviewPanel", () => {
 
     vi.stubGlobal("fetch", fetchMock);
 
-    renderWithProviders(<ContentReviewPanel />);
+    renderWithProviders(<ContentReviewPanel activeTab={activeTab} />);
 
     expect(await screen.findByRole("alert")).toHaveTextContent("审核数据加载失败。");
   });

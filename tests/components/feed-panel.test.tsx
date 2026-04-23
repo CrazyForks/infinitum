@@ -24,10 +24,14 @@ const initialEntries: FeedEntryDTO[] = [
     title: "OpenAI Agent 发布",
     summary: "聚合摘要内容",
     publishedAt: "2026-04-10T09:00:00.000Z",
+    createdAt: "2026-04-10T09:00:00.000Z",
     latestPublishedAt: "2026-04-10T09:00:00.000Z",
     score: 90,
     sourceCount: 2,
     itemCount: 2,
+    upvotes: 5,
+    downvotes: 1,
+    userVote: null,
     itemsPreview: [
       {
         id: "item-preview-1",
@@ -49,6 +53,7 @@ const initialEntries: FeedEntryDTO[] = [
     title: "中文标题",
     originalUrl: "https://example.com/posts/1",
     publishedAt: "2026-04-09T09:00:00.000Z",
+    createdAt: "2026-04-09T09:00:00.000Z",
     latestPublishedAt: "2026-04-09T09:00:00.000Z",
     sourceName: "Example Feed",
     author: "Alex",
@@ -56,6 +61,9 @@ const initialEntries: FeedEntryDTO[] = [
     score: 72,
     sourceCount: 1,
     itemCount: 1,
+    upvotes: 0,
+    downvotes: 0,
+    userVote: null,
     canRegenerateTranslation: true,
   },
 ];
@@ -647,7 +655,7 @@ describe("FeedPanel", () => {
       />,
     );
 
-    const refreshButton = screen.getByRole("button", { name: "立即刷新" });
+    const refreshButton = screen.getByRole("button", { name: "立即更新" });
     const inlineControls = refreshButton.parentElement;
 
     expect(inlineControls).not.toBeNull();
@@ -669,7 +677,7 @@ describe("FeedPanel", () => {
     );
 
     const advancedToggle = screen.getByRole("button", { name: "高级筛选" });
-    const refreshButton = screen.queryByRole("button", { name: "立即刷新" });
+    const refreshButton = screen.queryByRole("button", { name: "立即更新" });
     const rangeSelect = getSelectRoot("创建时间");
     const sortSelect = getSelectRoot("排序方式");
     const clearButton = screen.getByRole("button", { name: "清除筛选" });
@@ -762,7 +770,7 @@ describe("FeedPanel", () => {
     );
 
     const advancedToggle = screen.getByRole("button", { name: "高级筛选" });
-    const refreshButton = screen.getByRole("button", { name: "立即刷新" });
+    const refreshButton = screen.getByRole("button", { name: "立即更新" });
     const advancedIcon = advancedToggle.querySelector("svg");
     const refreshIcon = refreshButton.querySelector("svg");
 
@@ -791,7 +799,7 @@ describe("FeedPanel", () => {
       />,
     );
 
-    const refreshButton = screen.getByRole("button", { name: "立即刷新" });
+    const refreshButton = screen.getByRole("button", { name: "立即更新" });
 
     expect(refreshButton.className).toContain("lumina-home-action-button");
     expect(refreshButton.className).toContain("lumina-home-action-button--primary");
@@ -826,7 +834,7 @@ describe("FeedPanel", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "立即刷新" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "立即更新" })).toBeDisabled();
   });
 
   it("uses transplanted Lumina filter components on the homepage", () => {
@@ -990,7 +998,7 @@ describe("FeedPanel", () => {
       />,
     );
 
-    expect(screen.getByText("当前时间范围内还没有可展示内容，可以先点击“立即刷新”拉取数据。")).toBeInTheDocument();
+    expect(screen.getByText("当前时间范围内还没有可展示内容，可以先点击“立即更新”拉取数据。")).toBeInTheDocument();
   });
 
   it("renders a neutral empty state for non-admin visitors", () => {
@@ -1008,7 +1016,7 @@ describe("FeedPanel", () => {
     );
 
     expect(screen.getByText("当前时间范围内还没有可展示内容，请稍后再回来看看。")).toBeInTheDocument();
-    expect(screen.queryByText("当前时间范围内还没有可展示内容，可以先点击“立即刷新”拉取数据。")).not.toBeInTheDocument();
+    expect(screen.queryByText("当前时间范围内还没有可展示内容，可以先点击“立即更新”拉取数据。")).not.toBeInTheDocument();
   });
 
   it("polls ingestion status every 30 seconds for admins and reloads the current range when the run completes", async () => {
@@ -1172,7 +1180,7 @@ describe("FeedPanel", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "立即刷新" }));
+    await user.click(screen.getByRole("button", { name: "立即更新" }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith("/api/ingest/run", { method: "POST" });
@@ -1209,7 +1217,7 @@ describe("FeedPanel", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "立即刷新" }));
+    await user.click(screen.getByRole("button", { name: "立即更新" }));
 
     expect(await screen.findByText("Unauthorized")).toBeInTheDocument();
     expect(screen.getByText("Unauthorized").closest('[role="alert"]')).not.toBeNull();
@@ -1229,7 +1237,7 @@ describe("FeedPanel", () => {
       />,
     );
 
-    expect(screen.queryByRole("button", { name: "立即刷新" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "立即更新" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "重新生成内容" })).not.toBeInTheDocument();
   });
 
@@ -1269,7 +1277,7 @@ describe("FeedPanel", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "立即刷新" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "立即更新" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "重新生成内容" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "重新生成内容" }).textContent).toBe("");
 

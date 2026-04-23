@@ -29,6 +29,24 @@ function IconBase({ size = 16, strokeWidth = 2, className, children }: IconBaseP
   );
 }
 
+export function IconThumbsUp({ filled, ...props }: IconProps & { filled?: boolean }) {
+  return (
+    <IconBase {...props}>
+      <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
+      {filled && <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3z" fill="currentColor" stroke="none" />}
+    </IconBase>
+  );
+}
+
+export function IconThumbsDown({ filled, ...props }: IconProps & { filled?: boolean }) {
+  return (
+    <IconBase {...props}>
+      <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zM17 2h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3" />
+      {filled && <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3z" fill="currentColor" stroke="none" transform="rotate(180 12 12)" />}
+    </IconBase>
+  );
+}
+
 export function IconSettings(props: IconProps) {
   return (
     <IconBase {...props}>

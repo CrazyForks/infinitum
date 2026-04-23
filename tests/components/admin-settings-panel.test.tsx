@@ -142,6 +142,8 @@ describe("AdminSettingsPanel", () => {
 
     expect(screen.getByText("提示词配置列表")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "条目摘要" })).toBeInTheDocument();
+    // 切换到"内容分析"标签页以查看内容分析类提示词
+    await user.click(screen.getByRole("button", { name: "内容分析" }));
     expect(screen.getByText("默认内容分析提示词")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "预览" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "复制" })).toBeInTheDocument();

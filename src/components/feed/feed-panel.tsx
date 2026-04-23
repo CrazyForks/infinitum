@@ -12,7 +12,7 @@ import { FilterSelect } from "@/components/ui/filter-select";
 import { FilterSelectInline } from "@/components/ui/filter-select-inline";
 import { FilterSummary } from "@/components/ui/filter-summary";
 import { FormField } from "@/components/ui/form-field";
-import { IconFilter, IconPlus, IconTrash } from "@/components/ui/icons";
+import { IconFilter, IconPlus, IconTrash, IconThumbsUp, IconThumbsDown } from "@/components/ui/icons";
 import { ModalShell } from "@/components/ui/modal-shell";
 import { SelectField } from "@/components/ui/select-field";
 import { TextInput } from "@/components/ui/text-input";
@@ -216,10 +216,6 @@ function toDayjsRange(startDate: string | null, endDate: string | null): [Dayjs 
 
 function getBrowserTimeZoneOffsetMinutes(): number {
   return new Date().getTimezoneOffset();
-}
-
-function isTimeZoneSensitiveQuery(range: FeedRange, startDate: string | null, endDate: string | null): boolean {
-  return Boolean(startDate || endDate || range === "today" || range === "1m" || range === "1y");
 }
 
 function buildFeedSearch(
@@ -1048,6 +1044,41 @@ export function FeedPanel({
     });
   };
 
+  // 投票功能
+  const handleVote = async (clusterId: string, voteType: "upvote" | "downvote") => {
+    startTransition(async () => {
+      try {
+        const response = await fetch(`/api/feed/clusters/${clusterId}/vote`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ voteType }),
+        });
+
+        if (!response.ok) {
+          setRefreshFeedback({ tone: "error", message: "投票失败，请稍后重试。" });
+          return;
+        }
+
+        const result = (await response.json()) as {
+          upvotes: number;
+          downvotes: number;
+          userVote: "upvote" | "downvote" | null;
+        };
+
+        // 更新本地状态（支持聚合和单条，通过 id 或 clusterId 匹配）
+        setItems((currentItems) =>
+          currentItems.map((item) =>
+            item.id === clusterId || ('clusterId' in item && item.clusterId === clusterId)
+              ? { ...item, upvotes: result.upvotes, downvotes: result.downvotes, userVote: result.userVote }
+              : item,
+          ),
+        );
+      } catch {
+        setRefreshFeedback({ tone: "error", message: "投票失败，请稍后重试。" });
+      }
+    });
+  };
+
   // 批量操作相关函数
   const extractItemIdsFromEntry = (entry: FeedEntryDTO): string[] => {
     if (entry.type === "single") {
@@ -1269,7 +1300,10 @@ export function FeedPanel({
 
     didHydrateTimeZoneRef.current = true;
 
-    if (getBrowserTimeZoneOffsetMinutes() === 0 || !isTimeZoneSensitiveQuery(range, startDate, endDate)) {
+    // 服务端渲染时无法获取浏览器时区，导致时间筛选可能不准确
+    // 客户端加载完成后，需要重新获取数据以应用正确的时区
+    if (getBrowserTimeZoneOffsetMinutes() === 0 && initialItems.length > 0) {
+      // 如果时区是 UTC 且已有数据，不需要刷新
       return;
     }
 
@@ -1289,7 +1323,7 @@ export function FeedPanel({
       resetExpandedClusterState();
       setRefreshFeedback(null);
     });
-  }, [availableGroups, endDate, groupId, pageSize, range, sort, sourceId, startDate, titleFilter]);
+  }, [availableGroups, endDate, groupId, initialItems.length, pageSize, range, sort, sourceId, startDate, titleFilter]);
 
   useEffect(() => {
     if (skipTitleEffectRef.current) {
@@ -1514,7 +1548,7 @@ export function FeedPanel({
                   >
                     <span className="inline-flex items-center gap-2">
                       <RefreshIcon />
-                      <span>立即刷新</span>
+                      <span>立即更新</span>
                     </span>
                   </button>
                 ) : null}
@@ -1695,7 +1729,7 @@ export function FeedPanel({
           {items.length === 0 ? (
             <div className="rounded-[1.15rem] border border-dashed border-[color:var(--line-strong)] bg-white/80 px-5 py-8 text-sm leading-7 text-[var(--muted)] shadow-[var(--shadow-sm)]">
               {isAdmin
-                ? "当前时间范围内还没有可展示内容，可以先点击“立即刷新”拉取数据。"
+                ? "当前时间范围内还没有可展示内容，可以先点击“立即更新”拉取数据。"
                 : "当前时间范围内还没有可展示内容，请稍后再回来看看。"}
             </div>
           ) : (
@@ -1727,7 +1761,43 @@ export function FeedPanel({
                       </div>
                     )}
                     <div className="flex-1 space-y-3">
-                      <h2 className={cardTitleClassName}>{entry.title}</h2>
+                      {/* 标题行：左侧标题，右侧投票按钮 + 管理按钮 */}
+                      <div className="flex items-start justify-between gap-3">
+                        <h2 className={cardTitleClassName}>{entry.title}</h2>
+                        <div className="flex shrink-0 items-center gap-0.5">
+                          {/* 投票按钮 */}
+                          <button
+                            type="button"
+                            onClick={() => handleVote(entry.id, "upvote")}
+                            disabled={isPending}
+                            className={cx(
+                              "inline-flex items-center gap-1 rounded-sm px-2 py-1 text-xs transition",
+                              entry.userVote === "upvote"
+                                ? "bg-green-100 text-green-700"
+                                : "bg-transparent text-[var(--text-2)] hover:bg-[var(--bg-muted)]"
+                            )}
+                            title="推荐"
+                          >
+                            <IconThumbsUp filled={entry.userVote === "upvote"} size={14} />
+                            <span>{entry.upvotes}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleVote(entry.id, "downvote")}
+                            disabled={isPending}
+                            className={cx(
+                              "inline-flex items-center gap-1 rounded-sm px-2 py-1 text-xs transition",
+                              entry.userVote === "downvote"
+                                ? "bg-red-100 text-red-700"
+                                : "bg-transparent text-[var(--text-2)] hover:bg-[var(--bg-muted)]"
+                            )}
+                            title="不推荐"
+                          >
+                            <IconThumbsDown filled={entry.userVote === "downvote"} size={14} />
+                            <span>{entry.downvotes}</span>
+                          </button>
+                        </div>
+                      </div>
                       <div className={cardMetaRowClassName}>
                         <span className="rounded-sm bg-[var(--accent-soft)] px-2 py-1 text-[11px] text-[var(--accent-strong)]">聚合</span>
                         <span className={neutralBadgeClassName}>{formatScore(entry.score)}</span>
@@ -1871,50 +1941,83 @@ export function FeedPanel({
                             {entry.title}
                           </a>
                         </h2>
-                        {isAdmin ? (
-                          <div className="flex shrink-0 items-center gap-0.5">
-                            <button
-                              aria-label={`加入聚合组：${entry.title}`}
-                              title="加入聚合组"
-                              className={iconButtonClassName}
-                              type="button"
-                              onClick={() => openAssignClusterDialog(entry.id, entry.title)}
-                              disabled={isPending}
-                            >
-                              <IconPlus className="h-4 w-4" />
-                            </button>
-                            <button
-                              aria-label={`手动过滤：${entry.title}`}
-                              title="手动过滤"
-                              className={iconButtonClassName}
-                              type="button"
-                              onClick={() => setManualFilterDialog({ itemId: entry.id, itemTitle: entry.title })}
-                              disabled={isPending}
-                            >
-                              <IconFilter className="h-4 w-4" />
-                            </button>
-                            <button
-                              aria-label="重新生成内容"
-                              title="重新生成内容"
-                              className={iconButtonClassName}
-                              type="button"
-                              onClick={() => openRegenerateDialog(entry.id, Boolean(entry.canRegenerateTranslation))}
-                              disabled={isPending}
-                            >
-                              <RefreshIcon />
-                            </button>
-                            <button
-                              aria-label={`删除内容：${entry.title}`}
-                              title="删除内容"
-                              className={iconButtonClassName}
-                              type="button"
-                              onClick={() => setDeleteItemDialog({ itemId: entry.id, itemTitle: entry.title })}
-                              disabled={isPending}
-                            >
-                              <IconTrash className="h-4 w-4" />
-                            </button>
-                          </div>
-                        ) : null}
+                        <div className="flex shrink-0 items-center gap-0.5">
+                          {/* 投票按钮 */}
+                          <button
+                            type="button"
+                            onClick={() => handleVote('clusterId' in entry && entry.clusterId ? entry.clusterId : entry.id, "upvote")}
+                            disabled={isPending}
+                            className={cx(
+                              "inline-flex items-center gap-1 rounded-sm px-2 py-1 text-xs transition",
+                              entry.userVote === "upvote"
+                                ? "bg-green-100 text-green-700"
+                                : "bg-transparent text-[var(--text-2)] hover:bg-[var(--bg-muted)]"
+                            )}
+                            title="推荐"
+                          >
+                            <IconThumbsUp filled={entry.userVote === "upvote"} size={14} />
+                            <span>{entry.upvotes}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleVote('clusterId' in entry && entry.clusterId ? entry.clusterId : entry.id, "downvote")}
+                            disabled={isPending}
+                            className={cx(
+                              "inline-flex items-center gap-1 rounded-sm px-2 py-1 text-xs transition",
+                              entry.userVote === "downvote"
+                                ? "bg-red-100 text-red-700"
+                                : "bg-transparent text-[var(--text-2)] hover:bg-[var(--bg-muted)]"
+                            )}
+                            title="不推荐"
+                          >
+                            <IconThumbsDown filled={entry.userVote === "downvote"} size={14} />
+                            <span>{entry.downvotes}</span>
+                          </button>
+                          {isAdmin ? (
+                            <>
+                              <button
+                                aria-label={`加入聚合组：${entry.title}`}
+                                title="加入聚合组"
+                                className={iconButtonClassName}
+                                type="button"
+                                onClick={() => openAssignClusterDialog(entry.id, entry.title)}
+                                disabled={isPending}
+                              >
+                                <IconPlus className="h-4 w-4" />
+                              </button>
+                              <button
+                                aria-label={`手动过滤：${entry.title}`}
+                                title="手动过滤"
+                                className={iconButtonClassName}
+                                type="button"
+                                onClick={() => setManualFilterDialog({ itemId: entry.id, itemTitle: entry.title })}
+                                disabled={isPending}
+                              >
+                                <IconFilter className="h-4 w-4" />
+                              </button>
+                              <button
+                                aria-label="重新生成内容"
+                                title="重新生成内容"
+                                className={iconButtonClassName}
+                                type="button"
+                                onClick={() => openRegenerateDialog(entry.id, Boolean(entry.canRegenerateTranslation))}
+                                disabled={isPending}
+                              >
+                                <RefreshIcon />
+                              </button>
+                              <button
+                                aria-label={`删除内容：${entry.title}`}
+                                title="删除内容"
+                                className={iconButtonClassName}
+                                type="button"
+                                onClick={() => setDeleteItemDialog({ itemId: entry.id, itemTitle: entry.title })}
+                                disabled={isPending}
+                              >
+                                <IconTrash className="h-4 w-4" />
+                              </button>
+                            </>
+                          ) : null}
+                        </div>
                       </div>
                     <div className={cardMetaRowClassName}>
                       <span className={neutralBadgeClassName}>{formatScore(entry.score)}</span>
