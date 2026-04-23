@@ -1,5 +1,5 @@
 export type FeedRange = "today" | "3d" | "7d" | "1m" | "1y" | "all";
-export type FeedSort = "time_desc" | "score_desc" | "votes_desc";
+export type FeedSort = "time_desc" | "score_desc";
 
 export type FeedFilters = {
   range: FeedRange;

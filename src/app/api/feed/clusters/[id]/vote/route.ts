@@ -163,9 +163,7 @@ export async function GET(
 
     const cluster = await prisma.contentCluster.findUnique({
       where: { id: clusterId },
-      select: {
-        upvotes: true,
-        downvotes: true,
+      include: {
         visitorVotes: visitorId ? {
           where: { visitorId },
           select: { voteType: true },

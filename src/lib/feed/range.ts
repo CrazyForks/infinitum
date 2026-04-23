@@ -15,7 +15,6 @@ export const RANGE_OPTIONS: Array<{ value: FeedRange; label: string }> = [
 export const SORT_OPTIONS: Array<{ value: FeedSort; label: string }> = [
   { value: "time_desc", label: "按时间倒序" },
   { value: "score_desc", label: "按评分倒序" },
-  { value: "votes_desc", label: "按推荐值倒序" },
 ];
 
 const RANGE_SET = new Set<FeedRange>(RANGE_OPTIONS.map((option) => option.value));

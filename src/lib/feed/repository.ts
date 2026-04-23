@@ -38,6 +38,7 @@ type FeedEntryRow = {
   itemCount: number | bigint;
   upvotes?: number | bigint;
   downvotes?: number | bigint;
+  recommendScore?: number | bigint;
 };
 
 type CountRow = {
@@ -281,6 +282,22 @@ function toIsoString(value: Date | string) {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 }
 
+/**
+ * 计算综合推荐评分
+ * 以AI评分为基准，访客推荐值做适当微调
+ *
+ * 算法：
+ * - 基准分 = AI评分 (0-100)
+ * - 净推荐值 = upvotes - downvotes
+ * - 微调值 = clamp(净推荐值, -20, +20)  // 每个净推荐±1分，最多影响20分
+ * - 综合评分 = clamp(基准分 + 微调值, 0, 100)
+ */
+function calculateRecommendScore(aiScore: number, upvotes: number, downvotes: number): number {
+  const netVotes = upvotes - downvotes;
+  const adjustment = Math.max(-20, Math.min(20, netVotes));
+  return Math.max(0, Math.min(100, aiScore + adjustment));
+}
+
 function buildFeedEntryCandidatesCte(filters: FeedFilters & { rangeStart: Date | null; rangeEnd: Date | null }) {
   const whereClauses: Prisma.Sql[] = [
     Prisma.sql`i.status = ${"processed"}`,
@@ -334,7 +351,13 @@ function buildFeedEntryCandidatesCte(filters: FeedFilters & { rangeStart: Date |
         COUNT(*) AS "itemCount",
         COUNT(DISTINCT fi."sourceId") AS "sourceCount",
         COALESCE(MIN(cc.upvotes), 0) AS upvotes,
-        COALESCE(MIN(cc.downvotes), 0) AS downvotes
+        COALESCE(MIN(cc.downvotes), 0) AS downvotes,
+        -- 综合推荐评分 = AI评分 + 访客投票微调（净推荐*1，限制在±20范围内，总分限制在0-100）
+        CASE
+          WHEN CAST(ROUND(AVG(fi."qualityScore")) AS INTEGER) + CASE WHEN (COALESCE(MIN(cc.upvotes), 0) - COALESCE(MIN(cc.downvotes), 0)) > 20 THEN 20 WHEN (COALESCE(MIN(cc.upvotes), 0) - COALESCE(MIN(cc.downvotes), 0)) < -20 THEN -20 ELSE (COALESCE(MIN(cc.upvotes), 0) - COALESCE(MIN(cc.downvotes), 0)) END > 100 THEN 100
+          WHEN CAST(ROUND(AVG(fi."qualityScore")) AS INTEGER) + CASE WHEN (COALESCE(MIN(cc.upvotes), 0) - COALESCE(MIN(cc.downvotes), 0)) > 20 THEN 20 WHEN (COALESCE(MIN(cc.upvotes), 0) - COALESCE(MIN(cc.downvotes), 0)) < -20 THEN -20 ELSE (COALESCE(MIN(cc.upvotes), 0) - COALESCE(MIN(cc.downvotes), 0)) END < 0 THEN 0
+          ELSE CAST(ROUND(AVG(fi."qualityScore")) AS INTEGER) + CASE WHEN (COALESCE(MIN(cc.upvotes), 0) - COALESCE(MIN(cc.downvotes), 0)) > 20 THEN 20 WHEN (COALESCE(MIN(cc.upvotes), 0) - COALESCE(MIN(cc.downvotes), 0)) < -20 THEN -20 ELSE (COALESCE(MIN(cc.upvotes), 0) - COALESCE(MIN(cc.downvotes), 0)) END
+        END AS "recommendScore"
       FROM filtered_items fi
       INNER JOIN "content_clusters" cc ON cc.id = fi."clusterId"
       WHERE fi."clusterId" IS NOT NULL
@@ -353,7 +376,13 @@ function buildFeedEntryCandidatesCte(filters: FeedFilters & { rangeStart: Date |
         1 AS "sourceCount",
         1 AS "itemCount",
         COALESCE(cg.upvotes, 0) AS upvotes,
-        COALESCE(cg.downvotes, 0) AS downvotes
+        COALESCE(cg.downvotes, 0) AS downvotes,
+        -- 综合推荐评分 = AI评分 + 访客投票微调
+        CASE
+          WHEN fi."qualityScore" + CASE WHEN (COALESCE(cg.upvotes, 0) - COALESCE(cg.downvotes, 0)) > 20 THEN 20 WHEN (COALESCE(cg.upvotes, 0) - COALESCE(cg.downvotes, 0)) < -20 THEN -20 ELSE (COALESCE(cg.upvotes, 0) - COALESCE(cg.downvotes, 0)) END > 100 THEN 100
+          WHEN fi."qualityScore" + CASE WHEN (COALESCE(cg.upvotes, 0) - COALESCE(cg.downvotes, 0)) > 20 THEN 20 WHEN (COALESCE(cg.upvotes, 0) - COALESCE(cg.downvotes, 0)) < -20 THEN -20 ELSE (COALESCE(cg.upvotes, 0) - COALESCE(cg.downvotes, 0)) END < 0 THEN 0
+          ELSE fi."qualityScore" + CASE WHEN (COALESCE(cg.upvotes, 0) - COALESCE(cg.downvotes, 0)) > 20 THEN 20 WHEN (COALESCE(cg.upvotes, 0) - COALESCE(cg.downvotes, 0)) < -20 THEN -20 ELSE (COALESCE(cg.upvotes, 0) - COALESCE(cg.downvotes, 0)) END
+        END AS "recommendScore"
       FROM filtered_items fi
       LEFT JOIN cluster_groups cg ON cg.id = fi."clusterId"
       WHERE fi."clusterId" IS NULL OR cg."itemCount" = 1
@@ -372,15 +401,15 @@ function buildFeedEntryCandidatesCte(filters: FeedFilters & { rangeStart: Date |
         cg."itemCount" AS "itemCount",
         cg.upvotes AS upvotes,
         cg.downvotes AS downvotes,
-        (cg.upvotes - cg.downvotes) AS "voteScore"
+        cg."recommendScore" AS "recommendScore"
       FROM cluster_groups cg
       WHERE cg."itemCount" > 1
     ),
     entry_candidates AS (
-      SELECT id, type, NULL AS "clusterId", title, summary, "latestPublishedAt", "createdAt", score, "sourceCount", "itemCount", upvotes, downvotes, (upvotes - downvotes) AS "voteScore"
+      SELECT id, type, NULL AS "clusterId", title, summary, "latestPublishedAt", "createdAt", score, "sourceCount", "itemCount", upvotes, downvotes, "recommendScore"
       FROM cluster_entries
       UNION ALL
-      SELECT id, type, "clusterId", title, summary, "latestPublishedAt", "createdAt", score, "sourceCount", "itemCount", upvotes, downvotes, (upvotes - downvotes) AS "voteScore"
+      SELECT id, type, "clusterId", title, summary, "latestPublishedAt", "createdAt", score, "sourceCount", "itemCount", upvotes, downvotes, "recommendScore"
       FROM single_entries
     )
   `;
@@ -398,14 +427,11 @@ function buildFeedEntryTitleFilter(title: string | null) {
 
 function buildFeedEntryOrderBy(sort: FeedFilters["sort"]) {
   if (sort === "score_desc") {
-    return Prisma.sql`ORDER BY score DESC, "latestPublishedAt" DESC, "itemCount" DESC, id DESC`;
+    // 按综合推荐评分降序（AI评分 + 访客投票微调）
+    return Prisma.sql`ORDER BY "recommendScore" DESC, "latestPublishedAt" DESC, "itemCount" DESC, id DESC`;
   }
 
-  if (sort === "votes_desc") {
-    return Prisma.sql`ORDER BY "voteScore" DESC, "latestPublishedAt" DESC, score DESC, id DESC`;
-  }
-
-  return Prisma.sql`ORDER BY "latestPublishedAt" DESC, score DESC, "itemCount" DESC, id DESC`;
+  return Prisma.sql`ORDER BY "latestPublishedAt" DESC, "recommendScore" DESC, "itemCount" DESC, id DESC`;
 }
 
 export async function listFeedFilterOptions(): Promise<{
@@ -517,11 +543,12 @@ export async function listFeedItems(
       summary,
       "latestPublishedAt",
       "createdAt",
-      score,
+      "recommendScore" AS score,
       "sourceCount",
       "itemCount",
       upvotes,
-      downvotes
+      downvotes,
+      "recommendScore"
     FROM entry_candidates
     ${titleFilter}
     ${buildFeedEntryOrderBy(filters.sort)}
@@ -592,10 +619,12 @@ export async function listFeedItems(
         return [];
       }
       // 为单条卡片注入 clusterId（用于投票）和正确的投票数
+      // 使用综合推荐评分（AI评分 + 访客投票微调）
       const clusterId = row.clusterId ?? item.id;
       return [{
         ...item,
         clusterId,
+        score: toNumber(row.recommendScore ?? row.score),
         upvotes: toNumber(row.upvotes ?? 0),
         downvotes: toNumber(row.downvotes ?? 0),
         userVote: userVotes.get(clusterId) ?? null,
@@ -614,7 +643,7 @@ export async function listFeedItems(
         publishedAt: toIsoString(row.latestPublishedAt),
         createdAt: toIsoString(row.createdAt),
         latestPublishedAt: toIsoString(row.latestPublishedAt),
-        score: toNumber(row.score),
+        score: toNumber(row.recommendScore ?? row.score),
         sourceCount: toNumber(row.sourceCount),
         itemCount,
         upvotes: toNumber(row.upvotes ?? 0),
@@ -680,19 +709,29 @@ export async function listAdminClusters() {
         take: 5,
       },
     },
-    orderBy: [{ latestPublishedAt: "desc" }, { score: "desc" }, { createdAt: "desc" }],
+    orderBy: [{ latestPublishedAt: "desc" }, { createdAt: "desc" }],
   });
 
-  return clusters.map((cluster) => ({
-    id: cluster.id,
-    title: cluster.title,
-    summary: cluster.summary,
-    score: cluster.score,
-    itemCount: cluster.itemCount,
-    latestPublishedAt: cluster.latestPublishedAt.toISOString(),
-    status: cluster.status,
-    items: cluster.items.map(mapItemToClusterPreview),
-  })) satisfies ClusterDTO[];
+  return clusters.map((cluster) => {
+    // 计算综合推荐评分（AI评分 + 访客投票微调）
+    const clusterWithVotes = cluster as typeof cluster & { upvotes: number; downvotes: number };
+    const recommendScore = calculateRecommendScore(
+      cluster.score,
+      clusterWithVotes.upvotes ?? 0,
+      clusterWithVotes.downvotes ?? 0
+    );
+
+    return {
+      id: cluster.id,
+      title: cluster.title,
+      summary: cluster.summary,
+      score: recommendScore,
+      itemCount: cluster.itemCount,
+      latestPublishedAt: cluster.latestPublishedAt.toISOString(),
+      status: cluster.status,
+      items: cluster.items.map(mapItemToClusterPreview),
+    } satisfies ClusterDTO;
+  });
 }
 
 export async function getAdminCluster(clusterId: string) {
@@ -716,11 +755,19 @@ export async function getAdminCluster(clusterId: string) {
     return null;
   }
 
+  // 计算综合推荐评分（AI评分 + 访客投票微调）
+  const clusterWithVotes = cluster as typeof cluster & { upvotes: number; downvotes: number };
+  const recommendScore = calculateRecommendScore(
+    cluster.score,
+    clusterWithVotes.upvotes ?? 0,
+    clusterWithVotes.downvotes ?? 0
+  );
+
   return {
     id: cluster.id,
     title: cluster.title,
     summary: cluster.summary,
-    score: cluster.score,
+    score: recommendScore,
     itemCount: cluster.itemCount,
     latestPublishedAt: cluster.latestPublishedAt.toISOString(),
     status: cluster.status,
