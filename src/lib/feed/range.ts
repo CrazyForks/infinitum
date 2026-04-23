@@ -1,0 +1,152 @@
+import type { FeedFilters, FeedRange, FeedSort } from "@/lib/feed/types";
+
+const MINUTE_MS = 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+export const RANGE_OPTIONS: Array<{ value: FeedRange; label: string }> = [
+  { value: "today", label: "当天" },
+  { value: "3d", label: "3天" },
+  { value: "7d", label: "7天" },
+  { value: "1m", label: "1月" },
+  { value: "1y", label: "1年" },
+  { value: "all", label: "不限" },
+];
+
+export const SORT_OPTIONS: Array<{ value: FeedSort; label: string }> = [
+  { value: "time_desc", label: "按时间倒序" },
+  { value: "score_desc", label: "按评分倒序" },
+];
+
+const RANGE_SET = new Set<FeedRange>(RANGE_OPTIONS.map((option) => option.value));
+const SORT_SET = new Set<FeedSort>(SORT_OPTIONS.map((option) => option.value));
+const FEED_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+export function normalizeFeedFilterId(value: string | null | undefined): string | null {
+  const normalized = value?.trim();
+  return normalized ? normalized : null;
+}
+
+export function isFeedRange(value: string): value is FeedRange {
+  return RANGE_SET.has(value as FeedRange);
+}
+
+export function isFeedSort(value: string): value is FeedSort {
+  return SORT_SET.has(value as FeedSort);
+}
+
+export function normalizeFeedDateInput(value: string | null | undefined): string | null {
+  if (!value || !FEED_DATE_PATTERN.test(value)) {
+    return null;
+  }
+
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(year!, month! - 1, day!));
+
+  if (
+    Number.isNaN(date.getTime()) ||
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month! - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    return null;
+  }
+
+  return value;
+}
+
+export function normalizeFeedTimeZoneOffset(value: string | null | undefined): number {
+  const parsed = Number(value);
+
+  if (!Number.isInteger(parsed) || parsed < -24 * 60 || parsed > 24 * 60) {
+    return 0;
+  }
+
+  return parsed;
+}
+
+function shiftInstantToOffsetTimeline(date: Date, timeZoneOffsetMinutes: number): Date {
+  return new Date(date.getTime() - timeZoneOffsetMinutes * MINUTE_MS);
+}
+
+function shiftOffsetTimelineToUtc(date: Date, timeZoneOffsetMinutes: number): Date {
+  return new Date(date.getTime() + timeZoneOffsetMinutes * MINUTE_MS);
+}
+
+export function getRangeStart(range: FeedRange, now = new Date(), timeZoneOffsetMinutes = 0): Date | null {
+  const current = new Date(now);
+  const localCurrent = shiftInstantToOffsetTimeline(current, timeZoneOffsetMinutes);
+
+  switch (range) {
+    case "today": {
+      const localDayStart = new Date(Date.UTC(localCurrent.getUTCFullYear(), localCurrent.getUTCMonth(), localCurrent.getUTCDate()));
+      return shiftOffsetTimelineToUtc(localDayStart, timeZoneOffsetMinutes);
+    }
+    case "3d":
+      return new Date(current.getTime() - 3 * DAY_MS);
+    case "7d":
+      return new Date(current.getTime() - 7 * DAY_MS);
+    case "1m": {
+      const localDate = new Date(localCurrent);
+      localDate.setUTCMonth(localDate.getUTCMonth() - 1);
+      return shiftOffsetTimelineToUtc(localDate, timeZoneOffsetMinutes);
+    }
+    case "1y": {
+      const localDate = new Date(localCurrent);
+      localDate.setUTCFullYear(localDate.getUTCFullYear() - 1);
+      return shiftOffsetTimelineToUtc(localDate, timeZoneOffsetMinutes);
+    }
+    case "all":
+      return null;
+  }
+}
+
+function buildDateBoundary(value: string, boundary: "start" | "end", timeZoneOffsetMinutes: number): Date {
+  const [year, month, day] = value.split("-").map(Number);
+
+  if (boundary === "start") {
+    return shiftOffsetTimelineToUtc(new Date(Date.UTC(year!, month! - 1, day!, 0, 0, 0, 0)), timeZoneOffsetMinutes);
+  }
+
+  return shiftOffsetTimelineToUtc(new Date(Date.UTC(year!, month! - 1, day!, 23, 59, 59, 999)), timeZoneOffsetMinutes);
+}
+
+export function resolveFeedFilters(
+  input: Partial<FeedFilters> & Pick<FeedFilters, "range" | "sort">,
+  now = new Date(),
+  timeZoneOffsetMinutes = 0,
+): FeedFilters & { rangeStart: Date | null; rangeEnd: Date | null; isCustomRange: boolean } {
+  let start = normalizeFeedDateInput(input.start);
+  let end = normalizeFeedDateInput(input.end);
+
+  if (start && end && start > end) {
+    [start, end] = [end, start];
+  }
+
+  if (start || end) {
+    return {
+      range: input.range,
+      sort: input.sort,
+      start,
+      end,
+      groupId: normalizeFeedFilterId(input.groupId),
+      sourceId: normalizeFeedFilterId(input.sourceId),
+      title: input.title?.trim() ? input.title.trim() : null,
+      rangeStart: start ? buildDateBoundary(start, "start", timeZoneOffsetMinutes) : null,
+      rangeEnd: end ? buildDateBoundary(end, "end", timeZoneOffsetMinutes) : null,
+      isCustomRange: true,
+    };
+  }
+
+  return {
+    range: input.range,
+    sort: input.sort,
+    start: null,
+    end: null,
+    groupId: normalizeFeedFilterId(input.groupId),
+    sourceId: normalizeFeedFilterId(input.sourceId),
+    title: input.title?.trim() ? input.title.trim() : null,
+    rangeStart: getRangeStart(input.range, now, timeZoneOffsetMinutes),
+    rangeEnd: null,
+    isCustomRange: false,
+  };
+}

@@ -1,0 +1,43 @@
+import { z } from "zod";
+
+import { adminErrorResponse } from "@/lib/admin/http";
+import { requireAdmin } from "@/lib/admin/session";
+import {
+  createPromptConfig,
+  listPromptConfigs,
+} from "@/lib/settings/service";
+
+const promptConfigSchema = z.object({
+  name: z.string().min(1),
+  type: z.enum(["item_summary", "item_analysis", "cluster_summary", "cluster_match"]),
+  prompt: z.string().min(1),
+  systemPrompt: z.string().min(1),
+  temperature: z.number().min(0).max(2).nullable().optional(),
+  maxTokens: z.number().int().positive().nullable().optional(),
+  topP: z.number().min(0).max(1).nullable().optional(),
+  modelApiConfigId: z.string().nullable().optional(),
+  isEnabled: z.boolean(),
+  isDefault: z.boolean(),
+});
+
+export async function GET() {
+  try {
+    await requireAdmin();
+
+    return Response.json(await listPromptConfigs());
+  } catch (error) {
+    return adminErrorResponse(error, 401, "Unauthorized");
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    await requireAdmin();
+    const body = promptConfigSchema.parse(await request.json());
+    const config = await createPromptConfig(body);
+
+    return Response.json({ config }, { status: 201 });
+  } catch (error) {
+    return adminErrorResponse(error);
+  }
+}

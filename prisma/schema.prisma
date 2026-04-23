@@ -1,0 +1,325 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum ItemStatus {
+  new
+  fetched
+  filtered
+  processed
+  failed
+}
+
+enum ModerationStatus {
+  allowed
+  filtered
+  restored
+}
+
+enum ModerationReason {
+  marketing
+  low_quality
+  duplicate_noise
+  rule_blacklist
+  other
+}
+
+enum ProcessingCheckpointStatus {
+  pending
+  succeeded
+  failed
+}
+
+enum FetchRunStatus {
+  running
+  succeeded
+  failed
+  partial
+}
+
+enum IngestionTrigger {
+  scheduled
+  manual
+}
+
+enum BackgroundTaskKind {
+  ingestion
+  item_regenerate_translation
+  item_regenerate_summary
+  item_reanalyze
+  cluster_regenerate_summary
+}
+
+enum BackgroundTaskTrigger {
+  scheduled
+  manual
+  admin_action
+}
+
+enum BackgroundTaskStatus {
+  queued
+  running
+  succeeded
+  failed
+  partial
+  cancelled
+}
+
+enum ContentClusterKind {
+  topic
+}
+
+enum ContentClusterStatus {
+  active
+  hidden
+}
+
+enum PromptConfigType {
+  item_summary
+  item_analysis
+  cluster_summary
+  cluster_match
+}
+
+model Source {
+  id               String   @id @default(cuid())
+  groupId          String?
+  name             String
+  rssUrl           String   @unique
+  siteUrl          String
+  enabled          Boolean  @default(true)
+  aiParsingEnabled Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  items            Item[]
+  group            SourceGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+
+  @@index([groupId, name])
+  @@map("sources")
+}
+
+model Item {
+  id               String     @id @default(cuid())
+  sourceId         String
+  clusterId        String?
+  originalUrl      String
+  canonicalUrl     String
+  urlHash          String     @unique
+  dedupeSignature  String     @unique
+  originalTitle    String
+  translatedTitle  String?
+  author           String?
+  publishedAt      DateTime
+  rssExcerpt       String?
+  rssContent       String?
+  fullText         String?
+  summaryText      String?
+  language         String?
+  status           ItemStatus @default(new)
+  summaryStatus    ProcessingCheckpointStatus @default(pending)
+  analysisStatus   ProcessingCheckpointStatus @default(pending)
+  filterReason     String?
+  moderationStatus ModerationStatus @default(allowed)
+  moderationReason ModerationReason?
+  moderationDetail String?
+  qualityScore     Int @default(50)
+  qualityRationale String @default("AI analysis unavailable")
+  eventType        String?
+  eventSubject     String?
+  eventAction      String?
+  eventObject      String?
+  eventDate        String?
+  aiProcessedAt    DateTime?
+  restoredByAdminAt DateTime?
+  errorMessage     String?
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+  source           Source     @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  cluster          ContentCluster? @relation(fields: [clusterId], references: [id], onDelete: SetNull)
+
+  @@index([sourceId, publishedAt])
+  @@index([status, publishedAt])
+  @@index([moderationStatus, publishedAt])
+  @@index([status, moderationStatus, createdAt])
+  @@index([clusterId, publishedAt])
+  @@index([qualityScore, publishedAt])
+  @@map("items")
+}
+
+model ContentCluster {
+  id              String @id @default(cuid())
+  kind            ContentClusterKind @default(topic)
+  title           String
+  summary         String
+  score           Int @default(50)
+  itemCount       Int @default(0)
+  latestPublishedAt DateTime
+  status          ContentClusterStatus @default(active)
+  fingerprint     String @unique
+  eventType       String?
+  eventSubject    String?
+  eventAction     String?
+  eventObject     String?
+  eventDate       String?
+  upvotes         Int @default(0)
+  downvotes       Int @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  items           Item[]
+  visitorVotes    VisitorClusterVote[]
+
+  @@index([status, latestPublishedAt])
+  @@index([upvotes, downvotes])
+  @@map("content_clusters")
+}
+
+model VisitorClusterVote {
+  id            String   @id @default(cuid())
+  clusterId     String
+  visitorId     String
+  voteType      VoteType
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  cluster       ContentCluster @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+
+  @@unique([clusterId, visitorId])
+  @@index([visitorId])
+  @@map("visitor_cluster_votes")
+}
+
+enum VoteType {
+  upvote
+  downvote
+}
+
+model FetchRun {
+  id           String             @id @default(cuid())
+  taskRunId    String?
+  triggerType  IngestionTrigger
+  status       FetchRunStatus     @default(running)
+  startedAt    DateTime           @default(now())
+  finishedAt   DateTime?
+  sourceCount  Int                @default(0)
+  itemCount    Int                @default(0)
+  successCount Int                @default(0)
+  failureCount Int                @default(0)
+  itemsAdded   Int                @default(0)
+  errorSummary String?
+  taskRun      BackgroundTaskRun? @relation(fields: [taskRunId], references: [id], onDelete: SetNull)
+
+  @@index([taskRunId])
+  @@index([startedAt])
+  @@map("fetch_runs")
+}
+
+model TaskSchedule {
+  id                String                @id @default(cuid())
+  key               String                @unique
+  enabled           Boolean               @default(false)
+  cronExpression    String                @default("0 * * * *")
+  sourceConcurrency Int                   @default(2)
+  fullTextFetchThreshold Int              @default(80)
+  perSourceItemLimit Int                  @default(20)
+  timezone          String
+  lastHeartbeatAt   DateTime?
+  lastRunStartedAt  DateTime?
+  lastRunFinishedAt DateTime?
+  lastRunStatus     BackgroundTaskStatus?
+  nextRunAt         DateTime
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
+  @@map("task_schedules")
+}
+
+model BackgroundTaskRun {
+  id              String                @id @default(cuid())
+  kind            BackgroundTaskKind
+  triggerType     BackgroundTaskTrigger
+  status          BackgroundTaskStatus  @default(queued)
+  label           String
+  entityId        String?
+  progressCurrent Int                   @default(0)
+  progressTotal   Int                   @default(0)
+  progressLabel   String?
+  itemsAdded      Int                   @default(0)
+  fullTextFetchedCount Int              @default(0)
+  aiCallCountActual Int                 @default(0)
+  aiCallCountEstimated Int              @default(0)
+  aiCallBreakdownJson String?
+  cancelRequestedAt DateTime?
+  startedAt       DateTime?
+  finishedAt      DateTime?
+  errorSummary    String?
+  stageTimingsJson String?
+  taskTimelineJson String?
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  fetchRuns       FetchRun[]
+
+  @@index([status, createdAt])
+  @@index([kind, status, createdAt])
+  @@map("background_task_runs")
+}
+
+model SourceGroup {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  sources   Source[]
+
+  @@map("source_groups")
+}
+
+model ModelApiConfig {
+  id                   String   @id @default(cuid())
+  name                 String
+  baseUrl              String
+  apiKey               String   @default("")
+  modelName            String
+  ingestionItemConcurrency Int    @default(3)
+  isEnabled            Boolean  @default(true)
+  isDefault            Boolean  @default(false)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  promptConfigs        PromptConfig[]
+
+  @@index([isEnabled, isDefault])
+  @@map("model_api_configs")
+}
+
+model PromptConfig {
+  id                 String           @id @default(cuid())
+  name               String
+  type               PromptConfigType
+  prompt             String
+  systemPrompt       String?
+  temperature        Float?
+  maxTokens          Int?
+  topP               Float?
+  modelApiConfigId   String?
+  isEnabled          Boolean          @default(true)
+  isDefault          Boolean          @default(false)
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  modelApiConfig     ModelApiConfig?  @relation(fields: [modelApiConfigId], references: [id], onDelete: SetNull)
+
+  @@index([type, isEnabled, isDefault])
+  @@index([modelApiConfigId])
+  @@map("prompt_configs")
+}
+
+model BlacklistKeyword {
+  id        String   @id @default(cuid())
+  keyword   String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("blacklist_keywords")
+}

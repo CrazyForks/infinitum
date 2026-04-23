@@ -1,0 +1,37 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: app-runner
+    image: infinitum-app:latest
+    container_name: infinitum
+    restart: unless-stopped
+    env_file:
+      - .env.docker
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+    ports:
+      - "3001:3000"
+    volumes:
+      - infinitum-data:/app/data
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: worker-runner
+    image: infinitum-worker:latest
+    restart: unless-stopped
+    env_file:
+      - .env.docker
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: file:/app/data/dev.db
+    command: ["sh", "./scripts/worker-entrypoint.sh"]
+    volumes:
+      - infinitum-data:/app/data
+
+volumes:
+  infinitum-data:

@@ -1,0 +1,226 @@
+import type { BackgroundTaskRun } from "@prisma/client";
+
+import { prisma } from "@/lib/db";
+import { executeTaskRun as defaultExecuteTaskRun } from "@/lib/tasks/handlers";
+import { computeNextRunAt } from "@/lib/tasks/scheduler";
+import { DEFAULT_INGESTION_TASK_LABEL } from "@/lib/tasks/types";
+import {
+  claimNextQueuedTaskRun,
+  ensureDefaultIngestionSchedule,
+  enqueueTaskRun,
+  TASK_RUN_CANCELLED_LABEL,
+  TASK_RUN_CANCELLED_MESSAGE,
+} from "@/lib/tasks/service";
+
+const DEFAULT_TASK_STALE_MS = 15 * 60_000;
+const DEFAULT_POLL_INTERVAL_MS = 2_000;
+
+function sleep(ms: number) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function touchScheduleHeartbeat(now: Date) {
+  const schedule = await ensureDefaultIngestionSchedule();
+
+  return prisma.taskSchedule.update({
+    where: { id: schedule.id },
+    data: {
+      lastHeartbeatAt: now,
+    },
+  });
+}
+
+async function enqueueScheduledIngestionIfDue(now: Date) {
+  const schedule = await ensureDefaultIngestionSchedule();
+
+  if (!schedule.enabled || schedule.nextRunAt.getTime() > now.getTime()) {
+    return false;
+  }
+
+  const activeIngestionCount = await prisma.backgroundTaskRun.count({
+    where: {
+      kind: "ingestion",
+      status: {
+        in: ["queued", "running"],
+      },
+    },
+  });
+
+  if (activeIngestionCount > 0) {
+    return false;
+  }
+
+  await enqueueTaskRun({
+    kind: "ingestion",
+    triggerType: "scheduled",
+    label: DEFAULT_INGESTION_TASK_LABEL,
+  });
+
+  await prisma.taskSchedule.update({
+    where: { id: schedule.id },
+    data: {
+      nextRunAt: computeNextRunAt({
+        cronExpression: schedule.cronExpression,
+        now,
+        anchor: schedule.nextRunAt,
+        timezone: schedule.timezone,
+      }),
+    },
+  });
+
+  return true;
+}
+
+export async function recoverStaleTaskRuns(now = new Date()) {
+  const staleBefore = new Date(now.getTime() - DEFAULT_TASK_STALE_MS);
+  const staleReason = "Worker exited before completing the task.";
+  const cancellationRequestedRuns = await prisma.backgroundTaskRun.findMany({
+    where: {
+      status: "running",
+      cancelRequestedAt: {
+        not: null,
+      },
+      finishedAt: null,
+    },
+    select: {
+      id: true,
+    },
+  });
+  const staleRuns = await prisma.backgroundTaskRun.findMany({
+    where: {
+      status: "running",
+      cancelRequestedAt: null,
+      startedAt: {
+        lt: staleBefore,
+      },
+      finishedAt: null,
+    },
+    select: {
+      id: true,
+    },
+  });
+
+  const cancellationRequestedTaskRunIds = cancellationRequestedRuns.map((run) => run.id);
+  const staleTaskRunIds = staleRuns.map((run) => run.id);
+  let recoveredCount = 0;
+
+  if (cancellationRequestedTaskRunIds.length > 0) {
+    const result = await prisma.backgroundTaskRun.updateMany({
+      where: {
+        id: {
+          in: cancellationRequestedTaskRunIds,
+        },
+      },
+      data: {
+        status: "cancelled",
+        finishedAt: now,
+        progressLabel: TASK_RUN_CANCELLED_LABEL,
+        errorSummary: TASK_RUN_CANCELLED_MESSAGE,
+      },
+    });
+
+    await prisma.fetchRun.updateMany({
+      where: {
+        taskRunId: {
+          in: cancellationRequestedTaskRunIds,
+        },
+        status: "running",
+      },
+      data: {
+        status: "failed",
+        finishedAt: now,
+        errorSummary: TASK_RUN_CANCELLED_MESSAGE,
+      },
+    });
+
+    recoveredCount += result.count;
+  }
+
+  if (staleTaskRunIds.length > 0) {
+    const result = await prisma.backgroundTaskRun.updateMany({
+      where: {
+        id: {
+          in: staleTaskRunIds,
+        },
+      },
+      data: {
+        status: "failed",
+        finishedAt: now,
+        errorSummary: staleReason,
+      },
+    });
+
+    await prisma.fetchRun.updateMany({
+      where: {
+        taskRunId: {
+          in: staleTaskRunIds,
+        },
+        status: "running",
+      },
+      data: {
+        status: "failed",
+        finishedAt: now,
+        errorSummary: staleReason,
+      },
+    });
+
+    recoveredCount += result.count;
+  }
+
+  await prisma.fetchRun.updateMany({
+    where: {
+      status: "running",
+      taskRun: {
+        is: {
+          status: {
+            in: ["failed", "cancelled", "partial", "succeeded"],
+          },
+        },
+      },
+    },
+    data: {
+      status: "failed",
+      finishedAt: now,
+      errorSummary: staleReason,
+    },
+  });
+
+  return recoveredCount;
+}
+
+export async function runWorkerCycle(options?: {
+  now?: Date;
+  executeTaskRun?: (taskRun: BackgroundTaskRun) => Promise<void>;
+}) {
+  const now = options?.now ?? new Date();
+
+  await ensureDefaultIngestionSchedule();
+  await touchScheduleHeartbeat(now);
+  const enqueuedScheduledRun = await enqueueScheduledIngestionIfDue(now);
+  const claimedTaskRun = await claimNextQueuedTaskRun();
+
+  if (claimedTaskRun) {
+    await (options?.executeTaskRun ?? defaultExecuteTaskRun)(claimedTaskRun);
+  }
+
+  return {
+    enqueuedScheduledRun,
+    claimedTaskRunId: claimedTaskRun?.id ?? null,
+  };
+}
+
+export async function startWorkerLoop(options?: {
+  pollIntervalMs?: number;
+  executeTaskRun?: (taskRun: BackgroundTaskRun) => Promise<void>;
+}) {
+  await recoverStaleTaskRuns();
+
+  while (true) {
+    await runWorkerCycle({
+      executeTaskRun: options?.executeTaskRun,
+    });
+    await sleep(options?.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS);
+  }
+}
