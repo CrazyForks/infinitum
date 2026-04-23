@@ -17,6 +17,7 @@ import {
   IconX,
   IconExternalLink,
   IconTrash,
+  IconMerge,
 } from "@/components/ui/icons";
 import type { ClusterDTO, ReviewItemDTO } from "@/lib/feed/types";
 import { cx } from "@/lib/ui/cx";
@@ -294,6 +295,7 @@ interface ClusterDetailModalProps {
   onRegenerateSummary?: () => void;
   onToggleStatus?: () => void;
   onDetachItem?: (itemId: string) => void;
+  onMerge?: () => void;
   isRegenerating?: boolean;
   isTogglingStatus?: boolean;
 }
@@ -305,6 +307,7 @@ function ClusterDetailModal({
   onRegenerateSummary,
   onToggleStatus,
   onDetachItem,
+  onMerge,
   isRegenerating,
   isTogglingStatus,
 }: ClusterDetailModalProps) {
@@ -323,6 +326,12 @@ function ClusterDetailModal({
       footerClassName="border-t border-[color:var(--line)] bg-[var(--bg-muted)] p-6"
       footer={
         <div className="flex justify-end gap-2">
+          {onMerge && (
+            <Button onClick={onMerge} variant="secondary">
+              <IconMerge className="h-4 w-4 mr-1" />
+              合并聚合组
+            </Button>
+          )}
           {onRegenerateSummary && (
             <Button onClick={onRegenerateSummary} variant="secondary" disabled={isRegenerating}>
               <IconRotateCw className={cx("h-4 w-4 mr-1", isRegenerating && "animate-spin")} />
@@ -465,6 +474,13 @@ function ContentReviewContent({ initialTab = "filtered" }: ContentReviewContentP
   const [reanalyzingItemId, setReanalyzingItemId] = useState<string | null>(null);
   const [regeneratingClusterId, setRegeneratingClusterId] = useState<string | null>(null);
   const [togglingClusterId, setTogglingClusterId] = useState<string | null>(null);
+  const [mergingClusterId, setMergingClusterId] = useState<string | null>(null);
+
+  // Merge modal states
+  const [isMergeModalOpen, setIsMergeModalOpen] = useState(false);
+  const [mergeTargetId, setMergeTargetId] = useState<string | null>(null);
+  const [mergeSourceIds, setMergeSourceIds] = useState<Set<string>>(new Set());
+  const [mergeSearchQuery, setMergeSearchQuery] = useState("");
 
   // Confirmation modal states
   const [confirmModal, setConfirmModal] = useState<{
@@ -635,6 +651,30 @@ function ContentReviewContent({ initialTab = "filtered" }: ContentReviewContentP
     });
   }, [clusters, clusterSearch, clusterStatus, clusterTimeRange]);
 
+  // Available clusters for merge (exclude current cluster and filter by search)
+  const availableClustersForMerge = useMemo(() => {
+    const query = mergeSearchQuery.trim().toLowerCase();
+    const filtered = clusters.filter((cluster: ClusterDTO) => {
+      // Exclude target cluster
+      if (cluster.id === mergeTargetId) return false;
+      // Only show clusters with items
+      if (cluster.itemCount < 1) return false;
+      // Apply search filter
+      if (!query) return true;
+      return (
+        cluster.title.toLowerCase().includes(query) ||
+        (cluster.summary ?? "").toLowerCase().includes(query)
+      );
+    });
+    // Limit to first 20 clusters to avoid overwhelming the UI
+    return filtered.slice(0, 20);
+  }, [clusters, mergeTargetId, mergeSearchQuery]);
+
+  // Get target cluster info for merge modal
+  const targetClusterForMerge = useMemo(() => {
+    return clusters.find((c) => c.id === mergeTargetId) ?? null;
+  }, [clusters, mergeTargetId]);
+
   // Pagination
   const { currentItems, totalPages, paginatedItems, currentPage } = useMemo(() => {
     const currentItems = activeTab === "filtered" ? visibleFilteredItems : visibleClusters;
@@ -672,8 +712,20 @@ function ContentReviewContent({ initialTab = "filtered" }: ContentReviewContentP
     setSelectedFilteredItem(null);
   };
 
-  const handleOpenClusterDetail = (cluster: ClusterDTO) => {
-    setSelectedCluster(cluster);
+  const handleOpenClusterDetail = async (cluster: ClusterDTO) => {
+    // 从API获取完整聚合组详情（包含所有条目）
+    try {
+      const response = await fetch(`/api/admin/clusters/${cluster.id}`);
+      const payload = await response.json();
+      if (response.ok && payload.cluster) {
+        setSelectedCluster(payload.cluster);
+      } else {
+        // 如果API调用失败，使用列表中的数据作为 fallback
+        setSelectedCluster(cluster);
+      }
+    } catch {
+      setSelectedCluster(cluster);
+    }
     setIsClusterDetailOpen(true);
   };
 
@@ -833,6 +885,67 @@ function ContentReviewContent({ initialTab = "filtered" }: ContentReviewContentP
 
   const closeConfirmModal = () => {
     setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+  };
+
+  // Merge handlers
+  const handleOpenMergeModal = (targetClusterId: string) => {
+    setMergeTargetId(targetClusterId);
+    setMergeSearchQuery("");
+    setMergeSourceIds(new Set());
+    setIsMergeModalOpen(true);
+  };
+
+  const handleCloseMergeModal = () => {
+    setIsMergeModalOpen(false);
+    setMergeTargetId(null);
+    setMergeSourceIds(new Set());
+  };
+
+  const handleToggleMergeSource = (clusterId: string) => {
+    setMergeSourceIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(clusterId)) {
+        next.delete(clusterId);
+      } else {
+        next.add(clusterId);
+      }
+      return next;
+    });
+  };
+
+  const handleExecuteMerge = async () => {
+    if (!mergeTargetId || mergeSourceIds.size === 0) {
+      showToast("请至少选择一个要合并的聚合组", "error");
+      return;
+    }
+
+    setMergingClusterId(mergeTargetId);
+    try {
+      const response = await fetch("/api/admin/clusters/merge", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          targetClusterId: mergeTargetId,
+          sourceClusterIds: Array.from(mergeSourceIds),
+        }),
+      });
+
+      const payload = await response.json();
+
+      if (!response.ok || payload.error) {
+        showToast(payload.error ?? "合并失败", "error");
+        return;
+      }
+
+      showToast(`成功合并 ${payload.result.itemsMoved} 个条目`, "success");
+      handleCloseMergeModal();
+      handleCloseClusterDetail();
+      fetchData();
+    } catch {
+      showToast("合并请求失败", "error");
+    } finally {
+      setMergingClusterId(null);
+    }
   };
 
   return (
@@ -1054,6 +1167,15 @@ function ContentReviewContent({ initialTab = "filtered" }: ContentReviewContentP
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-1">
                       <IconButton
+                        onClick={() => handleOpenMergeModal(cluster.id)}
+                        variant="ghost"
+                        size="sm"
+                        title="合并其他聚合组"
+                        disabled={false}
+                      >
+                        <IconMerge className="h-4 w-4" />
+                      </IconButton>
+                      <IconButton
                         onClick={() => openConfirmRegenerate(cluster.id)}
                         variant="ghost"
                         size="sm"
@@ -1146,6 +1268,7 @@ function ContentReviewContent({ initialTab = "filtered" }: ContentReviewContentP
           onRegenerateSummary={() => openConfirmRegenerate(selectedCluster.id)}
           onToggleStatus={() => openConfirmToggleStatus(selectedCluster.id, selectedCluster.status)}
           onDetachItem={(itemId) => openConfirmDetach(selectedCluster.id, itemId)}
+          onMerge={() => handleOpenMergeModal(selectedCluster.id)}
           isRegenerating={regeneratingClusterId === selectedCluster?.id}
           isTogglingStatus={togglingClusterId === selectedCluster?.id}
         />
@@ -1175,6 +1298,134 @@ function ContentReviewContent({ initialTab = "filtered" }: ContentReviewContentP
         }
       >
         <p className="text-sm text-[var(--text-2)]">{confirmModal.message}</p>
+      </ModalShell>
+
+      {/* Merge Clusters Modal */}
+      <ModalShell
+        isOpen={isMergeModalOpen}
+        onClose={handleCloseMergeModal}
+        title="合并聚合组"
+        widthClassName="max-w-3xl"
+        headerClassName="border-b border-[color:var(--line)] p-4"
+        bodyClassName="p-4 space-y-4"
+        footerClassName="border-t border-[color:var(--line)] bg-[var(--bg-muted)] p-4"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button onClick={handleCloseMergeModal} variant="secondary">
+              取消
+            </Button>
+            <Button
+              onClick={handleExecuteMerge}
+              variant="primary"
+              disabled={mergeSourceIds.size === 0 || mergingClusterId === mergeTargetId}
+            >
+              {mergingClusterId === mergeTargetId ? (
+                <>
+                  <IconRotateCw className="h-4 w-4 mr-1 animate-spin" />
+                  合并中...
+                </>
+              ) : (
+                <>
+                  <IconMerge className="h-4 w-4 mr-1" />
+                  确认合并 ({mergeSourceIds.size} 个)
+                </>
+              )}
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <div className="rounded-lg border border-[color:var(--line)] bg-[var(--bg-muted)] p-4">
+            <h4 className="text-sm font-semibold text-[var(--text-1)] mb-2">操作说明</h4>
+            <ul className="text-sm text-[var(--text-2)] space-y-1 list-disc list-inside">
+              <li>选中的聚合组条目将被合并到当前聚合组</li>
+              <li>合并后，被合并的聚合组将被隐藏，其条目归属到当前聚合组</li>
+              <li>系统会自动重新生成当前聚合组的摘要</li>
+            </ul>
+          </div>
+
+          {/* Target Cluster Info */}
+          <div className="space-y-2">
+            <h4 className="text-sm font-semibold text-[var(--text-1)]">目标聚合组（当前）</h4>
+            <div className="rounded-lg border border-[color:var(--accent-soft)] bg-[var(--accent-soft)]/30 p-3">
+              <div className="font-medium text-sm text-[var(--foreground)]">
+                {targetClusterForMerge?.title ?? "加载中..."}
+              </div>
+              <div className="text-xs text-[var(--muted)] mt-1">
+                {targetClusterForMerge ? `${targetClusterForMerge.itemCount} 条内容 · 质量分: ${targetClusterForMerge.score}` : ""}
+              </div>
+            </div>
+          </div>
+
+          {/* Source Selection with Search */}
+          <div className="space-y-2">
+            <h4 className="text-sm font-semibold text-[var(--text-1)]">
+              选择要合并的聚合组
+              {mergeSourceIds.size > 0 && (
+                <span className="ml-2 text-xs font-normal text-[var(--accent-strong)]">
+                  已选择 {mergeSourceIds.size} 个
+                </span>
+              )}
+            </h4>
+
+            {/* Search Input */}
+            <div className="relative">
+              <input
+                type="text"
+                placeholder="搜索聚合组标题..."
+                value={mergeSearchQuery}
+                onChange={(e) => setMergeSearchQuery(e.target.value)}
+                className={cx(
+                  "w-full min-h-10 rounded-xl border border-[color:var(--line)] bg-white px-4 py-2.5 text-sm",
+                  "text-[var(--foreground)] outline-none transition",
+                  "placeholder:text-[var(--muted)]",
+                  "focus:border-[color:var(--accent)] focus:ring-2 focus:ring-[color:var(--accent-soft)]"
+                )}
+              />
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--muted)]">
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              </span>
+            </div>
+
+            {/* Cluster List */}
+            <div className="max-h-[280px] overflow-y-auto space-y-1 border border-[color:var(--line)] rounded-lg p-2">
+              {availableClustersForMerge.length === 0 ? (
+                <p className="text-sm text-[var(--muted)] text-center py-4">
+                  {mergeSearchQuery.trim() ? "未找到匹配的聚合组" : "暂无可合并的聚合组"}
+                </p>
+              ) : (
+                availableClustersForMerge.map((cluster) => (
+                  <label
+                    key={cluster.id}
+                    className={cx(
+                      "flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors",
+                      mergeSourceIds.has(cluster.id)
+                        ? "bg-[var(--accent-soft)] border border-[color:var(--accent)]"
+                        : "hover:bg-[var(--surface)] border border-transparent"
+                    )}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={mergeSourceIds.has(cluster.id)}
+                      onChange={() => handleToggleMergeSource(cluster.id)}
+                      className="h-4 w-4 text-[var(--accent)] rounded"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-sm text-[var(--foreground)] truncate">
+                        {cluster.title}
+                      </div>
+                      <div className="text-xs text-[var(--muted)]">
+                        {cluster.itemCount} 条内容 · 质量分: {cluster.score}
+                      </div>
+                    </div>
+                  </label>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
       </ModalShell>
     </div>
   );

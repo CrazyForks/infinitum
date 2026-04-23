@@ -331,3 +331,24 @@ export function IconRss(props: IconProps) {
     </IconBase>
   );
 }
+
+export function IconMerge(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M8 6h8" />
+      <path d="M6 12h4" />
+      <path d="M14 12h4" />
+      <path d="M8 6v6c0 1.1.9 2 2 2h4c1.1 0 2-.9 2-2V6" />
+      <path d="M12 14v6" />
+    </IconBase>
+  );
+}
+
+export function IconArrowRight(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M5 12h14" />
+      <path d="m12 5 7 7-7 7" />
+    </IconBase>
+  );
+}

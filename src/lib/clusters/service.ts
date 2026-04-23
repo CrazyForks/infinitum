@@ -498,11 +498,14 @@ async function generateClusterPresentation(clusterItems: ItemWithSource[], exist
       )
       .join("\n");
 
+    const aiSummary = await summaryProvider.summarizeCluster(summarySeed, { title: fallback.title });
+    const useAiSummary = Boolean(aiSummary?.trim()) && aiSummary !== fallback.summary;
+
     return {
       title: fallback.title,
-      summary: (await summaryProvider.summarizeCluster(summarySeed, { title: fallback.title })) || fallback.summary,
+      summary: useAiSummary ? aiSummary : fallback.summary,
       summaryAttempted: true,
-      summarySucceeded: true,
+      summarySucceeded: useAiSummary,
     };
   } catch {
     return {
@@ -774,7 +777,10 @@ export async function assignItemToCluster(
   });
 }
 
-export async function recomputeCluster(clusterId: string, aiProvider?: AiProvider) {
+export async function recomputeCluster(
+  clusterId: string,
+  aiProvider?: AiProvider,
+): Promise<ClusterRecomputeResult> {
   const cluster = await getClusterWithItems(clusterId);
 
   if (!cluster) {
@@ -926,11 +932,11 @@ export async function recomputeAllClusters(aiProvider?: AiProvider) {
   }
 }
 
-export async function enqueueClusterSummaryTask(clusterId: string) {
+export async function enqueueClusterSummaryTask(clusterId: string, label?: string) {
   return enqueueTaskRun({
     kind: "cluster_regenerate_summary",
     triggerType: "admin_action",
-    label: "重新生成聚合摘要",
+    label: label ?? "重新生成聚合摘要",
     entityId: clusterId,
   });
 }
@@ -973,11 +979,17 @@ export async function executeClusterSummaryTask(
       trackedAiProvider,
     );
 
+    const progressLabel = cluster.summaryAttempted
+      ? cluster.summarySucceeded
+        ? "已完成聚合摘要重生成（AI生成成功）"
+        : "已完成聚合摘要重生成（AI生成失败，使用回退摘要）"
+      : "已完成聚合摘要重生成（条目不足2条，跳过AI生成）";
+
     await updateTaskRun(taskRun.id, {
       status: "succeeded",
       progressCurrent: 1,
       progressTotal: 1,
-      progressLabel: "已完成聚合摘要重生成",
+      progressLabel,
       aiCallCountActual: aiUsage.snapshot().actual,
       aiCallCountEstimated: aiUsage.snapshot().estimated,
       aiCallBreakdown: aiUsage.snapshot().breakdown,
@@ -1001,4 +1013,110 @@ export async function executeClusterSummaryTask(
     });
     throw error;
   }
+}
+
+export type ClusterMergeResult = {
+  targetClusterId: string;
+  mergedClusterIds: string[];
+  itemsMoved: number;
+  taskId: string;
+};
+
+export async function mergeClusters(
+  targetClusterId: string,
+  sourceClusterIds: string[],
+): Promise<ClusterMergeResult> {
+  if (sourceClusterIds.length === 0) {
+    throw new Error("至少需要选择一个要合并的聚合组");
+  }
+
+  if (sourceClusterIds.includes(targetClusterId)) {
+    throw new Error("目标聚合组不能在待合并列表中");
+  }
+
+  // 验证目标聚合组存在且为active状态
+  const targetCluster = await prisma.contentCluster.findUnique({
+    where: { id: targetClusterId },
+    include: {
+      items: {
+        where: {
+          status: "processed",
+          moderationStatus: { in: ["allowed", "restored"] },
+        },
+      },
+    },
+  });
+
+  if (!targetCluster) {
+    throw new Error("目标聚合组不存在");
+  }
+
+  if (targetCluster.status !== "active") {
+    throw new Error("只能合并到active状态的聚合组");
+  }
+
+  // 验证所有源聚合组存在且为active状态
+  const sourceClusters = await prisma.contentCluster.findMany({
+    where: {
+      id: { in: sourceClusterIds },
+      status: "active",
+    },
+    include: {
+      items: {
+        where: {
+          status: "processed",
+          moderationStatus: { in: ["allowed", "restored"] },
+        },
+      },
+    },
+  });
+
+  if (sourceClusters.length !== sourceClusterIds.length) {
+    const foundIds = new Set(sourceClusters.map((c) => c.id));
+    const missingIds = sourceClusterIds.filter((id) => !foundIds.has(id));
+    throw new Error(`部分聚合组不存在或已隐藏: ${missingIds.join(", ")}`);
+  }
+
+  // 收集所有要移动的条目
+  const itemsToMove: string[] = [];
+  for (const cluster of sourceClusters) {
+    for (const item of cluster.items) {
+      itemsToMove.push(item.id);
+    }
+  }
+
+  if (itemsToMove.length === 0) {
+    throw new Error("选中的聚合组中没有可移动的条目");
+  }
+
+  // 移动所有条目到目标聚合组
+  await prisma.item.updateMany({
+    where: { id: { in: itemsToMove } },
+    data: { clusterId: targetClusterId },
+  });
+
+  // 将被合并的聚合组标记为隐藏（而不是删除，保留历史记录）
+  await prisma.contentCluster.updateMany({
+    where: { id: { in: sourceClusterIds } },
+    data: {
+      status: "hidden",
+      itemCount: 0,
+    },
+  });
+
+  // 清除缓存
+  invalidateFeedCache();
+
+  // 创建异步任务重新生成目标聚合组摘要
+  const task = await enqueueClusterSummaryTask(
+    targetClusterId,
+    `合并 ${sourceClusterIds.length} 个聚合组后重新生成摘要`
+  );
+
+  return {
+    targetClusterId,
+    mergedClusterIds: sourceClusterIds,
+    itemsMoved: itemsToMove.length,
+    taskId: task.id,
+  };
 }

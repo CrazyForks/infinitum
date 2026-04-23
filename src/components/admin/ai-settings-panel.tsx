@@ -539,7 +539,7 @@ export function AiSettingsPanel({ initialSettings, mode }: AiSettingsPanelProps)
         <section className="w-full min-w-0 space-y-6">
           <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
             <div className="space-y-1">
-              <h2 className="text-lg font-semibold text-[var(--text-1)]">模型API配置列表</h2>
+              <h2 className="text-lg font-semibold text-[var(--text-1)]">模型API配置</h2>
             </div>
             <Button onClick={openCreateModelModal} variant="primary">
               + 创建配置
@@ -972,7 +972,7 @@ export function AiSettingsPanel({ initialSettings, mode }: AiSettingsPanelProps)
       <section className="w-full min-w-0 space-y-6">
         <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
           <div className="space-y-1">
-            <h2 className="text-lg font-semibold text-[var(--text-1)]">提示词配置列表</h2>
+            <h2 className="text-lg font-semibold text-[var(--text-1)]">提示词配置</h2>
           </div>
           <Button onClick={openCreatePromptModal} variant="primary">
             + 创建配置

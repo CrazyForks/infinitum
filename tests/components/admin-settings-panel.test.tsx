@@ -128,7 +128,7 @@ describe("AdminSettingsPanel", () => {
     );
     expect(within(settingsNav).getByRole("tab", { name: "提示词" })).toBeInTheDocument();
     expect(within(settingsNav).getByRole("tab", { name: "任务配置" })).toBeInTheDocument();
-    expect(screen.getByText("模型API配置列表")).toBeInTheDocument();
+    expect(screen.getByText("模型API配置")).toBeInTheDocument();
     expect(screen.getAllByText("默认模型配置").length).toBeGreaterThan(0);
     expect(screen.getByText("抓取并发：")).toBeInTheDocument();
   });
@@ -140,7 +140,7 @@ describe("AdminSettingsPanel", () => {
 
     await user.click(screen.getByRole("tab", { name: "提示词" }));
 
-    expect(screen.getByText("提示词配置列表")).toBeInTheDocument();
+    expect(screen.getByText("提示词配置")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "条目摘要" })).toBeInTheDocument();
     // 切换到"内容分析"标签页以查看内容分析类提示词
     await user.click(screen.getByRole("button", { name: "内容分析" }));

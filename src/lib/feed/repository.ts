@@ -307,11 +307,13 @@ function buildFeedEntryCandidatesCte(filters: FeedFilters & { rangeStart: Date |
   ];
 
   if (filters.rangeStart) {
-    whereClauses.push(Prisma.sql`i."createdAt" >= ${filters.rangeStart}`);
+    // SQLite 存储的是毫秒时间戳，需要将 Date 转换为时间戳数字
+    whereClauses.push(Prisma.sql`i."createdAt" >= ${filters.rangeStart.getTime()}`);
   }
 
   if (filters.rangeEnd) {
-    whereClauses.push(Prisma.sql`i."createdAt" <= ${filters.rangeEnd}`);
+    // SQLite 存储的是毫秒时间戳，需要将 Date 转换为时间戳数字
+    whereClauses.push(Prisma.sql`i."createdAt" <= ${filters.rangeEnd.getTime()}`);
   }
 
   if (filters.groupId) {
@@ -726,7 +728,7 @@ export async function listAdminClusters() {
       title: cluster.title,
       summary: cluster.summary,
       score: recommendScore,
-      itemCount: cluster.itemCount,
+      itemCount: cluster.items.length, // 使用实际查询到的条目数，而不是数据库中的 itemCount 字段
       latestPublishedAt: cluster.latestPublishedAt.toISOString(),
       status: cluster.status,
       items: cluster.items.map(mapItemToClusterPreview),

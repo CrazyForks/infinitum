@@ -2,7 +2,7 @@
 
 import dayjs, { type Dayjs } from "dayjs";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition, useCallback } from "react";
 
 import { PageShell } from "@/components/ui/page-shell";
 import { StatusBanner } from "@/components/ui/status-banner";
@@ -596,22 +596,29 @@ export function FeedPanel({
     });
   }, [assignClusterDialog?.currentClusterId, clusterOptions, clusterSearch]);
 
-  const resetExpandedClusterState = () => {
+  const resetExpandedClusterState = useCallback(() => {
     setExpandedClusters({});
     setOpenClusters({});
-  };
+  }, []);
 
-  const replaceFeedData = (nextItems: FeedEntryDTO[], nextPagination: FeedPagination) => {
+  const replaceFeedData = useCallback((nextItems: FeedEntryDTO[], nextPagination: FeedPagination) => {
     setItems(nextItems);
     setPagination(nextPagination);
     resetExpandedClusterState();
-  };
+  }, [resetExpandedClusterState]);
 
-  const loadFeed = (
+  const syncUrlWithQuery = useCallback((query: FeedQueryState, page?: number, size?: number) => {
+    const search = buildFeedSearch(query, { page, size });
+    const newUrl = `${window.location.pathname}?${search}`;
+    router.replace(newUrl, { scroll: false });
+  }, [router]);
+
+  const loadFeed = useCallback((
     query: FeedQueryState,
     page = 1,
     size = pageSize,
   ) => {
+    syncUrlWithQuery(query, page, size);
     startTransition(async () => {
       const payload = await requestFeed(query, { page, size });
       replaceFeedData(payload.items, payload.pagination);
@@ -619,7 +626,7 @@ export function FeedPanel({
       setGroupTotalCount(payload.groupTotalCount ?? payload.pagination.total);
       setRefreshFeedback(null);
     });
-  };
+  }, [pageSize, availableGroups, syncUrlWithQuery, replaceFeedData]);
 
   const buildQuery = (overrides: Partial<FeedQueryState> = {}): FeedQueryState => ({
     range,
@@ -636,24 +643,17 @@ export function FeedPanel({
     setRange(nextRange);
     setStartDate(null);
     setEndDate(null);
-    loadFeed(
-      buildQuery({
-        range: nextRange,
-        startDate: null,
-        endDate: null,
-      }),
-      1,
-    );
+    const query = buildQuery({
+      range: nextRange,
+      startDate: null,
+      endDate: null,
+    });
+    loadFeed(query, 1);
   };
 
   const changeSort = (nextSort: FeedSort) => {
     setSort(nextSort);
-    loadFeed(
-      buildQuery({
-        sort: nextSort,
-      }),
-      1,
-    );
+    loadFeed(buildQuery({ sort: nextSort }), 1);
   };
 
   const changeGroup = (nextGroupId: string) => {
@@ -665,24 +665,16 @@ export function FeedPanel({
 
     setGroupId(normalizedGroupId);
     setSourceId(nextSourceId);
-    loadFeed(
-      buildQuery({
-        groupId: normalizedGroupId,
-        sourceId: nextSourceId,
-      }),
-      1,
-    );
+    loadFeed(buildQuery({
+      groupId: normalizedGroupId,
+      sourceId: nextSourceId,
+    }), 1);
   };
 
   const changeSource = (nextSourceId: string) => {
     const normalizedSourceId = normalizeOptionalId(nextSourceId);
     setSourceId(normalizedSourceId);
-    loadFeed(
-      buildQuery({
-        sourceId: normalizedSourceId,
-      }),
-      1,
-    );
+    loadFeed(buildQuery({ sourceId: normalizedSourceId }), 1);
   };
 
   const changeDateRange = (nextRange: DateRangeValue) => {
@@ -692,13 +684,10 @@ export function FeedPanel({
 
     setStartDate(normalizedStartDate);
     setEndDate(normalizedEndDate);
-    loadFeed(
-      buildQuery({
-        startDate: normalizedStartDate,
-        endDate: normalizedEndDate,
-      }),
-      1,
-    );
+    loadFeed(buildQuery({
+      startDate: normalizedStartDate,
+      endDate: normalizedEndDate,
+    }), 1);
   };
 
   const clearFilters = () => {
@@ -712,8 +701,8 @@ export function FeedPanel({
     setTitleFilter(null);
     setAdvancedFiltersOpen(false);
     loadFeed({
-      range: "today",
-      sort: "time_desc",
+      range: "today" as FeedRange,
+      sort: "time_desc" as FeedSort,
       startDate: null,
       endDate: null,
       groupId: null,
@@ -1044,7 +1033,35 @@ export function FeedPanel({
     });
   };
 
-  // 投票功能
+  // 重新生成聚合摘要
+  const handleRegenerateClusterSummary = async (clusterId: string) => {
+    startTransition(async () => {
+      try {
+        const response = await fetch(`/api/admin/clusters/${clusterId}/regenerate-summary`, {
+          method: "POST",
+        });
+        const payload = (await response.json()) as {
+          taskRun?: { id: string } | null;
+          error?: string;
+        };
+
+        if (payload.error) {
+          setRefreshFeedback({ tone: "error", message: payload.error });
+          return;
+        }
+
+        if (!payload.taskRun) {
+          setRefreshFeedback({ tone: "error", message: "未返回后台任务信息。" });
+          return;
+        }
+
+        setRefreshFeedback({ tone: "success", message: "聚合摘要重生成任务已进入队列。" });
+        router.push(`/admin?tab=monitoring&section=tasks&task=${encodeURIComponent(payload.taskRun.id)}`);
+      } catch {
+        setRefreshFeedback({ tone: "error", message: "创建聚合摘要重生成任务失败，请稍后重试。" });
+      }
+    });
+  };
   const handleVote = async (clusterId: string, voteType: "upvote" | "downvote") => {
     startTransition(async () => {
       try {
@@ -1323,7 +1340,7 @@ export function FeedPanel({
       resetExpandedClusterState();
       setRefreshFeedback(null);
     });
-  }, [availableGroups, endDate, groupId, initialItems.length, pageSize, range, sort, sourceId, startDate, titleFilter]);
+  }, [availableGroups, endDate, groupId, initialItems.length, pageSize, range, resetExpandedClusterState, sort, sourceId, startDate, titleFilter]);
 
   useEffect(() => {
     if (skipTitleEffectRef.current) {
@@ -1341,23 +1358,16 @@ export function FeedPanel({
 
       setTitleFilter(normalizedTitle);
 
-      startTransition(async () => {
-        const payload = await requestFeed({
-          ...latestQueryRef.current,
-          title: normalizedTitle,
-        }, { page: 1, size: pageSize });
-        setItems(payload.items);
-        setPagination(payload.pagination);
-        setGroups(payload.groups ?? availableGroups);
-        resetExpandedClusterState();
-        setRefreshFeedback(null);
-      });
+      loadFeed({
+        ...latestQueryRef.current,
+        title: normalizedTitle,
+      }, 1);
     }, TITLE_SEARCH_DEBOUNCE_MS);
 
     return () => {
       window.clearTimeout(timer);
     };
-  }, [availableGroups, pageSize, titleInput]);
+  }, [availableGroups, pageSize, titleInput, loadFeed]);
 
   useEffect(() => {
     if (!isAdmin) {
@@ -1422,7 +1432,7 @@ export function FeedPanel({
     return () => {
       window.clearInterval(timer);
     };
-  }, [availableGroups, endDate, groupId, isAdmin, pageSize, queuedRefreshAt, range, sort, sourceId, startDate, startTransition, status, titleFilter]);
+  }, [availableGroups, endDate, groupId, isAdmin, pageSize, queuedRefreshAt, range, resetExpandedClusterState, sort, sourceId, startDate, startTransition, status, titleFilter]);
 
   useEffect(() => {
     setJumpToPage(String(currentPage));
@@ -1432,7 +1442,6 @@ export function FeedPanel({
     if (!canGoPreviousPage) {
       return;
     }
-
     loadFeed(buildQuery(), currentPage - 1, pageSize);
   };
 
@@ -1440,7 +1449,6 @@ export function FeedPanel({
     if (!canGoNextPage) {
       return;
     }
-
     loadFeed(buildQuery(), currentPage + 1, pageSize);
   };
 
@@ -1449,7 +1457,6 @@ export function FeedPanel({
     if (!FEED_PAGE_SIZE_OPTIONS.includes(nextSize as (typeof FEED_PAGE_SIZE_OPTIONS)[number])) {
       return;
     }
-
     loadFeed(buildQuery(), 1, nextSize);
   };
 
@@ -1765,6 +1772,19 @@ export function FeedPanel({
                       <div className="flex items-start justify-between gap-3">
                         <h2 className={cardTitleClassName}>{entry.title}</h2>
                         <div className="flex shrink-0 items-center gap-0.5">
+                          {/* 重新生成聚合摘要按钮（仅管理员可见） */}
+                          {isAdmin ? (
+                            <button
+                              type="button"
+                              onClick={() => handleRegenerateClusterSummary(entry.id)}
+                              disabled={isPending}
+                              className={iconButtonClassName}
+                              title="重新生成聚合摘要"
+                              aria-label={`重新生成聚合摘要：${entry.title}`}
+                            >
+                              <RefreshIcon />
+                            </button>
+                          ) : null}
                           {/* 投票按钮 */}
                           <button
                             type="button"
