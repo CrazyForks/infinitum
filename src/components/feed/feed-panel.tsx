@@ -1037,7 +1037,7 @@ export function FeedPanel({
   const neutralBadgeClassName =
     "inline-flex items-center rounded-sm border border-[color:var(--line)] bg-[var(--surface-muted)] px-2 py-1 text-xs text-[var(--muted)]";
   const denseCardClassName =
-    "w-full rounded-lg border border-[color:var(--line)] bg-white px-4 py-4 shadow-[var(--shadow-sm)] transition hover:border-[color:var(--line-strong)] hover:shadow-md sm:px-6 sm:py-5";
+    "w-full rounded-lg border border-[color:var(--line)] bg-[var(--surface)] px-4 py-4 shadow-[var(--shadow-sm)] transition hover:border-[color:var(--line-strong)] hover:shadow-md sm:px-6 sm:py-5";
   const cardMetaRowClassName = "flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-[var(--muted)]";
   const cardSummaryClassName = "text-sm leading-6 text-[var(--muted)]";
   const cardTitleClassName = "text-xl font-semibold leading-7 text-[var(--foreground)]";
@@ -1045,7 +1045,7 @@ export function FeedPanel({
   const iconButtonClassName =
     "feed-card-icon-button inline-flex items-center justify-center rounded-sm border border-transparent bg-transparent p-1.5 text-[var(--text-2)] transition hover:bg-[var(--bg-muted)] hover:text-[var(--text-1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]/35 disabled:cursor-not-allowed disabled:opacity-50";
   const clusterToggleClassName =
-    "inline-flex shrink-0 items-center gap-1 bg-transparent px-0 py-0 text-left text-[11px] leading-none text-[var(--muted)] transition hover:text-[var(--foreground)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(59,130,246,0.28)] focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:cursor-not-allowed disabled:opacity-55";
+    "inline-flex shrink-0 items-center gap-1 bg-transparent px-0 py-0 text-left text-[11px] leading-none text-[var(--muted)] transition hover:text-[var(--foreground)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(59,130,246,0.28)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)] disabled:cursor-not-allowed disabled:opacity-55";
   const hasClearableFilters = activeFilterSummary.length > 0;
   const latestRunSummary = formatRunSummary(status);
   const latestRunDetail = formatRunDetail(status);
@@ -1148,7 +1148,7 @@ export function FeedPanel({
             </div>
 
             <div className="lg:hidden">
-              <div className="rounded-sm border border-[color:var(--line)] bg-white px-3 py-3 shadow-[var(--shadow-sm)]">
+              <div className="rounded-sm border border-[color:var(--line)] bg-[var(--surface)] px-3 py-3 shadow-[var(--shadow-sm)]">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <span className="text-sm font-medium text-[var(--foreground)]">分组筛选</span>
                   <FilterSelectInline
@@ -1288,7 +1288,7 @@ export function FeedPanel({
           )}
 
           {items.length === 0 ? (
-            <div className="rounded-[1.15rem] border border-dashed border-[color:var(--line-strong)] bg-white/80 px-5 py-8 text-sm leading-7 text-[var(--muted)] shadow-[var(--shadow-sm)]">
+            <div className="rounded-[1.15rem] border border-dashed border-[color:var(--line-strong)] bg-[color-mix(in_srgb,var(--surface)_80%,transparent)] px-5 py-8 text-sm leading-7 text-[var(--muted)] shadow-[var(--shadow-sm)]">
               {isAdmin
                 ? "当前时间范围内还没有可展示内容，可以先点击“立即更新”拉取数据。"
                 : "当前时间范围内还没有可展示内容，请稍后再回来看看。"}

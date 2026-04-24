@@ -110,7 +110,7 @@ export function AdminLoginForm({ redirectPath }: AdminLoginFormProps) {
             <label className="grid gap-3 text-sm font-medium text-[var(--foreground)]">
               <span>管理员密码</span>
               <input
-                className="w-full rounded-2xl border border-[color:var(--line)] bg-[var(--surface-highlight)] px-4 py-3 text-base text-[var(--foreground)] shadow-[inset_0_1px_0_rgba(255,255,255,0.84)] outline-none transition focus:border-[color:var(--accent)] focus:ring-4 focus:ring-[rgba(33,111,255,0.12)]"
+                className="w-full rounded-2xl border border-[color:var(--line)] bg-[var(--surface-highlight)] px-4 py-3 text-base text-[var(--foreground)] shadow-[inset_0_1px_0_var(--surface-inset-highlight)] outline-none transition focus:border-[color:var(--accent)] focus:ring-4 focus:ring-[rgba(33,111,255,0.12)]"
                 type="password"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}

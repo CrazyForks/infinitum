@@ -102,7 +102,7 @@ export function ContentReviewMergeModal({
               value={searchQuery}
               onChange={(event) => onSearchQueryChange(event.target.value)}
               className={cx(
-                "w-full min-h-10 rounded-xl border border-[color:var(--line)] bg-white px-4 py-2.5 text-sm",
+                "w-full min-h-10 rounded-xl border border-[color:var(--line)] bg-[var(--surface)] px-4 py-2.5 text-sm",
                 "text-[var(--foreground)] outline-none transition",
                 "placeholder:text-[var(--muted)]",
                 "focus:border-[color:var(--accent)] focus:ring-2 focus:ring-[color:var(--accent-soft)]",

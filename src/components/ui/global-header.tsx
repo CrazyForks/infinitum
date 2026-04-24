@@ -1,10 +1,10 @@
 "use client";
 
-import { startTransition, useState } from "react";
+import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-import { IconGithub, IconLock, IconLogout, IconRss, IconSettings } from "@/components/ui/icons";
+import { IconGithub, IconLock, IconLogout, IconMonitor, IconMoon, IconRss, IconSettings, IconSun } from "@/components/ui/icons";
 import { cx } from "@/lib/ui/cx";
 
 type GlobalHeaderProps = {
@@ -16,11 +16,62 @@ const navItems = [
   { href: "/", key: "home", label: "主页" },
 ] as const;
 
+type ThemePreference = "light" | "dark" | "system";
+
 export function GlobalHeader({ activeNav, isAdmin }: GlobalHeaderProps) {
   const router = useRouter();
   const [isPending, setIsPending] = useState(false);
+  const [theme, setTheme] = useState<ThemePreference>("system");
+  const [themeMenuOpen, setThemeMenuOpen] = useState(false);
+  const themeMenuRef = useRef<HTMLDivElement | null>(null);
   const headerIconButtonClass =
     "inline-flex items-center justify-center w-8 h-8 rounded-sm text-[var(--text-3)] hover:text-[var(--text-1)] hover:bg-[var(--bg-muted)] transition";
+
+  const themeOptions = useMemo(
+    () => [
+      { value: "light" as const, label: "明亮", icon: IconSun },
+      { value: "dark" as const, label: "暗黑", icon: IconMoon },
+      { value: "system" as const, label: "系统", icon: IconMonitor },
+    ],
+    [],
+  );
+
+  const activeTheme = themeOptions.find((option) => option.value === theme) ?? themeOptions[2];
+
+  useEffect(() => {
+    const stored = localStorage.getItem("theme");
+    const initial = stored === "light" || stored === "dark" || stored === "system" ? stored : "system";
+
+    setTheme(initial);
+    if (initial === "system") {
+      document.documentElement.removeAttribute("data-theme");
+    } else {
+      document.documentElement.setAttribute("data-theme", initial);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!themeMenuOpen) return;
+
+    const handleClick = (event: MouseEvent) => {
+      if (!themeMenuRef.current) return;
+      if (themeMenuRef.current.contains(event.target as Node)) return;
+      setThemeMenuOpen(false);
+    };
+
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [themeMenuOpen]);
+
+  const applyTheme = (nextTheme: ThemePreference) => {
+    setTheme(nextTheme);
+    localStorage.setItem("theme", nextTheme);
+    if (nextTheme === "system") {
+      document.documentElement.removeAttribute("data-theme");
+    } else {
+      document.documentElement.setAttribute("data-theme", nextTheme);
+    }
+  };
 
   const goToLogin = () => {
     startTransition(() => {
@@ -109,6 +160,45 @@ export function GlobalHeader({ activeNav, isAdmin }: GlobalHeaderProps) {
         </div>
 
         <div className="flex items-center gap-2">
+          <div className="relative" ref={themeMenuRef}>
+            <button
+              type="button"
+              onClick={() => setThemeMenuOpen((current) => !current)}
+              className={headerIconButtonClass}
+              aria-label="切换主题"
+              title="切换主题"
+            >
+              <activeTheme.icon className="h-4 w-4" />
+            </button>
+            {themeMenuOpen ? (
+              <div className="absolute right-0 z-50 mt-2 w-28 rounded-md border border-[color:var(--line)] bg-[var(--surface)] p-1 shadow-[var(--shadow-lg)]">
+                {themeOptions.map((option) => {
+                  const isActive = theme === option.value;
+                  const Icon = option.icon;
+
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => {
+                        applyTheme(option.value);
+                        setThemeMenuOpen(false);
+                      }}
+                      className={cx(
+                        "flex w-full items-center gap-2 rounded-sm px-2 py-1 text-xs transition",
+                        isActive
+                          ? "bg-[var(--bg-muted)] text-[var(--text-1)]"
+                          : "text-[var(--text-2)] hover:bg-[var(--bg-muted)] hover:text-[var(--text-1)]",
+                      )}
+                    >
+                      <Icon className="h-3.5 w-3.5" />
+                      <span>{option.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
           <button
             type="button"
             onClick={openRss}

@@ -58,15 +58,15 @@ const taskKindLabels = {
 } as const;
 
 const surfaceCardClassName =
-  "rounded-[1.35rem] border border-[color:var(--line)] bg-white/95 shadow-[var(--shadow-sm)]";
+  "rounded-[1.35rem] border border-[color:var(--line)] bg-[color-mix(in_srgb,var(--surface)_95%,transparent)] shadow-[var(--shadow-sm)]";
 const subtleCardClassName =
   "rounded-[1rem] border border-[color:var(--line)] bg-[var(--surface-muted)] shadow-[var(--shadow-sm)]";
 const primaryButtonClassName =
   "inline-flex min-h-10 items-center justify-center rounded-xl bg-[var(--accent)] px-3.5 py-2.5 text-sm font-semibold text-white shadow-[0_14px_28px_rgba(37,99,235,0.18)] transition hover:bg-[var(--accent-strong)] disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:bg-[var(--accent)]";
 const secondaryButtonClassName =
-  "inline-flex min-h-10 items-center justify-center rounded-xl border border-[color:var(--line)] bg-white px-3.5 py-2.5 text-sm font-medium text-[var(--foreground)] shadow-[var(--shadow-sm)] transition hover:bg-[var(--surface)] disabled:cursor-not-allowed disabled:opacity-55";
+  "inline-flex min-h-10 items-center justify-center rounded-xl border border-[color:var(--line)] bg-[var(--surface)] px-3.5 py-2.5 text-sm font-medium text-[var(--foreground)] shadow-[var(--shadow-sm)] transition hover:bg-[var(--surface-muted)] disabled:cursor-not-allowed disabled:opacity-55";
 const inputClassName =
-  "min-h-10 rounded-xl border border-[color:var(--line)] bg-white px-3.5 py-2.5 text-sm text-[var(--foreground)] outline-none transition placeholder:text-[var(--muted)] focus:border-[color:var(--accent)] focus:ring-2 focus:ring-[color:var(--accent-soft)]";
+  "min-h-10 rounded-xl border border-[color:var(--line)] bg-[var(--surface)] px-3.5 py-2.5 text-sm text-[var(--foreground)] outline-none transition placeholder:text-[var(--muted)] focus:border-[color:var(--accent)] focus:ring-2 focus:ring-[color:var(--accent-soft)]";
 const chipBaseClassName =
   "inline-flex items-center rounded-full border px-2.5 py-1 font-mono text-[11px] font-medium uppercase tracking-[0.18em]";
 function formatDateTime(value: string | null) {
@@ -132,7 +132,7 @@ function TaskToneBadge({
       "border-[color:var(--accent-soft)] bg-[var(--accent-soft)] text-[var(--accent-strong)]",
     danger:
       "border-[color:var(--danger-line)] bg-[var(--danger-surface)] text-[var(--danger-ink)]",
-    muted: "border-[color:var(--line)] bg-white text-[var(--muted)]",
+    muted: "border-[color:var(--line)] bg-[var(--surface)] text-[var(--muted)]",
     success:
       "border-[color:var(--success-line)] bg-[var(--success-surface)] text-[var(--success-ink)]",
     warning:
@@ -177,7 +177,7 @@ function TaskCard({
       className={cx(
         "overflow-hidden rounded-[1.15rem] border p-4 shadow-[var(--shadow-sm)] sm:p-5",
         emphasis === "strong"
-          ? "border-[color:var(--line-strong)] bg-white/95"
+          ? "border-[color:var(--line-strong)] bg-[color-mix(in_srgb,var(--surface)_95%,transparent)]"
           : "border-[color:var(--line)] bg-[var(--surface)]",
       )}
     >
@@ -552,7 +552,7 @@ export function AdminMonitorPanel({
             >
               <span
                 className={cx(
-                  "absolute left-0.5 top-0.5 h-6 w-6 rounded-full bg-white shadow-[var(--shadow-sm)] transition-transform",
+                  "absolute left-0.5 top-0.5 h-6 w-6 rounded-full bg-[var(--surface-highlight)] shadow-[var(--shadow-sm)] transition-transform",
                   enabled ? "translate-x-5" : "translate-x-0",
                 )}
               />
@@ -622,7 +622,7 @@ export function AdminMonitorPanel({
         aria-labelledby="monitor-running-heading"
         className={cx(
           surfaceCardClassName,
-          "space-y-5 border-[color:var(--line-strong)] bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(239,246,255,0.82))] p-4 sm:p-5",
+          "space-y-5 border-[color:var(--line-strong)] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--surface)_98%,transparent),color-mix(in_srgb,var(--accent-soft)_52%,var(--surface)))] p-4 sm:p-5",
         )}
       >
         <div className="flex flex-col gap-4 border-b border-[color:var(--line)] pb-4">

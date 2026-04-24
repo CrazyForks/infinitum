@@ -47,7 +47,7 @@ export function PageShell({
       {header ? <GlobalHeader activeNav={header.activeNav} isAdmin={header.isAdmin} /> : null}
 
       {!header && chromeLabel ? (
-        <div className="border-b border-[color:var(--line)] bg-white/80 backdrop-blur">
+        <div className="border-b border-[color:var(--line)] bg-[color-mix(in_srgb,var(--surface)_80%,transparent)] backdrop-blur">
           <div className="mx-auto flex h-14 w-full max-w-6xl items-center px-4 sm:px-6 lg:px-8">
             <div className="font-mono text-[11px] font-medium uppercase tracking-[0.28em] text-[var(--muted)]">
               {chromeLabel}

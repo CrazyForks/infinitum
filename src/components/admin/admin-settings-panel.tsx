@@ -49,7 +49,7 @@ type AdminSettingsSection =
   | "tasks";
 
 const surfaceCardClassName =
-  "rounded-[1.1rem] border border-[color:var(--line)] bg-white/96 shadow-[var(--shadow-sm)]";
+  "rounded-[1.1rem] border border-[color:var(--line)] bg-[color-mix(in_srgb,var(--surface)_96%,transparent)] shadow-[var(--shadow-sm)]";
 const checkboxInputClassName =
   "h-4 w-4 rounded border-[color:var(--line-strong)] text-[var(--accent)] focus:ring-[color:var(--accent-soft)]";
 const settingsNavItems: Array<{
