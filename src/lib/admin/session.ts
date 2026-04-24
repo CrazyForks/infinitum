@@ -80,11 +80,15 @@ function decodeSessionToken(token: string): AdminSessionPayload | null {
 }
 
 function buildCookieOptions(expiresAt: Date) {
+  const secureOverride = process.env.ADMIN_SESSION_COOKIE_SECURE?.trim().toLowerCase();
+  const secure =
+    secureOverride === "true" ? true : secureOverride === "false" ? false : process.env.NODE_ENV === "production";
+
   return {
     httpOnly: true,
     sameSite: "lax" as const,
     path: "/",
-    secure: process.env.NODE_ENV === "production",
+    secure,
     expires: expiresAt,
   };
 }
