@@ -100,7 +100,7 @@ export async function getAdminSettings(): Promise<AdminSettingsSnapshot> {
       orderBy: { keyword: "asc" },
     }),
     prisma.sourceGroup.findMany({
-      orderBy: { name: "asc" },
+      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
     }),
     prisma.source.findMany({
       include: { group: true },
@@ -128,6 +128,7 @@ export async function getAdminSettings(): Promise<AdminSettingsSnapshot> {
     groups: groups.map((group) => ({
       id: group.id,
       name: group.name,
+      sortOrder: group.sortOrder,
     })),
     sources: sources.map((source) => ({
       id: source.id,

@@ -129,11 +129,36 @@ function buildEmptyPromptForm(type: PromptConfigType): PromptFormState {
   };
 }
 
+function getInitialPromptType(): PromptConfigType {
+  if (typeof window === "undefined") {
+    return "item_summary";
+  }
+
+  const promptType = new URLSearchParams(window.location.search).get("promptType");
+  return PROMPT_TYPE_OPTIONS.some((option) => option.value === promptType)
+    ? (promptType as PromptConfigType)
+    : "item_summary";
+}
+
+function updatePromptTypeUrl(promptType: PromptConfigType) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const url = new URL(window.location.href);
+  if (promptType === "item_summary") {
+    url.searchParams.delete("promptType");
+  } else {
+    url.searchParams.set("promptType", promptType);
+  }
+  window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
 export function AiSettingsPanel({ initialSettings, mode }: AiSettingsPanelProps) {
   const { showToast } = useToast();
   const [modelConfigs, setModelConfigs] = useState(initialSettings.modelApiConfigs);
   const [promptConfigs, setPromptConfigs] = useState(initialSettings.promptConfigs);
-  const [selectedPromptType, setSelectedPromptType] = useState<PromptConfigType>("item_summary");
+  const [selectedPromptType, setSelectedPromptType] = useState<PromptConfigType>(getInitialPromptType);
 
   const [showModelModal, setShowModelModal] = useState(false);
   const [editingModelConfig, setEditingModelConfig] = useState<AdminModelApiConfig | null>(null);
@@ -940,7 +965,10 @@ export function AiSettingsPanel({ initialSettings, mode }: AiSettingsPanelProps)
           {PROMPT_TYPE_OPTIONS.map((option) => (
             <SelectableButton
               key={option.value}
-              onClick={() => setSelectedPromptType(option.value)}
+              onClick={() => {
+                setSelectedPromptType(option.value);
+                updatePromptTypeUrl(option.value);
+              }}
               active={selectedPromptType === option.value}
               variant="pill"
             >

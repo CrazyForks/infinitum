@@ -31,6 +31,7 @@ export {
   deleteSourceGroup,
   importSourcesFromOpml,
   renameSourceGroup,
+  reorderSourceGroups,
   replaceBlacklistKeywords,
   resolveSourceMetadata,
   updateSource,

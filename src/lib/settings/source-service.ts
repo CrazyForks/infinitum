@@ -92,15 +92,16 @@ export async function importSourcesFromOpml(
           name,
           siteUrl,
           groupId,
-          enabled: true,
+          enabled: source.enabled ?? true,
+          aiParsingEnabled: source.aiParsingEnabled ?? true,
         },
         create: {
           name,
           rssUrl: source.rssUrl,
           siteUrl,
           groupId,
-          enabled: true,
-          aiParsingEnabled: true,
+          enabled: source.enabled ?? true,
+          aiParsingEnabled: source.aiParsingEnabled ?? true,
         },
       });
 
@@ -142,11 +143,23 @@ export async function replaceBlacklistKeywords(keywords: string[]) {
 }
 
 export async function createSourceGroup(name: string) {
+  const nextSortOrder = await getNextSourceGroupSortOrder();
+
   return prisma.sourceGroup.create({
     data: {
       name: name.trim(),
+      sortOrder: nextSortOrder,
     },
   });
+}
+
+async function getNextSourceGroupSortOrder() {
+  const latest = await prisma.sourceGroup.findFirst({
+    orderBy: { sortOrder: "desc" },
+    select: { sortOrder: true },
+  });
+
+  return (latest?.sortOrder ?? -1) + 1;
 }
 
 export async function renameSourceGroup(id: string, name: string) {
@@ -169,6 +182,31 @@ export async function deleteSourceGroup(id: string) {
 
   await prisma.sourceGroup.delete({
     where: { id },
+  });
+}
+
+export async function reorderSourceGroups(groupIds: string[]) {
+  const uniqueGroupIds = [...new Set(groupIds)];
+  const existingGroups = await prisma.sourceGroup.findMany({
+    select: { id: true },
+  });
+  const existingGroupIds = new Set(existingGroups.map((group) => group.id));
+
+  if (uniqueGroupIds.length !== existingGroups.length || uniqueGroupIds.some((id) => !existingGroupIds.has(id))) {
+    throw new Error("Invalid source group order.");
+  }
+
+  await prisma.$transaction(
+    uniqueGroupIds.map((id, index) =>
+      prisma.sourceGroup.update({
+        where: { id },
+        data: { sortOrder: index },
+      }),
+    ),
+  );
+
+  return prisma.sourceGroup.findMany({
+    orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
   });
 }
 

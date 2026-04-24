@@ -1,8 +1,26 @@
 "use client";
+import {
+  closestCenter,
+  DndContext,
+  type DragEndEvent,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { useMemo, useRef, useState, useTransition } from "react";
 
 import {
   importSourcesFromOpmlText,
+  reorderSourceGroups,
   resolveSourceFromRssUrl,
   saveDefaultIngestionSchedule,
   submitAdminSettingsAction,
@@ -15,7 +33,7 @@ import { FilterInput } from "@/components/ui/filter-input";
 import { FilterSelect } from "@/components/ui/filter-select";
 import { FormField } from "@/components/ui/form-field";
 import { IconButton } from "@/components/ui/icon-button";
-import { IconCheck, IconEdit, IconPlus, IconTag, IconTrash, IconX } from "@/components/ui/icons";
+import { IconCheck, IconEdit, IconGrip, IconPlus, IconTag, IconTrash, IconX } from "@/components/ui/icons";
 import { ModalShell } from "@/components/ui/modal-shell";
 import { PaginationControls } from "@/components/ui/pagination-controls";
 import { TextArea } from "@/components/ui/text-area";
@@ -103,6 +121,48 @@ const sourceUpdateFormatter = new Intl.DateTimeFormat("zh-CN", {
   minute: "2-digit",
 });
 
+const sourceFilterQueryKeys = {
+  name: "sourceName",
+  group: "sourceGroup",
+  enabled: "sourceEnabled",
+  page: "sourcePage",
+  pageSize: "sourcePageSize",
+} as const;
+
+function getInitialSourceFilterValue(key: string) {
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  return new URLSearchParams(window.location.search).get(key) ?? "";
+}
+
+function getInitialSourceFilterNumber(key: string, fallback: number) {
+  const value = Number.parseInt(getInitialSourceFilterValue(key), 10);
+  return Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
+function escapeXml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function downloadTextFile(filename: string, content: string, type: string) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 function formatSourceUpdateTime(value: string | null) {
   if (!value) {
     return "暂无入库";
@@ -128,15 +188,16 @@ export function AdminSettingsPanel({
   );
   const [showCreateGroupComposer, setShowCreateGroupComposer] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
+  const [orderedGroups, setOrderedGroups] = useState(initialSettings.groups);
   const opmlFileInputRef = useRef<HTMLInputElement | null>(null);
   const [sourceModalMode, setSourceModalMode] = useState<"create" | "edit" | null>(null);
   const [editingSourceId, setEditingSourceId] = useState<string | null>(null);
   const [sourceDeleteTarget, setSourceDeleteTarget] = useState<AdminSource | null>(null);
-  const [sourceNameFilter, setSourceNameFilter] = useState("");
-  const [sourceGroupFilter, setSourceGroupFilter] = useState("");
-  const [sourceEnabledFilter, setSourceEnabledFilter] = useState("");
-  const [sourcePage, setSourcePage] = useState(1);
-  const [sourcePageSize, setSourcePageSize] = useState(10);
+  const [sourceNameFilter, setSourceNameFilter] = useState(() => getInitialSourceFilterValue(sourceFilterQueryKeys.name));
+  const [sourceGroupFilter, setSourceGroupFilter] = useState(() => getInitialSourceFilterValue(sourceFilterQueryKeys.group));
+  const [sourceEnabledFilter, setSourceEnabledFilter] = useState(() => getInitialSourceFilterValue(sourceFilterQueryKeys.enabled));
+  const [sourcePage, setSourcePage] = useState(() => getInitialSourceFilterNumber(sourceFilterQueryKeys.page, 1));
+  const [sourcePageSize, setSourcePageSize] = useState(() => getInitialSourceFilterNumber(sourceFilterQueryKeys.pageSize, 10));
   const [sourceForm, setSourceForm] = useState({
     name: "",
     rssUrl: "",
@@ -185,14 +246,54 @@ export function AdminSettingsPanel({
     });
   }, [initialSettings.sources, sourceEnabledFilter, sourceGroupFilter, sourceNameFilter]);
   const sourceTotalPages = Math.max(1, Math.ceil(filteredSources.length / sourcePageSize));
+  const safeSourcePage = Math.min(sourcePage, sourceTotalPages);
   const paginatedSources = useMemo(
     () =>
       filteredSources.slice(
-        (sourcePage - 1) * sourcePageSize,
-        sourcePage * sourcePageSize,
+        (safeSourcePage - 1) * sourcePageSize,
+        safeSourcePage * sourcePageSize,
       ),
-    [filteredSources, sourcePage, sourcePageSize],
+    [filteredSources, safeSourcePage, sourcePageSize],
   );
+
+  const updateSourceFilterUrl = (next: {
+    name?: string;
+    group?: string;
+    enabled?: string;
+    page?: number;
+    pageSize?: number;
+  }) => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const url = new URL(window.location.href);
+    const values = {
+      name: next.name ?? sourceNameFilter,
+      group: next.group ?? sourceGroupFilter,
+      enabled: next.enabled ?? sourceEnabledFilter,
+      page: next.page ?? sourcePage,
+      pageSize: next.pageSize ?? sourcePageSize,
+    };
+
+    const entries: Array<[string, string | number, string | number]> = [
+      [sourceFilterQueryKeys.name, values.name, ""],
+      [sourceFilterQueryKeys.group, values.group, ""],
+      [sourceFilterQueryKeys.enabled, values.enabled, ""],
+      [sourceFilterQueryKeys.page, values.page, 1],
+      [sourceFilterQueryKeys.pageSize, values.pageSize, 10],
+    ];
+
+    for (const [key, value, defaultValue] of entries) {
+      if (value === defaultValue || value === "") {
+        url.searchParams.delete(key);
+      } else {
+        url.searchParams.set(key, String(value));
+      }
+    }
+
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  };
 
   const submitJson = (
     url: string,
@@ -301,9 +402,97 @@ export function AdminSettingsPanel({
     });
   };
 
+  const exportOpml = () => {
+    const groupsById = new Map(orderedGroups.map((group) => [group.id, group.name]));
+    const groupedSources = new Map<string, AdminSource[]>();
+    const ungroupedSources: AdminSource[] = [];
+
+    for (const source of initialSettings.sources) {
+      if (source.groupId) {
+        groupedSources.set(source.groupId, [...(groupedSources.get(source.groupId) ?? []), source]);
+      } else {
+        ungroupedSources.push(source);
+      }
+    }
+
+    const sourceOutline = (source: AdminSource, indent = "    ") =>
+      `${indent}<outline text="${escapeXml(source.name)}" title="${escapeXml(source.name)}" type="rss" xmlUrl="${escapeXml(source.rssUrl)}" htmlUrl="${escapeXml(source.siteUrl)}" infinitum:enabled="${source.enabled ? "true" : "false"}" infinitum:aiParsingEnabled="${source.aiParsingEnabled !== false ? "true" : "false"}" />`;
+    const outlines = [
+      ...orderedGroups.flatMap((group) => {
+        const sources = groupedSources.get(group.id) ?? [];
+
+        if (sources.length === 0) {
+          return [];
+        }
+
+        return [
+          `    <outline text="${escapeXml(groupsById.get(group.id) ?? group.name)}" title="${escapeXml(groupsById.get(group.id) ?? group.name)}">`,
+          ...sources.map((source) => sourceOutline(source, "      ")),
+          "    </outline>",
+        ];
+      }),
+      ...ungroupedSources.map((source) => sourceOutline(source)),
+    ];
+    const opml = [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<opml version="2.0" xmlns:infinitum="https://infinitum.app/opml">',
+      "  <head>",
+      "    <title>Infinitum Subscriptions</title>",
+      `    <dateCreated>${new Date().toUTCString()}</dateCreated>`,
+      "  </head>",
+      "  <body>",
+      ...outlines,
+      "  </body>",
+      "</opml>",
+      "",
+    ].join("\n");
+
+    downloadTextFile("infinitum-subscriptions.opml", opml, "text/x-opml;charset=utf-8");
+  };
+
   const handleSourcePageSizeChange = (nextPageSize: number) => {
     setSourcePageSize(nextPageSize);
     setSourcePage(1);
+    updateSourceFilterUrl({ page: 1, pageSize: nextPageSize });
+  };
+
+  const saveGroupOrder = (nextGroups: AdminSettingsSnapshot["groups"]) => {
+    startTransition(async () => {
+      try {
+        const savedGroups = await reorderSourceGroups(nextGroups.map((group) => group.id));
+        setOrderedGroups(savedGroups);
+        showToast("分组排序已保存。", "success");
+      } catch (error) {
+        setOrderedGroups(initialSettings.groups);
+        showToast(error instanceof Error ? error.message : "分组排序保存失败。", "error");
+      }
+    });
+  };
+
+  const groupSortSensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
+  );
+
+  const handleGroupDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+
+    if (!over || active.id === over.id) {
+      return;
+    }
+
+    const oldIndex = orderedGroups.findIndex((group) => group.id === active.id);
+    const newIndex = orderedGroups.findIndex((group) => group.id === over.id);
+
+    if (oldIndex < 0 || newIndex < 0) {
+      return;
+    }
+
+    const nextGroups = arrayMove(orderedGroups, oldIndex, newIndex);
+    setOrderedGroups(nextGroups);
+    saveGroupOrder(nextGroups);
   };
 
   const handleSaveSource = () => {
@@ -592,16 +781,20 @@ export function AdminSettingsPanel({
               </div>
             ) : null}
 
-            {initialSettings.groups.length ? (
-              <div className="space-y-3">
-                {initialSettings.groups.map((group) => (
-                  <GroupRow
-                    key={group.id}
-                    group={group}
-                    submitJson={submitJson}
-                  />
-                ))}
-              </div>
+            {orderedGroups.length ? (
+              <DndContext sensors={groupSortSensors} collisionDetection={closestCenter} onDragEnd={handleGroupDragEnd}>
+                <SortableContext items={orderedGroups.map((group) => group.id)} strategy={verticalListSortingStrategy}>
+                  <div className="space-y-3">
+                    {orderedGroups.map((group) => (
+                      <GroupRow
+                        key={group.id}
+                        group={group}
+                        submitJson={submitJson}
+                      />
+                    ))}
+                  </div>
+                </SortableContext>
+              </DndContext>
             ) : (
               <EmptyState
                 className="text-[var(--text-3)]"
@@ -645,6 +838,14 @@ export function AdminSettingsPanel({
                 >
                   导入 OPML
                 </Button>
+                <Button
+                  variant="secondary"
+                  size="md"
+                  onClick={exportOpml}
+                  disabled={initialSettings.sources.length === 0}
+                >
+                  导出 OPML
+                </Button>
                 <Button variant="primary" size="md" onClick={openCreateSourceModal}>
                   新建信息源
                 </Button>
@@ -661,6 +862,7 @@ export function AdminSettingsPanel({
                 onChange={(value) => {
                   setSourceNameFilter(value);
                   setSourcePage(1);
+                  updateSourceFilterUrl({ name: value, page: 1 });
                 }}
               />
               <FilterSelect
@@ -671,12 +873,13 @@ export function AdminSettingsPanel({
                 onChange={(value) => {
                   setSourceGroupFilter(value);
                   setSourcePage(1);
+                  updateSourceFilterUrl({ group: value, page: 1 });
                 }}
                 showSearch={false}
                 options={[
                   { value: "", label: "全部分组" },
                   { value: "__ungrouped__", label: "未分组" },
-                  ...initialSettings.groups.map((group) => ({
+                  ...orderedGroups.map((group) => ({
                     value: group.id,
                     label: group.name,
                   })),
@@ -690,6 +893,7 @@ export function AdminSettingsPanel({
                 onChange={(value) => {
                   setSourceEnabledFilter(value);
                   setSourcePage(1);
+                  updateSourceFilterUrl({ enabled: value, page: 1 });
                 }}
                 showSearch={false}
                 options={[
@@ -743,14 +947,16 @@ export function AdminSettingsPanel({
                           {formatSourceUpdateTime(source.lastItemCreatedAt)}
                         </td>
                         <td className="px-4 py-3 text-xs text-[var(--text-3)]">
-                          <a
-                            href={source.siteUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="hover:text-[var(--accent)] hover:underline"
-                          >
-                            {source.siteUrl}
-                          </a>
+                          <div className="max-w-[18rem] truncate" title={source.siteUrl}>
+                            <a
+                              href={source.siteUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="hover:text-[var(--accent)] hover:underline"
+                            >
+                              {source.siteUrl}
+                            </a>
+                          </div>
                         </td>
                         <td className="px-4 py-3 text-right">
                           <div className="flex items-center justify-end gap-1">
@@ -783,10 +989,13 @@ export function AdminSettingsPanel({
             {filteredSources.length > 0 ? (
               <PaginationControls
                 totalItems={filteredSources.length}
-                page={sourcePage}
+                page={safeSourcePage}
                 totalPages={sourceTotalPages}
                 pageSize={sourcePageSize}
-                onPageChange={setSourcePage}
+                onPageChange={(nextPage) => {
+                  setSourcePage(nextPage);
+                  updateSourceFilterUrl({ page: nextPage });
+                }}
                 onPageSizeChange={handleSourcePageSizeChange}
               />
             ) : null}
@@ -877,7 +1086,7 @@ export function AdminSettingsPanel({
                   showSearch={false}
                   options={[
                     { value: "", label: "未分组" },
-                    ...initialSettings.groups.map((group) => ({
+                    ...orderedGroups.map((group) => ({
                       value: group.id,
                       label: group.name,
                     })),
@@ -1183,13 +1392,41 @@ function GroupRow({
   const [isEditing, setIsEditing] = useState(false);
   const initial = group.name.charAt(0).toUpperCase();
   const badgeColor = getStableGroupBadgeColor(group.name);
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: group.id });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.55 : 1,
+  };
 
   return (
     <div
-      className="rounded-lg border border-[color:var(--line)] bg-[var(--surface)] px-3 py-3 transition hover:shadow-[0_1px_3px_rgba(0,0,0,0.06)]"
+      ref={setNodeRef}
+      style={style}
+      className={cx(
+        "rounded-lg border border-[color:var(--line)] bg-[var(--surface)] px-3 py-3 transition hover:shadow-[0_1px_3px_rgba(0,0,0,0.06)]",
+        isDragging && "opacity-60 ring-2 ring-[rgba(59,130,246,0.35)]",
+      )}
     >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-center gap-3">
+          <button
+            type="button"
+            {...attributes}
+            {...listeners}
+            className="cursor-grab rounded-sm px-1 text-[var(--text-3)] transition hover:text-[var(--text-2)] active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(59,130,246,0.35)]"
+            title="拖动排序"
+            aria-label="拖动排序"
+          >
+            <IconGrip className="h-4 w-4" />
+          </button>
           <div
             className="flex h-8 w-8 items-center justify-center rounded text-sm font-bold text-white"
             style={{ backgroundColor: badgeColor }}

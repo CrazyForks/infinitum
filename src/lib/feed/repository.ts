@@ -48,6 +48,7 @@ type CountRow = {
 type FeedGroupCountRow = {
   id: string;
   name: string;
+  sortOrder: number | bigint;
   count: bigint;
 };
 
@@ -552,31 +553,30 @@ export async function listFeedFilterOptions(): Promise<{
   groups: FeedGroupOption[];
   sources: FeedSourceOption[];
 }> {
-  const sources = await prisma.source.findMany({
-    where: { enabled: true },
-    include: { group: true },
-    orderBy: [{ name: "asc" }],
-  });
-
-  const groups = new Map<string, FeedGroupOption>();
-
-  for (const source of sources) {
-    if (source.groupId && source.group) {
-      const current = groups.get(source.groupId);
-      if (current) {
-        current.count += 1;
-      } else {
-        groups.set(source.groupId, {
-          id: source.groupId,
-          name: source.group.name,
-          count: 1,
-        });
-      }
-    }
-  }
+  const [groups, sources] = await Promise.all([
+    prisma.sourceGroup.findMany({
+      where: { sources: { some: { enabled: true } } },
+      include: {
+        _count: {
+          select: {
+            sources: { where: { enabled: true } },
+          },
+        },
+      },
+      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+    }),
+    prisma.source.findMany({
+      where: { enabled: true },
+      orderBy: [{ name: "asc" }],
+    }),
+  ]);
 
   return {
-    groups: [...groups.values()].sort((left, right) => left.name.localeCompare(right.name)),
+    groups: groups.map((group) => ({
+      id: group.id,
+      name: group.name,
+      count: group._count.sources,
+    })),
     sources: sources.map((source) => ({
       id: source.id,
       name: source.name,
@@ -602,12 +602,13 @@ async function listFeedGroupCounts(
       SELECT
         s."groupId" AS id,
         g.name AS name,
+        g."sortOrder" AS "sortOrder",
         COUNT(*) AS count
       FROM filtered_items fi
       INNER JOIN "sources" s ON s.id = fi."sourceId"
       INNER JOIN "source_groups" g ON g.id = s."groupId"
-      GROUP BY s."groupId", g.name
-      ORDER BY g.name ASC
+      GROUP BY s."groupId", g.name, g."sortOrder"
+      ORDER BY g."sortOrder" ASC, g.name ASC
     `),
     prisma.$queryRaw<CountRow[]>(Prisma.sql`
       ${filteredItemsCte}

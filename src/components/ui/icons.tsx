@@ -131,6 +131,19 @@ export function IconList(props: IconProps) {
   );
 }
 
+export function IconGrip(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <circle cx="9" cy="5" r="1" />
+      <circle cx="15" cy="5" r="1" />
+      <circle cx="9" cy="12" r="1" />
+      <circle cx="15" cy="12" r="1" />
+      <circle cx="9" cy="19" r="1" />
+      <circle cx="15" cy="19" r="1" />
+    </IconBase>
+  );
+}
+
 export function IconRobot(props: IconProps) {
   return (
     <IconBase {...props}>

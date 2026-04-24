@@ -44,7 +44,25 @@ type ParsedOpmlSource = {
   rssUrl: string;
   siteUrl: string | null;
   groupName: string | null;
+  enabled: boolean | null;
+  aiParsingEnabled: boolean | null;
 };
+
+function parseOptionalBoolean(value: string | null): boolean | null {
+  if (value === null) {
+    return null;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (["true", "1", "yes", "enabled"].includes(normalized)) {
+    return true;
+  }
+  if (["false", "0", "no", "disabled"].includes(normalized)) {
+    return false;
+  }
+
+  return null;
+}
 
 export type SaveModelApiConfigInput = {
   name: string;
@@ -124,6 +142,10 @@ export function parseOpmlSources(opmlText: string): ParsedOpmlSource[] {
           rssUrl,
           siteUrl,
           groupName: currentGroupName,
+          enabled: parseOptionalBoolean(node.getAttribute("infinitum:enabled") ?? node.getAttribute("enabled")),
+          aiParsingEnabled: parseOptionalBoolean(
+            node.getAttribute("infinitum:aiParsingEnabled") ?? node.getAttribute("aiParsingEnabled"),
+          ),
         });
         continue;
       }

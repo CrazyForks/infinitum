@@ -24,6 +24,11 @@ type SchedulePayload = {
   schedule?: AdminSettingsSnapshot["taskSchedule"];
 };
 
+type GroupReorderPayload = {
+  error?: string;
+  groups?: AdminSettingsSnapshot["groups"];
+};
+
 async function requestAdminSettingsJson<T extends { error?: string }>(
   url: string,
   method: string,
@@ -99,4 +104,19 @@ export async function saveDefaultIngestionSchedule(input: {
   }
 
   return payload.schedule;
+}
+
+export async function reorderSourceGroups(groupIds: string[]) {
+  const payload = await requestAdminSettingsJson<GroupReorderPayload>(
+    "/api/admin/settings/groups/reorder",
+    "PATCH",
+    { groupIds },
+    "分组排序保存失败。",
+  );
+
+  if (!payload.groups) {
+    throw new Error("分组排序保存失败。");
+  }
+
+  return payload.groups;
 }

@@ -63,7 +63,8 @@ function makeSqliteSchemaIdempotent(sql) {
   return sql
     .replace(/^CREATE TABLE /gm, "CREATE TABLE IF NOT EXISTS ")
     .replace(/^CREATE UNIQUE INDEX /gm, "CREATE UNIQUE INDEX IF NOT EXISTS ")
-    .replace(/^CREATE INDEX /gm, "CREATE INDEX IF NOT EXISTS ");
+    .replace(/^CREATE INDEX /gm, "CREATE INDEX IF NOT EXISTS ")
+    .replace(/^CREATE INDEX IF NOT EXISTS "source_groups_sortOrder_name_idx" ON "source_groups"\("sortOrder", "name"\);\n?/gm, "");
 }
 
 function runSqlite(commandArgs, options = {}) {
@@ -71,6 +72,26 @@ function runSqlite(commandArgs, options = {}) {
     stdio: ["pipe", "inherit", "inherit"],
     ...options,
   });
+}
+
+function columnExists(tableName, columnName) {
+  const result = execFileSync(
+    "sqlite3",
+    [dbPath, `SELECT COUNT(*) FROM pragma_table_info('${tableName}') WHERE name = '${columnName}'`],
+    {
+      encoding: "utf8",
+    },
+  ).trim();
+
+  return result === "1";
+}
+
+function applyIncrementalMigrations() {
+  if (!columnExists("source_groups", "sortOrder")) {
+    runSqlite([dbPath], {
+      input: `ALTER TABLE "source_groups" ADD COLUMN "sortOrder" INTEGER NOT NULL DEFAULT 0;\nCREATE INDEX IF NOT EXISTS "source_groups_sortOrder_name_idx" ON "source_groups"("sortOrder", "name");\n`,
+    });
+  }
 }
 
 function sleep(ms) {
@@ -140,6 +161,7 @@ try {
   runSqlite([dbPath], {
     input: sql,
   });
+  applyIncrementalMigrations();
 
   if (testHoldMs > 0) {
     sleep(testHoldMs);

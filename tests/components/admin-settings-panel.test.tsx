@@ -88,7 +88,7 @@ function buildInitialSettings(): AdminSettingsSnapshot {
       nextRunAt: "2026-04-20T11:00:00.000Z",
       isHeartbeatStale: false,
     },
-    groups: [{ id: "group-1", name: "Core" }],
+    groups: [{ id: "group-1", name: "Core", sortOrder: 0 }],
     sources: [
       {
         id: "source-1",
@@ -106,6 +106,7 @@ function buildInitialSettings(): AdminSettingsSnapshot {
 }
 
 afterEach(() => {
+  window.history.replaceState(null, "", "/");
   pushMock.mockReset();
   refreshMock.mockReset();
   vi.restoreAllMocks();
@@ -449,6 +450,45 @@ describe("AdminSettingsPanel", () => {
 
     await user.selectOptions(within(sourcesPanel).getByLabelText("分组"), "__ungrouped__");
     expect(screen.queryByText("Existing Source")).not.toBeInTheDocument();
+  });
+
+  it("exports OPML with source status and AI parsing metadata", async () => {
+    const user = userEvent.setup();
+    const createObjectUrl = vi.fn(() => "blob:opml");
+    const revokeObjectUrl = vi.fn();
+    const click = vi.fn();
+    const appendChild = vi.spyOn(document.body, "appendChild");
+
+    vi.stubGlobal("URL", {
+      ...URL,
+      createObjectURL: createObjectUrl,
+      revokeObjectURL: revokeObjectUrl,
+    });
+
+    renderWithProviders(<AdminSettingsPanel initialSettings={buildInitialSettings()} />);
+
+    const createElement = vi.spyOn(document, "createElement");
+    createElement.mockImplementation((tagName: string, options?: ElementCreationOptions) => {
+      const element = document.createElementNS("http://www.w3.org/1999/xhtml", tagName) as HTMLElement;
+      if (tagName === "a") {
+        Object.defineProperty(element, "click", { value: click });
+      }
+      return options ? document.createElementNS("http://www.w3.org/1999/xhtml", tagName, options) : element;
+    });
+
+    await user.click(screen.getByRole("tab", { name: "信息源" }));
+    await user.click(screen.getByRole("button", { name: "导出 OPML" }));
+
+    expect(createObjectUrl).toHaveBeenCalledTimes(1);
+    const blob = createObjectUrl.mock.calls[0][0] as Blob;
+    const text = await blob.text();
+
+    expect(text).toContain('xmlns:infinitum="https://infinitum.app/opml"');
+    expect(text).toContain('infinitum:enabled="true"');
+    expect(text).toContain('infinitum:aiParsingEnabled="true"');
+    expect(appendChild).toHaveBeenCalled();
+    expect(click).toHaveBeenCalledTimes(1);
+    expect(revokeObjectUrl).toHaveBeenCalledWith("blob:opml");
   });
 
   it("requires confirmation before deleting a source", async () => {

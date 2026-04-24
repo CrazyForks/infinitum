@@ -273,7 +273,7 @@ describe("admin settings service", () => {
 
     await importSourcesFromOpml!(
       `<?xml version="1.0" encoding="UTF-8"?>
-      <opml version="2.0">
+      <opml version="2.0" xmlns:infinitum="https://infinitum.app/opml">
         <body>
           <outline text="AI">
             <outline
@@ -291,6 +291,8 @@ describe("admin settings service", () => {
               type="rss"
               xmlUrl="https://feeds.example.com/two.xml"
               htmlUrl="https://feeds.example.com/two"
+              infinitum:enabled="false"
+              infinitum:aiParsingEnabled="false"
             />
           </outline>
         </body>
@@ -326,6 +328,8 @@ describe("admin settings service", () => {
       rssUrl: "https://feeds.example.com/two.xml",
       name: "Import Feed Two",
       siteUrl: "https://feeds.example.com/two",
+      enabled: false,
+      aiParsingEnabled: false,
       group: {
         name: "Infra",
       },
