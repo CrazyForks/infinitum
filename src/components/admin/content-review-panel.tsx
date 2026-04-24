@@ -1029,9 +1029,6 @@ function ContentReviewContent({ initialTab = "filtered" }: ContentReviewContentP
                       <div className="font-medium text-[var(--foreground)] group-hover:text-[var(--accent)] transition-colors truncate max-w-[280px]">
                         {item.title}
                       </div>
-                      <div className="text-xs text-[var(--muted)] truncate max-w-[280px]">
-                        {truncateText(item.summary, 50)}
-                      </div>
                     </button>
                   </td>
                   <td className="px-4 py-3 text-[var(--text-2)]">{item.sourceName}</td>

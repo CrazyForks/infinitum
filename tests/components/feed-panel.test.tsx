@@ -989,6 +989,51 @@ describe("FeedPanel", () => {
     expect(screen.getByText("详细摘要")).toBeInTheDocument();
   });
 
+  it("expands cluster items when clicking the cluster card body", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () =>
+      new Response(
+        JSON.stringify({
+          items: [
+            {
+              id: "item-detail-1",
+              title: "详细标题",
+              originalUrl: "https://example.com/detail",
+              publishedAt: "2026-04-10T09:00:00.000Z",
+              sourceName: "Another Feed",
+              author: "Jamie",
+              summary: "详细摘要",
+              score: 84,
+              canRegenerateTranslation: true,
+            },
+          ],
+        }),
+      ),
+    );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <FeedPanel
+        initialItems={initialEntries}
+        initialRange="7d"
+        initialSort="time_desc"
+        initialStartDate={null}
+        initialEndDate={null}
+        initialNextCursor={null}
+        initialStatus={null}
+        isAdmin={false}
+      />,
+    );
+
+    await user.click(screen.getByRole("heading", { name: "OpenAI Agent 发布" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/feed/clusters/cluster-1?range=7d&sort=time_desc&tzOffsetMinutes=-480");
+    });
+    expect(await screen.findByText("详细标题")).toBeInTheDocument();
+  });
+
   it("shows a regenerate icon for expanded cluster items and keeps the cluster refresh hint", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
@@ -1804,6 +1849,62 @@ describe("FeedPanel", () => {
     expect(actionGroup).toHaveClass("flex");
     expect(actionGroup).toHaveClass("shrink-0");
     expect(actionGroup).toHaveClass("gap-0.5");
+  });
+
+  it("omits author metadata when the author is unknown", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () =>
+      new Response(
+        JSON.stringify({
+          items: [
+            {
+              id: "item-detail-unknown-author",
+              title: "详细标题",
+              originalUrl: "https://example.com/detail",
+              publishedAt: "2026-04-10T09:00:00.000Z",
+              sourceName: "Another Feed",
+              author: null,
+              summary: "详细摘要",
+              score: 84,
+              canRegenerateTranslation: true,
+            },
+          ],
+        }),
+      ),
+    );
+    const entriesWithoutAuthors: FeedEntryDTO[] = initialEntries.map((entry) => {
+      if (entry.type === "cluster") {
+        return {
+          ...entry,
+          itemsPreview: entry.itemsPreview.map((item) => ({ ...item, author: null })),
+        };
+      }
+
+      return {
+        ...entry,
+        author: null,
+      };
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <FeedPanel
+        initialItems={entriesWithoutAuthors}
+        initialRange="7d"
+        initialSort="time_desc"
+        initialStartDate={null}
+        initialEndDate={null}
+        initialNextCursor={null}
+        initialStatus={null}
+        isAdmin={false}
+      />,
+    );
+
+    expect(screen.queryByText(/作者：未知作者/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "展开相关内容" }));
+    expect(await screen.findByText("详细标题")).toBeInTheDocument();
+    expect(screen.queryByText(/作者：未知作者/)).not.toBeInTheDocument();
   });
 
   it("renders regenerate API errors as alerts", async () => {

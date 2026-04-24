@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import type { Item, Source } from "@prisma/client";
 
 import { type AiEventSignature, type AiProvider } from "@/lib/ai/provider";
+import { shouldRegenerateChineseSummary } from "@/lib/ai/summary-language";
 import type { ClusterAssignmentCandidate } from "@/lib/clusters/repository";
 import {
   normalizeEventActionForStorage,
@@ -483,7 +484,10 @@ export async function generateClusterPresentation(
   try {
     const summarySeed = buildClusterSummarySeed(clusterItems);
 
-    const aiSummary = await summaryProvider.summarizeCluster(summarySeed, { title: fallback.title });
+    let aiSummary = await summaryProvider.summarizeCluster(summarySeed, { title: fallback.title });
+    if (shouldRegenerateChineseSummary(aiSummary)) {
+      aiSummary = await summaryProvider.summarizeCluster(summarySeed, { title: fallback.title });
+    }
     const useAiSummary = Boolean(aiSummary?.trim()) && aiSummary !== fallback.summary;
 
     return {

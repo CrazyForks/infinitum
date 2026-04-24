@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState, useTransition, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition, useCallback, type MouseEvent } from "react";
 
 import { STATUS_POLL_INTERVAL_MS, TITLE_SEARCH_DEBOUNCE_MS } from "@/config/constants";
 import {
@@ -135,6 +135,15 @@ function ChevronIcon({ expanded, className }: { expanded: boolean; className?: s
       <path d="m6 9 6 6 6-6" />
     </svg>
   );
+}
+
+function isInteractiveClickTarget(target: EventTarget | null) {
+  return target instanceof Element && Boolean(target.closest("a,button,input,select,textarea,label,[role='button']"));
+}
+
+function getVisibleAuthorLabel(author: string | null | undefined) {
+  const normalized = author?.trim();
+  return normalized && normalized !== "未知作者" ? normalized : null;
 }
 
 export function FeedPanel({
@@ -669,6 +678,14 @@ export function FeedPanel({
         [clusterId]: nextOpen,
       }));
     });
+  };
+
+  const handleClusterCardClick = (event: MouseEvent<HTMLElement>, clusterId: string) => {
+    if (isPending || isInteractiveClickTarget(event.target)) {
+      return;
+    }
+
+    toggleCluster(clusterId);
   };
 
   // 重新生成聚合摘要
@@ -1220,7 +1237,7 @@ export function FeedPanel({
                       ariaLabel="信息源"
                       value={sourceId ?? ""}
                       onChange={changeSource}
-                      showSearch={false}
+                      showSearch
                       options={[
                         { value: "", label: "全部信息源" },
                         ...visibleSources.map((source) => ({
@@ -1344,7 +1361,10 @@ export function FeedPanel({
               entry.type === "cluster" ? (
                 <article key={entry.id} className={denseCardClassName}>
                   {/* 聚合条目头部 */}
-                  <div className="flex items-start gap-3">
+                  <div
+                    className="flex cursor-pointer items-start gap-3"
+                    onClick={(event) => handleClusterCardClick(event, entry.id)}
+                  >
                     {isAdmin && (
                       <div className="flex flex-col gap-1 pt-1">
                         <input
@@ -1422,7 +1442,11 @@ export function FeedPanel({
                         <span className="rounded-sm bg-[var(--accent-soft)] px-2 py-1 text-[11px] text-[var(--accent-strong)]">聚合</span>
                         <span className={neutralBadgeClassName}>{formatScore(entry.score)}</span>
                         <span className={metaTextClassName}>{formatMetaLabel("来源", formatClusterSourceLabel(entry))}</span>
-                        <span className={metaTextClassName}>{formatMetaLabel("作者", formatClusterAuthorLabel(entry))}</span>
+                        {getVisibleAuthorLabel(formatClusterAuthorLabel(entry)) ? (
+                          <span className={metaTextClassName}>
+                            {formatMetaLabel("作者", getVisibleAuthorLabel(formatClusterAuthorLabel(entry)) ?? "")}
+                          </span>
+                        ) : null}
                         <span className={metaTextClassName}>{formatMetaLabel("发表", formatDate(entry.latestPublishedAt))}</span>
                       </div>
                       <p className={cardSummaryClassName}>{entry.summary}</p>
@@ -1527,7 +1551,11 @@ export function FeedPanel({
                               <div className={cardMetaRowClassName}>
                                 <span className={neutralBadgeClassName}>{formatScore(clusterItem.score)}</span>
                                 <span className={metaTextClassName}>{formatMetaLabel("来源", clusterItem.sourceName)}</span>
-                                <span className={metaTextClassName}>{formatMetaLabel("作者", clusterItem.author || "未知作者")}</span>
+                                {getVisibleAuthorLabel(clusterItem.author) ? (
+                                  <span className={metaTextClassName}>
+                                    {formatMetaLabel("作者", getVisibleAuthorLabel(clusterItem.author) ?? "")}
+                                  </span>
+                                ) : null}
                                 <span className={metaTextClassName}>{formatMetaLabel("发表", formatDate(clusterItem.publishedAt))}</span>
                               </div>
                               <p className={cardSummaryClassName}>{clusterItem.summary}</p>
@@ -1642,7 +1670,11 @@ export function FeedPanel({
                     <div className={cardMetaRowClassName}>
                       <span className={neutralBadgeClassName}>{formatScore(entry.score)}</span>
                       <span className={metaTextClassName}>{formatMetaLabel("来源", entry.sourceName)}</span>
-                      <span className={metaTextClassName}>{formatMetaLabel("作者", entry.author || "未知作者")}</span>
+                      {getVisibleAuthorLabel(entry.author) ? (
+                        <span className={metaTextClassName}>
+                          {formatMetaLabel("作者", getVisibleAuthorLabel(entry.author) ?? "")}
+                        </span>
+                      ) : null}
                       <span className={metaTextClassName}>{formatMetaLabel("发表", formatDate(entry.publishedAt))}</span>
                     </div>
                     <p className={cardSummaryClassName}>{entry.summary}</p>

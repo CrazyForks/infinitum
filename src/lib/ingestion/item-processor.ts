@@ -1,6 +1,7 @@
 import type { Item } from "@prisma/client";
 
 import type { AiEventSignature } from "@/lib/ai/provider";
+import { shouldRegenerateChineseSummary } from "@/lib/ai/summary-language";
 import type { ClusterAssignmentCoordinator } from "@/lib/clusters/helpers";
 import { assignItemToCluster } from "@/lib/clusters/service";
 import {
@@ -55,6 +56,30 @@ function getBestContent(item: ParsedFeedItem): string {
   return item["content:encoded"] || item.content || item.contentSnippet || "";
 }
 
+function normalizeFeedAuthor(value: unknown): string | null {
+  if (typeof value === "string") {
+    return value.trim() || null;
+  }
+
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const candidate = record.name ?? record.title ?? record.email;
+
+  if (Array.isArray(candidate)) {
+    const text = candidate.find((entry) => typeof entry === "string" && entry.trim());
+    return typeof text === "string" ? text.trim() : null;
+  }
+
+  return typeof candidate === "string" && candidate.trim() ? candidate.trim() : null;
+}
+
+function getFeedItemAuthor(item: ParsedFeedItem): string | null {
+  return normalizeFeedAuthor(item.creator) ?? normalizeFeedAuthor(item.author);
+}
+
 function parsePublishedAt(item: ParsedFeedItem, fallback: Date): Date {
   const raw = item.isoDate || item.pubDate;
   const parsed = raw ? new Date(raw) : null;
@@ -107,6 +132,20 @@ function buildFallbackSummary(rssExcerpt: string | null, fallbackBody: string | 
   }
 
   return null;
+}
+
+async function summarizeItemWithChineseRetry(
+  aiProvider: RunIngestionOptions["aiProvider"],
+  inputText: string,
+  metadata: { title: string; sourceName: string },
+) {
+  const firstSummary = await aiProvider.summarizeItem(inputText, metadata);
+
+  if (!shouldRegenerateChineseSummary(firstSummary)) {
+    return firstSummary;
+  }
+
+  return aiProvider.summarizeItem(inputText, metadata);
 }
 
 function hasSucceededSummary(existing?: {
@@ -306,6 +345,7 @@ export async function processFeedItem({
     existingItem === undefined
       ? await findExistingItem(dedupeKeys.urlHash, dedupeKeys.signature)
       : existingItem;
+  const author = getFeedItemAuthor(item);
   const isNew = !existing;
   const analysisInputsChanged = existing
     ? hasAnalysisInputsChanged(existing, {
@@ -372,7 +412,7 @@ export async function processFeedItem({
         dedupeSignature: dedupeKeys.signature,
         originalTitle,
         translatedTitle,
-        author: item.creator || item.author || null,
+        author,
         publishedAt,
         rssExcerpt,
         rssContent,
@@ -412,7 +452,6 @@ export async function processFeedItem({
   }
 
   if (canReuseExistingAnalysis && existing) {
-    const author = item.creator || item.author || null;
     const language = existing?.language ?? (shouldTranslateTitle(originalTitle) ? "en" : "unknown");
     const stored = shouldWriteReusableExistingItem(existing, lookup, {
       sourceId,
@@ -510,7 +549,7 @@ export async function processFeedItem({
     } else {
       try {
         summaryText = stripHtmlTags(
-          await aiProvider.summarizeItem(summarySourceText, {
+          await summarizeItemWithChineseRetry(aiProvider, summarySourceText, {
             title: originalTitle,
             sourceName,
           }),
@@ -592,7 +631,7 @@ export async function processFeedItem({
       dedupeSignature: dedupeKeys.signature,
       originalTitle,
       translatedTitle,
-      author: item.creator || item.author || null,
+      author,
       publishedAt,
       rssExcerpt,
       rssContent,

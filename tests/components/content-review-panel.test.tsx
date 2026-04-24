@@ -154,6 +154,7 @@ describe("ContentReviewPanel", () => {
     expect(screen.getByLabelText("过滤原因")).toBeInTheDocument();
     const filteredTable = screen.getByRole("table");
     expect(within(filteredTable).getByRole("button", { name: /营销内容/ })).toBeInTheDocument();
+    expect(within(filteredTable).queryByText("摘要")).not.toBeInTheDocument();
     expect(within(filteredTable).getByText("Example Feed")).toBeInTheDocument();
 
     await user.click(screen.getByTitle("恢复内容"));

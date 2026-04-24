@@ -223,24 +223,24 @@ describe("/api/feed", () => {
     });
     expect(json.items[1]).toMatchObject({
       type: "single",
+      id: "item-timezone-created",
+      title: "按创建时间归档",
+      itemCount: 1,
+      score: 75,
+    });
+    expect(json.items[2]).toMatchObject({
+      type: "single",
       id: "item-b1",
       title: "故事 B",
       itemCount: 1,
       score: 62,
     });
-    expect(json.items[2]).toMatchObject({
+    expect(json.items[3]).toMatchObject({
       type: "single",
       id: "item-c1",
       title: "故事 C1",
       itemCount: 1,
       score: 98,
-    });
-    expect(json.items[3]).toMatchObject({
-      type: "single",
-      id: "item-timezone-created",
-      title: "按创建时间归档",
-      itemCount: 1,
-      score: 75,
     });
     expect(json.pagination).toMatchObject({
       page: 1,
@@ -266,11 +266,11 @@ describe("/api/feed", () => {
       expect(json.items).toHaveLength(2);
       expect(json.items[0]).toMatchObject({
         type: "single",
-        id: "item-c1",
+        id: "item-b1",
       });
       expect(json.items[1]).toMatchObject({
         type: "single",
-        id: "item-timezone-created",
+        id: "item-c1",
       });
       expect(json.pagination).toMatchObject({
         page: 2,

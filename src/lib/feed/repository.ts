@@ -135,7 +135,22 @@ export async function upsertItem(
     });
   }
 
-  return prisma.item.create({ data });
+  try {
+    return await prisma.item.create({ data });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      const existing = await findExistingItem(where.urlHash, where.dedupeSignature);
+
+      if (existing) {
+        return prisma.item.update({
+          where: { id: existing.id },
+          data,
+        });
+      }
+    }
+
+    throw error;
+  }
 }
 
 export async function createFetchRun(triggerType: "scheduled" | "manual", startedAt: Date, taskRunId?: string) {
@@ -574,7 +589,7 @@ function buildFeedEntryOrderBy(sort: FeedFilters["sort"]) {
     return Prisma.sql`ORDER BY "recommendScore" DESC, "latestPublishedAt" DESC, "itemCount" DESC, id DESC`;
   }
 
-  return Prisma.sql`ORDER BY "latestPublishedAt" DESC, "recommendScore" DESC, "itemCount" DESC, id DESC`;
+  return Prisma.sql`ORDER BY "createdAt" DESC, "recommendScore" DESC, "itemCount" DESC, id DESC`;
 }
 
 export async function listFeedFilterOptions(): Promise<{

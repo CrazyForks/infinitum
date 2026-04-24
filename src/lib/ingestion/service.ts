@@ -268,6 +268,7 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
   const sourceMetadataCommitCandidates = new Map<string, SourceFetchMetadataUpdate>();
   const sourceProcessingFailures = new Map<string, number>();
   const errors: string[] = [];
+  let processableItemCount = 0;
   let successCount = 0;
   let failureCount = 0;
   let itemsAdded = 0;
@@ -277,7 +278,7 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
   const clusterAssignmentCoordinator = createClusterAssignmentCoordinator();
   const getProgressSnapshot = () => ({
     sourceCount: sources.length,
-    itemCount: preparedItems.length,
+    itemCount: processableItemCount,
     successCount,
     failureCount,
     itemsAdded,
@@ -379,7 +380,6 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
   } finally {
     stageTracker.finishStage(sourceSyncStage);
     timelineCounters.sourceFetch.sourcesFetched = sources.length;
-    timelineCounters.sourceFetch.itemsFetched = preparedItems.length;
   }
 
   const preparedLookups = preparedItems
@@ -388,6 +388,8 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
       lookup: buildPreparedFeedItemLookup(preparedItem, now),
     }))
     .filter((entry) => !entry.lookup || !processingStartAt || entry.lookup.publishedAt >= processingStartAt);
+  processableItemCount = preparedLookups.length;
+  timelineCounters.sourceFetch.itemsFetched = processableItemCount;
   const existingItems = await findExistingItemsForDedupeKeys(
     preparedLookups
       .map((entry) => entry.lookup)
@@ -415,7 +417,7 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
 
   await updateFetchRunProgress(run.id, {
     sourceCount: sources.length,
-    itemCount: preparedItems.length,
+    itemCount: processableItemCount,
     successCount,
     failureCount,
     itemsAdded,
@@ -431,7 +433,7 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
 
     await updateFetchRunProgress(run.id, {
       sourceCount: sources.length,
-      itemCount: preparedItems.length,
+      itemCount: processableItemCount,
       successCount,
       failureCount,
       itemsAdded,
@@ -642,7 +644,7 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
     status,
     finishedAt: new Date(),
     sourceCount: sources.length,
-    itemCount: preparedItems.length,
+    itemCount: processableItemCount,
     successCount,
     failureCount,
     itemsAdded,

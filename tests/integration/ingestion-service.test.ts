@@ -201,6 +201,173 @@ describe("runIngestion", () => {
     ]);
   });
 
+  it("counts only processing-start eligible items in task progress and timeline", async () => {
+    const parser = {
+      parseURL: vi.fn().mockResolvedValue({
+        items: [
+          {
+            title: "Old article before configured processing start",
+            link: "https://example.com/posts/old",
+            isoDate: "2026-04-10T08:00:00.000Z",
+            contentSnippet: "Old summary",
+          },
+          {
+            title: "Fresh article after configured processing start",
+            link: "https://example.com/posts/fresh",
+            isoDate: "2026-04-10T10:00:00.000Z",
+            contentSnippet: "Fresh summary",
+          },
+        ],
+      }),
+    };
+    const aiProvider = buildAiProviderMock({
+      summarizeItem: vi.fn().mockResolvedValue("这是一条符合处理时间范围的新内容。"),
+      enrichContent: vi.fn().mockResolvedValue({
+        translatedTitle: "符合处理时间范围的新内容",
+        moderationStatus: "allowed",
+        moderationReason: null,
+        moderationDetail: "新闻价值明确",
+        qualityScore: 86,
+        qualityRationale: "内容完整",
+        eventSignature: buildEventSignature({
+          eventType: "update",
+          eventSubject: "OpenAI",
+          eventAction: "更新",
+          eventObject: "产品能力",
+        }),
+      }),
+    });
+    const taskRun = await startIngestionTask({ triggerType: "manual" });
+
+    await runIngestionTask(taskRun, {
+      parser,
+      articleFetcher: vi.fn(),
+      aiProvider,
+      sourceConfigs: [
+        {
+          name: "Example Feed",
+          rssUrl: "https://example.com/feed.xml",
+          siteUrl: "https://example.com",
+          enabled: true,
+          aiParsingEnabled: true,
+        },
+      ],
+      blacklist: [],
+      processingStartAt: new Date("2026-04-10T09:00:00.000Z"),
+      now: new Date("2026-04-10T10:30:00.000Z"),
+    });
+
+    const [storedTaskRun, storedFetchRun, storedItems] = await Promise.all([
+      prisma.backgroundTaskRun.findUniqueOrThrow({ where: { id: taskRun.id } }),
+      prisma.fetchRun.findFirstOrThrow({ where: { taskRunId: taskRun.id } }),
+      prisma.item.findMany({ orderBy: { publishedAt: "asc" } }),
+    ]);
+    const taskTimeline = JSON.parse(
+      storedTaskRun.taskTimelineJson ?? "[]",
+    ) as Array<{ key: string; metrics: Array<{ label: string; value: number }> }>;
+
+    expect(storedTaskRun.progressCurrent).toBe(1);
+    expect(storedTaskRun.progressTotal).toBe(1);
+    expect(storedTaskRun.progressLabel).toBe("已处理 1/1 条内容，来自 1 个源，失败 0 项，正文补抓 0 篇");
+    expect(storedFetchRun.itemCount).toBe(1);
+    expect(taskTimeline[0]?.metrics).toEqual([
+      { label: "抓取源", value: 1 },
+      { label: "抓取内容", value: 1 },
+      { label: "正文补抓", value: 0 },
+    ]);
+    expect(storedItems).toHaveLength(1);
+    expect(storedItems[0]?.originalUrl).toBe("https://example.com/posts/fresh");
+  });
+
+  it("normalizes structured RSS authors before storing items", async () => {
+    const parser = {
+      parseURL: vi.fn().mockResolvedValue({
+        items: [
+          {
+            title: "3 easy ways to shop for spring with Google",
+            link: "https://blog.google/products-and-platforms/products/search/spring-fashion-shopping-tips/",
+            isoDate: "2026-04-23T16:00:00.000Z",
+            contentSnippet: "Shopping tips",
+            author: {
+              name: ["Megan Stoner"],
+              title: ["Keyword Contributor"],
+            },
+          },
+        ],
+      }),
+    };
+
+    const result = await runIngestion({
+      trigger: "manual",
+      parser,
+      articleFetcher: vi.fn(),
+      aiProvider: buildAiProviderMock(),
+      sourceConfigs: [
+        {
+          name: "The Keyword",
+          rssUrl: "https://blog.google/rss/",
+          siteUrl: "https://blog.google",
+          enabled: true,
+          aiParsingEnabled: false,
+        },
+      ],
+      blacklist: [],
+      now: new Date("2026-04-24T10:30:00.000Z"),
+    });
+
+    const storedItem = await prisma.item.findFirstOrThrow();
+
+    expect(result.status).toBe("succeeded");
+    expect(storedItem.author).toBe("Megan Stoner");
+  });
+
+  it("updates the existing item when duplicate feed entries race on the same url hash", async () => {
+    const parser = {
+      parseURL: vi.fn().mockResolvedValue({
+        items: [
+          {
+            title: "DeepSeek V4 - almost on the frontier",
+            link: "https://simonwillison.net/2026/Apr/24/deepseek-v4/",
+            isoDate: "2026-04-24T09:00:00.000Z",
+            contentSnippet: "First copy",
+          },
+          {
+            title: "DeepSeek V4 - almost on the frontier",
+            link: "https://simonwillison.net/2026/Apr/24/deepseek-v4/",
+            isoDate: "2026-04-24T09:00:00.000Z",
+            contentSnippet: "Second copy",
+          },
+        ],
+      }),
+    };
+
+    const result = await runIngestion({
+      trigger: "manual",
+      parser,
+      articleFetcher: vi.fn(),
+      aiProvider: buildAiProviderMock(),
+      sourceConfigs: [
+        {
+          name: "Simon Willison's Weblog",
+          rssUrl: "https://simonwillison.net/atom/everything/",
+          siteUrl: "https://simonwillison.net",
+          enabled: true,
+          aiParsingEnabled: false,
+        },
+      ],
+      blacklist: [],
+      itemConcurrency: 2,
+      now: new Date("2026-04-24T10:30:00.000Z"),
+    });
+
+    const storedItems = await prisma.item.findMany();
+
+    expect(result.status).toBe("succeeded");
+    expect(result.errorSummary).toBeNull();
+    expect(storedItems).toHaveLength(1);
+    expect(storedItems[0]?.rssExcerpt).toBe("Second copy");
+  });
+
   it("uses conditional RSS metadata to skip unchanged sources", async () => {
     const source = await prisma.source.create({
       data: {
@@ -1334,6 +1501,66 @@ describe("runIngestion", () => {
     expect(storedItem.summaryText).toBe("Token economy summary");
   });
 
+  it("regenerates an item summary once when the first AI summary is English", async () => {
+    const parser = {
+      parseURL: vi.fn().mockResolvedValue({
+        items: [
+          {
+            title: "OpenAI ships a new agent toolkit",
+            link: "https://example.com/posts/openai-toolkit",
+            isoDate: "2026-04-10T09:00:00.000Z",
+            contentSnippet: "Brief summary",
+          },
+        ],
+      }),
+    };
+    const summarizeItem = vi
+      .fn()
+      .mockResolvedValueOnce("This article explains OpenAI's new agent toolkit for developers.")
+      .mockResolvedValueOnce("这篇文章介绍了 OpenAI 面向开发者的新 agent 工具包。");
+    const aiProvider = buildAiProviderMock({
+      summarizeItem,
+      enrichContent: vi.fn().mockResolvedValue({
+        translatedTitle: "OpenAI 发布新的 agent 工具包",
+        moderationStatus: "allowed",
+        moderationReason: null,
+        moderationDetail: null,
+        qualityScore: 90,
+        qualityRationale: "高质量",
+        eventSignature: buildEventSignature({
+          eventType: "launch",
+          eventSubject: "OpenAI",
+          eventAction: "发布",
+          eventObject: "agent toolkit",
+        }),
+      }),
+      summarizeCluster: vi.fn().mockResolvedValue("聚合摘要"),
+      matchClusterCandidate: vi.fn().mockResolvedValue(null),
+    });
+
+    await runIngestion({
+      trigger: "manual",
+      parser,
+      articleFetcher: vi.fn(),
+      aiProvider,
+      sourceConfigs: [
+        {
+          name: "Example Feed",
+          rssUrl: "https://example.com/feed.xml",
+          siteUrl: "https://example.com",
+          enabled: true,
+          aiParsingEnabled: true,
+        },
+      ],
+      blacklist: [],
+      now: new Date("2026-04-10T10:00:00.000Z"),
+    });
+
+    const storedItem = await prisma.item.findFirstOrThrow();
+    expect(summarizeItem).toHaveBeenCalledTimes(2);
+    expect(storedItem.summaryText).toBe("这篇文章介绍了 OpenAI 面向开发者的新 agent 工具包。");
+  });
+
   it("does not call cluster summary ai for single-item clusters", async () => {
     const parser = {
       parseURL: vi.fn().mockResolvedValue({
@@ -1393,6 +1620,72 @@ describe("runIngestion", () => {
     expect(storedCluster.itemCount).toBe(1);
     expect(storedCluster.summary).toBe("这是单条内容的摘要。");
     expect(storedCluster.title).toBe("OpenAI 发布 solo launch");
+  });
+
+  it("regenerates a cluster summary once when the first AI summary is English", async () => {
+    const parser = {
+      parseURL: vi.fn().mockResolvedValue({
+        items: [
+          {
+            title: "OpenAI ships a new agent toolkit",
+            link: "https://example.com/posts/openai-toolkit",
+            isoDate: "2026-04-10T09:00:00.000Z",
+            contentSnippet: "Brief summary",
+          },
+          {
+            title: "Another report on OpenAI agent toolkit",
+            link: "https://example.com/posts/openai-toolkit-2",
+            isoDate: "2026-04-10T09:30:00.000Z",
+            contentSnippet: "Another brief summary",
+          },
+        ],
+      }),
+    };
+    const summarizeCluster = vi
+      .fn()
+      .mockResolvedValueOnce("Both reports focus on OpenAI's new agent toolkit for developers.")
+      .mockResolvedValueOnce("两篇报道都聚焦 OpenAI 面向开发者发布的新 agent 工具包。");
+    const aiProvider = buildAiProviderMock({
+      summarizeItem: vi.fn().mockResolvedValue("OpenAI 发布 agent toolkit。"),
+      enrichContent: vi.fn().mockResolvedValue({
+        translatedTitle: "OpenAI 发布 agent toolkit",
+        moderationStatus: "allowed",
+        moderationReason: null,
+        moderationDetail: null,
+        qualityScore: 90,
+        qualityRationale: "高质量",
+        eventSignature: buildEventSignature({
+          eventType: "launch",
+          eventSubject: "OpenAI",
+          eventAction: "发布",
+          eventObject: "agent toolkit",
+        }),
+      }),
+      summarizeCluster,
+      matchClusterCandidate: vi.fn().mockResolvedValue(null),
+    });
+
+    await runIngestion({
+      trigger: "manual",
+      parser,
+      articleFetcher: vi.fn(),
+      aiProvider,
+      sourceConfigs: [
+        {
+          name: "Example Feed",
+          rssUrl: "https://example.com/feed.xml",
+          siteUrl: "https://example.com",
+          enabled: true,
+          aiParsingEnabled: true,
+        },
+      ],
+      blacklist: [],
+      now: new Date("2026-04-10T10:00:00.000Z"),
+    });
+
+    const storedCluster = await prisma.contentCluster.findFirstOrThrow();
+    expect(summarizeCluster).toHaveBeenCalledTimes(2);
+    expect(storedCluster.summary).toBe("两篇报道都聚焦 OpenAI 面向开发者发布的新 agent 工具包。");
   });
 
   it("skips cluster summary ai when the cluster summary input hash is unchanged", async () => {

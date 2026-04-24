@@ -12,8 +12,8 @@ export type ParsedFeedItem = {
   link?: string | null;
   isoDate?: string | null;
   pubDate?: string | null;
-  creator?: string | null;
-  author?: string | null;
+  creator?: unknown;
+  author?: unknown;
   content?: string | null;
   "content:encoded"?: string | null;
   contentSnippet?: string | null;
