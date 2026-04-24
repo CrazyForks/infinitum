@@ -363,6 +363,7 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
               sourceId: source.id,
               sourceName: source.name,
               aiParsingEnabled: source.aiParsingEnabled,
+              aggregationEnabled: source.aggregationEnabled,
             });
           }
         } catch (error) {

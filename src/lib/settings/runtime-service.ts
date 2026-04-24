@@ -138,6 +138,7 @@ export async function getAdminSettings(): Promise<AdminSettingsSnapshot> {
       siteUrl: source.siteUrl,
       enabled: source.enabled,
       aiParsingEnabled: source.aiParsingEnabled,
+      aggregationEnabled: source.aggregationEnabled,
       groupId: source.groupId,
       groupName: source.group?.name ?? null,
       lastItemCreatedAt: latestItemCreatedAtBySourceId.get(source.id)?.toISOString() ?? null,

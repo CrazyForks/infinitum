@@ -43,6 +43,7 @@ describe("runtime config defaults", () => {
       siteUrl: "https://example.com",
       enabled: true,
       aiParsingEnabled: true,
+      aggregationEnabled: true,
     });
     left.blacklistKeywords.push("foo");
 

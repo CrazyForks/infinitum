@@ -97,6 +97,7 @@ function buildInitialSettings(): AdminSettingsSnapshot {
         siteUrl: "https://example.com",
         enabled: true,
         aiParsingEnabled: true,
+        aggregationEnabled: true,
         groupId: "group-1",
         groupName: "Core",
         lastItemCreatedAt: "2026-04-20T10:00:00.000Z",
@@ -395,6 +396,7 @@ describe("AdminSettingsPanel", () => {
           siteUrl: "https://feeds.example.com",
           enabled: true,
           aiParsingEnabled: false,
+          aggregationEnabled: true,
           groupId: "group-1",
         }),
       });
@@ -421,6 +423,7 @@ describe("AdminSettingsPanel", () => {
               siteUrl: "https://infra.example.com",
               enabled: false,
               aiParsingEnabled: false,
+              aggregationEnabled: false,
               groupId: null,
               groupName: null,
               lastItemCreatedAt: null,
@@ -454,7 +457,7 @@ describe("AdminSettingsPanel", () => {
 
   it("exports OPML with source status and AI parsing metadata", async () => {
     const user = userEvent.setup();
-    const createObjectUrl = vi.fn(() => "blob:opml");
+    const createObjectUrl = vi.fn<(object: Blob | MediaSource) => string>(() => "blob:opml");
     const revokeObjectUrl = vi.fn();
     const click = vi.fn();
     const appendChild = vi.spyOn(document.body, "appendChild");
@@ -473,7 +476,7 @@ describe("AdminSettingsPanel", () => {
       if (tagName === "a") {
         Object.defineProperty(element, "click", { value: click });
       }
-      return options ? document.createElementNS("http://www.w3.org/1999/xhtml", tagName, options) : element;
+      return options ? (document.createElementNS("http://www.w3.org/1999/xhtml", tagName, options) as HTMLElement) : element;
     });
 
     await user.click(screen.getByRole("tab", { name: "信息源" }));
@@ -486,6 +489,7 @@ describe("AdminSettingsPanel", () => {
     expect(text).toContain('xmlns:infinitum="https://infinitum.app/opml"');
     expect(text).toContain('infinitum:enabled="true"');
     expect(text).toContain('infinitum:aiParsingEnabled="true"');
+    expect(text).toContain('infinitum:aggregationEnabled="true"');
     expect(appendChild).toHaveBeenCalled();
     expect(click).toHaveBeenCalledTimes(1);
     expect(revokeObjectUrl).toHaveBeenCalledWith("blob:opml");

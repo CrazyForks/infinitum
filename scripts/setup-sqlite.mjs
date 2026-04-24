@@ -98,6 +98,12 @@ function applyIncrementalMigrations() {
       input: `ALTER TABLE "task_schedules" ADD COLUMN "processingStartAt" DATETIME;\n`,
     });
   }
+
+  if (!columnExists("sources", "aggregationEnabled")) {
+    runSqlite([dbPath], {
+      input: `ALTER TABLE "sources" ADD COLUMN "aggregationEnabled" BOOLEAN NOT NULL DEFAULT true;\n`,
+    });
+  }
 }
 
 function sleep(ms) {

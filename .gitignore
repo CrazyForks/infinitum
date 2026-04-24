@@ -51,6 +51,7 @@ next-env.d.ts
 
 # local runtime / deployment files
 /config/infinitum.config.json
+/docker-compose.yml
 /docker-compose.override.yml
 /docker-compose.local.yml
 /scripts/local/

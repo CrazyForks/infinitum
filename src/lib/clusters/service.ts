@@ -243,6 +243,7 @@ export async function assignItemToCluster(
     eventSignature?: AiEventSignature | null;
     aiProvider?: AiProvider;
     coordinator?: ClusterAssignmentCoordinator;
+    aggregationEnabled?: boolean;
   },
 ) {
   const item = await prisma.item.findUnique({
@@ -275,11 +276,37 @@ export async function assignItemToCluster(
     }
 
     const resolvedEventSignature = normalizeEventSignatureForStorage(options.eventSignature ?? getItemEventSignature(item));
+    const canAggregate = options.aggregationEnabled ?? item.source.aggregationEnabled;
+    if (!canAggregate) {
+      const eventDisplayTitle = buildEventDisplayTitle(resolvedEventSignature);
+      const cluster = await createContentCluster({
+        fingerprint: `single-${item.id}`,
+        title: eventDisplayTitle || getDisplayTitle(item.originalTitle, item.translatedTitle),
+        summary: buildItemSummary(item),
+        score: item.qualityScore,
+        latestPublishedAt: item.publishedAt,
+        eventType: resolvedEventSignature?.eventType ?? null,
+        eventSubject: resolvedEventSignature?.eventSubject ?? null,
+        eventAction: resolvedEventSignature?.eventAction ?? null,
+        eventObject: resolvedEventSignature?.eventObject ?? null,
+        eventDate: resolvedEventSignature?.eventDate ?? null,
+      });
+
+      await setItemCluster(item.id, cluster.id);
+
+      return {
+        clusterId: cluster.id,
+        matchSource: null,
+        skippedIncompleteSignature: false,
+        createdNewCluster: true,
+      } satisfies ClusterAssignmentResult;
+    }
+
     const { cluster: matchedCluster, fingerprint, matchSource, skippedIncompleteSignature } =
       await findClusterForItem(item, {
-      ...options,
-      eventSignature: resolvedEventSignature,
-    });
+        ...options,
+        eventSignature: resolvedEventSignature,
+      });
     const eventDisplayTitle = buildEventDisplayTitle(resolvedEventSignature);
     const createdNewCluster = !matchedCluster;
     const cluster =

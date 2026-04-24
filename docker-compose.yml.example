@@ -1,0 +1,32 @@
+services:
+  app:
+    image: docker.io/xiexiao064/infinitum-app:latest
+    container_name: infinitum
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+      DATABASE_URL: file:/app/data/dev.db
+      ADMIN_PASSWORD: change-me
+      ADMIN_SESSION_SECRET: replace-with-a-long-random-secret
+      ADMIN_SESSION_COOKIE_SECURE: "true"
+    ports:
+      - "3001:3000"
+    volumes:
+      - infinitum-data:/app/data
+  worker:
+    image: docker.io/xiexiao064/infinitum-worker:latest
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: file:/app/data/dev.db
+      ADMIN_PASSWORD: change-me
+      ADMIN_SESSION_SECRET: replace-with-a-long-random-secret
+      ADMIN_SESSION_COOKIE_SECURE: "true"
+    command: ["sh", "./scripts/worker-entrypoint.sh"]
+    volumes:
+      - infinitum-data:/app/data
+
+volumes:
+  infinitum-data:

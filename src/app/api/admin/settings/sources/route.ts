@@ -10,6 +10,7 @@ const sourceSchema = z.object({
   siteUrl: z.url(),
   enabled: z.boolean(),
   aiParsingEnabled: z.boolean().default(true),
+  aggregationEnabled: z.boolean().default(true),
   groupId: z.string().nullable().optional(),
 });
 

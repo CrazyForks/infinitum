@@ -29,10 +29,7 @@ flowchart LR
 
 ### 1. 配置 Compose
 
-编辑 `docker-compose.yml`，至少替换以下值：
-
-- `docker.io/<namespace>/infinitum-app:latest`
-- `docker.io/<namespace>/infinitum-worker:latest`
+将 `docker-compose.yml.example` 复制为 `docker-compose.yml`，至少替换以下值：
 - `ADMIN_PASSWORD`
 - `ADMIN_SESSION_SECRET`
 
@@ -45,12 +42,6 @@ flowchart LR
 ```bash
 docker compose pull
 docker compose up -d
-```
-
-如需从当前源码本地构建镜像：
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 ```
 
 ### 3. 验证状态

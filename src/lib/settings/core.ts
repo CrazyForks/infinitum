@@ -46,6 +46,7 @@ type ParsedOpmlSource = {
   groupName: string | null;
   enabled: boolean | null;
   aiParsingEnabled: boolean | null;
+  aggregationEnabled: boolean | null;
 };
 
 function parseOptionalBoolean(value: string | null): boolean | null {
@@ -146,6 +147,9 @@ export function parseOpmlSources(opmlText: string): ParsedOpmlSource[] {
           aiParsingEnabled: parseOptionalBoolean(
             node.getAttribute("infinitum:aiParsingEnabled") ?? node.getAttribute("aiParsingEnabled"),
           ),
+          aggregationEnabled: parseOptionalBoolean(
+            node.getAttribute("infinitum:aggregationEnabled") ?? node.getAttribute("aggregationEnabled"),
+          ),
         });
         continue;
       }
@@ -179,6 +183,7 @@ export function toSourceConfig(source: {
   siteUrl: string;
   enabled: boolean;
   aiParsingEnabled: boolean;
+  aggregationEnabled?: boolean;
 }): SourceConfig {
   return {
     name: source.name,
@@ -186,6 +191,7 @@ export function toSourceConfig(source: {
     siteUrl: source.siteUrl,
     enabled: source.enabled,
     aiParsingEnabled: source.aiParsingEnabled,
+    aggregationEnabled: source.aggregationEnabled,
   };
 }
 
@@ -437,6 +443,7 @@ async function ensureModelAndPromptConfigsSeeded() {
           siteUrl: source.siteUrl,
           enabled: source.enabled,
           aiParsingEnabled: source.aiParsingEnabled,
+          aggregationEnabled: source.aggregationEnabled ?? true,
         })),
       });
     }

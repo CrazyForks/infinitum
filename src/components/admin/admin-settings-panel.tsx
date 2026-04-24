@@ -228,6 +228,7 @@ export function AdminSettingsPanel({
     siteUrl: "",
     enabled: true,
     aiParsingEnabled: true,
+    aggregationEnabled: true,
     groupId: "",
   });
   const [taskScheduleEnabled, setTaskScheduleEnabled] = useState(
@@ -361,6 +362,7 @@ export function AdminSettingsPanel({
       siteUrl: "",
       enabled: true,
       aiParsingEnabled: true,
+      aggregationEnabled: true,
       groupId: "",
     });
   };
@@ -374,6 +376,7 @@ export function AdminSettingsPanel({
       siteUrl: source.siteUrl,
       enabled: source.enabled,
       aiParsingEnabled: source.aiParsingEnabled ?? true,
+      aggregationEnabled: source.aggregationEnabled ?? true,
       groupId: source.groupId ?? "",
     });
   };
@@ -443,7 +446,7 @@ export function AdminSettingsPanel({
     }
 
     const sourceOutline = (source: AdminSource, indent = "    ") =>
-      `${indent}<outline text="${escapeXml(source.name)}" title="${escapeXml(source.name)}" type="rss" xmlUrl="${escapeXml(source.rssUrl)}" htmlUrl="${escapeXml(source.siteUrl)}" infinitum:enabled="${source.enabled ? "true" : "false"}" infinitum:aiParsingEnabled="${source.aiParsingEnabled !== false ? "true" : "false"}" />`;
+      `${indent}<outline text="${escapeXml(source.name)}" title="${escapeXml(source.name)}" type="rss" xmlUrl="${escapeXml(source.rssUrl)}" htmlUrl="${escapeXml(source.siteUrl)}" infinitum:enabled="${source.enabled ? "true" : "false"}" infinitum:aiParsingEnabled="${source.aiParsingEnabled !== false ? "true" : "false"}" infinitum:aggregationEnabled="${source.aggregationEnabled !== false ? "true" : "false"}" />`;
     const outlines = [
       ...orderedGroups.flatMap((group) => {
         const sources = groupedSources.get(group.id) ?? [];
@@ -945,9 +948,9 @@ export function AdminSettingsPanel({
                 <table className="w-full table-auto text-sm">
                   <thead className="bg-[var(--bg-muted)] text-[var(--muted)]">
                     <tr>
-                      <th className="w-[28%] px-4 py-3 text-left">RSS 源名称</th>
-                      <th className="w-[18%] px-4 py-3 text-left">分组</th>
-                      <th className="w-[14%] px-4 py-3 text-left">状态</th>
+                      <th className="w-[26%] px-4 py-3 text-left">RSS 源名称</th>
+                      <th className="w-[16%] px-4 py-3 text-left">分组</th>
+                      <th className="w-[18%] px-4 py-3 text-left">状态</th>
                       <th className="w-[16%] px-4 py-3 text-left">最近更新</th>
                       <th className="w-[19%] px-4 py-3 text-left">站点信息</th>
                       <th className="w-[15%] px-4 py-3 text-right">操作</th>
@@ -971,6 +974,8 @@ export function AdminSettingsPanel({
                           <div>{source.enabled ? "已启用" : "已停用"}</div>
                           <div className="mt-1 text-xs text-[var(--text-3)]">
                             {source.aiParsingEnabled !== false ? "AI解析" : "仅RSS"}
+                            {" · "}
+                            {source.aggregationEnabled !== false ? "参与聚合" : "不聚合"}
                           </div>
                         </td>
                         <td className="px-4 py-3 text-xs text-[var(--text-3)]">
@@ -1152,6 +1157,20 @@ export function AdminSettingsPanel({
                     }
                   />
                   <span className="text-sm text-[var(--text-2)]">AI解析</span>
+                </label>
+                <label className="flex flex-wrap items-center gap-2">
+                  <input
+                    checked={sourceForm.aggregationEnabled}
+                    className={checkboxInputClassName}
+                    type="checkbox"
+                    onChange={(event) =>
+                      setSourceForm((current) => ({
+                        ...current,
+                        aggregationEnabled: event.target.checked,
+                      }))
+                    }
+                  />
+                  <span className="text-sm text-[var(--text-2)]">参与聚合</span>
                 </label>
               </div>
             </ModalShell>

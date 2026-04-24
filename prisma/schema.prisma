@@ -95,6 +95,7 @@ model Source {
   siteUrl          String
   enabled          Boolean  @default(true)
   aiParsingEnabled Boolean  @default(true)
+  aggregationEnabled Boolean @default(true)
   feedEtag         String?
   feedLastModified String?
   feedContentHash  String?

@@ -21,6 +21,7 @@ export type PreparedFeedItem = {
   sourceId: string;
   sourceName: string;
   aiParsingEnabled: boolean;
+  aggregationEnabled: boolean;
 };
 
 export type PreparedFeedItemLookup = {
@@ -257,6 +258,7 @@ export async function processFeedItem({
   sourceId,
   sourceName,
   aiParsingEnabled,
+  aggregationEnabled,
   lookup: providedLookup,
   existingItem,
   blacklist,
@@ -270,6 +272,7 @@ export async function processFeedItem({
   sourceId: string;
   sourceName: string;
   aiParsingEnabled: boolean;
+  aggregationEnabled: boolean;
   lookup?: PreparedFeedItemLookup | null;
   existingItem?: Item | null;
   blacklist: string[];
@@ -284,6 +287,7 @@ export async function processFeedItem({
     sourceId,
     sourceName,
     aiParsingEnabled,
+    aggregationEnabled,
   }, now);
 
   if (!lookup) {
@@ -627,6 +631,7 @@ export async function processFeedItem({
       eventSignature,
       aiProvider,
       coordinator: clusterAssignmentCoordinator,
+      aggregationEnabled,
     });
 
     clusterAssignmentMetrics = {

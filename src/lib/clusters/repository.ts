@@ -25,6 +25,9 @@ export async function findActiveClusterByFingerprint(fingerprint: string, since:
           moderationStatus: {
             in: ["allowed", "restored"],
           },
+          source: {
+            aggregationEnabled: true,
+          },
         },
       },
       latestPublishedAt: {
@@ -45,6 +48,9 @@ export async function findRecentActiveClusterCandidates(options: { since: Date; 
           status: "processed",
           moderationStatus: {
             in: ["allowed", "restored"],
+          },
+          source: {
+            aggregationEnabled: true,
           },
         },
       },

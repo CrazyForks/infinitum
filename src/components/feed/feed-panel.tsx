@@ -38,7 +38,6 @@ import {
   formatDate,
   formatMetaLabel,
   formatRangeLabel,
-  formatRunDetail,
   formatRunSummary,
   formatScore,
   formatGroupOptionLabel,
@@ -1074,7 +1073,7 @@ export function FeedPanel({
   const denseCardClassName =
     "w-full rounded-lg border border-[color:var(--line)] bg-[var(--surface)] px-4 py-4 shadow-[var(--shadow-sm)] transition hover:border-[color:var(--line-strong)] hover:shadow-md sm:px-6 sm:py-5";
   const cardMetaRowClassName = "flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-[var(--muted)]";
-  const cardSummaryClassName = "text-sm leading-6 text-[var(--muted)]";
+  const cardSummaryClassName = "line-clamp-5 text-sm leading-6 text-[var(--muted)]";
   const cardTitleClassName = "text-xl font-semibold leading-7 text-[var(--foreground)]";
   const metaTextClassName = "inline-flex items-center";
   const iconButtonClassName =
@@ -1083,7 +1082,6 @@ export function FeedPanel({
     "inline-flex shrink-0 items-center gap-1 bg-transparent px-0 py-0 text-left text-[11px] leading-none text-[var(--muted)] transition hover:text-[var(--foreground)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(59,130,246,0.28)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)] disabled:cursor-not-allowed disabled:opacity-55";
   const hasClearableFilters = activeFilterSummary.length > 0;
   const latestRunSummary = formatRunSummary(status);
-  const latestRunDetail = formatRunDetail(status);
   const isRefreshDisabled =
     isPending || status?.status === "running" || Boolean(queuedRefreshAt);
   return (
@@ -1260,7 +1258,7 @@ export function FeedPanel({
               items={activeFilterSummary}
               onClear={clearFilters}
               canClear={hasClearableFilters && !isPending}
-              details={isAdmin && latestRunDetail ? <span>{latestRunDetail}</span> : null}
+              details={null}
               className="pt-1"
             />
 

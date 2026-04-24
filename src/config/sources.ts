@@ -7,6 +7,7 @@ export const DEFAULT_SOURCE_CONFIGS: SourceConfig[] = [
     siteUrl: "https://openai.com/news",
     enabled: true,
     aiParsingEnabled: false,
+    aggregationEnabled: true,
   },
   {
     name: "Hacker News Frontpage",
@@ -14,5 +15,6 @@ export const DEFAULT_SOURCE_CONFIGS: SourceConfig[] = [
     siteUrl: "https://news.ycombinator.com/",
     enabled: true,
     aiParsingEnabled: true,
+    aggregationEnabled: true,
   },
 ];

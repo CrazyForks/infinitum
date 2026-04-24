@@ -140,4 +140,5 @@ export type SourceConfig = {
   siteUrl: string;
   enabled: boolean;
   aiParsingEnabled: boolean;
+  aggregationEnabled?: boolean;
 };
