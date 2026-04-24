@@ -945,15 +945,23 @@ export function AdminSettingsPanel({
               </EmptyState>
             ) : (
               <div className="w-full overflow-x-auto">
-                <table className="w-full table-auto text-sm">
+                <table className="w-full min-w-[56rem] table-fixed text-sm">
+                  <colgroup>
+                    <col className="w-[24%]" />
+                    <col className="w-[8rem]" />
+                    <col className="w-[11rem]" />
+                    <col className="w-[7.5rem]" />
+                    <col />
+                    <col className="w-[5.5rem]" />
+                  </colgroup>
                   <thead className="bg-[var(--bg-muted)] text-[var(--muted)]">
                     <tr>
-                      <th className="w-[26%] px-4 py-3 text-left">RSS 源名称</th>
-                      <th className="w-[16%] px-4 py-3 text-left">分组</th>
-                      <th className="w-[18%] px-4 py-3 text-left">状态</th>
-                      <th className="w-[16%] px-4 py-3 text-left">最近更新</th>
-                      <th className="w-[19%] px-4 py-3 text-left">站点信息</th>
-                      <th className="w-[15%] px-4 py-3 text-right">操作</th>
+                      <th className="whitespace-nowrap px-4 py-3 text-left">RSS 源名称</th>
+                      <th className="whitespace-nowrap px-4 py-3 text-left">分组</th>
+                      <th className="whitespace-nowrap px-4 py-3 text-left">状态</th>
+                      <th className="whitespace-nowrap px-4 py-3 text-left">最近更新</th>
+                      <th className="px-4 py-3 text-left">站点信息</th>
+                      <th className="whitespace-nowrap px-4 py-3 text-right">操作</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[color:var(--line)]">
@@ -972,7 +980,7 @@ export function AdminSettingsPanel({
                         </td>
                         <td className="px-4 py-3 text-[var(--text-2)]">
                           <div>{source.enabled ? "已启用" : "已停用"}</div>
-                          <div className="mt-1 text-xs text-[var(--text-3)]">
+                          <div className="mt-1 whitespace-nowrap text-xs text-[var(--text-3)]">
                             {source.aiParsingEnabled !== false ? "AI解析" : "仅RSS"}
                             {" · "}
                             {source.aggregationEnabled !== false ? "参与聚合" : "不聚合"}
