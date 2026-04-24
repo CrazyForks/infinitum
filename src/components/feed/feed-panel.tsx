@@ -1,10 +1,54 @@
 "use client";
 
-import dayjs, { type Dayjs } from "dayjs";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition, useCallback } from "react";
 
 import { STATUS_POLL_INTERVAL_MS, TITLE_SEARCH_DEBOUNCE_MS } from "@/config/constants";
+import {
+  deleteItem,
+  filterItem,
+  joinCluster,
+  queueIngestionRun,
+  regenerateClusterSummary,
+  requestClusterItems,
+  requestClusterOptions,
+  requestFeed,
+  requestIngestionStatus,
+  requestRegeneration,
+  voteCluster,
+} from "@/components/feed/feed-panel.api";
+import { GroupFilterSidebar } from "@/components/feed/feed-panel-sidebar";
+import type {
+  AssignClusterDialogState,
+  BatchActionDialogState,
+  DateRangeValue,
+  DeleteItemDialogState,
+  FeedFeedback,
+  FeedPanelProps,
+  FeedQueryState,
+  ManualFilterDialogState,
+  RegenerateDialogState,
+  RegenerateMode,
+} from "@/components/feed/feed-panel.types";
+import {
+  buildFeedSearch,
+  buildFallbackPagination,
+  formatClusterAuthorLabel,
+  formatClusterSourceLabel,
+  formatDate,
+  formatMetaLabel,
+  formatRangeLabel,
+  formatRunDetail,
+  formatRunSummary,
+  formatScore,
+  formatGroupOptionLabel,
+  getAllSelectableItemIds,
+  getBrowserTimeZoneOffsetMinutes,
+  normalizeDateRange,
+  normalizeOptionalId,
+  normalizeSearchText,
+  toDayjsRange,
+} from "@/components/feed/feed-panel.utils";
 import { PageShell } from "@/components/ui/page-shell";
 import { StatusBanner } from "@/components/ui/status-banner";
 import { DateRangePicker } from "@/components/ui/date-range-picker";
@@ -21,300 +65,17 @@ import { TextInput } from "@/components/ui/text-input";
 import { RANGE_OPTIONS, SORT_OPTIONS } from "@/lib/feed/range";
 import type {
   ClusterDTO,
-  FeedPagination,
   FeedClusterPreviewItemDTO,
   FeedEntryDTO,
   FeedGroupOption,
+  FeedPagination,
   FeedRange,
-  FeedSourceOption,
   FeedSort,
   FetchRunSnapshot,
 } from "@/lib/feed/types";
-import { DEFAULT_FEED_PAGE_SIZE, FEED_PAGE_SIZE_OPTIONS } from "@/lib/feed/types";
+import { FEED_PAGE_SIZE_OPTIONS } from "@/lib/feed/types";
 import { cx } from "@/lib/ui/cx";
 import { Button } from "@/components/ui/button";
-
-// UI 常量已移至 @/config/constants
-const DISPLAY_TIME_ZONE = "Asia/Shanghai";
-const FETCH_STATUS_LABELS = {
-  running: "运行中",
-  succeeded: "已成功",
-  failed: "失败",
-  partial: "部分成功",
-} as const;
-
-type FeedPanelProps = {
-  initialItems: FeedEntryDTO[];
-  initialRange: FeedRange;
-  initialSort: FeedSort;
-  initialStartDate: string | null;
-  initialEndDate: string | null;
-  initialNextCursor?: string | null;
-  initialPagination?: FeedPagination | null;
-  initialStatus: FetchRunSnapshot | null;
-  isAdmin: boolean;
-  initialGroupId?: string | null;
-  initialSourceId?: string | null;
-  initialTitle?: string | null;
-  availableGroups?: FeedGroupOption[];
-  initialGroupTotalCount?: number;
-  availableSources?: FeedSourceOption[];
-};
-
-type FeedQueryState = {
-  range: FeedRange;
-  sort: FeedSort;
-  startDate: string | null;
-  endDate: string | null;
-  groupId: string | null;
-  sourceId: string | null;
-  title: string | null;
-};
-
-type FeedbackTone = "info" | "success" | "error";
-
-type FeedFeedback = {
-  tone: FeedbackTone;
-  message: string;
-};
-
-type RegenerateDialogState = {
-  itemId: string;
-  canRegenerateTranslation: boolean;
-  shouldAnnounceClusterRefresh?: boolean;
-} | null;
-
-type RegenerateMode = "summary" | "translation" | "both";
-
-type AssignClusterDialogState = {
-  itemId: string;
-  itemTitle: string;
-  currentClusterId?: string | null;
-} | null;
-
-type ManualFilterDialogState = {
-  itemId: string;
-  itemTitle: string;
-} | null;
-
-type DeleteItemDialogState = {
-  itemId: string;
-  itemTitle: string;
-} | null;
-
-type BatchActionType = "regenerate" | "filter" | "delete";
-
-type BatchActionDialogState = {
-  type: BatchActionType;
-  itemIds: string[];
-  itemTitles: string[];
-} | null;
-
-type DateRangeValue = [Dayjs | null, Dayjs | null] | null;
-
-function formatDate(value: string): string {
-  return new Intl.DateTimeFormat("zh-CN", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZone: DISPLAY_TIME_ZONE,
-  }).format(new Date(value));
-}
-
-function formatRunSummary(status: FetchRunSnapshot | null): string {
-  if (!status) {
-    return "最近抓取：尚未执行";
-  }
-
-  const timestamp = formatDate(status.finishedAt ?? status.startedAt);
-  const statusLabel = FETCH_STATUS_LABELS[status.status];
-  const addedInfo = status.itemsAdded > 0 ? ` · 新增${status.itemsAdded}条` : "";
-
-  return `最近抓取：${statusLabel}${addedInfo} · ${timestamp}`;
-}
-
-function formatRunDetail(status: FetchRunSnapshot | null): string | null {
-  const detail = status?.errorSummary?.trim();
-  return detail ? `抓取说明：${detail}` : null;
-}
-
-function formatScore(score: number): string {
-  if (score >= 80) {
-    return `高质量 ${score}`;
-  }
-
-  if (score >= 60) {
-    return `一般 ${score}`;
-  }
-
-  return `较低 ${score}`;
-}
-
-function formatRangeLabel(range: FeedRange, startDate: string | null, endDate: string | null): string {
-  if (startDate || endDate) {
-    return `${startDate ?? "最早"} 至 ${endDate ?? "最新"}`;
-  }
-
-  return RANGE_OPTIONS.find((option) => option.value === range)?.label ?? "当天";
-}
-
-function formatClusterSourceLabel(entry: FeedEntryDTO): string {
-  if (entry.type === "single") {
-    return entry.sourceName;
-  }
-
-  if (entry.sourceCount <= 1) {
-    return entry.itemsPreview[0]?.sourceName ?? "未知来源";
-  }
-
-  return `${entry.sourceCount} 个来源`;
-}
-
-function formatClusterAuthorLabel(entry: FeedEntryDTO): string {
-  if (entry.type === "single") {
-    return entry.author || "未知作者";
-  }
-
-  const uniqueAuthors = Array.from(
-    new Set(
-      entry.itemsPreview
-        .map((item) => item.author?.trim())
-        .filter((author): author is string => Boolean(author)),
-    ),
-  );
-
-  if (uniqueAuthors.length === 1) {
-    return uniqueAuthors[0];
-  }
-
-  if (uniqueAuthors.length > 1) {
-    return `${uniqueAuthors.length} 位作者`;
-  }
-
-  return "未知作者";
-}
-
-function formatMetaLabel(label: string, value: string): string {
-  return `${label}：${value}`;
-}
-
-function normalizeOptionalId(value: string | null | undefined): string | null {
-  const normalized = value?.trim();
-  return normalized ? normalized : null;
-}
-
-function normalizeSearchText(value: string | null | undefined): string | null {
-  const normalized = value?.trim();
-  return normalized ? normalized : null;
-}
-
-function toDayjsRange(startDate: string | null, endDate: string | null): [Dayjs | null, Dayjs | null] {
-  return [startDate ? dayjs(startDate, "YYYY-MM-DD") : null, endDate ? dayjs(endDate, "YYYY-MM-DD") : null];
-}
-
-function getBrowserTimeZoneOffsetMinutes(): number {
-  return new Date().getTimezoneOffset();
-}
-
-function buildFeedSearch(
-  { range, sort, startDate, endDate, groupId, sourceId, title }: FeedQueryState,
-  pagination?: {
-    page?: number;
-    size?: number;
-  },
-): string {
-  const search = new URLSearchParams({
-    range,
-    sort,
-  });
-  const normalizedGroupId = normalizeOptionalId(groupId);
-  const normalizedSourceId = normalizeOptionalId(sourceId);
-  const normalizedTitle = normalizeSearchText(title);
-  const page = pagination?.page ?? 1;
-  const size = pagination?.size ?? DEFAULT_FEED_PAGE_SIZE;
-
-  if (startDate) {
-    search.set("start", startDate);
-  }
-
-  if (endDate) {
-    search.set("end", endDate);
-  }
-
-  if (normalizedGroupId) {
-    search.set("groupId", normalizedGroupId);
-  }
-
-  if (normalizedSourceId) {
-    search.set("sourceId", normalizedSourceId);
-  }
-
-  if (normalizedTitle) {
-    search.set("title", normalizedTitle);
-  }
-
-  if (page > 1) {
-    search.set("page", String(page));
-  }
-
-  if (size !== DEFAULT_FEED_PAGE_SIZE) {
-    search.set("size", String(size));
-  }
-
-  const timeZoneOffsetMinutes = getBrowserTimeZoneOffsetMinutes();
-  if (timeZoneOffsetMinutes !== 0) {
-    search.set("tzOffsetMinutes", String(timeZoneOffsetMinutes));
-  }
-
-  return search.toString();
-}
-
-async function requestFeed(
-  query: FeedQueryState,
-  pagination?: {
-    page?: number;
-    size?: number;
-  },
-) {
-  const requestedPage = pagination?.page ?? 1;
-  const requestedSize = pagination?.size ?? DEFAULT_FEED_PAGE_SIZE;
-  const response = await fetch(`/api/feed?${buildFeedSearch(query, pagination)}`);
-  const payload = (await response.json()) as {
-    items: FeedEntryDTO[];
-    groups?: FeedGroupOption[];
-    groupTotalCount?: number;
-    nextCursor?: string | null;
-    pagination?: FeedPagination;
-    range: FeedRange;
-    sort: FeedSort;
-    start: string | null;
-    end: string | null;
-    groupId: string | null;
-    sourceId: string | null;
-    title: string | null;
-  };
-
-  return {
-    ...payload,
-    pagination: payload.pagination ?? {
-      page: requestedPage,
-      size: requestedSize,
-      total: payload.items.length,
-      totalPages: 1,
-    },
-  };
-}
-
-async function requestClusterItems(clusterId: string, query: FeedQueryState) {
-  const response = await fetch(`/api/feed/clusters/${clusterId}?${buildFeedSearch(query)}`);
-  const payload = (await response.json()) as {
-    items: FeedClusterPreviewItemDTO[];
-  };
-
-  return payload.items;
-}
 
 function SearchIcon() {
   return (
@@ -377,97 +138,6 @@ function ChevronIcon({ expanded, className }: { expanded: boolean; className?: s
   );
 }
 
-function formatGroupOptionLabel(name: string, count: number): string {
-  return `${name} (${count})`;
-}
-
-function GroupFilterSidebar({
-  groups,
-  totalCount,
-  selectedGroupId,
-  expanded,
-  onToggle,
-  onSelect,
-}: {
-  groups: FeedGroupOption[];
-  totalCount: number;
-  selectedGroupId: string | null;
-  expanded: boolean;
-  onToggle: () => void;
-  onSelect: (groupId: string) => void;
-}) {
-  const optionClassName =
-    "flex w-full items-center justify-between rounded-sm px-3 py-2 text-left text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(59,130,246,0.28)]";
-
-  return (
-    <aside
-      role="complementary"
-      aria-label="分组筛选侧栏"
-      className="w-full lg:h-full"
-    >
-      <div className="panel-raised rounded-sm border border-[color:var(--line)] p-4 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
-        <div className="mb-4 flex items-center justify-between">
-          {expanded ? (
-            <h2 className="inline-flex items-center gap-2 font-semibold text-[var(--foreground)]">
-              <span>分组筛选</span>
-            </h2>
-          ) : null}
-          <button
-            type="button"
-            aria-expanded={expanded}
-            aria-label={expanded ? "收起分组筛选" : "展开分组筛选"}
-            onClick={onToggle}
-            className="text-[var(--text-3)] transition hover:text-[var(--text-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(59,130,246,0.28)]"
-          >
-            {expanded ? "«" : "»"}
-          </button>
-        </div>
-
-        {expanded ? (
-          <div className="space-y-2">
-            <button
-              type="button"
-              aria-pressed={selectedGroupId === null}
-              aria-label={formatGroupOptionLabel("全部内容", totalCount)}
-              onClick={() => onSelect("")}
-              className={cx(
-                optionClassName,
-                selectedGroupId === null
-                  ? "bg-[var(--accent-soft)] text-[var(--accent-strong)]"
-                  : "text-[var(--text-2)] hover:bg-[var(--bg-muted)]",
-              )}
-            >
-              <span>{formatGroupOptionLabel("全部内容", totalCount)}</span>
-            </button>
-
-            {groups.map((group) => {
-              const isActive = selectedGroupId === group.id;
-
-              return (
-                <button
-                  key={group.id}
-                  type="button"
-                  aria-pressed={isActive}
-                  aria-label={formatGroupOptionLabel(group.name, group.count)}
-                  onClick={() => onSelect(group.id)}
-                  className={cx(
-                    optionClassName,
-                    isActive
-                      ? "bg-[var(--accent-soft)] text-[var(--accent-strong)]"
-                      : "text-[var(--text-2)] hover:bg-[var(--bg-muted)]",
-                  )}
-                >
-                  <span>{formatGroupOptionLabel(group.name, group.count)}</span>
-                </button>
-              );
-            })}
-          </div>
-        ) : null}
-      </div>
-    </aside>
-  );
-}
-
 export function FeedPanel({
   initialItems,
   initialRange,
@@ -486,12 +156,7 @@ export function FeedPanel({
   availableSources = [],
 }: FeedPanelProps) {
   const router = useRouter();
-  const fallbackInitialPagination: FeedPagination = initialPagination ?? {
-    page: 1,
-    size: DEFAULT_FEED_PAGE_SIZE,
-    total: initialItems.length + (initialNextCursor ? 1 : 0),
-    totalPages: initialNextCursor ? 2 : 1,
-  };
+  const fallbackInitialPagination: FeedPagination = initialPagination ?? buildFallbackPagination(initialItems, initialNextCursor);
   const [items, setItems] = useState(initialItems);
   const [pagination, setPagination] = useState<FeedPagination>(fallbackInitialPagination);
   const [jumpToPage, setJumpToPage] = useState(String(fallbackInitialPagination.page));
@@ -676,9 +341,7 @@ export function FeedPanel({
   };
 
   const changeDateRange = (nextRange: DateRangeValue) => {
-    const [nextStartDate, nextEndDate] = nextRange ?? [null, null];
-    const normalizedStartDate = nextStartDate ? nextStartDate.format("YYYY-MM-DD") : null;
-    const normalizedEndDate = nextEndDate ? nextEndDate.format("YYYY-MM-DD") : null;
+    const { startDate: normalizedStartDate, endDate: normalizedEndDate } = normalizeDateRange(nextRange);
 
     setStartDate(normalizedStartDate);
     setEndDate(normalizedEndDate);
@@ -717,20 +380,14 @@ export function FeedPanel({
     startTransition(async () => {
       try {
         const queuedAt = new Date().toISOString();
-        const response = await fetch("/api/ingest/run", { method: "POST" });
-        const payload = (await response.json()) as {
-          taskRun?: {
-            id: string;
-          } | null;
-          error?: string;
-        };
+        const result = await queueIngestionRun();
 
-        if (payload.error) {
-          setRefreshFeedback({ tone: "error", message: payload.error });
+        if (!result.ok || result.data.error) {
+          setRefreshFeedback({ tone: "error", message: result.data.error ?? "创建抓取任务失败，请稍后重试。" });
           return;
         }
 
-        if (!payload.taskRun) {
+        if (!result.data.taskRun) {
           setRefreshFeedback({ tone: "error", message: "未返回后台任务信息。" });
           return;
         }
@@ -738,28 +395,12 @@ export function FeedPanel({
         setQueuedRefreshAt(queuedAt);
         setRefreshFeedback({ tone: "success", message: "抓取任务已进入队列，等待后台执行。" });
         router.push(
-          `/admin?tab=monitoring&section=tasks&task=${encodeURIComponent(payload.taskRun.id)}`,
+          `/admin?tab=monitoring&section=tasks&task=${encodeURIComponent(result.data.taskRun.id)}`,
         );
       } catch {
         setRefreshFeedback({ tone: "error", message: "创建抓取任务失败，请稍后重试。" });
       }
     });
-  };
-
-  const requestRegeneration = async (itemId: string, target: "translation" | "summary") => {
-    const response = await fetch(`/api/admin/items/${itemId}/regenerate`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({ target }),
-    });
-    return (await response.json()) as {
-      taskRun?: {
-        id: string;
-      } | null;
-      error?: string;
-    };
   };
 
   const reloadCurrentFeed = () => {
@@ -783,22 +424,18 @@ export function FeedPanel({
 
     startTransition(async () => {
       try {
-        const response = await fetch("/api/admin/clusters");
-        const payload = (await response.json()) as {
-          clusters?: ClusterDTO[];
-          error?: string;
-        };
+        const result = await requestClusterOptions();
 
-        if (!response.ok || payload.error) {
+        if (!result.ok || result.data.error) {
           setRefreshFeedback({
             tone: "error",
-            message: payload.error ?? "加载聚合组选项失败，请稍后重试。",
+            message: result.data.error ?? "加载聚合组选项失败，请稍后重试。",
           });
           setAssignClusterDialog(null);
           return;
         }
 
-        setClusterOptions(payload.clusters ?? []);
+        setClusterOptions(result.data.clusters ?? []);
       } catch {
         setRefreshFeedback({
           tone: "error",
@@ -821,21 +458,12 @@ export function FeedPanel({
 
     startTransition(async () => {
       try {
-        const response = await fetch(`/api/admin/items/${itemId}/join-cluster`, {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-          },
-          body: JSON.stringify({ clusterId: selectedClusterId }),
-        });
-        const payload = (await response.json()) as {
-          error?: string;
-        };
+        const result = await joinCluster(itemId, selectedClusterId);
 
-        if (!response.ok || payload.error) {
+        if (!result.ok || result.data.error) {
           setRefreshFeedback({
             tone: "error",
-            message: payload.error ?? "加入聚合组失败，请稍后重试。",
+            message: result.data.error ?? "加入聚合组失败，请稍后重试。",
           });
           return;
         }
@@ -864,20 +492,12 @@ export function FeedPanel({
 
     startTransition(async () => {
       try {
-        const response = await fetch(`/api/admin/items/${itemId}/filter`, {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-          },
-        });
-        const payload = (await response.json()) as {
-          error?: string;
-        };
+        const result = await filterItem(itemId);
 
-        if (!response.ok || payload.error) {
+        if (!result.ok || result.data.error) {
           setRefreshFeedback({
             tone: "error",
-            message: payload.error ?? "手动过滤失败，请稍后重试。",
+            message: result.data.error ?? "手动过滤失败，请稍后重试。",
           });
           return;
         }
@@ -906,20 +526,12 @@ export function FeedPanel({
 
     startTransition(async () => {
       try {
-        const response = await fetch(`/api/admin/items/${itemId}`, {
-          method: "DELETE",
-          headers: {
-            "content-type": "application/json",
-          },
-        });
-        const payload = (await response.json()) as {
-          error?: string;
-        };
+        const result = await deleteItem(itemId);
 
-        if (!response.ok || payload.error) {
+        if (!result.ok || result.data.error) {
           setRefreshFeedback({
             tone: "error",
-            message: payload.error ?? "删除内容失败，请稍后重试。",
+            message: result.data.error ?? "删除内容失败，请稍后重试。",
           });
           return;
         }
@@ -950,19 +562,19 @@ export function FeedPanel({
       const createdTaskRunIds: string[] = [];
 
       for (const target of targets) {
-        const payload = await requestRegeneration(itemId, target);
+        const result = await requestRegeneration(itemId, target);
 
-        if (payload.error) {
-          setRefreshFeedback({ tone: "error", message: payload.error });
+        if (!result.ok || result.data.error) {
+          setRefreshFeedback({ tone: "error", message: result.data.error ?? "创建重新生成任务失败，请稍后重试。" });
           return;
         }
 
-        if (!payload.taskRun) {
+        if (!result.data.taskRun) {
           setRefreshFeedback({ tone: "error", message: "未返回后台任务信息。" });
           return;
         }
 
-        createdTaskRunIds.push(payload.taskRun.id);
+        createdTaskRunIds.push(result.data.taskRun.id);
       }
 
       const primaryTaskRunId = createdTaskRunIds[0];
@@ -1035,26 +647,20 @@ export function FeedPanel({
   const handleRegenerateClusterSummary = async (clusterId: string) => {
     startTransition(async () => {
       try {
-        const response = await fetch(`/api/admin/clusters/${clusterId}/regenerate-summary`, {
-          method: "POST",
-        });
-        const payload = (await response.json()) as {
-          taskRun?: { id: string } | null;
-          error?: string;
-        };
+        const result = await regenerateClusterSummary(clusterId);
 
-        if (payload.error) {
-          setRefreshFeedback({ tone: "error", message: payload.error });
+        if (!result.ok || result.data.error) {
+          setRefreshFeedback({ tone: "error", message: result.data.error ?? "创建聚合摘要重生成任务失败，请稍后重试。" });
           return;
         }
 
-        if (!payload.taskRun) {
+        if (!result.data.taskRun) {
           setRefreshFeedback({ tone: "error", message: "未返回后台任务信息。" });
           return;
         }
 
         setRefreshFeedback({ tone: "success", message: "聚合摘要重生成任务已进入队列。" });
-        router.push(`/admin?tab=monitoring&section=tasks&task=${encodeURIComponent(payload.taskRun.id)}`);
+        router.push(`/admin?tab=monitoring&section=tasks&task=${encodeURIComponent(result.data.taskRun.id)}`);
       } catch {
         setRefreshFeedback({ tone: "error", message: "创建聚合摘要重生成任务失败，请稍后重试。" });
       }
@@ -1063,28 +669,23 @@ export function FeedPanel({
   const handleVote = async (clusterId: string, voteType: "upvote" | "downvote") => {
     startTransition(async () => {
       try {
-        const response = await fetch(`/api/feed/clusters/${clusterId}/vote`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ voteType }),
-        });
+        const result = await voteCluster(clusterId, voteType);
 
-        if (!response.ok) {
+        if (!result.ok) {
           setRefreshFeedback({ tone: "error", message: "投票失败，请稍后重试。" });
           return;
         }
-
-        const result = (await response.json()) as {
-          upvotes: number;
-          downvotes: number;
-          userVote: "upvote" | "downvote" | null;
-        };
 
         // 更新本地状态（支持聚合和单条，通过 id 或 clusterId 匹配）
         setItems((currentItems) =>
           currentItems.map((item) =>
             item.id === clusterId || ('clusterId' in item && item.clusterId === clusterId)
-              ? { ...item, upvotes: result.upvotes, downvotes: result.downvotes, userVote: result.userVote }
+              ? {
+                  ...item,
+                  upvotes: result.data.upvotes,
+                  downvotes: result.data.downvotes,
+                  userVote: result.data.userVote,
+                }
               : item,
           ),
         );
@@ -1094,22 +695,7 @@ export function FeedPanel({
     });
   };
 
-  // 批量操作相关函数
-  const extractItemIdsFromEntry = (entry: FeedEntryDTO): string[] => {
-    if (entry.type === "single") {
-      return [entry.id];
-    }
-    // 对于聚合，返回聚合内所有条目的ID
-    return entry.itemsPreview.map((item) => item.id);
-  };
-
-  const getAllSelectableItemIds = (): string[] => {
-    const ids: string[] = [];
-    for (const entry of items) {
-      ids.push(...extractItemIdsFromEntry(entry));
-    }
-    return ids;
-  };
+  const allSelectableItemIds = useMemo(() => getAllSelectableItemIds(items), [items]);
 
   const handleToggleSelect = (itemId: string) => {
     setSelectedItems((prev) => {
@@ -1124,11 +710,10 @@ export function FeedPanel({
   };
 
   const handleSelectAll = () => {
-    const allIds = getAllSelectableItemIds();
-    if (selectedItems.size === allIds.length && allIds.length > 0) {
+    if (selectedItems.size === allSelectableItemIds.length && allSelectableItemIds.length > 0) {
       setSelectedItems(new Set());
     } else {
-      setSelectedItems(new Set(allIds));
+      setSelectedItems(new Set(allSelectableItemIds));
     }
   };
 
@@ -1173,12 +758,8 @@ export function FeedPanel({
     for (const itemId of itemIds) {
       for (const target of targets) {
         try {
-          const response = await fetch(`/api/admin/items/${itemId}/regenerate`, {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ target }),
-          });
-          if (response.ok) {
+          const result = await requestRegeneration(itemId, target);
+          if (result.ok && !result.data.error && result.data.taskRun) {
             results.success++;
           } else {
             results.failed++;
@@ -1224,11 +805,8 @@ export function FeedPanel({
 
     for (const itemId of itemIds) {
       try {
-        const response = await fetch(`/api/admin/items/${itemId}/filter`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-        });
-        if (response.ok) {
+        const result = await filterItem(itemId);
+        if (result.ok && !result.data.error) {
           results.success++;
         } else {
           results.failed++;
@@ -1264,11 +842,8 @@ export function FeedPanel({
 
     for (const itemId of itemIds) {
       try {
-        const response = await fetch(`/api/admin/items/${itemId}`, {
-          method: "DELETE",
-          headers: { "content-type": "application/json" },
-        });
-        if (response.ok) {
+        const result = await deleteItem(itemId);
+        if (result.ok && !result.data.error) {
           results.success++;
         } else {
           results.failed++;
@@ -1378,10 +953,7 @@ export function FeedPanel({
 
     const timer = window.setInterval(() => {
       startTransition(async () => {
-        const response = await fetch("/api/ingest/status");
-        const payload = (await response.json()) as {
-          run?: FetchRunSnapshot | null;
-        };
+        const payload = await requestIngestionStatus();
 
         if (!payload.run) {
           return;
@@ -1703,12 +1275,12 @@ export function FeedPanel({
               <input
                 type="checkbox"
                 id="select-all-items"
-                checked={selectedItems.size > 0 && selectedItems.size === getAllSelectableItemIds().length}
+                checked={selectedItems.size > 0 && selectedItems.size === allSelectableItemIds.length}
                 onChange={handleSelectAll}
                 className="h-4 w-4 rounded border-[color:var(--line)] text-[var(--accent)] focus:ring-[var(--accent)]"
               />
               <label htmlFor="select-all-items" className="text-sm text-[var(--text-2)] cursor-pointer">
-                全选 ({selectedItems.size}/{getAllSelectableItemIds().length})
+                全选 ({selectedItems.size}/{allSelectableItemIds.length})
               </label>
             </div>
           )}

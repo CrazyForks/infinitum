@@ -1,6 +1,12 @@
 "use client";
 import { useMemo, useRef, useState, useTransition } from "react";
 
+import {
+  importSourcesFromOpmlText,
+  resolveSourceFromRssUrl,
+  saveDefaultIngestionSchedule,
+  submitAdminSettingsAction,
+} from "@/components/admin/admin-settings-panel.api";
 import { AiSettingsPanel } from "@/components/admin/ai-settings-panel";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -182,27 +188,15 @@ export function AdminSettingsPanel({
   ) => {
     startTransition(async () => {
       try {
-        const response = await fetch(url, {
-          method,
-          headers: {
-            "content-type": "application/json",
-          },
-          body: JSON.stringify(body),
-        });
-        const payload = (await response.json()) as { error?: string };
-
-        if (!response.ok || payload.error) {
-          showToast(payload.error ?? "保存失败", "error");
-          return;
-        }
+        await submitAdminSettingsAction(url, method, body);
 
         showToast(successMessage, "success");
 
         if (reload) {
           triggerRefresh();
         }
-      } catch {
-        showToast("保存失败", "error");
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : "保存失败", "error");
       }
     });
   };
@@ -249,31 +243,7 @@ export function AdminSettingsPanel({
 
     startTransition(async () => {
       try {
-        const response = await fetch("/api/admin/settings/sources/resolve", {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-          },
-          body: JSON.stringify({
-            rssUrl: sourceForm.rssUrl.trim(),
-          }),
-        });
-        const payload = (await response.json()) as {
-          source?: {
-            name: string;
-            rssUrl: string;
-            siteUrl: string;
-            suggestedAiParsingEnabled: boolean;
-          };
-          error?: string;
-        };
-
-        if (!response.ok || payload.error || !payload.source) {
-          showToast(payload.error ?? "RSS 解析失败", "error");
-          return;
-        }
-
-        const source = payload.source;
+        const source = await resolveSourceFromRssUrl(sourceForm.rssUrl.trim());
 
         setSourceForm((current) => ({
           ...current,
@@ -283,8 +253,8 @@ export function AdminSettingsPanel({
           aiParsingEnabled: source.suggestedAiParsingEnabled,
         }));
         showToast("已根据 RSS 自动填充信息源基本信息。", "success");
-      } catch {
-        showToast("RSS 解析失败", "error");
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : "RSS 解析失败", "error");
       }
     });
   };
@@ -298,29 +268,10 @@ export function AdminSettingsPanel({
     startTransition(async () => {
       try {
         const opmlText = await file.text();
-        const response = await fetch("/api/admin/settings/sources/import", {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-          },
-          body: JSON.stringify({ opmlText }),
-        });
-        const payload = (await response.json()) as {
-          summary?: {
-            createdCount: number;
-            updatedCount: number;
-            failedCount: number;
-          };
-          error?: string;
-        };
-
-        if (!response.ok || payload.error || !payload.summary) {
-          showToast(payload.error ?? "OPML 导入失败", "error");
-          return;
-        }
+        const summary = await importSourcesFromOpmlText(opmlText);
 
         showToast(
-          `OPML 导入完成：新建 ${payload.summary.createdCount} 个，更新 ${payload.summary.updatedCount} 个，失败 ${payload.summary.failedCount} 个。`,
+          `OPML 导入完成：新建 ${summary.createdCount} 个，更新 ${summary.updatedCount} 个，失败 ${summary.failedCount} 个。`,
           "success",
         );
         if (opmlFileInputRef.current) {
@@ -329,8 +280,8 @@ export function AdminSettingsPanel({
         window.setTimeout(() => {
           triggerRefresh();
         }, 600);
-      } catch {
-        showToast("OPML 导入失败", "error");
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : "OPML 导入失败", "error");
       }
     });
   };
@@ -433,38 +384,23 @@ export function AdminSettingsPanel({
 
     startTransition(async () => {
       try {
-        const response = await fetch("/api/admin/monitor/schedule/ingestion-default", {
-          method: "PATCH",
-          headers: {
-            "content-type": "application/json",
-          },
-          body: JSON.stringify({
-            enabled: taskScheduleEnabled,
-            cronExpression: taskScheduleCronExpression,
-            sourceConcurrency: parsedSourceConcurrency,
-            fullTextFetchThreshold: parsedFullTextFetchThreshold,
-            perSourceItemLimit: parsedPerSourceItemLimit,
-          }),
+        const schedule = await saveDefaultIngestionSchedule({
+          enabled: taskScheduleEnabled,
+          cronExpression: taskScheduleCronExpression,
+          sourceConcurrency: parsedSourceConcurrency,
+          fullTextFetchThreshold: parsedFullTextFetchThreshold,
+          perSourceItemLimit: parsedPerSourceItemLimit,
         });
-        const payload = (await response.json()) as {
-          error?: string;
-          schedule?: AdminSettingsSnapshot["taskSchedule"];
-        };
 
-        if (!response.ok || payload.error || !payload.schedule) {
-          showToast(payload.error ?? "任务配置保存失败。", "error");
-          return;
-        }
-
-        setTaskScheduleSnapshot(payload.schedule);
-        setTaskScheduleEnabled(payload.schedule.enabled);
-        setTaskScheduleCronExpression(payload.schedule.cronExpression);
-        setTaskScheduleSourceConcurrency(String(payload.schedule.sourceConcurrency));
-        setTaskScheduleFullTextFetchThreshold(String(payload.schedule.fullTextFetchThreshold));
-        setTaskSchedulePerSourceItemLimit(String(payload.schedule.perSourceItemLimit));
+        setTaskScheduleSnapshot(schedule);
+        setTaskScheduleEnabled(schedule.enabled);
+        setTaskScheduleCronExpression(schedule.cronExpression);
+        setTaskScheduleSourceConcurrency(String(schedule.sourceConcurrency));
+        setTaskScheduleFullTextFetchThreshold(String(schedule.fullTextFetchThreshold));
+        setTaskSchedulePerSourceItemLimit(String(schedule.perSourceItemLimit));
         showToast("任务配置已保存。", "success");
-      } catch {
-        showToast("任务配置保存失败。", "error");
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : "任务配置保存失败。", "error");
       }
     });
   };

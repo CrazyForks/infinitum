@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 
 const requireAdmin = vi.fn();
 const enqueueClusterSummaryTask = vi.fn();
+const mergeClusters = vi.fn();
 
 vi.mock("@/lib/admin/session", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/admin/session")>();
@@ -20,6 +21,7 @@ vi.mock("@/lib/clusters/service", async (importOriginal) => {
   return {
     ...actual,
     enqueueClusterSummaryTask,
+    mergeClusters,
   };
 });
 
@@ -157,5 +159,59 @@ describe("/api/admin/clusters", () => {
     expect(enqueueClusterSummaryTask).toHaveBeenCalledWith("cluster-1");
     expect(json.taskRun.id).toBe("task-cluster-1");
     expect(json.taskRun.kind).toBe("cluster_regenerate_summary");
+  });
+
+  it("merges selected clusters for admins", async () => {
+    requireAdmin.mockResolvedValue(undefined);
+    mergeClusters.mockResolvedValue({
+      targetClusterId: "cluster-1",
+      mergedClusterIds: ["cluster-2"],
+      itemsMoved: 2,
+      taskId: "task-merge-1",
+    });
+
+    const { POST } = await import("@/app/api/admin/clusters/merge/route");
+    const response = await POST(
+      new Request("http://localhost/api/admin/clusters/merge", {
+        method: "POST",
+        body: JSON.stringify({
+          targetClusterId: "cluster-1",
+          sourceClusterIds: ["cluster-2"],
+        }),
+      }),
+    );
+    const json = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(mergeClusters).toHaveBeenCalledWith("cluster-1", ["cluster-2"]);
+    expect(json).toEqual({
+      success: true,
+      result: {
+        targetClusterId: "cluster-1",
+        mergedClusterIds: ["cluster-2"],
+        itemsMoved: 2,
+        taskId: "task-merge-1",
+      },
+    });
+  });
+
+  it("rejects invalid cluster merge requests before calling the service", async () => {
+    requireAdmin.mockResolvedValue(undefined);
+
+    const { POST } = await import("@/app/api/admin/clusters/merge/route");
+    const response = await POST(
+      new Request("http://localhost/api/admin/clusters/merge", {
+        method: "POST",
+        body: JSON.stringify({
+          targetClusterId: "cluster-1",
+          sourceClusterIds: ["cluster-1"],
+        }),
+      }),
+    );
+    const json = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(json.error).toBe("目标聚合组不能在待合并列表中");
+    expect(mergeClusters).not.toHaveBeenCalled();
   });
 });

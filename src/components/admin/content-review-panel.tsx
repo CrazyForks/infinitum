@@ -3,6 +3,16 @@
 import type { Dispatch, SetStateAction } from "react";
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 
+import {
+  fetchAdminCluster,
+  fetchFilteredReviewItems,
+  fetchReviewClusters,
+  mergeReviewClusters,
+  postContentReviewAction,
+  type ContentReviewActionPayload,
+  type RequiredActionField,
+} from "@/components/admin/content-review-panel.api";
+import { ContentReviewMergeModal } from "@/components/admin/content-review-merge-modal";
 import { PageShell } from "@/components/ui/page-shell";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FilterInput } from "@/components/ui/filter-input";
@@ -25,20 +35,6 @@ import type { ClusterDTO, ReviewItemDTO } from "@/lib/feed/types";
 import { cx } from "@/lib/ui/cx";
 
 type ReviewTab = "filtered" | "clusters";
-type RequiredActionField = "cluster" | "taskRun";
-
-type ActionPayload = {
-  item?: ReviewItemDTO;
-  cluster?: ClusterDTO | null;
-  taskRun?: { id: string; kind?: string };
-  error?: string;
-};
-
-type CollectionPayload = {
-  clusters?: ClusterDTO[];
-  error?: string;
-  items?: ReviewItemDTO[];
-};
 
 const reviewReasonLabels: Record<NonNullable<ReviewItemDTO["moderationReason"]>, string> = {
   marketing: "营销内容",
@@ -140,19 +136,6 @@ function getReviewReasonLabel(reason: ReviewItemDTO["moderationReason"]) {
     return "待复核";
   }
   return reviewReasonLabels[reason];
-}
-
-function getResponseError(
-  response: Response,
-  payload: {
-    error?: string;
-  },
-  fallbackMessage: string,
-) {
-  if (!response.ok) {
-    return payload.error ?? fallbackMessage;
-  }
-  return payload.error ?? null;
 }
 
 function truncateText(value: string | null | undefined, maxLength: number) {
@@ -502,41 +485,26 @@ function ContentReviewContent({ initialTab = "filtered" }: ContentReviewContentP
 
     startTransition(async () => {
       try {
-        // Only fetch data needed for current tab
         if (activeTab === "filtered") {
-          const filteredResponse = await fetch("/api/admin/items?moderationStatus=filtered");
-          const filteredPayload = (await filteredResponse.json()) as CollectionPayload;
+          const nextItems = await fetchFilteredReviewItems();
 
           if (cancelled) {
             return;
           }
 
-          const filteredError = getResponseError(filteredResponse, filteredPayload, "审核数据加载失败。");
-
-          if (filteredError) {
-            showToast(filteredError, "error");
-          } else {
-            setFilteredItems(filteredPayload.items ?? []);
-          }
+          setFilteredItems(nextItems);
         } else {
-          const clusterResponse = await fetch("/api/admin/clusters");
-          const clusterPayload = (await clusterResponse.json()) as CollectionPayload;
+          const nextClusters = await fetchReviewClusters();
 
           if (cancelled) {
             return;
           }
 
-          const clusterError = getResponseError(clusterResponse, clusterPayload, "审核数据加载失败。");
-
-          if (clusterError) {
-            showToast(clusterError, "error");
-          } else {
-            setClusters(clusterPayload.clusters ?? []);
-          }
+          setClusters(nextClusters);
         }
-      } catch {
+      } catch (error) {
         if (!cancelled) {
-          showToast("审核数据加载失败。", "error");
+          showToast(error instanceof Error ? error.message : "审核数据加载失败。", "error");
         }
       }
     });
@@ -561,19 +529,12 @@ function ContentReviewContent({ initialTab = "filtered" }: ContentReviewContentP
     url: string,
     successMessage: string,
     options?: {
-      onSuccess?: (payload: ActionPayload) => void;
+      onSuccess?: (payload: ContentReviewActionPayload) => void;
       requiredField?: RequiredActionField;
     },
   ) => {
     try {
-      const response = await fetch(url, { method: "POST" });
-      const payload = (await response.json()) as ActionPayload;
-      const responseError = getResponseError(response, payload, "操作失败");
-
-      if (responseError) {
-        showToast(responseError, "error");
-        return false;
-      }
+      const payload = await postContentReviewAction(url);
 
       if (options?.requiredField && !payload[options.requiredField]) {
         showToast("操作失败", "error");
@@ -583,8 +544,8 @@ function ContentReviewContent({ initialTab = "filtered" }: ContentReviewContentP
       options?.onSuccess?.(payload);
       showToast(successMessage, "success");
       return true;
-    } catch {
-      showToast("操作失败", "error");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "操作失败", "error");
       return false;
     }
   }, [showToast]);
@@ -713,16 +674,8 @@ function ContentReviewContent({ initialTab = "filtered" }: ContentReviewContentP
   };
 
   const handleOpenClusterDetail = async (cluster: ClusterDTO) => {
-    // 从API获取完整聚合组详情（包含所有条目）
     try {
-      const response = await fetch(`/api/admin/clusters/${cluster.id}`);
-      const payload = await response.json();
-      if (response.ok && payload.cluster) {
-        setSelectedCluster(payload.cluster);
-      } else {
-        // 如果API调用失败，使用列表中的数据作为 fallback
-        setSelectedCluster(cluster);
-      }
+      setSelectedCluster((await fetchAdminCluster(cluster.id)) ?? cluster);
     } catch {
       setSelectedCluster(cluster);
     }
@@ -921,28 +874,17 @@ function ContentReviewContent({ initialTab = "filtered" }: ContentReviewContentP
 
     setMergingClusterId(mergeTargetId);
     try {
-      const response = await fetch("/api/admin/clusters/merge", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          targetClusterId: mergeTargetId,
-          sourceClusterIds: Array.from(mergeSourceIds),
-        }),
+      const result = await mergeReviewClusters({
+        targetClusterId: mergeTargetId,
+        sourceClusterIds: Array.from(mergeSourceIds),
       });
 
-      const payload = await response.json();
-
-      if (!response.ok || payload.error) {
-        showToast(payload.error ?? "合并失败", "error");
-        return;
-      }
-
-      showToast(`成功合并 ${payload.result.itemsMoved} 个条目`, "success");
+      showToast(`成功合并 ${result.itemsMoved} 个条目`, "success");
       handleCloseMergeModal();
       handleCloseClusterDetail();
       fetchData();
-    } catch {
-      showToast("合并请求失败", "error");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "合并请求失败", "error");
     } finally {
       setMergingClusterId(null);
     }
@@ -1272,133 +1214,18 @@ function ContentReviewContent({ initialTab = "filtered" }: ContentReviewContentP
         <p className="text-sm text-[var(--text-2)]">{confirmModal.message}</p>
       </ModalShell>
 
-      {/* Merge Clusters Modal */}
-      <ModalShell
+      <ContentReviewMergeModal
         isOpen={isMergeModalOpen}
         onClose={handleCloseMergeModal}
-        title="合并聚合组"
-        widthClassName="max-w-3xl"
-        headerClassName="border-b border-[color:var(--line)] p-4"
-        bodyClassName="p-4 space-y-4"
-        footerClassName="border-t border-[color:var(--line)] bg-[var(--bg-muted)] p-4"
-        footer={
-          <div className="flex justify-end gap-2">
-            <Button onClick={handleCloseMergeModal} variant="secondary">
-              取消
-            </Button>
-            <Button
-              onClick={handleExecuteMerge}
-              variant="primary"
-              disabled={mergeSourceIds.size === 0 || mergingClusterId === mergeTargetId}
-            >
-              {mergingClusterId === mergeTargetId ? (
-                <>
-                  <IconRotateCw className="h-4 w-4 mr-1 animate-spin" />
-                  合并中...
-                </>
-              ) : (
-                <>
-                  <IconMerge className="h-4 w-4 mr-1" />
-                  确认合并 ({mergeSourceIds.size} 个)
-                </>
-              )}
-            </Button>
-          </div>
-        }
-      >
-        <div className="space-y-4">
-          <div className="rounded-lg border border-[color:var(--line)] bg-[var(--bg-muted)] p-4">
-            <h4 className="text-sm font-semibold text-[var(--text-1)] mb-2">操作说明</h4>
-            <ul className="text-sm text-[var(--text-2)] space-y-1 list-disc list-inside">
-              <li>选中的聚合组条目将被合并到当前聚合组</li>
-              <li>合并后，被合并的聚合组将被隐藏，其条目归属到当前聚合组</li>
-              <li>系统会自动重新生成当前聚合组的摘要</li>
-            </ul>
-          </div>
-
-          {/* Target Cluster Info */}
-          <div className="space-y-2">
-            <h4 className="text-sm font-semibold text-[var(--text-1)]">目标聚合组（当前）</h4>
-            <div className="rounded-lg border border-[color:var(--accent-soft)] bg-[var(--accent-soft)]/30 p-3">
-              <div className="font-medium text-sm text-[var(--foreground)]">
-                {targetClusterForMerge?.title ?? "加载中..."}
-              </div>
-              <div className="text-xs text-[var(--muted)] mt-1">
-                {targetClusterForMerge ? `${targetClusterForMerge.itemCount} 条内容 · 质量分: ${targetClusterForMerge.score}` : ""}
-              </div>
-            </div>
-          </div>
-
-          {/* Source Selection with Search */}
-          <div className="space-y-2">
-            <h4 className="text-sm font-semibold text-[var(--text-1)]">
-              选择要合并的聚合组
-              {mergeSourceIds.size > 0 && (
-                <span className="ml-2 text-xs font-normal text-[var(--accent-strong)]">
-                  已选择 {mergeSourceIds.size} 个
-                </span>
-              )}
-            </h4>
-
-            {/* Search Input */}
-            <div className="relative">
-              <input
-                type="text"
-                placeholder="搜索聚合组标题..."
-                value={mergeSearchQuery}
-                onChange={(e) => setMergeSearchQuery(e.target.value)}
-                className={cx(
-                  "w-full min-h-10 rounded-xl border border-[color:var(--line)] bg-white px-4 py-2.5 text-sm",
-                  "text-[var(--foreground)] outline-none transition",
-                  "placeholder:text-[var(--muted)]",
-                  "focus:border-[color:var(--accent)] focus:ring-2 focus:ring-[color:var(--accent-soft)]"
-                )}
-              />
-              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--muted)]">
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                </svg>
-              </span>
-            </div>
-
-            {/* Cluster List */}
-            <div className="max-h-[280px] overflow-y-auto space-y-1 border border-[color:var(--line)] rounded-lg p-2">
-              {availableClustersForMerge.length === 0 ? (
-                <p className="text-sm text-[var(--muted)] text-center py-4">
-                  {mergeSearchQuery.trim() ? "未找到匹配的聚合组" : "暂无可合并的聚合组"}
-                </p>
-              ) : (
-                availableClustersForMerge.map((cluster) => (
-                  <label
-                    key={cluster.id}
-                    className={cx(
-                      "flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors",
-                      mergeSourceIds.has(cluster.id)
-                        ? "bg-[var(--accent-soft)] border border-[color:var(--accent)]"
-                        : "hover:bg-[var(--surface)] border border-transparent"
-                    )}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={mergeSourceIds.has(cluster.id)}
-                      onChange={() => handleToggleMergeSource(cluster.id)}
-                      className="h-4 w-4 text-[var(--accent)] rounded"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium text-sm text-[var(--foreground)] truncate">
-                        {cluster.title}
-                      </div>
-                      <div className="text-xs text-[var(--muted)]">
-                        {cluster.itemCount} 条内容 · 质量分: {cluster.score}
-                      </div>
-                    </div>
-                  </label>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-      </ModalShell>
+        targetCluster={targetClusterForMerge}
+        availableClusters={availableClustersForMerge}
+        selectedClusterIds={mergeSourceIds}
+        searchQuery={mergeSearchQuery}
+        isMerging={mergingClusterId === mergeTargetId}
+        onSearchQueryChange={setMergeSearchQuery}
+        onToggleSource={handleToggleMergeSource}
+        onExecuteMerge={handleExecuteMerge}
+      />
     </div>
   );
 }

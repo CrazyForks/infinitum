@@ -1,0 +1,134 @@
+import { PromptConfigType } from "@prisma/client";
+
+import type { RuntimeConfig } from "@/config/runtime";
+import { prisma } from "@/lib/db";
+import {
+  ensureRuntimeConfigSeeded,
+  pickPromptConfigByType,
+  serializeAdminModelApiConfig,
+  serializeAdminPromptConfig,
+  serializeRuntimeModelApi,
+  serializeSelectedPromptConfig,
+  toSourceConfig,
+} from "@/lib/settings/core";
+import type { AdminSettingsSnapshot } from "@/lib/settings/types";
+import { ensureDefaultIngestionSchedule, toTaskScheduleSnapshot } from "@/lib/tasks/service";
+
+export async function getIngestionRuntimeConfig(): Promise<RuntimeConfig> {
+  await ensureRuntimeConfigSeeded();
+
+  const [sources, blacklist, defaultModelConfig, promptConfigs, taskSchedule] = await Promise.all([
+    prisma.source.findMany({
+      where: { enabled: true },
+      orderBy: { name: "asc" },
+    }),
+    prisma.blacklistKeyword.findMany({
+      orderBy: { keyword: "asc" },
+    }),
+    prisma.modelApiConfig.findFirst({
+      where: {
+        isEnabled: true,
+        isDefault: true,
+      },
+      orderBy: { createdAt: "asc" },
+    }),
+    prisma.promptConfig.findMany({
+      where: {
+        isEnabled: true,
+        isDefault: true,
+      },
+      include: {
+        modelApiConfig: true,
+      },
+      orderBy: [{ createdAt: "asc" }],
+    }),
+    ensureDefaultIngestionSchedule(),
+  ]);
+
+  if (!defaultModelConfig) {
+    throw new Error("缺少启用中的默认模型配置。");
+  }
+
+  const itemAnalysisConfig = pickPromptConfigByType(promptConfigs, PromptConfigType.item_analysis);
+  const itemSummaryConfig = pickPromptConfigByType(promptConfigs, PromptConfigType.item_summary);
+  const clusterSummaryConfig = pickPromptConfigByType(promptConfigs, PromptConfigType.cluster_summary);
+  const clusterMatchConfig = pickPromptConfigByType(promptConfigs, PromptConfigType.cluster_match);
+
+  return {
+    rssSources: sources.map((source) => toSourceConfig(source)),
+    blacklistKeywords: blacklist.map((entry) => entry.keyword),
+    ingestion: {
+      itemConcurrency: defaultModelConfig.ingestionItemConcurrency,
+      sourceConcurrency: taskSchedule.sourceConcurrency,
+      fullTextFetchThreshold: taskSchedule.fullTextFetchThreshold,
+      perSourceItemLimit: taskSchedule.perSourceItemLimit,
+    },
+    modelApi: serializeRuntimeModelApi(defaultModelConfig),
+    prompts: {
+      itemSummary: itemSummaryConfig.systemPrompt || itemSummaryConfig.prompt,
+      itemAnalysis: itemAnalysisConfig.systemPrompt || itemAnalysisConfig.prompt,
+      clusterSummary: clusterSummaryConfig.systemPrompt || clusterSummaryConfig.prompt,
+      clusterMatch: clusterMatchConfig.systemPrompt || clusterMatchConfig.prompt,
+    },
+    selectedPromptConfigs: {
+      itemSummary: serializeSelectedPromptConfig(itemSummaryConfig),
+      itemAnalysis: serializeSelectedPromptConfig(itemAnalysisConfig),
+      clusterSummary: serializeSelectedPromptConfig(clusterSummaryConfig),
+      clusterMatch: serializeSelectedPromptConfig(clusterMatchConfig),
+    },
+  };
+}
+
+export async function getAdminSettings(): Promise<AdminSettingsSnapshot> {
+  await ensureRuntimeConfigSeeded();
+
+  const [modelApiConfigs, promptConfigs, blacklist, groups, sources, taskSchedule] = await Promise.all([
+    prisma.modelApiConfig.findMany({
+      orderBy: [{ isDefault: "desc" }, { createdAt: "desc" }],
+    }),
+    prisma.promptConfig.findMany({
+      include: {
+        modelApiConfig: {
+          select: {
+            name: true,
+          },
+        },
+      },
+      orderBy: [{ type: "asc" }, { isDefault: "desc" }, { createdAt: "desc" }],
+    }),
+    prisma.blacklistKeyword.findMany({
+      orderBy: { keyword: "asc" },
+    }),
+    prisma.sourceGroup.findMany({
+      orderBy: { name: "asc" },
+    }),
+    prisma.source.findMany({
+      include: { group: true },
+      orderBy: [{ name: "asc" }],
+    }),
+    ensureDefaultIngestionSchedule(),
+  ]);
+
+  const defaultModelConfig = modelApiConfigs.find((config) => config.isDefault);
+
+  return {
+    modelApiConfigs: modelApiConfigs.map(serializeAdminModelApiConfig),
+    promptConfigs: promptConfigs.map((config) => serializeAdminPromptConfig(config, defaultModelConfig)),
+    blacklistKeywords: blacklist.map((entry) => entry.keyword),
+    taskSchedule: toTaskScheduleSnapshot(taskSchedule),
+    groups: groups.map((group) => ({
+      id: group.id,
+      name: group.name,
+    })),
+    sources: sources.map((source) => ({
+      id: source.id,
+      name: source.name,
+      rssUrl: source.rssUrl,
+      siteUrl: source.siteUrl,
+      enabled: source.enabled,
+      aiParsingEnabled: source.aiParsingEnabled,
+      groupId: source.groupId,
+      groupName: source.group?.name ?? null,
+    })),
+  };
+}

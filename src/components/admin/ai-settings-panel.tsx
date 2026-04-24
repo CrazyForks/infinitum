@@ -3,6 +3,17 @@
 import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 
+import {
+  createModelApiConfig,
+  createPromptConfig,
+  deleteModelApiConfig,
+  deletePromptConfig,
+  fetchModelApiConfigModels,
+  getModelApiConfig,
+  testModelApiConfig,
+  updateModelApiConfig,
+  updatePromptConfig,
+} from "@/components/admin/ai-settings-panel.api";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import {
@@ -30,7 +41,6 @@ import {
 } from "@/lib/settings/ai-config";
 import type {
   AdminModelApiConfig,
-  AdminModelApiConfigDetail,
   AdminPromptConfig,
   AdminSettingsSnapshot,
   PromptConfigType,
@@ -175,30 +185,6 @@ export function AiSettingsPanel({ initialSettings, mode }: AiSettingsPanelProps)
     [defaultModelConfigName, promptModelOptions],
   );
 
-  const submitJson = async <T,>(
-    url: string,
-    method: string,
-    body: unknown,
-  ): Promise<T> => {
-    const response = await fetch(url, {
-      method,
-      headers:
-        method === "GET"
-          ? undefined
-          : {
-              "content-type": "application/json",
-            },
-      body: method === "GET" ? undefined : JSON.stringify(body),
-    });
-    const payload = (await response.json()) as T & { error?: string };
-
-    if (!response.ok || payload.error) {
-      throw new Error(payload.error ?? "请求失败");
-    }
-
-    return payload;
-  };
-
   const copyText = async (value: string, message = "已复制。") => {
     await navigator.clipboard.writeText(value);
     showToast(message, "success");
@@ -233,11 +219,7 @@ export function AiSettingsPanel({ initialSettings, mode }: AiSettingsPanelProps)
     setShowModelModal(true);
 
     try {
-      const detail = await submitJson<AdminModelApiConfigDetail>(
-        `/api/admin/settings/model-api-configs/${config.id}`,
-        "GET",
-        undefined,
-      );
+      const detail = await getModelApiConfig(config.id);
       setEditingModelApiKeyRaw(detail.apiKeyRaw || "");
     } catch (error) {
       showToast(error instanceof Error ? error.message : "读取模型配置详情失败", "error");
@@ -254,11 +236,7 @@ export function AiSettingsPanel({ initialSettings, mode }: AiSettingsPanelProps)
     setModelOptionsError("");
 
     try {
-      const payload = await submitJson<{
-        success: boolean;
-        models: string[];
-        message?: string;
-      }>("/api/admin/settings/model-api-configs/models", "POST", {
+      const payload = await fetchModelApiConfigModels({
         baseUrl: modelForm.baseUrl,
         apiKey:
           editingModelConfig && modelForm.apiKeyMode === "keep"
@@ -311,16 +289,8 @@ export function AiSettingsPanel({ initialSettings, mode }: AiSettingsPanelProps)
       };
 
       const result = editingModelConfig
-        ? await submitJson<{ config: AdminModelApiConfig }>(
-            `/api/admin/settings/model-api-configs/${editingModelConfig.id}`,
-            "PUT",
-            payload,
-          )
-        : await submitJson<{ config: AdminModelApiConfig }>(
-            "/api/admin/settings/model-api-configs",
-            "POST",
-            payload,
-          );
+        ? await updateModelApiConfig(editingModelConfig.id, payload)
+        : await createModelApiConfig(payload);
 
       setModelConfigs((current) => {
         const next = editingModelConfig
@@ -351,7 +321,7 @@ export function AiSettingsPanel({ initialSettings, mode }: AiSettingsPanelProps)
 
   const handleDeleteModelConfig = async (configId: string) => {
     try {
-      await submitJson(`/api/admin/settings/model-api-configs/${configId}`, "DELETE", {});
+      await deleteModelApiConfig(configId);
       setModelConfigs((current) => current.filter((item) => item.id !== configId));
       setPromptConfigs((current) =>
         current.map((item) =>
@@ -389,14 +359,7 @@ export function AiSettingsPanel({ initialSettings, mode }: AiSettingsPanelProps)
     setTestResult("");
     setTestRawResponse("");
     try {
-      const result = await submitJson<{
-        success: boolean;
-        message: string;
-        content: string;
-        rawResponse: string;
-      }>(`/api/admin/settings/model-api-configs/${testingModelConfig.id}/test`, "POST", {
-        prompt: testPrompt,
-      });
+      const result = await testModelApiConfig(testingModelConfig.id, testPrompt);
       if (!result.success) {
         setTestError(result.message || "调用失败");
       }
@@ -491,16 +454,8 @@ export function AiSettingsPanel({ initialSettings, mode }: AiSettingsPanelProps)
       };
 
       const result = editingPromptConfig
-        ? await submitJson<{ config: AdminPromptConfig }>(
-            `/api/admin/settings/prompt-configs/${editingPromptConfig.id}`,
-            "PUT",
-            payload,
-          )
-        : await submitJson<{ config: AdminPromptConfig }>(
-            "/api/admin/settings/prompt-configs",
-            "POST",
-            payload,
-          );
+        ? await updatePromptConfig(editingPromptConfig.id, payload)
+        : await createPromptConfig(payload);
 
       setPromptConfigs((current) => {
         const next = editingPromptConfig
@@ -524,7 +479,7 @@ export function AiSettingsPanel({ initialSettings, mode }: AiSettingsPanelProps)
 
   const handleDeletePromptConfig = async (configId: string) => {
     try {
-      await submitJson(`/api/admin/settings/prompt-configs/${configId}`, "DELETE", {});
+      await deletePromptConfig(configId);
       setPromptConfigs((current) => current.filter((item) => item.id !== configId));
       showToast("提示词配置已删除。", "success");
     } catch (error) {

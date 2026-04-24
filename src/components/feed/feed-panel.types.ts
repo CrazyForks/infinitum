@@ -1,0 +1,88 @@
+import type { Dayjs } from "dayjs";
+
+import type {
+  ClusterDTO,
+  FeedEntryDTO,
+  FeedGroupOption,
+  FeedPagination,
+  FeedRange,
+  FeedSort,
+  FeedSourceOption,
+  FetchRunSnapshot,
+} from "@/lib/feed/types";
+
+export type FeedPanelProps = {
+  initialItems: FeedEntryDTO[];
+  initialRange: FeedRange;
+  initialSort: FeedSort;
+  initialStartDate: string | null;
+  initialEndDate: string | null;
+  initialNextCursor?: string | null;
+  initialPagination?: FeedPagination | null;
+  initialStatus: FetchRunSnapshot | null;
+  isAdmin: boolean;
+  initialGroupId?: string | null;
+  initialSourceId?: string | null;
+  initialTitle?: string | null;
+  availableGroups?: FeedGroupOption[];
+  initialGroupTotalCount?: number;
+  availableSources?: FeedSourceOption[];
+};
+
+export type FeedQueryState = {
+  range: FeedRange;
+  sort: FeedSort;
+  startDate: string | null;
+  endDate: string | null;
+  groupId: string | null;
+  sourceId: string | null;
+  title: string | null;
+};
+
+export type FeedbackTone = "info" | "success" | "error";
+
+export type FeedFeedback = {
+  tone: FeedbackTone;
+  message: string;
+};
+
+export type RegenerateDialogState = {
+  itemId: string;
+  canRegenerateTranslation: boolean;
+  shouldAnnounceClusterRefresh?: boolean;
+} | null;
+
+export type RegenerateMode = "summary" | "translation" | "both";
+
+export type AssignClusterDialogState = {
+  itemId: string;
+  itemTitle: string;
+  currentClusterId?: string | null;
+} | null;
+
+export type ManualFilterDialogState = {
+  itemId: string;
+  itemTitle: string;
+} | null;
+
+export type DeleteItemDialogState = {
+  itemId: string;
+  itemTitle: string;
+} | null;
+
+export type BatchActionType = "regenerate" | "filter" | "delete";
+
+export type BatchActionDialogState = {
+  type: BatchActionType;
+  itemIds: string[];
+  itemTitles: string[];
+} | null;
+
+export type DateRangeValue = [Dayjs | null, Dayjs | null] | null;
+
+export type FeedClusterOptionsState = {
+  clusterOptions: ClusterDTO[];
+  clusterSearch: string;
+  selectedClusterId: string | null;
+  isLoadingClusterOptions: boolean;
+};
