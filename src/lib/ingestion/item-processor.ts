@@ -1,3 +1,5 @@
+import type { Item } from "@prisma/client";
+
 import type { AiEventSignature } from "@/lib/ai/provider";
 import type { ClusterAssignmentCoordinator } from "@/lib/clusters/helpers";
 import { assignItemToCluster } from "@/lib/clusters/service";
@@ -19,6 +21,20 @@ export type PreparedFeedItem = {
   sourceId: string;
   sourceName: string;
   aiParsingEnabled: boolean;
+};
+
+export type PreparedFeedItemLookup = {
+  originalTitle: string;
+  originalUrl: string;
+  publishedAt: Date;
+  rssContent: string | null;
+  rssExcerpt: string | null;
+  canonicalUrl: string;
+  dedupeKeys: {
+    canonicalUrl: string;
+    urlHash: string;
+    signature: string;
+  };
 };
 
 const EVENT_TYPES = new Set<NonNullable<AiEventSignature["eventType"]>>([
@@ -153,19 +169,85 @@ function hasAnalysisInputsChanged(
   );
 }
 
-export function willRequireAiAnalysis(preparedItem: PreparedFeedItem, blacklist: string[]) {
+export function buildPreparedFeedItemLookup(preparedItem: PreparedFeedItem, now: Date): PreparedFeedItemLookup | null {
   const originalTitle = preparedItem.item.title?.trim();
   const originalUrl = preparedItem.item.link?.trim();
 
   if (!originalTitle || !originalUrl) {
-    return false;
+    return null;
   }
 
-  return !findBlacklistMatch({
+  const publishedAt = parsePublishedAt(preparedItem.item, now);
+  const rssContent = getBestContent(preparedItem.item).trim() || null;
+  const rssExcerpt = preparedItem.item.contentSnippet?.trim() || null;
+  const canonicalUrl = normalizeUrl(originalUrl);
+  const dedupeKeys = buildDedupeKeys({
+    sourceName: preparedItem.sourceName,
+    canonicalUrl,
     title: originalTitle,
-    content: [getBestContent(preparedItem.item).trim(), preparedItem.item.contentSnippet?.trim() ?? ""].filter(Boolean).join("\n"),
+    publishedAt,
+  });
+
+  return {
+    originalTitle,
+    originalUrl,
+    publishedAt,
+    rssContent,
+    rssExcerpt,
+    canonicalUrl,
+    dedupeKeys,
+  };
+}
+
+export function estimatePreparedItemAiWork(
+  preparedItem: PreparedFeedItem,
+  lookup: PreparedFeedItemLookup | null,
+  existing: Item | null | undefined,
+  blacklist: string[],
+): { summary: boolean; analysis: boolean } {
+  if (!lookup || !preparedItem.aiParsingEnabled) {
+    return { summary: false, analysis: false };
+  }
+
+  const initialFilterMatch = findBlacklistMatch({
+    title: lookup.originalTitle,
+    content: [lookup.rssContent, lookup.rssExcerpt].filter(Boolean).join("\n"),
     blacklist,
   });
+
+  if (initialFilterMatch) {
+    return { summary: false, analysis: false };
+  }
+
+  const inputsChanged = existing ? hasAnalysisInputsChanged(existing, lookup) : true;
+
+  return {
+    summary: !Boolean(existing && !inputsChanged && hasSucceededSummary(existing)),
+    analysis: !Boolean(existing && !inputsChanged && hasSucceededAnalysis(existing)),
+  };
+}
+
+function shouldWriteReusableExistingItem(
+  existing: Item,
+  lookup: PreparedFeedItemLookup,
+  input: {
+    sourceId: string;
+    author: string | null;
+  },
+) {
+  return (
+    existing.sourceId !== input.sourceId ||
+    existing.originalUrl !== lookup.originalUrl ||
+    existing.canonicalUrl !== lookup.dedupeKeys.canonicalUrl ||
+    existing.urlHash !== lookup.dedupeKeys.urlHash ||
+    existing.dedupeSignature !== lookup.dedupeKeys.signature ||
+    existing.originalTitle !== lookup.originalTitle ||
+    existing.author !== input.author ||
+    existing.publishedAt.getTime() !== lookup.publishedAt.getTime() ||
+    (existing.rssExcerpt ?? null) !== lookup.rssExcerpt ||
+    (existing.rssContent ?? null) !== lookup.rssContent ||
+    existing.errorMessage !== null
+  );
 }
 
 export async function processFeedItem({
@@ -173,6 +255,8 @@ export async function processFeedItem({
   sourceId,
   sourceName,
   aiParsingEnabled,
+  lookup: providedLookup,
+  existingItem,
   blacklist,
   articleFetcher,
   aiProvider,
@@ -184,6 +268,8 @@ export async function processFeedItem({
   sourceId: string;
   sourceName: string;
   aiParsingEnabled: boolean;
+  lookup?: PreparedFeedItemLookup | null;
+  existingItem?: Item | null;
   blacklist: string[];
   articleFetcher: RunIngestionOptions["articleFetcher"];
   aiProvider: RunIngestionOptions["aiProvider"];
@@ -191,24 +277,29 @@ export async function processFeedItem({
   fullTextFetchThreshold: number;
   now: Date;
 }): Promise<ProcessedItemRecord | null> {
-  const originalTitle = item.title?.trim();
-  const originalUrl = item.link?.trim();
+  const lookup = providedLookup ?? buildPreparedFeedItemLookup({
+    item,
+    sourceId,
+    sourceName,
+    aiParsingEnabled,
+  }, now);
 
-  if (!originalTitle || !originalUrl) {
+  if (!lookup) {
     return null;
   }
 
-  const publishedAt = parsePublishedAt(item, now);
-  const rssContent = getBestContent(item).trim() || null;
-  const rssExcerpt = item.contentSnippet?.trim() || null;
-  const canonicalUrl = normalizeUrl(originalUrl);
-  const dedupeKeys = buildDedupeKeys({
-    sourceName,
-    canonicalUrl,
-    title: originalTitle,
+  const {
+    originalTitle,
+    originalUrl,
     publishedAt,
-  });
-  const existing = await findExistingItem(dedupeKeys.urlHash, dedupeKeys.signature);
+    rssContent,
+    rssExcerpt,
+    dedupeKeys,
+  } = lookup;
+  const existing =
+    existingItem === undefined
+      ? await findExistingItem(dedupeKeys.urlHash, dedupeKeys.signature)
+      : existingItem;
   const isNew = !existing;
   const analysisInputsChanged = existing
     ? hasAnalysisInputsChanged(existing, {
@@ -240,6 +331,7 @@ export async function processFeedItem({
   let summaryCompleted = false;
   let summaryFailed = false;
   let analysisCompleted = false;
+  let analysisFailed = false;
   const issues: string[] = [];
   const contentForFullTextDecision = fullText || rssContent || rssExcerpt || "";
   const canReuseExistingAnalysis = Boolean(
@@ -311,47 +403,54 @@ export async function processFeedItem({
     };
   }
 
-  if (canReuseExistingAnalysis) {
-    const stored = await upsertItem(
-      {
-        id: existing?.id,
-        urlHash: dedupeKeys.urlHash,
-        dedupeSignature: dedupeKeys.signature,
-      },
-      {
-        sourceId,
-        originalUrl,
-        canonicalUrl: dedupeKeys.canonicalUrl,
-        urlHash: dedupeKeys.urlHash,
-        dedupeSignature: dedupeKeys.signature,
-        originalTitle,
-        translatedTitle,
-        author: item.creator || item.author || null,
-        publishedAt,
-        rssExcerpt,
-        rssContent,
-        fullText,
-        summaryText,
-        language: existing?.language ?? (shouldTranslateTitle(originalTitle) ? "en" : "unknown"),
-        status,
-        summaryStatus,
-        analysisStatus,
-        filterReason,
-        moderationStatus,
-        moderationReason,
-        moderationDetail,
-        qualityScore,
-        qualityRationale,
-        eventType: eventSignature?.eventType ?? null,
-        eventSubject: eventSignature?.eventSubject ?? null,
-        eventAction: eventSignature?.eventAction ?? null,
-        eventObject: eventSignature?.eventObject ?? null,
-        eventDate: eventSignature?.eventDate ?? null,
-        aiProcessedAt: existing?.aiProcessedAt,
-        clusterId: existing?.clusterId ?? null,
-        errorMessage: null,
-      },
-    );
+  if (canReuseExistingAnalysis && existing) {
+    const author = item.creator || item.author || null;
+    const language = existing?.language ?? (shouldTranslateTitle(originalTitle) ? "en" : "unknown");
+    const stored = shouldWriteReusableExistingItem(existing, lookup, {
+      sourceId,
+      author,
+    })
+      ? await upsertItem(
+          {
+            id: existing.id,
+            urlHash: dedupeKeys.urlHash,
+            dedupeSignature: dedupeKeys.signature,
+          },
+          {
+            sourceId,
+            originalUrl,
+            canonicalUrl: dedupeKeys.canonicalUrl,
+            urlHash: dedupeKeys.urlHash,
+            dedupeSignature: dedupeKeys.signature,
+            originalTitle,
+            translatedTitle,
+            author,
+            publishedAt,
+            rssExcerpt,
+            rssContent,
+            fullText,
+            summaryText,
+            language,
+            status,
+            summaryStatus,
+            analysisStatus,
+            filterReason,
+            moderationStatus,
+            moderationReason,
+            moderationDetail,
+            qualityScore,
+            qualityRationale,
+            eventType: eventSignature?.eventType ?? null,
+            eventSubject: eventSignature?.eventSubject ?? null,
+            eventAction: eventSignature?.eventAction ?? null,
+            eventObject: eventSignature?.eventObject ?? null,
+            eventDate: eventSignature?.eventDate ?? null,
+            aiProcessedAt: existing.aiProcessedAt,
+            clusterId: existing.clusterId ?? null,
+            errorMessage: null,
+          },
+        )
+      : existing;
 
     return {
       id: stored.id,
@@ -447,6 +546,7 @@ export async function processFeedItem({
         qualityRationale = "AI analysis unavailable";
         eventSignature = null;
         analysisStatus = "failed";
+        analysisFailed = true;
       }
     }
 
@@ -547,6 +647,7 @@ export async function processFeedItem({
       summaryCompleted,
       summaryFailed,
       analysisCompleted,
+      analysisFailed,
       analysisFiltered: analysisCompleted && moderationStatus === "filtered",
       clusterAssignment: clusterAssignmentMetrics,
     },

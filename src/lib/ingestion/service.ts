@@ -1,4 +1,6 @@
-import type { BackgroundTaskRun, FetchRun, FetchRunStatus } from "@prisma/client";
+import crypto from "node:crypto";
+
+import type { BackgroundTaskRun, FetchRun, FetchRunStatus, Item, Source } from "@prisma/client";
 
 import { INGESTION_PROGRESS_FLUSH_INTERVAL_MS } from "@/config/constants";
 import type { RuntimeConfig } from "@/config/runtime";
@@ -12,16 +14,20 @@ import { prisma } from "@/lib/db";
 import {
   completeFetchRun,
   createFetchRun,
+  findExistingItemsForDedupeKeys,
   syncSources,
+  updateSourceFetchMetadata,
   updateFetchRunProgress,
 } from "@/lib/feed/repository";
 import { invalidateFeedCache } from "@/lib/feed/cache";
 import { fetchArticleContent } from "@/lib/ingestion/article";
 import {
   deriveSourceConcurrency,
+  buildPreparedFeedItemLookup,
+  estimatePreparedItemAiWork,
   type PreparedFeedItem,
+  type PreparedFeedItemLookup,
   processFeedItem,
-  willRequireAiAnalysis,
 } from "@/lib/ingestion/item-processor";
 import { createRssParser } from "@/lib/ingestion/parser";
 import {
@@ -67,6 +73,13 @@ type RuntimePromptConfig =
   | RuntimePromptConfigs["itemAnalysis"]
   | RuntimePromptConfigs["clusterSummary"]
   | RuntimePromptConfigs["clusterMatch"];
+
+type SourceFetchMetadataUpdate = {
+  feedEtag?: string | null;
+  feedLastModified?: string | null;
+  feedContentHash?: string | null;
+  lastFetchedAt: Date;
+};
 
 class TaskRunCancellationError extends Error {
   snapshot: {
@@ -184,6 +197,43 @@ async function runWithConcurrency(
   await Promise.all(Array.from({ length: workerCount }, () => worker()));
 }
 
+function buildFeedRequestHeaders(source: Source): Record<string, string> {
+  return {
+    ...(source.feedEtag ? { "If-None-Match": source.feedEtag } : {}),
+    ...(source.feedLastModified ? { "If-Modified-Since": source.feedLastModified } : {}),
+  };
+}
+
+function buildFeedContentHash(items: Array<{ title?: string | null; link?: string | null; isoDate?: string | null; pubDate?: string | null; content?: string | null; "content:encoded"?: string | null; contentSnippet?: string | null }>) {
+  const payload = items.map((item) => ({
+    title: item.title?.trim() ?? null,
+    link: item.link?.trim() ?? null,
+    isoDate: item.isoDate ?? null,
+    pubDate: item.pubDate ?? null,
+    content: item.content ?? null,
+    contentEncoded: item["content:encoded"] ?? null,
+    contentSnippet: item.contentSnippet ?? null,
+  }));
+
+  return crypto.createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
+
+async function updateSourceMetadataIfChanged(sourceId: string, data: SourceFetchMetadataUpdate) {
+  await updateSourceFetchMetadata(sourceId, data);
+}
+
+function getExistingItemForLookup(
+  lookup: PreparedFeedItemLookup | null,
+  existingByUrlHash: Map<string, Item>,
+  existingByDedupeSignature: Map<string, Item>,
+) {
+  if (!lookup) {
+    return null;
+  }
+
+  return existingByUrlHash.get(lookup.dedupeKeys.urlHash) ?? existingByDedupeSignature.get(lookup.dedupeKeys.signature) ?? null;
+}
+
 
 async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
   const {
@@ -212,6 +262,8 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
     summarizeItemEstimated: false,
   });
   const preparedItems: PreparedFeedItem[] = [];
+  const sourceMetadataCommitCandidates = new Map<string, SourceFetchMetadataUpdate>();
+  const sourceProcessingFailures = new Map<string, number>();
   const errors: string[] = [];
   let successCount = 0;
   let failureCount = 0;
@@ -269,8 +321,38 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
         await throwIfCancellationRequested();
 
         try {
-          const feed = await parser.parseURL(source.rssUrl);
+          const feed = await parser.parseURL(source.rssUrl, {
+            headers: buildFeedRequestHeaders(source),
+          });
+
+          if (feed.notModified) {
+            await updateSourceMetadataIfChanged(source.id, {
+              feedEtag: feed.etag ?? source.feedEtag,
+              feedLastModified: feed.lastModified ?? source.feedLastModified,
+              lastFetchedAt: now,
+            });
+            return;
+          }
+
           const items = (feed.items ?? []).slice(0, perSourceItemLimit);
+          const feedContentHash = buildFeedContentHash(items);
+
+          if (source.feedContentHash && source.feedContentHash === feedContentHash) {
+            await updateSourceMetadataIfChanged(source.id, {
+              feedEtag: feed.etag ?? source.feedEtag,
+              feedLastModified: feed.lastModified ?? source.feedLastModified,
+              feedContentHash,
+              lastFetchedAt: now,
+            });
+            return;
+          }
+
+          sourceMetadataCommitCandidates.set(source.id, {
+            feedEtag: feed.etag ?? source.feedEtag,
+            feedLastModified: feed.lastModified ?? source.feedLastModified,
+            feedContentHash,
+            lastFetchedAt: now,
+          });
 
           for (const item of items) {
             preparedItems.push({
@@ -296,9 +378,34 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
     timelineCounters.sourceFetch.itemsFetched = preparedItems.length;
   }
 
-  const estimatedAiItemCount = preparedItems.filter((preparedItem) => willRequireAiAnalysis(preparedItem, blacklist)).length;
-  aiUsage.setEstimated(estimatedAiItemCount, "item_summary");
-  aiUsage.setEstimated(estimatedAiItemCount, "item_analysis");
+  const preparedLookups = preparedItems.map((preparedItem) => ({
+    preparedItem,
+    lookup: buildPreparedFeedItemLookup(preparedItem, now),
+  }));
+  const existingItems = await findExistingItemsForDedupeKeys(
+    preparedLookups
+      .map((entry) => entry.lookup)
+      .filter((lookup): lookup is PreparedFeedItemLookup => Boolean(lookup))
+      .map((lookup) => ({
+        urlHash: lookup.dedupeKeys.urlHash,
+        dedupeSignature: lookup.dedupeKeys.signature,
+      })),
+  );
+  const existingByUrlHash = new Map(existingItems.map((item) => [item.urlHash, item]));
+  const existingByDedupeSignature = new Map(existingItems.map((item) => [item.dedupeSignature, item]));
+  const estimatedAiWork = preparedLookups.reduce(
+    (total, entry) => {
+      const existing = getExistingItemForLookup(entry.lookup, existingByUrlHash, existingByDedupeSignature);
+      const estimate = estimatePreparedItemAiWork(entry.preparedItem, entry.lookup, existing, blacklist);
+      return {
+        summaries: total.summaries + (estimate.summary ? 1 : 0),
+        analyses: total.analyses + (estimate.analysis ? 1 : 0),
+      };
+    },
+    { summaries: 0, analyses: 0 },
+  );
+  aiUsage.setEstimated(estimatedAiWork.summaries, "item_summary");
+  aiUsage.setEstimated(estimatedAiWork.analyses, "item_analysis");
 
   await updateFetchRunProgress(run.id, {
     sourceCount: sources.length,
@@ -419,10 +526,13 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
   taskStages.itemProcessing = itemProcessingStage;
   try {
     await runWithConcurrency(
-      preparedItems.map((preparedItem) => async () => {
+      preparedLookups.map(({ preparedItem, lookup }) => async () => {
         try {
+          const existingItem = getExistingItemForLookup(lookup, existingByUrlHash, existingByDedupeSignature);
           const result = await processFeedItem({
             ...preparedItem,
+            lookup,
+            existingItem,
             blacklist,
             articleFetcher,
             aiProvider: trackedAiProvider,
@@ -431,8 +541,26 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
             now,
           });
 
+          if (result?.status === "failed") {
+            sourceProcessingFailures.set(
+              preparedItem.sourceId,
+              (sourceProcessingFailures.get(preparedItem.sourceId) ?? 0) + 1,
+            );
+          }
+
+          if (result?.metrics?.summaryFailed || result?.metrics?.analysisFailed) {
+            sourceProcessingFailures.set(
+              preparedItem.sourceId,
+              (sourceProcessingFailures.get(preparedItem.sourceId) ?? 0) + 1,
+            );
+          }
+
           await enqueueProgressUpdate(result);
         } catch (error) {
+          sourceProcessingFailures.set(
+            preparedItem.sourceId,
+            (sourceProcessingFailures.get(preparedItem.sourceId) ?? 0) + 1,
+          );
           const message =
             error instanceof Error
               ? `${preparedItem.sourceName}: ${preparedItem.item.title ?? "Untitled item"}: ${error.message}`
@@ -490,6 +618,12 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
   } finally {
     stageTracker.finishStage(clusterFinalizeStage);
   }
+
+  await Promise.all(
+    [...sourceMetadataCommitCandidates.entries()]
+      .filter(([sourceId]) => (sourceProcessingFailures.get(sourceId) ?? 0) === 0)
+      .map(([sourceId, metadata]) => updateSourceMetadataIfChanged(sourceId, metadata)),
+  );
 
   const status: FetchRunStatus =
     errors.length > 0 || failureCount > 0

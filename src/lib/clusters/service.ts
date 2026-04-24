@@ -13,6 +13,7 @@ import {
   buildClusterEventSignature,
   buildClusterFingerprintSeed,
   buildClusterMatchInput,
+  buildClusterSummaryInputHash,
   buildEventDisplayTitle,
   buildItemSummary,
   buildExactMatchKey,
@@ -322,6 +323,7 @@ export async function assignItemToCluster(
 export async function recomputeCluster(
   clusterId: string,
   aiProvider?: AiProvider,
+  options?: { forceSummary?: boolean },
 ): Promise<ClusterRecomputeResult> {
   const cluster = await getClusterWithItems(clusterId);
 
@@ -346,7 +348,16 @@ export async function recomputeCluster(
     } satisfies ClusterRecomputeResult;
   }
 
-  const presentation = await generateClusterPresentation(cluster.items, cluster.title, aiProvider);
+  const summaryInputHash = buildClusterSummaryInputHash(cluster.items, cluster.title);
+  const presentation =
+    !options?.forceSummary && cluster.summaryInputHash && cluster.summaryInputHash === summaryInputHash
+      ? {
+          title: cluster.title,
+          summary: cluster.summary,
+          summaryAttempted: false,
+          summarySucceeded: false,
+        }
+      : await generateClusterPresentation(cluster.items, cluster.title, aiProvider);
   const eventSignature = buildClusterEventSignature(cluster.items);
   const score = Math.max(...cluster.items.map((item) => item.qualityScore));
   const latestPublishedAt = cluster.items[0]!.publishedAt;
@@ -361,7 +372,8 @@ export async function recomputeCluster(
     cluster.eventSubject === (eventSignature?.eventSubject ?? null) &&
     cluster.eventAction === (eventSignature?.eventAction ?? null) &&
     cluster.eventObject === (eventSignature?.eventObject ?? null) &&
-    cluster.eventDate === (eventSignature?.eventDate ?? null);
+    cluster.eventDate === (eventSignature?.eventDate ?? null) &&
+    cluster.summaryInputHash === summaryInputHash;
 
   if (shouldSkipUpdate) {
     return {
@@ -376,6 +388,7 @@ export async function recomputeCluster(
   await updateClusterSummary(clusterId, {
     title: presentation.title,
     summary: presentation.summary,
+    summaryInputHash,
     score,
     itemCount: nextItemCount,
     latestPublishedAt,
@@ -509,6 +522,7 @@ export async function executeClusterSummaryTask(
     const cluster = await recomputeCluster(
       taskRun.entityId,
       trackedAiProvider,
+      { forceSummary: true },
     );
 
     const progressLabel = cluster.summaryAttempted

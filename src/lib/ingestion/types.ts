@@ -24,10 +24,18 @@ export type ParsedFeed = {
   link?: string | null;
   feedUrl?: string | null;
   items?: ParsedFeedItem[];
+  notModified?: boolean;
+  etag?: string | null;
+  lastModified?: string | null;
 };
 
 export type RssParserLike = {
-  parseURL(url: string): Promise<ParsedFeed>;
+  parseURL(
+    url: string,
+    options?: {
+      headers?: Record<string, string>;
+    },
+  ): Promise<ParsedFeed>;
 };
 
 export type ArticleFetcher = (url: string) => Promise<string | null>;
@@ -44,6 +52,7 @@ export type ProcessedItemRecord = {
     summaryCompleted?: boolean;
     summaryFailed?: boolean;
     analysisCompleted?: boolean;
+    analysisFailed?: boolean;
     analysisFiltered?: boolean;
     clusterAssignment?: {
       exactMatch?: boolean;

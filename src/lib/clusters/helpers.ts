@@ -1,3 +1,5 @@
+import crypto from "node:crypto";
+
 import type { Item, Source } from "@prisma/client";
 
 import { type AiEventSignature, type AiProvider } from "@/lib/ai/provider";
@@ -433,6 +435,34 @@ function shouldGenerateAiClusterSummary(clusterItems: ItemWithSource[], aiProvid
   return Boolean(aiProvider) && clusterItems.length >= 2;
 }
 
+function buildClusterSummarySeed(clusterItems: ItemWithSource[]) {
+  return clusterItems
+    .map((item, index) =>
+      [
+        `候选 ${index + 1}`,
+        `标题：${getDisplayTitle(item.originalTitle, item.translatedTitle)}`,
+        buildItemSummary(item) ? `摘要：${buildItemSummary(item)}` : null,
+        ...buildEventSignatureLines(getItemEventSignature(item)),
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    )
+    .join("\n");
+}
+
+export function buildClusterSummaryInputHash(clusterItems: ItemWithSource[], existingTitle?: string) {
+  const fallback = buildClusterFallback(clusterItems, existingTitle);
+  const seed = buildClusterSummarySeed(clusterItems);
+
+  return crypto
+    .createHash("sha256")
+    .update(JSON.stringify({
+      title: fallback.title,
+      seed,
+    }))
+    .digest("hex");
+}
+
 export async function generateClusterPresentation(
   clusterItems: ItemWithSource[],
   existingTitle?: string,
@@ -451,18 +481,7 @@ export async function generateClusterPresentation(
   const summaryProvider = aiProvider!;
 
   try {
-    const summarySeed = clusterItems
-      .map((item, index) =>
-        [
-          `候选 ${index + 1}`,
-          `标题：${getDisplayTitle(item.originalTitle, item.translatedTitle)}`,
-          buildItemSummary(item) ? `摘要：${buildItemSummary(item)}` : null,
-          ...buildEventSignatureLines(getItemEventSignature(item)),
-        ]
-          .filter(Boolean)
-          .join("\n"),
-      )
-      .join("\n");
+    const summarySeed = buildClusterSummarySeed(clusterItems);
 
     const aiSummary = await summaryProvider.summarizeCluster(summarySeed, { title: fallback.title });
     const useAiSummary = Boolean(aiSummary?.trim()) && aiSummary !== fallback.summary;

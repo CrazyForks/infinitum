@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AiProvider } from "@/lib/ai/provider";
+import { recomputeCluster } from "@/lib/clusters/service";
 import { findRecentActiveClusterCandidates } from "@/lib/clusters/repository";
 import { prisma } from "@/lib/db";
 import { runIngestion, runIngestionTask, startIngestionTask } from "@/lib/ingestion/service";
@@ -198,6 +199,137 @@ describe("runIngestion", () => {
       { label: "摘要失败", value: 0 },
       { label: "已删除", value: 0 },
     ]);
+  });
+
+  it("uses conditional RSS metadata to skip unchanged sources", async () => {
+    const source = await prisma.source.create({
+      data: {
+        name: "Cached Feed",
+        rssUrl: "https://cached.example.com/feed.xml",
+        siteUrl: "https://cached.example.com",
+        enabled: true,
+        aiParsingEnabled: true,
+        feedEtag: "\"etag-1\"",
+        feedLastModified: "Wed, 10 Apr 2026 09:00:00 GMT",
+      },
+    });
+    const parser = {
+      parseURL: vi.fn().mockResolvedValue({
+        notModified: true,
+        etag: "\"etag-1\"",
+        lastModified: "Wed, 10 Apr 2026 09:00:00 GMT",
+        items: [],
+      }),
+    };
+    const aiProvider = buildAiProviderMock();
+
+    const result = await runIngestion({
+      trigger: "manual",
+      parser,
+      articleFetcher: vi.fn(),
+      aiProvider,
+      sourceConfigs: [
+        {
+          name: "Cached Feed",
+          rssUrl: "https://cached.example.com/feed.xml",
+          siteUrl: "https://cached.example.com",
+          enabled: true,
+          aiParsingEnabled: true,
+        },
+      ],
+      blacklist: [],
+      now: new Date("2026-04-10T10:00:00.000Z"),
+    });
+
+    expect(result.itemCount).toBe(0);
+    expect(parser.parseURL).toHaveBeenCalledWith("https://cached.example.com/feed.xml", {
+      headers: {
+        "If-None-Match": "\"etag-1\"",
+        "If-Modified-Since": "Wed, 10 Apr 2026 09:00:00 GMT",
+      },
+    });
+    expect(aiProvider.summarizeItem).not.toHaveBeenCalled();
+    expect(aiProvider.enrichContent).not.toHaveBeenCalled();
+
+    const storedSource = await prisma.source.findUniqueOrThrow({
+      where: { id: source.id },
+    });
+    expect(storedSource.lastFetchedAt?.toISOString()).toBe("2026-04-10T10:00:00.000Z");
+  });
+
+  it("commits feed content hashes and skips identical feed payloads on the next run", async () => {
+    const feedItems = [
+      {
+        title: "OpenAI ships a cached toolkit",
+        link: "https://example.com/posts/cached-toolkit",
+        isoDate: "2026-04-10T09:00:00.000Z",
+        contentSnippet: "Brief cached summary",
+      },
+    ];
+    const parser = {
+      parseURL: vi.fn().mockResolvedValue({
+        etag: "\"etag-2\"",
+        lastModified: "Wed, 10 Apr 2026 10:00:00 GMT",
+        items: feedItems,
+      }),
+    };
+    const aiProvider = buildAiProviderMock({
+      summarizeItem: vi.fn().mockResolvedValue("缓存内容摘要。"),
+      enrichContent: vi.fn().mockResolvedValue({
+        translatedTitle: "OpenAI 发布缓存工具包",
+        moderationStatus: "allowed",
+        moderationReason: null,
+        moderationDetail: null,
+        qualityScore: 88,
+        qualityRationale: "高质量",
+        eventSignature: buildEventSignature({
+          eventType: "launch",
+          eventSubject: "OpenAI",
+          eventAction: "发布",
+          eventObject: "cached toolkit",
+        }),
+      }),
+      summarizeCluster: vi.fn().mockResolvedValue("不会被二次调用"),
+    });
+    const sourceConfigs = [
+      {
+        name: "Example Feed",
+        rssUrl: "https://example.com/feed.xml",
+        siteUrl: "https://example.com",
+        enabled: true,
+        aiParsingEnabled: true,
+      },
+    ];
+
+    const firstRun = await runIngestion({
+      trigger: "manual",
+      parser,
+      articleFetcher: vi.fn(),
+      aiProvider,
+      sourceConfigs,
+      blacklist: [],
+      now: new Date("2026-04-10T10:00:00.000Z"),
+    });
+    const secondRun = await runIngestion({
+      trigger: "manual",
+      parser,
+      articleFetcher: vi.fn(),
+      aiProvider,
+      sourceConfigs,
+      blacklist: [],
+      now: new Date("2026-04-10T11:00:00.000Z"),
+    });
+
+    expect(firstRun.itemCount).toBe(1);
+    expect(secondRun.itemCount).toBe(0);
+    expect(aiProvider.summarizeItem).toHaveBeenCalledTimes(1);
+    expect(aiProvider.enrichContent).toHaveBeenCalledTimes(1);
+
+    const storedSource = await prisma.source.findFirstOrThrow({
+      where: { rssUrl: "https://example.com/feed.xml" },
+    });
+    expect(storedSource.feedContentHash).not.toBeNull();
+    expect(storedSource.lastFetchedAt?.toISOString()).toBe("2026-04-10T11:00:00.000Z");
   });
 
   it("stops ingestion after a cancellation request", async () => {
@@ -406,7 +538,7 @@ describe("runIngestion", () => {
     expect(result.status).toBe("succeeded");
     expect(result.successCount).toBe(2);
     expect(result.failureCount).toBe(0);
-    expect(parser.parseURL).toHaveBeenCalledWith("https://example.com/feed.xml");
+    expect(parser.parseURL).toHaveBeenCalledWith("https://example.com/feed.xml", { headers: {} });
     expect(articleFetcher).toHaveBeenCalledTimes(2);
     expect(aiProvider.enrichContent).toHaveBeenCalledTimes(2);
     expect(aiProvider.matchClusterCandidate).not.toHaveBeenCalled();
@@ -522,7 +654,6 @@ describe("runIngestion", () => {
       summarizeCluster: vi.fn().mockResolvedValue("不会被使用"),
       matchClusterCandidate: vi.fn().mockResolvedValue(null),
     });
-
     await runIngestion({
       trigger: "manual",
       parser,
@@ -1264,6 +1395,73 @@ describe("runIngestion", () => {
     expect(storedCluster.title).toBe("OpenAI 发布 solo launch");
   });
 
+  it("skips cluster summary ai when the cluster summary input hash is unchanged", async () => {
+    const parser = {
+      parseURL: vi.fn().mockResolvedValue({
+        items: [
+          {
+            title: "OpenAI ships a new agent toolkit",
+            link: "https://example.com/posts/openai-toolkit",
+            isoDate: "2026-04-10T09:00:00.000Z",
+            contentSnippet: "Brief summary",
+          },
+          {
+            title: "Another report on OpenAI agent toolkit",
+            link: "https://example.com/posts/openai-toolkit-2",
+            isoDate: "2026-04-10T09:30:00.000Z",
+            contentSnippet: "Another brief summary",
+          },
+        ],
+      }),
+    };
+    const summarizeCluster = vi.fn().mockResolvedValue("两篇报道都聚焦 OpenAI agent toolkit。");
+    const aiProvider = buildAiProviderMock({
+      summarizeItem: vi.fn().mockResolvedValue("OpenAI 发布 agent toolkit。"),
+      enrichContent: vi.fn().mockResolvedValue({
+        translatedTitle: "OpenAI 发布 agent toolkit",
+        moderationStatus: "allowed",
+        moderationReason: null,
+        moderationDetail: null,
+        qualityScore: 90,
+        qualityRationale: "高质量",
+        eventSignature: buildEventSignature({
+          eventType: "launch",
+          eventSubject: "OpenAI",
+          eventAction: "发布",
+          eventObject: "agent toolkit",
+        }),
+      }),
+      summarizeCluster,
+      matchClusterCandidate: vi.fn().mockResolvedValue(null),
+    });
+
+    await runIngestion({
+      trigger: "manual",
+      parser,
+      articleFetcher: vi.fn(),
+      aiProvider,
+      sourceConfigs: [
+        {
+          name: "Example Feed",
+          rssUrl: "https://example.com/feed.xml",
+          siteUrl: "https://example.com",
+          enabled: true,
+          aiParsingEnabled: true,
+        },
+      ],
+      blacklist: [],
+      now: new Date("2026-04-10T10:00:00.000Z"),
+    });
+
+    const storedCluster = await prisma.contentCluster.findFirstOrThrow();
+    expect(storedCluster.summaryInputHash).not.toBeNull();
+    expect(summarizeCluster).toHaveBeenCalledOnce();
+
+    await recomputeCluster(storedCluster.id, aiProvider);
+
+    expect(summarizeCluster).toHaveBeenCalledOnce();
+  });
+
   it("normalizes noisy event signatures before exact cluster matching", async () => {
     const source = await prisma.source.create({
       data: {
@@ -1360,7 +1558,6 @@ describe("runIngestion", () => {
       summarizeCluster: vi.fn().mockResolvedValue("不会被使用"),
       matchClusterCandidate: vi.fn().mockResolvedValue(null),
     });
-
     await runIngestion({
       trigger: "manual",
       parser,
@@ -1416,7 +1613,7 @@ describe("runIngestion", () => {
       publishedAt,
     });
 
-    await prisma.item.create({
+    const existingItem = await prisma.item.create({
       data: {
         sourceId: source.id,
         originalUrl,
@@ -1467,7 +1664,6 @@ describe("runIngestion", () => {
       summarizeCluster: vi.fn().mockResolvedValue("不会被使用"),
       matchClusterCandidate: vi.fn().mockResolvedValue(null),
     });
-
     await runIngestion({
       trigger: "manual",
       parser,
@@ -1493,6 +1689,7 @@ describe("runIngestion", () => {
     });
     expect(storedItem.summaryText).toBe("保留已有摘要");
     expect(storedItem.qualityScore).toBe(91);
+    expect(storedItem.updatedAt.getTime()).toBe(existingItem.updatedAt.getTime());
   });
 
   it("reruns ai analysis when an existing item's rss content changes", async () => {
@@ -1571,7 +1768,6 @@ describe("runIngestion", () => {
       summarizeCluster: vi.fn().mockResolvedValue("不会被使用"),
       matchClusterCandidate: vi.fn().mockResolvedValue(null),
     });
-
     await runIngestion({
       trigger: "manual",
       parser,
@@ -1678,9 +1874,9 @@ describe("runIngestion", () => {
       summarizeCluster: vi.fn().mockResolvedValue("不会被使用"),
       matchClusterCandidate: vi.fn().mockResolvedValue(null),
     });
+    const taskRun = await startIngestionTask({ triggerType: "manual" });
 
-    await runIngestion({
-      trigger: "manual",
+    await runIngestionTask(taskRun, {
       parser,
       articleFetcher: vi.fn(),
       aiProvider,
@@ -1699,6 +1895,22 @@ describe("runIngestion", () => {
 
     expect(aiProvider.summarizeItem).not.toHaveBeenCalled();
     expect(aiProvider.enrichContent).toHaveBeenCalledOnce();
+    const storedTaskRun = await prisma.backgroundTaskRun.findUniqueOrThrow({
+      where: { id: taskRun.id },
+    });
+    const latestAiBreakdown = JSON.parse(storedTaskRun.aiCallBreakdownJson ?? "[]") as Array<{
+      key: string;
+      actual: number;
+      estimated: number;
+    }>;
+    expect(latestAiBreakdown.find((entry) => entry.key === "item_summary")).toMatchObject({
+      actual: 0,
+      estimated: 0,
+    });
+    expect(latestAiBreakdown.find((entry) => entry.key === "item_analysis")).toMatchObject({
+      actual: 1,
+      estimated: 1,
+    });
 
     const storedItem = await prisma.item.findFirstOrThrow({
       where: { sourceId: source.id },
@@ -1819,7 +2031,7 @@ describe("runIngestion", () => {
     });
 
     expect(result.status).toBe("succeeded");
-    expect(parser.parseURL).toHaveBeenCalledWith("https://db.example.com/feed.xml");
+    expect(parser.parseURL).toHaveBeenCalledWith("https://db.example.com/feed.xml", { headers: {} });
     expect(aiProvider.enrichContent).toHaveBeenCalledOnce();
   });
 });

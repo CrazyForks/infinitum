@@ -586,5 +586,33 @@ describe("regenerateItemContent", () => {
     expect(summarySeed).toContain("事件主体：OpenAI");
     expect(summarySeed).toContain("事件动作：上线");
     expect(summarySeed).toContain("关键对象：toolkit enterprise");
+
+    const secondTaskRun = await prisma.backgroundTaskRun.create({
+      data: {
+        kind: "cluster_regenerate_summary",
+        triggerType: "admin_action",
+        status: "queued",
+        label: "重新生成聚合摘要",
+        entityId: cluster.id,
+      },
+    });
+
+    await executeClusterSummaryTask(secondTaskRun, {
+      aiProvider: buildAiProviderMock({
+        summarizeCluster,
+        matchClusterCandidate: vi.fn().mockResolvedValue(null),
+      }),
+    });
+
+    const storedCluster = await prisma.contentCluster.findUniqueOrThrow({
+      where: { id: cluster.id },
+    });
+    const storedSecondTaskRun = await prisma.backgroundTaskRun.findUniqueOrThrow({
+      where: { id: secondTaskRun.id },
+    });
+
+    expect(storedCluster.summaryInputHash).not.toBeNull();
+    expect(summarizeCluster).toHaveBeenCalledTimes(2);
+    expect(storedSecondTaskRun.aiCallCountActual).toBe(1);
   });
 });

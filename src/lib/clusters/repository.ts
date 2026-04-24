@@ -74,6 +74,7 @@ export async function createContentCluster(data: {
   fingerprint: string;
   title: string;
   summary: string;
+  summaryInputHash?: string | null;
   score: number;
   latestPublishedAt: Date;
   eventType?: string | null;
@@ -89,6 +90,7 @@ export async function createContentCluster(data: {
       kind: "topic",
       title: data.title,
       summary: data.summary,
+      summaryInputHash: data.summaryInputHash ?? null,
       score: data.score,
       itemCount: 0,
       latestPublishedAt: data.latestPublishedAt,
@@ -135,6 +137,7 @@ export async function updateClusterSummary(
   data: {
     title: string;
     summary: string;
+    summaryInputHash?: string | null;
     score: number;
     itemCount: number;
     latestPublishedAt: Date;

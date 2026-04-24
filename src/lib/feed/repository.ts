@@ -85,6 +85,44 @@ export async function findExistingItem(urlHash: string, dedupeSignature: string)
   });
 }
 
+export async function findExistingItemsForDedupeKeys(keys: Array<{ urlHash: string; dedupeSignature: string }>) {
+  if (keys.length === 0) {
+    return [];
+  }
+
+  return prisma.item.findMany({
+    where: {
+      OR: [
+        {
+          urlHash: {
+            in: [...new Set(keys.map((key) => key.urlHash))],
+          },
+        },
+        {
+          dedupeSignature: {
+            in: [...new Set(keys.map((key) => key.dedupeSignature))],
+          },
+        },
+      ],
+    },
+  });
+}
+
+export async function updateSourceFetchMetadata(
+  sourceId: string,
+  data: {
+    feedEtag?: string | null;
+    feedLastModified?: string | null;
+    feedContentHash?: string | null;
+    lastFetchedAt: Date;
+  },
+) {
+  return prisma.source.update({
+    where: { id: sourceId },
+    data,
+  });
+}
+
 export async function upsertItem(
   where: { id?: string; urlHash: string; dedupeSignature: string },
   data: Prisma.ItemUncheckedCreateInput,

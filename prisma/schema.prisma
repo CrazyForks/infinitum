@@ -94,6 +94,10 @@ model Source {
   siteUrl          String
   enabled          Boolean  @default(true)
   aiParsingEnabled Boolean  @default(true)
+  feedEtag         String?
+  feedLastModified String?
+  feedContentHash  String?
+  lastFetchedAt    DateTime?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
   items            Item[]
@@ -156,6 +160,7 @@ model ContentCluster {
   kind            ContentClusterKind @default(topic)
   title           String
   summary         String
+  summaryInputHash String?
   score           Int @default(50)
   itemCount       Int @default(0)
   latestPublishedAt DateTime
