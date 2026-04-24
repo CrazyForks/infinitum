@@ -72,6 +72,7 @@ export type AdminSettingsSnapshot = {
     aiParsingEnabled: boolean;
     groupId: string | null;
     groupName: string | null;
+    lastItemCreatedAt: string | null;
   }>;
 };
 

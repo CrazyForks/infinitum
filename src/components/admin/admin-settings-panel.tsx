@@ -96,6 +96,21 @@ function refreshPage() {
   }
 }
 
+const sourceUpdateFormatter = new Intl.DateTimeFormat("zh-CN", {
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
+function formatSourceUpdateTime(value: string | null) {
+  if (!value) {
+    return "暂无入库";
+  }
+
+  return sourceUpdateFormatter.format(new Date(value));
+}
+
 export function AdminSettingsPanel({
   initialSettings,
   onRefresh,
@@ -698,8 +713,9 @@ export function AdminSettingsPanel({
                     <tr>
                       <th className="w-[28%] px-4 py-3 text-left">RSS 源名称</th>
                       <th className="w-[18%] px-4 py-3 text-left">分组</th>
-                      <th className="w-[18%] px-4 py-3 text-left">状态</th>
-                      <th className="w-[21%] px-4 py-3 text-left">站点信息</th>
+                      <th className="w-[14%] px-4 py-3 text-left">状态</th>
+                      <th className="w-[16%] px-4 py-3 text-left">最近更新</th>
+                      <th className="w-[19%] px-4 py-3 text-left">站点信息</th>
                       <th className="w-[15%] px-4 py-3 text-right">操作</th>
                     </tr>
                   </thead>
@@ -722,6 +738,9 @@ export function AdminSettingsPanel({
                           <div className="mt-1 text-xs text-[var(--text-3)]">
                             {source.aiParsingEnabled !== false ? "AI解析" : "仅RSS"}
                           </div>
+                        </td>
+                        <td className="px-4 py-3 text-xs text-[var(--text-3)]">
+                          {formatSourceUpdateTime(source.lastItemCreatedAt)}
                         </td>
                         <td className="px-4 py-3 text-xs text-[var(--text-3)]">
                           <a

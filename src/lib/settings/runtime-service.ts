@@ -108,6 +108,15 @@ export async function getAdminSettings(): Promise<AdminSettingsSnapshot> {
     }),
     ensureDefaultIngestionSchedule(),
   ]);
+  const latestItemsBySource = await prisma.item.groupBy({
+    by: ["sourceId"],
+    _max: {
+      createdAt: true,
+    },
+  });
+  const latestItemCreatedAtBySourceId = new Map(
+    latestItemsBySource.map((entry) => [entry.sourceId, entry._max.createdAt]),
+  );
 
   const defaultModelConfig = modelApiConfigs.find((config) => config.isDefault);
 
@@ -129,6 +138,7 @@ export async function getAdminSettings(): Promise<AdminSettingsSnapshot> {
       aiParsingEnabled: source.aiParsingEnabled,
       groupId: source.groupId,
       groupName: source.group?.name ?? null,
+      lastItemCreatedAt: latestItemCreatedAtBySourceId.get(source.id)?.toISOString() ?? null,
     })),
   };
 }

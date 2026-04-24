@@ -219,6 +219,49 @@ describe("admin settings service", () => {
     );
   });
 
+  it("includes each source latest item ingestion time in admin settings", async () => {
+    const source = await prisma.source.create({
+      data: {
+        name: "Tracked Feed",
+        rssUrl: "https://tracked.example.com/feed.xml",
+        siteUrl: "https://tracked.example.com",
+        enabled: true,
+        aiParsingEnabled: true,
+      },
+    });
+
+    await prisma.item.createMany({
+      data: [
+        {
+          sourceId: source.id,
+          originalUrl: "https://tracked.example.com/old",
+          canonicalUrl: "https://tracked.example.com/old",
+          urlHash: "tracked-old",
+          dedupeSignature: "tracked|old",
+          originalTitle: "Old item",
+          publishedAt: new Date("2026-04-19T08:00:00.000Z"),
+          createdAt: new Date("2026-04-19T08:01:00.000Z"),
+        },
+        {
+          sourceId: source.id,
+          originalUrl: "https://tracked.example.com/new",
+          canonicalUrl: "https://tracked.example.com/new",
+          urlHash: "tracked-new",
+          dedupeSignature: "tracked|new",
+          originalTitle: "New item",
+          publishedAt: new Date("2026-04-20T08:00:00.000Z"),
+          createdAt: new Date("2026-04-20T08:01:00.000Z"),
+        },
+      ],
+    });
+
+    const settings = await getAdminSettings();
+
+    expect(settings.sources.find((entry) => entry.id === source.id)?.lastItemCreatedAt).toBe(
+      "2026-04-20T08:01:00.000Z",
+    );
+  });
+
   it("imports OPML sources into matching groups", async () => {
     const importSourcesFromOpml = (
       settingsService as typeof settingsService & {

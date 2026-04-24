@@ -99,6 +99,7 @@ function buildInitialSettings(): AdminSettingsSnapshot {
         aiParsingEnabled: true,
         groupId: "group-1",
         groupName: "Core",
+        lastItemCreatedAt: "2026-04-20T10:00:00.000Z",
       },
     ],
   };
@@ -421,6 +422,7 @@ describe("AdminSettingsPanel", () => {
               aiParsingEnabled: false,
               groupId: null,
               groupName: null,
+              lastItemCreatedAt: null,
             },
           ],
         }}
