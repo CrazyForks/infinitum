@@ -6,6 +6,7 @@ import {
   getCachedLatestFetchRunSnapshot,
 } from "@/lib/feed/service";
 import { resolveFeedRequest } from "@/lib/feed/request";
+import { getVisitorIdCookie } from "@/lib/feed/visitor";
 
 export const dynamic = "force-dynamic";
 
@@ -16,8 +17,9 @@ type PageProps = {
 export default async function Home({ searchParams }: PageProps) {
   const resolvedSearchParams = (await searchParams) ?? {};
   const { filters, pagination } = resolveFeedRequest(resolvedSearchParams);
+  const visitorId = await getVisitorIdCookie();
   const [feed, latestRunSnapshot, adminSession, feedFilterOptions] = await Promise.all([
-    getCachedFeedItems(filters, pagination),
+    getCachedFeedItems(filters, pagination, visitorId),
     getCachedLatestFetchRunSnapshot(),
     getAdminSession(),
     getCachedFeedFilterOptions(),

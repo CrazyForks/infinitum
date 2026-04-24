@@ -910,6 +910,7 @@ export function FeedPanel({
       setItems(payload.items);
       setPagination(payload.pagination);
       setGroups(payload.groups ?? availableGroups);
+      setGroupTotalCount(payload.groupTotalCount ?? payload.pagination.total);
       resetExpandedClusterState();
       setRefreshFeedback(null);
     });
@@ -988,6 +989,7 @@ export function FeedPanel({
         setItems(feedPayload.items);
         setPagination(feedPayload.pagination);
         setGroups(feedPayload.groups ?? availableGroups);
+        setGroupTotalCount(feedPayload.groupTotalCount ?? feedPayload.pagination.total);
         resetExpandedClusterState();
         setRefreshFeedback({
           tone: payload.run.status === "succeeded" || payload.run.status === "partial" ? "success" : "error",

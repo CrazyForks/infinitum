@@ -31,6 +31,20 @@ function render(ui: TestingRenderParameters[0], options?: TestingRenderParameter
   }
 }
 
+function renderWithTimezoneOffset(
+  ui: TestingRenderParameters[0],
+  timeZoneOffsetMinutes: number,
+  options?: TestingRenderParameters[1],
+) {
+  const getTimezoneOffsetSpy = vi.spyOn(Date.prototype, "getTimezoneOffset").mockReturnValue(timeZoneOffsetMinutes);
+
+  try {
+    return testingRender(ui, options);
+  } finally {
+    getTimezoneOffsetSpy.mockRestore();
+  }
+}
+
 const initialEntries: FeedEntryDTO[] = [
   {
     id: "cluster-1",
@@ -471,6 +485,61 @@ describe("FeedPanel", () => {
     expect(await screen.findByRole("button", { name: "全部内容 (5)" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "AI (3)" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "研究 (1)" })).toBeInTheDocument();
+  });
+
+  it("refreshes all-group count after client timezone hydration reloads the feed", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          items: [
+            {
+              ...initialEntries[1],
+              id: "item-timezone-reload",
+              title: "时区重载后的内容",
+            },
+          ],
+          groups: [{ id: "group-ai", name: "AI", count: 4 }],
+          groupTotalCount: 6,
+          nextCursor: null,
+          pagination: {
+            page: 1,
+            size: 20,
+            total: 1,
+            totalPages: 1,
+          },
+          range: "today" satisfies FeedRange,
+          sort: "time_desc" satisfies FeedSort,
+          start: null,
+          end: null,
+          groupId: null,
+          sourceId: null,
+          title: null,
+        }),
+      ),
+    );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderWithTimezoneOffset(
+      <FeedPanel
+        initialItems={initialEntries}
+        initialRange="today"
+        initialSort="time_desc"
+        initialStartDate={null}
+        initialEndDate={null}
+        initialNextCursor={null}
+        initialStatus={null}
+        isAdmin={false}
+        availableGroups={[]}
+        initialGroupTotalCount={0}
+        availableSources={availableSources}
+      />,
+      -480,
+    );
+
+    expect(await screen.findByText("时区重载后的内容")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "全部内容 (6)" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "AI (4)" })).toBeInTheDocument();
   });
 
   it("supports advanced filters with automatic refresh and title search", async () => {

@@ -152,6 +152,51 @@ export async function getLatestFetchRun() {
   });
 }
 
+export async function getLatestFeedItemUpdate() {
+  return prisma.item.findFirst({
+    select: {
+      id: true,
+      updatedAt: true,
+    },
+    where: {
+      status: "processed",
+      moderationStatus: {
+        in: [...DISPLAYABLE_MODERATION_STATUSES],
+      },
+      source: {
+        is: {
+          enabled: true,
+        },
+      },
+    },
+    orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+  });
+}
+
+export async function getLatestFeedSourceConfigUpdate() {
+  const [latestSource, latestGroup] = await Promise.all([
+    prisma.source.findFirst({
+      select: {
+        id: true,
+        updatedAt: true,
+      },
+      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+    }),
+    prisma.sourceGroup.findFirst({
+      select: {
+        id: true,
+        updatedAt: true,
+      },
+      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+    }),
+  ]);
+
+  return {
+    latestSource,
+    latestGroup,
+  };
+}
+
 export function toFetchRunSnapshot(run: FetchRun): FetchRunSnapshot {
   return {
     id: run.id,
