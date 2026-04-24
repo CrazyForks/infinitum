@@ -39,30 +39,30 @@ flowchart LR
 
 ## 快速开始
 
-### 1. 准备环境变量
+### 1. 配置 Compose
 
-```bash
-cp .env.docker.example .env.docker
-```
+编辑 `docker-compose.yml`，至少替换以下值：
 
-至少需要配置：
-
-- `DATABASE_URL`
+- `docker.io/<namespace>/infinitum-app:latest`
+- `docker.io/<namespace>/infinitum-worker:latest`
 - `ADMIN_PASSWORD`
 - `ADMIN_SESSION_SECRET`
 
-默认 Docker 环境示例：
-
-```env
-DATABASE_URL=file:/app/data/dev.db
-ADMIN_PASSWORD=change-me
-ADMIN_SESSION_SECRET=replace-with-a-long-random-secret
-```
+如通过 HTTP 在可信内网访问，可将 `ADMIN_SESSION_COOKIE_SECURE` 改为 `"false"`。
 
 ### 2. 启动服务
 
+使用已发布镜像部署：
+
 ```bash
-docker compose up -d --build
+docker compose pull
+docker compose up -d
+```
+
+如需从当前源码本地构建镜像：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 ```
 
 ### 3. 验证状态

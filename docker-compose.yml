@@ -1,34 +1,29 @@
 services:
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: app-runner
-    image: infinitum-app:latest
+    image: docker.io/<namespace>/infinitum-app:latest
     container_name: infinitum
     restart: unless-stopped
-    env_file:
-      - .env.docker
     environment:
       NODE_ENV: production
       PORT: 3000
       HOSTNAME: 0.0.0.0
+      DATABASE_URL: file:/app/data/dev.db
+      ADMIN_PASSWORD: change-me
+      ADMIN_SESSION_SECRET: replace-with-a-long-random-secret
+      ADMIN_SESSION_COOKIE_SECURE: "true"
     ports:
       - "3001:3000"
     volumes:
       - infinitum-data:/app/data
   worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: worker-runner
-    image: infinitum-worker:latest
+    image: docker.io/<namespace>/infinitum-worker:latest
     restart: unless-stopped
-    env_file:
-      - .env.docker
     environment:
       NODE_ENV: production
       DATABASE_URL: file:/app/data/dev.db
+      ADMIN_PASSWORD: change-me
+      ADMIN_SESSION_SECRET: replace-with-a-long-random-secret
+      ADMIN_SESSION_COOKIE_SECURE: "true"
     command: ["sh", "./scripts/worker-entrypoint.sh"]
     volumes:
       - infinitum-data:/app/data
