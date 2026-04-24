@@ -9,7 +9,7 @@ import {
 } from "@/lib/feed/repository";
 import { shouldTranslateTitle, stripHtmlTags } from "@/lib/feed/presentation";
 import { buildDedupeKeys, shouldFetchFullText } from "@/lib/ingestion/dedupe";
-import { findBlacklistMatch } from "@/lib/ingestion/filtering";
+import { evaluateRuleFilter } from "@/lib/ingestion/filtering";
 import type {
   ParsedFeedItem,
   ProcessedItemRecord,
@@ -209,13 +209,15 @@ export function estimatePreparedItemAiWork(
     return { summary: false, analysis: false };
   }
 
-  const initialFilterMatch = findBlacklistMatch({
+  const initialFilterMatch = evaluateRuleFilter({
     title: lookup.originalTitle,
     content: [lookup.rssContent, lookup.rssExcerpt].filter(Boolean).join("\n"),
+    url: lookup.originalUrl,
+    sourceName: preparedItem.sourceName,
     blacklist,
   });
 
-  if (initialFilterMatch) {
+  if (initialFilterMatch.filtered) {
     return { summary: false, analysis: false };
   }
 
@@ -343,13 +345,15 @@ export async function processFeedItem({
       existing.status !== "fetched" &&
       existing.status !== "failed",
   );
-  const initialFilterMatch = findBlacklistMatch({
+  const initialRuleFilter = evaluateRuleFilter({
     title: originalTitle,
     content: [rssContent, rssExcerpt].filter(Boolean).join("\n"),
+    url: originalUrl,
+    sourceName,
     blacklist,
   });
 
-  if (initialFilterMatch) {
+  if (initialRuleFilter.filtered) {
     const stored = await upsertItem(
       {
         id: existing?.id,
@@ -374,10 +378,10 @@ export async function processFeedItem({
         status: "filtered",
         summaryStatus: "pending",
         analysisStatus: "pending",
-        filterReason: initialFilterMatch,
+        filterReason: initialRuleFilter.reason,
         moderationStatus: "filtered",
-        moderationReason: "rule_blacklist",
-        moderationDetail: `Matched blacklist keyword: ${initialFilterMatch}`,
+        moderationReason: "rule_filter",
+        moderationDetail: initialRuleFilter.detail,
         qualityScore,
         qualityRationale,
         eventType: eventSignature?.eventType ?? null,
@@ -474,20 +478,22 @@ export async function processFeedItem({
     }
   }
 
-  const filterMatch = findBlacklistMatch({
+  const ruleFilter = evaluateRuleFilter({
     title: originalTitle,
     content: [rssContent, rssExcerpt, fullText].filter(Boolean).join("\n"),
+    url: originalUrl,
+    sourceName,
     blacklist,
   });
 
-  if (filterMatch) {
+  if (ruleFilter.filtered) {
     status = "filtered";
     summaryStatus = "pending";
     analysisStatus = "pending";
-    filterReason = filterMatch;
+    filterReason = ruleFilter.reason;
     moderationStatus = "filtered";
-    moderationReason = "rule_blacklist";
-    moderationDetail = `Matched blacklist keyword: ${filterMatch}`;
+    moderationReason = "rule_filter";
+    moderationDetail = ruleFilter.detail;
   } else if (aiParsingEnabled) {
     const translateTitle = shouldTranslateTitle(originalTitle);
     const summarySourceText = fullText || rssContent || rssExcerpt || originalTitle;
@@ -643,7 +649,7 @@ export async function processFeedItem({
     affectedClusterId,
     fullTextFetched,
     metrics: {
-      blacklistFiltered: Boolean(filterMatch),
+      blacklistFiltered: ruleFilter.filtered,
       summaryCompleted,
       summaryFailed,
       analysisCompleted,

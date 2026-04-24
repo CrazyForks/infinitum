@@ -25,6 +25,7 @@ enum ModerationReason {
   marketing
   low_quality
   duplicate_noise
+  rule_filter
   rule_blacklist
   other
 }

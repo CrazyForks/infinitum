@@ -40,6 +40,7 @@ const reviewReasonLabels: Record<NonNullable<ReviewItemDTO["moderationReason"]>,
   marketing: "营销内容",
   low_quality: "低质量",
   duplicate_noise: "重复噪音",
+  rule_filter: "规则过滤",
   rule_blacklist: "规则黑名单",
   other: "其他原因",
 };
@@ -48,6 +49,7 @@ const reviewReasonTone: Record<NonNullable<ReviewItemDTO["moderationReason"]>, "
   marketing: "warning",
   low_quality: "neutral",
   duplicate_noise: "neutral",
+  rule_filter: "danger",
   rule_blacklist: "danger",
   other: "neutral",
 };

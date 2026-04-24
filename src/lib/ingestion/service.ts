@@ -460,7 +460,7 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
       }
 
       if (result?.metrics?.blacklistFiltered) {
-        timelineCounters.ruleFilter.blacklistFiltered += 1;
+        timelineCounters.ruleFilter.ruleFiltered += 1;
       }
 
       if (result?.metrics?.reusedExisting) {

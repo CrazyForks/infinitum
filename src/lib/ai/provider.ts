@@ -35,7 +35,7 @@ export type AiEventSignature = {
 export type AiEnrichment = {
   translatedTitle: string | null;
   moderationStatus: "allowed" | "filtered" | "restored";
-  moderationReason: "marketing" | "low_quality" | "duplicate_noise" | "rule_blacklist" | "other" | null;
+  moderationReason: "marketing" | "low_quality" | "duplicate_noise" | "rule_filter" | "rule_blacklist" | "other" | null;
   moderationDetail: string | null;
   qualityScore: number;
   qualityRationale: string;
@@ -257,6 +257,7 @@ function normalizeModerationReason(value: string | null | undefined): AiEnrichme
   return value === "marketing" ||
     value === "low_quality" ||
     value === "duplicate_noise" ||
+    value === "rule_filter" ||
     value === "rule_blacklist" ||
     value === "other"
     ? value

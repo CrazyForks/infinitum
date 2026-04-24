@@ -84,7 +84,7 @@ export type ReviewItemDTO = {
   author?: string | null;
   summary: string;
   moderationStatus: "allowed" | "filtered" | "restored";
-  moderationReason: "marketing" | "low_quality" | "duplicate_noise" | "rule_blacklist" | "other" | null;
+  moderationReason: "marketing" | "low_quality" | "duplicate_noise" | "rule_filter" | "rule_blacklist" | "other" | null;
   moderationDetail: string | null;
   qualityScore: number;
   qualityRationale: string;

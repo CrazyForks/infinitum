@@ -19,7 +19,7 @@ export type IngestionTimelineCounters = {
     fullTextFetched: number;
   };
   ruleFilter: {
-    blacklistFiltered: number;
+    ruleFiltered: number;
     reusedExisting: number;
   };
   itemSummary: {
@@ -108,7 +108,7 @@ export function createIngestionTimelineCounters(): IngestionTimelineCounters {
       fullTextFetched: 0,
     },
     ruleFilter: {
-      blacklistFiltered: 0,
+      ruleFiltered: 0,
       reusedExisting: 0,
     },
     itemSummary: {
@@ -225,11 +225,11 @@ export function buildIngestionTaskTimeline(input: {
       label: "规则过滤",
       status: resolveNodeStatusFromCounts({
         stageTiming: stages.itemProcessing,
-        successCount: counters.ruleFilter.blacklistFiltered + counters.ruleFilter.reusedExisting,
+        successCount: counters.ruleFilter.ruleFiltered + counters.ruleFilter.reusedExisting,
       }),
       ...toNodeTiming(stages.itemProcessing),
       metrics: [
-        { label: "命中黑名单", value: counters.ruleFilter.blacklistFiltered },
+        { label: "命中规则过滤", value: counters.ruleFilter.ruleFiltered },
         { label: "复用已有处理", value: counters.ruleFilter.reusedExisting },
       ],
     },

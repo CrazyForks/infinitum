@@ -567,7 +567,7 @@ describe("runIngestion", () => {
     expect(secondaryToolkitItem?.moderationStatus).toBe("allowed");
     expect(filteredItem?.status).toBe("filtered");
     expect(filteredItem?.moderationStatus).toBe("filtered");
-    expect(filteredItem?.moderationReason).toBe("rule_blacklist");
+    expect(filteredItem?.moderationReason).toBe("rule_filter");
 
     const storedCluster = await prisma.contentCluster.findUnique({
       where: {
