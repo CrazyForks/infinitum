@@ -14,6 +14,21 @@ export const MAX_FULL_TEXT_FETCH_THRESHOLD = 5000;
 export const MIN_PER_SOURCE_ITEM_LIMIT = 1;
 export const MAX_PER_SOURCE_ITEM_LIMIT = 200;
 
+function normalizeProcessingStartAt(value: string | null): string | null {
+  const normalized = value?.trim();
+
+  if (!normalized) {
+    return null;
+  }
+
+  const parsed = new Date(normalized);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new Error("Processing start time must be a valid date time.");
+  }
+
+  return parsed.toISOString();
+}
+
 export function normalizeScheduleInput(input: ScheduleUpdateInput): ScheduleUpdateInput {
   const cronExpression = input.cronExpression.trim();
 
@@ -62,6 +77,7 @@ export function normalizeScheduleInput(input: ScheduleUpdateInput): ScheduleUpda
     sourceConcurrency: input.sourceConcurrency,
     fullTextFetchThreshold: input.fullTextFetchThreshold,
     perSourceItemLimit: input.perSourceItemLimit,
+    processingStartAt: normalizeProcessingStartAt(input.processingStartAt ?? null),
   };
 }
 

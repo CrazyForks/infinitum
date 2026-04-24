@@ -155,6 +155,8 @@ async function resolveRunOptions(options?: Partial<RunIngestionOptions>): Promis
       DEFAULT_FULL_TEXT_FETCH_THRESHOLD,
     perSourceItemLimit:
       options?.perSourceItemLimit ?? runtimeConfig?.ingestion.perSourceItemLimit ?? 20,
+    processingStartAt:
+      options?.processingStartAt ?? runtimeConfig?.ingestion.processingStartAt ?? null,
     now,
     taskTimelineModelNames: runtimeConfig?.selectedPromptConfigs
       ? {
@@ -246,6 +248,7 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
     sourceConcurrency,
     fullTextFetchThreshold,
     perSourceItemLimit,
+    processingStartAt,
     now,
     taskTimelineModelNames,
   } = options;
@@ -378,10 +381,12 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
     timelineCounters.sourceFetch.itemsFetched = preparedItems.length;
   }
 
-  const preparedLookups = preparedItems.map((preparedItem) => ({
-    preparedItem,
-    lookup: buildPreparedFeedItemLookup(preparedItem, now),
-  }));
+  const preparedLookups = preparedItems
+    .map((preparedItem) => ({
+      preparedItem,
+      lookup: buildPreparedFeedItemLookup(preparedItem, now),
+    }))
+    .filter((entry) => !entry.lookup || !processingStartAt || entry.lookup.publishedAt >= processingStartAt);
   const existingItems = await findExistingItemsForDedupeKeys(
     preparedLookups
       .map((entry) => entry.lookup)

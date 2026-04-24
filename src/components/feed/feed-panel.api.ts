@@ -22,6 +22,8 @@ type FeedPayload = {
   sort: FeedSort;
   start: string | null;
   end: string | null;
+  publishedStart: string | null;
+  publishedEnd: string | null;
   groupId: string | null;
   sourceId: string | null;
   title: string | null;

@@ -15,6 +15,8 @@ export async function GET(request: Request) {
       sort: filters.sort,
       start: filters.start,
       end: filters.end,
+      publishedStart: filters.publishedStart,
+      publishedEnd: filters.publishedEnd,
       groupId: filters.groupId,
       sourceId: filters.sourceId,
       title: filters.title,

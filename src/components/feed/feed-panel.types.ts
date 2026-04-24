@@ -17,6 +17,8 @@ export type FeedPanelProps = {
   initialSort: FeedSort;
   initialStartDate: string | null;
   initialEndDate: string | null;
+  initialPublishedStartDate?: string | null;
+  initialPublishedEndDate?: string | null;
   initialNextCursor?: string | null;
   initialPagination?: FeedPagination | null;
   initialStatus: FetchRunSnapshot | null;
@@ -34,6 +36,8 @@ export type FeedQueryState = {
   sort: FeedSort;
   startDate: string | null;
   endDate: string | null;
+  publishedStartDate: string | null;
+  publishedEndDate: string | null;
   groupId: string | null;
   sourceId: string | null;
   title: string | null;

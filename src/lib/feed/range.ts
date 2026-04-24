@@ -113,13 +113,35 @@ export function resolveFeedFilters(
   input: Partial<FeedFilters> & Pick<FeedFilters, "range" | "sort">,
   now = new Date(),
   timeZoneOffsetMinutes = 0,
-): FeedFilters & { rangeStart: Date | null; rangeEnd: Date | null; isCustomRange: boolean } {
+): FeedFilters & {
+  rangeStart: Date | null;
+  rangeEnd: Date | null;
+  publishedRangeStart: Date | null;
+  publishedRangeEnd: Date | null;
+  isCustomRange: boolean;
+} {
   let start = normalizeFeedDateInput(input.start);
   let end = normalizeFeedDateInput(input.end);
+  let publishedStart = normalizeFeedDateInput(input.publishedStart);
+  let publishedEnd = normalizeFeedDateInput(input.publishedEnd);
 
   if (start && end && start > end) {
     [start, end] = [end, start];
   }
+
+  if (publishedStart && publishedEnd && publishedStart > publishedEnd) {
+    [publishedStart, publishedEnd] = [publishedEnd, publishedStart];
+  }
+
+  const sharedFilters = {
+    groupId: normalizeFeedFilterId(input.groupId),
+    sourceId: normalizeFeedFilterId(input.sourceId),
+    title: input.title?.trim() ? input.title.trim() : null,
+    publishedStart,
+    publishedEnd,
+    publishedRangeStart: publishedStart ? buildDateBoundary(publishedStart, "start", timeZoneOffsetMinutes) : null,
+    publishedRangeEnd: publishedEnd ? buildDateBoundary(publishedEnd, "end", timeZoneOffsetMinutes) : null,
+  };
 
   if (start || end) {
     return {
@@ -127,9 +149,7 @@ export function resolveFeedFilters(
       sort: input.sort,
       start,
       end,
-      groupId: normalizeFeedFilterId(input.groupId),
-      sourceId: normalizeFeedFilterId(input.sourceId),
-      title: input.title?.trim() ? input.title.trim() : null,
+      ...sharedFilters,
       rangeStart: start ? buildDateBoundary(start, "start", timeZoneOffsetMinutes) : null,
       rangeEnd: end ? buildDateBoundary(end, "end", timeZoneOffsetMinutes) : null,
       isCustomRange: true,
@@ -141,9 +161,7 @@ export function resolveFeedFilters(
     sort: input.sort,
     start: null,
     end: null,
-    groupId: normalizeFeedFilterId(input.groupId),
-    sourceId: normalizeFeedFilterId(input.sourceId),
-    title: input.title?.trim() ? input.title.trim() : null,
+    ...sharedFilters,
     rangeStart: getRangeStart(input.range, now, timeZoneOffsetMinutes),
     rangeEnd: null,
     isCustomRange: false,

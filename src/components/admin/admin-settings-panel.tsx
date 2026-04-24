@@ -82,6 +82,30 @@ const settingsNavItems: Array<{
   { key: "tasks", label: "任务配置" },
 ] as const;
 
+function toDateTimeLocalValue(value: string | null | undefined) {
+  if (!value) {
+    return "";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  const offsetDate = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return offsetDate.toISOString().slice(0, 16);
+}
+
+function toIsoDateTimeOrNull(value: string) {
+  const normalized = value.trim();
+  if (!normalized) {
+    return null;
+  }
+
+  const date = new Date(normalized);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
 const groupBadgePalette = [
   "#3b82f6",
   "#14b8a6",
@@ -218,6 +242,9 @@ export function AdminSettingsPanel({
     useState(String(initialSettings.taskSchedule.fullTextFetchThreshold));
   const [taskSchedulePerSourceItemLimit, setTaskSchedulePerSourceItemLimit] =
     useState(String(initialSettings.taskSchedule.perSourceItemLimit));
+  const [taskScheduleProcessingStartAt, setTaskScheduleProcessingStartAt] = useState(
+    toDateTimeLocalValue(initialSettings.taskSchedule.processingStartAt),
+  );
   const [taskScheduleSnapshot, setTaskScheduleSnapshot] = useState(
     initialSettings.taskSchedule,
   );
@@ -594,6 +621,7 @@ export function AdminSettingsPanel({
           sourceConcurrency: parsedSourceConcurrency,
           fullTextFetchThreshold: parsedFullTextFetchThreshold,
           perSourceItemLimit: parsedPerSourceItemLimit,
+          processingStartAt: toIsoDateTimeOrNull(taskScheduleProcessingStartAt),
         });
 
         setTaskScheduleSnapshot(schedule);
@@ -602,6 +630,7 @@ export function AdminSettingsPanel({
         setTaskScheduleSourceConcurrency(String(schedule.sourceConcurrency));
         setTaskScheduleFullTextFetchThreshold(String(schedule.fullTextFetchThreshold));
         setTaskSchedulePerSourceItemLimit(String(schedule.perSourceItemLimit));
+        setTaskScheduleProcessingStartAt(toDateTimeLocalValue(schedule.processingStartAt));
         showToast("任务配置已保存。", "success");
       } catch (error) {
         showToast(error instanceof Error ? error.message : "任务配置保存失败。", "error");
@@ -613,7 +642,8 @@ export function AdminSettingsPanel({
     taskScheduleCronExpression.trim() !== taskScheduleSnapshot.cronExpression ||
     taskScheduleSourceConcurrency.trim() !== String(taskScheduleSnapshot.sourceConcurrency) ||
     taskScheduleFullTextFetchThreshold.trim() !== String(taskScheduleSnapshot.fullTextFetchThreshold) ||
-    taskSchedulePerSourceItemLimit.trim() !== String(taskScheduleSnapshot.perSourceItemLimit);
+    taskSchedulePerSourceItemLimit.trim() !== String(taskScheduleSnapshot.perSourceItemLimit) ||
+    taskScheduleProcessingStartAt.trim() !== toDateTimeLocalValue(taskScheduleSnapshot.processingStartAt);
 
   const content = (
     <section aria-label="后台设置工作台" className="space-y-4">
@@ -1193,8 +1223,8 @@ export function AdminSettingsPanel({
             </div>
 
             <div className="space-y-6">
-              {/* Row 1: 任务开关 + Cron 表达式 */}
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              {/* Row 1: 任务开关 + Cron 表达式 + 处理开始时间点 */}
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
                 <div className="space-y-1.5">
                   <div className="block text-sm text-[var(--muted)]">任务开关</div>
                   <label className="flex min-h-10 items-center gap-2 rounded-sm border border-[color:var(--line)] bg-[var(--surface)] px-3 text-sm text-[var(--text-2)]">
@@ -1221,6 +1251,21 @@ export function AdminSettingsPanel({
                     value={taskScheduleCronExpression}
                     onChange={(event) => setTaskScheduleCronExpression(event.target.value)}
                     placeholder="例如 0 * * * *"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label
+                    htmlFor="task-schedule-processing-start-at"
+                    className="block text-sm text-[var(--muted)]"
+                  >
+                    处理开始时间点
+                  </label>
+                  <TextInput
+                    id="task-schedule-processing-start-at"
+                    type="datetime-local"
+                    value={taskScheduleProcessingStartAt}
+                    onChange={(event) => setTaskScheduleProcessingStartAt(event.target.value)}
                   />
                 </div>
               </div>

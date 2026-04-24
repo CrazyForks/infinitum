@@ -33,6 +33,8 @@ export default async function Home({ searchParams }: PageProps) {
         initialSort={filters.sort}
         initialStartDate={filters.start}
         initialEndDate={filters.end}
+        initialPublishedStartDate={filters.publishedStart}
+        initialPublishedEndDate={filters.publishedEnd}
         initialNextCursor={feed.nextCursor}
         initialPagination={feed.pagination}
         initialStatus={latestRunSnapshot}

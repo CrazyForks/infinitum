@@ -308,7 +308,12 @@ export function mapItemToReviewItem(item: ItemWithSource): ReviewItemDTO {
 }
 
 function buildItemWhere(
-  filters: FeedFilters & { rangeStart: Date | null; rangeEnd: Date | null },
+  filters: FeedFilters & {
+    rangeStart: Date | null;
+    rangeEnd: Date | null;
+    publishedRangeStart: Date | null;
+    publishedRangeEnd: Date | null;
+  },
   clusterId?: string | string[],
 ): Prisma.ItemWhereInput {
   return {
@@ -328,6 +333,14 @@ function buildItemWhere(
               createdAt: {
                 ...(filters.rangeStart ? { gte: filters.rangeStart } : {}),
                 ...(filters.rangeEnd ? { lte: filters.rangeEnd } : {}),
+              },
+            }
+          : {}),
+        ...(filters.publishedRangeStart || filters.publishedRangeEnd
+          ? {
+              publishedAt: {
+                ...(filters.publishedRangeStart ? { gte: filters.publishedRangeStart } : {}),
+                ...(filters.publishedRangeEnd ? { lte: filters.publishedRangeEnd } : {}),
               },
             }
           : {}),
@@ -399,7 +412,14 @@ function buildRecommendScoreSql(input: {
   return Prisma.sql`CASE WHEN ${combinedScore} > 100 THEN 100 WHEN ${combinedScore} < 0 THEN 0 ELSE ${combinedScore} END`;
 }
 
-function buildFeedEntryCandidatesCte(filters: FeedFilters & { rangeStart: Date | null; rangeEnd: Date | null }) {
+function buildFeedEntryCandidatesCte(
+  filters: FeedFilters & {
+    rangeStart: Date | null;
+    rangeEnd: Date | null;
+    publishedRangeStart: Date | null;
+    publishedRangeEnd: Date | null;
+  },
+) {
   const whereClauses: Prisma.Sql[] = [
     Prisma.sql`i.status = ${"processed"}`,
     Prisma.sql`i."moderationStatus" IN (${Prisma.join([...DISPLAYABLE_MODERATION_STATUSES])})`,
@@ -415,6 +435,14 @@ function buildFeedEntryCandidatesCte(filters: FeedFilters & { rangeStart: Date |
   if (filters.rangeEnd) {
     // SQLite 存储的是毫秒时间戳，需要将 Date 转换为时间戳数字
     whereClauses.push(Prisma.sql`i."createdAt" <= ${filters.rangeEnd.getTime()}`);
+  }
+
+  if (filters.publishedRangeStart) {
+    whereClauses.push(Prisma.sql`i."publishedAt" >= ${filters.publishedRangeStart.getTime()}`);
+  }
+
+  if (filters.publishedRangeEnd) {
+    whereClauses.push(Prisma.sql`i."publishedAt" <= ${filters.publishedRangeEnd.getTime()}`);
   }
 
   if (filters.groupId) {
@@ -586,7 +614,12 @@ export async function listFeedFilterOptions(): Promise<{
 }
 
 async function listFeedGroupCounts(
-  filters: FeedFilters & { rangeStart: Date | null; rangeEnd: Date | null },
+  filters: FeedFilters & {
+    rangeStart: Date | null;
+    rangeEnd: Date | null;
+    publishedRangeStart: Date | null;
+    publishedRangeEnd: Date | null;
+  },
 ): Promise<{
   groups: FeedGroupOption[];
   totalCount: number;
@@ -628,7 +661,12 @@ async function listFeedGroupCounts(
 }
 
 export async function listFeedItems(
-  filters: FeedFilters & { rangeStart: Date | null; rangeEnd: Date | null },
+  filters: FeedFilters & {
+    rangeStart: Date | null;
+    rangeEnd: Date | null;
+    publishedRangeStart: Date | null;
+    publishedRangeEnd: Date | null;
+  },
   pagination: {
     page: number;
     size: number;
@@ -788,7 +826,12 @@ export async function listFeedItems(
 
 export async function listClusterItems(
   clusterId: string,
-  filters: FeedFilters & { rangeStart: Date | null; rangeEnd: Date | null },
+  filters: FeedFilters & {
+    rangeStart: Date | null;
+    rangeEnd: Date | null;
+    publishedRangeStart: Date | null;
+    publishedRangeEnd: Date | null;
+  },
 ) {
   const items = await prisma.item.findMany({
     where: buildItemWhere(filters, clusterId),

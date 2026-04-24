@@ -92,6 +92,12 @@ function applyIncrementalMigrations() {
       input: `ALTER TABLE "source_groups" ADD COLUMN "sortOrder" INTEGER NOT NULL DEFAULT 0;\nCREATE INDEX IF NOT EXISTS "source_groups_sortOrder_name_idx" ON "source_groups"("sortOrder", "name");\n`,
     });
   }
+
+  if (!columnExists("task_schedules", "processingStartAt")) {
+    runSqlite([dbPath], {
+      input: `ALTER TABLE "task_schedules" ADD COLUMN "processingStartAt" DATETIME;\n`,
+    });
+  }
 }
 
 function sleep(ms) {

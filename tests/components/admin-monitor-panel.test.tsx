@@ -134,6 +134,8 @@ describe("AdminMonitorPanel", () => {
           cronExpression: "*/15 * * * *",
           sourceConcurrency: 4,
           fullTextFetchThreshold: 120,
+          perSourceItemLimit: 20,
+          processingStartAt: null,
         }),
       });
     });

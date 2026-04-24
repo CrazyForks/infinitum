@@ -17,6 +17,8 @@ function serializeFeedFilters(filters: FeedFiltersInput, visitorId?: string) {
     ...filters,
     rangeStart: filters.rangeStart?.toISOString() ?? null,
     rangeEnd: filters.rangeEnd?.toISOString() ?? null,
+    publishedRangeStart: filters.publishedRangeStart?.toISOString() ?? null,
+    publishedRangeEnd: filters.publishedRangeEnd?.toISOString() ?? null,
     visitorId: visitorId ?? null,
   });
 }

@@ -10,6 +10,8 @@ import {
   MAX_SOURCE_CONCURRENCY,
   MIN_FULL_TEXT_FETCH_THRESHOLD,
   MIN_SOURCE_CONCURRENCY,
+  MAX_PER_SOURCE_ITEM_LIMIT,
+  MIN_PER_SOURCE_ITEM_LIMIT,
 } from "@/lib/tasks/scheduler";
 import type {
   BackgroundTaskMonitorSnapshot,
@@ -79,6 +81,30 @@ function formatDateTime(value: string | null) {
     timeStyle: "short",
     timeZone: "Asia/Shanghai",
   }).format(new Date(value));
+}
+
+function toDateTimeLocalValue(value: string | null | undefined) {
+  if (!value) {
+    return "";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  const offsetDate = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return offsetDate.toISOString().slice(0, 16);
+}
+
+function toIsoDateTimeOrNull(value: string) {
+  const normalized = value.trim();
+  if (!normalized) {
+    return null;
+  }
+
+  const date = new Date(normalized);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
 function getAiCallLabel(task: TaskRunSnapshot) {
@@ -259,6 +285,12 @@ export function AdminMonitorPanel({
   const [fullTextFetchThreshold, setFullTextFetchThreshold] = useState(
     String(initialSnapshot.schedule.fullTextFetchThreshold),
   );
+  const [perSourceItemLimit, setPerSourceItemLimit] = useState(
+    String(initialSnapshot.schedule.perSourceItemLimit),
+  );
+  const [processingStartAt, setProcessingStartAt] = useState(
+    toDateTimeLocalValue(initialSnapshot.schedule.processingStartAt),
+  );
   const [isPending, startTransition] = useTransition();
   const [cancellingTaskId, setCancellingTaskId] = useState<string | null>(null);
   const isScheduleDirtyRef = useRef(false);
@@ -267,7 +299,9 @@ export function AdminMonitorPanel({
     enabled !== snapshot.schedule.enabled ||
     cronExpression.trim() !== snapshot.schedule.cronExpression ||
     sourceConcurrency.trim() !== String(snapshot.schedule.sourceConcurrency) ||
-    fullTextFetchThreshold.trim() !== String(snapshot.schedule.fullTextFetchThreshold);
+    fullTextFetchThreshold.trim() !== String(snapshot.schedule.fullTextFetchThreshold) ||
+    perSourceItemLimit.trim() !== String(snapshot.schedule.perSourceItemLimit) ||
+    processingStartAt.trim() !== toDateTimeLocalValue(snapshot.schedule.processingStartAt);
 
   isScheduleDirtyRef.current = isScheduleDirty;
 
@@ -301,6 +335,8 @@ export function AdminMonitorPanel({
           setCronExpression(payload.schedule.cronExpression);
           setSourceConcurrency(String(payload.schedule.sourceConcurrency));
           setFullTextFetchThreshold(String(payload.schedule.fullTextFetchThreshold));
+          setPerSourceItemLimit(String(payload.schedule.perSourceItemLimit));
+          setProcessingStartAt(toDateTimeLocalValue(payload.schedule.processingStartAt));
         }
       } catch {
         if (!disposed) {
@@ -328,6 +364,7 @@ export function AdminMonitorPanel({
   const saveSchedule = () => {
     const parsedSourceConcurrency = Number.parseInt(sourceConcurrency.trim(), 10);
     const parsedFullTextFetchThreshold = Number.parseInt(fullTextFetchThreshold.trim(), 10);
+    const parsedPerSourceItemLimit = Number.parseInt(perSourceItemLimit.trim(), 10);
 
     if (
       !Number.isInteger(parsedSourceConcurrency) ||
@@ -336,6 +373,18 @@ export function AdminMonitorPanel({
     ) {
       showToast(
         `源抓取并发需为 ${MIN_SOURCE_CONCURRENCY}-${MAX_SOURCE_CONCURRENCY} 的整数。`,
+        "error",
+      );
+      return;
+    }
+
+    if (
+      !Number.isInteger(parsedPerSourceItemLimit) ||
+      parsedPerSourceItemLimit < MIN_PER_SOURCE_ITEM_LIMIT ||
+      parsedPerSourceItemLimit > MAX_PER_SOURCE_ITEM_LIMIT
+    ) {
+      showToast(
+        `每源处理上限需为 ${MIN_PER_SOURCE_ITEM_LIMIT}-${MAX_PER_SOURCE_ITEM_LIMIT} 的整数。`,
         "error",
       );
       return;
@@ -367,6 +416,8 @@ export function AdminMonitorPanel({
               cronExpression,
               sourceConcurrency: parsedSourceConcurrency,
               fullTextFetchThreshold: parsedFullTextFetchThreshold,
+              perSourceItemLimit: parsedPerSourceItemLimit,
+              processingStartAt: toIsoDateTimeOrNull(processingStartAt),
             }),
           },
         );
@@ -385,6 +436,8 @@ export function AdminMonitorPanel({
         }));
         setSourceConcurrency(String(schedule.sourceConcurrency));
         setFullTextFetchThreshold(String(schedule.fullTextFetchThreshold));
+        setPerSourceItemLimit(String(schedule.perSourceItemLimit));
+        setProcessingStartAt(toDateTimeLocalValue(schedule.processingStartAt));
         showToast("调度配置已保存。", "success");
       } catch {
         showToast("调度配置保存失败。", "error");
@@ -457,23 +510,90 @@ export function AdminMonitorPanel({
       </div>
 
       <div className="grid gap-3">
-        <label
-          className={cx(subtleCardClassName, "flex flex-col gap-3 p-3.5")}
-        >
-          <span className="font-mono text-[11px] font-medium uppercase tracking-[0.22em] text-[var(--muted)]">
-            Cron
-          </span>
-          <span className="text-sm font-medium text-[var(--foreground)]">
-            Cron 表达式
-          </span>
-          <input
-            aria-label="Cron 表达式"
-            className={inputClassName}
-            type="text"
-            value={cronExpression}
-            onChange={(event) => setCronExpression(event.target.value)}
-          />
-        </label>
+        <div className="grid gap-3 lg:grid-cols-3">
+          <label
+            className={cx(
+              subtleCardClassName,
+              "flex cursor-pointer flex-col gap-3 p-3.5",
+            )}
+          >
+            <span className="font-mono text-[11px] font-medium uppercase tracking-[0.22em] text-[var(--muted)]">
+              Scheduler
+            </span>
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-[var(--foreground)]">
+                启用默认抓取任务
+              </p>
+              <p className="text-sm leading-6 text-[var(--muted)]">
+                停用后不会继续自动拉取新内容，但历史任务记录仍会保留。
+              </p>
+            </div>
+            <span className="inline-flex items-center gap-3">
+              <span
+                aria-hidden="true"
+                className={cx(
+                  "relative inline-flex h-7 w-12 rounded-full border transition",
+                  enabled
+                    ? "border-[color:var(--accent)] bg-[var(--accent)]"
+                    : "border-[color:var(--line)] bg-[var(--surface)]",
+                )}
+              >
+                <span
+                  className={cx(
+                    "absolute left-0.5 top-0.5 h-6 w-6 rounded-full bg-[var(--surface-highlight)] shadow-[var(--shadow-sm)] transition-transform",
+                    enabled ? "translate-x-5" : "translate-x-0",
+                  )}
+                />
+              </span>
+              <input
+                aria-label="启用默认抓取任务"
+                checked={enabled}
+                className="sr-only"
+                type="checkbox"
+                onChange={(event) => setEnabled(event.target.checked)}
+              />
+              <span className="text-sm font-medium text-[var(--foreground)]">
+                {enabled ? "当前已启用" : "当前已停用"}
+              </span>
+            </span>
+          </label>
+
+          <label
+            className={cx(subtleCardClassName, "flex flex-col gap-3 p-3.5")}
+          >
+            <span className="font-mono text-[11px] font-medium uppercase tracking-[0.22em] text-[var(--muted)]">
+              Cron
+            </span>
+            <span className="text-sm font-medium text-[var(--foreground)]">
+              Cron 表达式
+            </span>
+            <input
+              aria-label="Cron 表达式"
+              className={inputClassName}
+              type="text"
+              value={cronExpression}
+              onChange={(event) => setCronExpression(event.target.value)}
+            />
+          </label>
+
+          <label
+            className={cx(subtleCardClassName, "flex flex-col gap-3 p-3.5")}
+          >
+            <span className="font-mono text-[11px] font-medium uppercase tracking-[0.22em] text-[var(--muted)]">
+              Start Time
+            </span>
+            <span className="text-sm font-medium text-[var(--foreground)]">
+              处理开始时间点
+            </span>
+            <input
+              aria-label="处理开始时间点"
+              className={inputClassName}
+              type="datetime-local"
+              value={processingStartAt}
+              onChange={(event) => setProcessingStartAt(event.target.value)}
+            />
+          </label>
+        </div>
 
         <label
           className={cx(subtleCardClassName, "flex flex-col gap-3 p-3.5")}
@@ -524,51 +644,29 @@ export function AdminMonitorPanel({
         </label>
 
         <label
-          className={cx(
-            subtleCardClassName,
-            "flex cursor-pointer flex-col gap-3 p-3.5",
-          )}
+          className={cx(subtleCardClassName, "flex flex-col gap-3 p-3.5")}
         >
           <span className="font-mono text-[11px] font-medium uppercase tracking-[0.22em] text-[var(--muted)]">
-            Scheduler
+            Item Limit
           </span>
-          <div className="space-y-2">
-            <p className="text-sm font-medium text-[var(--foreground)]">
-              启用默认抓取任务
-            </p>
-            <p className="text-sm leading-6 text-[var(--muted)]">
-              停用后不会继续自动拉取新内容，但历史任务记录仍会保留。
-            </p>
-          </div>
-          <span className="inline-flex items-center gap-3">
-            <span
-              aria-hidden="true"
-              className={cx(
-                "relative inline-flex h-7 w-12 rounded-full border transition",
-                enabled
-                  ? "border-[color:var(--accent)] bg-[var(--accent)]"
-                  : "border-[color:var(--line)] bg-[var(--surface)]",
-              )}
-            >
-              <span
-                className={cx(
-                  "absolute left-0.5 top-0.5 h-6 w-6 rounded-full bg-[var(--surface-highlight)] shadow-[var(--shadow-sm)] transition-transform",
-                  enabled ? "translate-x-5" : "translate-x-0",
-                )}
-              />
-            </span>
-            <input
-              aria-label="启用默认抓取任务"
-              checked={enabled}
-              className="sr-only"
-              type="checkbox"
-              onChange={(event) => setEnabled(event.target.checked)}
-            />
-            <span className="text-sm font-medium text-[var(--foreground)]">
-              {enabled ? "当前已启用" : "当前已停用"}
-            </span>
+          <span className="text-sm font-medium text-[var(--foreground)]">
+            每源处理上限
+          </span>
+          <input
+            aria-label="每源处理上限"
+            className={inputClassName}
+            type="number"
+            min={MIN_PER_SOURCE_ITEM_LIMIT}
+            max={MAX_PER_SOURCE_ITEM_LIMIT}
+            step={1}
+            value={perSourceItemLimit}
+            onChange={(event) => setPerSourceItemLimit(event.target.value)}
+          />
+          <span className="text-sm leading-6 text-[var(--muted)]">
+            控制每个信息源单轮最多准备处理多少条 RSS 文章。
           </span>
         </label>
+
       </div>
 
       <div className="grid gap-2.5 sm:grid-cols-2">
@@ -599,6 +697,14 @@ export function AdminMonitorPanel({
         <TaskFact
           label="Full Text Threshold"
           value={String(snapshot.schedule.fullTextFetchThreshold)}
+        />
+        <TaskFact
+          label="Per Source Limit"
+          value={String(snapshot.schedule.perSourceItemLimit)}
+        />
+        <TaskFact
+          label="Processing Start"
+          value={formatDateTime(snapshot.schedule.processingStartAt ?? null)}
         />
         <TaskFact label="Timezone" value={snapshot.schedule.timezone} />
       </div>

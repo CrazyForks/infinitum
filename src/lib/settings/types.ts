@@ -51,6 +51,7 @@ export type AdminSettingsSnapshot = {
     sourceConcurrency: number;
     fullTextFetchThreshold: number;
     perSourceItemLimit: number;
+    processingStartAt?: string | null;
     timezone: string;
     lastHeartbeatAt: string | null;
     lastRunStartedAt: string | null;

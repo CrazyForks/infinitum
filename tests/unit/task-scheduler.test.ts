@@ -33,6 +33,7 @@ describe("task scheduler", () => {
       sourceConcurrency: 4,
       fullTextFetchThreshold: 120,
       perSourceItemLimit: 20,
+      processingStartAt: null,
     });
   });
 

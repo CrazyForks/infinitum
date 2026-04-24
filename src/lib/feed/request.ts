@@ -43,6 +43,8 @@ export function resolveFeedRequest(searchParams: SearchParamSource, now = new Da
   const sortParam = getSearchParamValue(searchParams, "sort");
   const startParam = getSearchParamValue(searchParams, "start");
   const endParam = getSearchParamValue(searchParams, "end");
+  const publishedStartParam = getSearchParamValue(searchParams, "publishedStart");
+  const publishedEndParam = getSearchParamValue(searchParams, "publishedEnd");
   const groupIdParam = getSearchParamValue(searchParams, "groupId");
   const sourceIdParam = getSearchParamValue(searchParams, "sourceId");
   const titleParam = getSearchParamValue(searchParams, "title");
@@ -55,6 +57,8 @@ export function resolveFeedRequest(searchParams: SearchParamSource, now = new Da
         sort: sortParam && isFeedSort(sortParam) ? sortParam : "time_desc",
         start: normalizeFeedDateInput(startParam),
         end: normalizeFeedDateInput(endParam),
+        publishedStart: normalizeFeedDateInput(publishedStartParam),
+        publishedEnd: normalizeFeedDateInput(publishedEndParam),
         groupId: normalizeFeedFilterId(groupIdParam),
         sourceId: normalizeFeedFilterId(sourceIdParam),
         title: titleParam?.trim() ? titleParam.trim() : null,

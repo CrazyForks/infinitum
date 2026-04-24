@@ -406,6 +406,7 @@ export function toTaskScheduleSnapshot(schedule: {
   sourceConcurrency: number;
   fullTextFetchThreshold: number;
   perSourceItemLimit: number | null;
+  processingStartAt: Date | null;
   timezone: string;
   lastHeartbeatAt: Date | null;
   lastRunStartedAt: Date | null;
@@ -420,6 +421,7 @@ export function toTaskScheduleSnapshot(schedule: {
     sourceConcurrency: schedule.sourceConcurrency,
     fullTextFetchThreshold: schedule.fullTextFetchThreshold,
     perSourceItemLimit: schedule.perSourceItemLimit ?? 20,
+    processingStartAt: schedule.processingStartAt?.toISOString() ?? null,
     timezone: schedule.timezone,
     lastHeartbeatAt: schedule.lastHeartbeatAt?.toISOString() ?? null,
     lastRunStartedAt: schedule.lastRunStartedAt?.toISOString() ?? null,
@@ -440,6 +442,7 @@ export async function updateDefaultIngestionSchedule(input: {
   sourceConcurrency: number;
   fullTextFetchThreshold: number;
   perSourceItemLimit: number;
+  processingStartAt?: string | null;
 }) {
   const normalizedInput = normalizeScheduleInput(input);
   const currentSchedule = await ensureDefaultIngestionSchedule();
@@ -459,6 +462,7 @@ export async function updateDefaultIngestionSchedule(input: {
       sourceConcurrency: normalizedInput.sourceConcurrency,
       fullTextFetchThreshold: normalizedInput.fullTextFetchThreshold,
       perSourceItemLimit: normalizedInput.perSourceItemLimit,
+      processingStartAt: normalizedInput.processingStartAt ? new Date(normalizedInput.processingStartAt) : null,
       nextRunAt,
     },
   });

@@ -587,8 +587,8 @@ describe("FeedPanel", () => {
     });
 
     expect(screen.getAllByText("创建时间").length).toBeGreaterThan(0);
-    expect(screen.getByPlaceholderText("开始日期")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("结束日期")).toBeInTheDocument();
+    expect(screen.getAllByPlaceholderText("开始日期")).toHaveLength(2);
+    expect(screen.getAllByPlaceholderText("结束日期")).toHaveLength(2);
     expect(screen.queryByRole("combobox", { name: "分组" })).not.toBeInTheDocument();
 
     await user.type(screen.getByLabelText("标题模糊搜索"), "Agent");

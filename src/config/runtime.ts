@@ -20,6 +20,7 @@ export type RuntimeConfig = {
     sourceConcurrency: number;
     fullTextFetchThreshold: number;
     perSourceItemLimit: number;
+    processingStartAt: Date | null;
   };
   modelApi: {
     apiKey: string;
@@ -81,6 +82,7 @@ export function getRuntimeConfig(): RuntimeConfig {
       sourceConcurrency: 2,
       fullTextFetchThreshold: DEFAULT_FULL_TEXT_FETCH_THRESHOLD,
       perSourceItemLimit: DEFAULT_PER_SOURCE_ITEM_LIMIT,
+      processingStartAt: null,
     },
     modelApi: {
       apiKey: "",

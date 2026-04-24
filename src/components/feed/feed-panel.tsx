@@ -144,6 +144,8 @@ export function FeedPanel({
   initialSort,
   initialStartDate,
   initialEndDate,
+  initialPublishedStartDate = null,
+  initialPublishedEndDate = null,
   initialNextCursor = null,
   initialPagination = null,
   initialStatus,
@@ -164,6 +166,8 @@ export function FeedPanel({
   const [sort, setSort] = useState<FeedSort>(initialSort);
   const [startDate, setStartDate] = useState<string | null>(initialStartDate);
   const [endDate, setEndDate] = useState<string | null>(initialEndDate);
+  const [publishedStartDate, setPublishedStartDate] = useState<string | null>(initialPublishedStartDate);
+  const [publishedEndDate, setPublishedEndDate] = useState<string | null>(initialPublishedEndDate);
   const [groupId, setGroupId] = useState<string | null>(normalizeOptionalId(initialGroupId));
   const [sourceId, setSourceId] = useState<string | null>(normalizeOptionalId(initialSourceId));
   const [titleInput, setTitleInput] = useState<string>(normalizeSearchText(initialTitle) ?? "");
@@ -191,7 +195,7 @@ export function FeedPanel({
   const [selectedClusterId, setSelectedClusterId] = useState<string | null>(null);
   const [isLoadingClusterOptions, setIsLoadingClusterOptions] = useState(false);
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(
-    Boolean(initialStartDate || initialEndDate || initialSourceId || initialTitle),
+    Boolean(initialStartDate || initialEndDate || initialPublishedStartDate || initialPublishedEndDate || initialSourceId || initialTitle),
   );
   const [groupSidebarExpanded, setGroupSidebarExpanded] = useState(true);
   const skipTitleEffectRef = useRef(true);
@@ -201,6 +205,8 @@ export function FeedPanel({
     sort: initialSort,
     startDate: initialStartDate,
     endDate: initialEndDate,
+    publishedStartDate: initialPublishedStartDate,
+    publishedEndDate: initialPublishedEndDate,
     groupId: normalizeOptionalId(initialGroupId),
     sourceId: normalizeOptionalId(initialSourceId),
     title: normalizeSearchText(initialTitle),
@@ -218,12 +224,18 @@ export function FeedPanel({
   const summary = useMemo(
     () => ({
       rangeLabel: formatRangeLabel(range, startDate, endDate),
+      publishedRangeLabel:
+        publishedStartDate || publishedEndDate ? formatRangeLabel("all", publishedStartDate, publishedEndDate) : null,
       sortLabel: SORT_OPTIONS.find((option) => option.value === sort)?.label ?? "按时间倒序",
     }),
-    [endDate, range, sort, startDate],
+    [endDate, publishedEndDate, publishedStartDate, range, sort, startDate],
   );
   const activeFilterSummary = useMemo(() => {
     const filters = [`创建时间：${summary.rangeLabel}`, `排序：${summary.sortLabel}`];
+
+    if (summary.publishedRangeLabel) {
+      filters.push(`发表时间：${summary.publishedRangeLabel}`);
+    }
 
     if (titleFilter) {
       filters.push(`标题：${titleFilter}`);
@@ -238,7 +250,7 @@ export function FeedPanel({
     }
 
     return filters;
-  }, [availableGroups, availableSources, groupId, sourceId, summary.rangeLabel, summary.sortLabel, titleFilter]);
+  }, [availableGroups, availableSources, groupId, sourceId, summary.publishedRangeLabel, summary.rangeLabel, summary.sortLabel, titleFilter]);
   const visibleClusterOptions = useMemo(() => {
     const normalizedSearch = clusterSearch.trim().toLocaleLowerCase();
 
@@ -296,6 +308,8 @@ export function FeedPanel({
     sort,
     startDate,
     endDate,
+    publishedStartDate,
+    publishedEndDate,
     groupId,
     sourceId,
     title: titleFilter,
@@ -351,11 +365,24 @@ export function FeedPanel({
     }), 1);
   };
 
+  const changePublishedDateRange = (nextRange: DateRangeValue) => {
+    const { startDate: normalizedStartDate, endDate: normalizedEndDate } = normalizeDateRange(nextRange);
+
+    setPublishedStartDate(normalizedStartDate);
+    setPublishedEndDate(normalizedEndDate);
+    loadFeed(buildQuery({
+      publishedStartDate: normalizedStartDate,
+      publishedEndDate: normalizedEndDate,
+    }), 1);
+  };
+
   const clearFilters = () => {
     setRange("today");
     setSort("time_desc");
     setStartDate(null);
     setEndDate(null);
+    setPublishedStartDate(null);
+    setPublishedEndDate(null);
     setGroupId(null);
     setSourceId(null);
     setTitleInput("");
@@ -366,6 +393,8 @@ export function FeedPanel({
       sort: "time_desc" as FeedSort,
       startDate: null,
       endDate: null,
+      publishedStartDate: null,
+      publishedEndDate: null,
       groupId: null,
       sourceId: null,
       title: null,
@@ -877,11 +906,13 @@ export function FeedPanel({
       sort,
       startDate,
       endDate,
+      publishedStartDate,
+      publishedEndDate,
       groupId,
       sourceId,
       title: titleFilter,
     };
-  }, [endDate, groupId, range, sort, sourceId, startDate, titleFilter]);
+  }, [endDate, groupId, publishedEndDate, publishedStartDate, range, sort, sourceId, startDate, titleFilter]);
 
   useEffect(() => {
     if (didHydrateTimeZoneRef.current) {
@@ -903,6 +934,8 @@ export function FeedPanel({
         sort,
         startDate,
         endDate,
+        publishedStartDate,
+        publishedEndDate,
         groupId,
         sourceId,
         title: titleFilter,
@@ -914,7 +947,7 @@ export function FeedPanel({
       resetExpandedClusterState();
       setRefreshFeedback(null);
     });
-  }, [availableGroups, endDate, groupId, initialItems.length, pageSize, range, resetExpandedClusterState, sort, sourceId, startDate, titleFilter]);
+  }, [availableGroups, endDate, groupId, initialItems.length, pageSize, publishedEndDate, publishedStartDate, range, resetExpandedClusterState, sort, sourceId, startDate, titleFilter]);
 
   useEffect(() => {
     if (skipTitleEffectRef.current) {
@@ -982,6 +1015,8 @@ export function FeedPanel({
           sort,
           startDate,
           endDate,
+          publishedStartDate,
+          publishedEndDate,
           groupId,
           sourceId,
           title: titleFilter,
@@ -1004,7 +1039,7 @@ export function FeedPanel({
     return () => {
       window.clearInterval(timer);
     };
-  }, [availableGroups, endDate, groupId, isAdmin, pageSize, queuedRefreshAt, range, resetExpandedClusterState, sort, sourceId, startDate, startTransition, status, titleFilter]);
+  }, [availableGroups, endDate, groupId, isAdmin, pageSize, publishedEndDate, publishedStartDate, queuedRefreshAt, range, resetExpandedClusterState, sort, sourceId, startDate, startTransition, status, titleFilter]);
 
   useEffect(() => {
     setJumpToPage(String(currentPage));
@@ -1171,39 +1206,52 @@ export function FeedPanel({
 
             {advancedFiltersOpen ? (
               <div className="border-t border-[color:var(--line)] pt-4">
-                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                  <FilterInput
-                    id="feed-title-filter"
-                    label="标题模糊搜索"
-                    value={titleInput}
-                    onChange={setTitleInput}
-                    placeholder="输入标题关键词"
-                  />
-
-                  <FilterSelect
-                    id="feed-source-filter"
-                    label="信息源"
-                    ariaLabel="信息源"
-                    value={sourceId ?? ""}
-                    onChange={changeSource}
-                    showSearch={false}
-                    options={[
-                      { value: "", label: "全部信息源" },
-                      ...visibleSources.map((source) => ({
-                        value: source.id,
-                        label: source.name,
-                      })),
-                    ]}
-                  />
-
-                  <FormField label="创建时间" htmlFor="feed-created-date-range">
-                    <DateRangePicker
-                      id="feed-created-date-range"
-                      value={toDayjsRange(startDate, endDate)}
-                      onChange={changeDateRange}
-                      className="w-full"
+                <div className="grid gap-4">
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <FilterInput
+                      id="feed-title-filter"
+                      label="标题模糊搜索"
+                      value={titleInput}
+                      onChange={setTitleInput}
+                      placeholder="输入标题关键词"
                     />
-                  </FormField>
+
+                    <FilterSelect
+                      id="feed-source-filter"
+                      label="信息源"
+                      ariaLabel="信息源"
+                      value={sourceId ?? ""}
+                      onChange={changeSource}
+                      showSearch={false}
+                      options={[
+                        { value: "", label: "全部信息源" },
+                        ...visibleSources.map((source) => ({
+                          value: source.id,
+                          label: source.name,
+                        })),
+                      ]}
+                    />
+                  </div>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <FormField label="创建时间" htmlFor="feed-created-date-range">
+                      <DateRangePicker
+                        id="feed-created-date-range"
+                        value={toDayjsRange(startDate, endDate)}
+                        onChange={changeDateRange}
+                        className="w-full"
+                      />
+                    </FormField>
+
+                    <FormField label="发表时间" htmlFor="feed-published-date-range">
+                      <DateRangePicker
+                        id="feed-published-date-range"
+                        value={toDayjsRange(publishedStartDate, publishedEndDate)}
+                        onChange={changePublishedDateRange}
+                        className="w-full"
+                      />
+                    </FormField>
+                  </div>
                 </div>
               </div>
             ) : null}

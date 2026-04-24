@@ -101,6 +101,7 @@ describe("/api/admin/monitor", () => {
       sourceConcurrency: 4,
       fullTextFetchThreshold: 120,
       perSourceItemLimit: 50,
+      processingStartAt: null,
     });
     expect(json.schedule.enabled).toBe(false);
     expect(json.schedule.cronExpression).toBe("*/15 * * * *");

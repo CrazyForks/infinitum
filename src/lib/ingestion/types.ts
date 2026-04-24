@@ -75,6 +75,7 @@ export type RunIngestionOptions = {
   sourceConcurrency: number;
   fullTextFetchThreshold: number;
   perSourceItemLimit: number;
+  processingStartAt?: Date | null;
   now?: Date;
   onProgress?: (snapshot: {
     status: "running" | "succeeded" | "failed" | "partial";

@@ -231,6 +231,7 @@ model TaskSchedule {
   sourceConcurrency Int                   @default(2)
   fullTextFetchThreshold Int              @default(80)
   perSourceItemLimit Int                  @default(20)
+  processingStartAt DateTime?
   timezone          String
   lastHeartbeatAt   DateTime?
   lastRunStartedAt  DateTime?

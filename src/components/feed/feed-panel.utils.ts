@@ -126,7 +126,7 @@ export function getBrowserTimeZoneOffsetMinutes(): number {
 }
 
 export function buildFeedSearch(
-  { range, sort, startDate, endDate, groupId, sourceId, title }: FeedQueryState,
+  { range, sort, startDate, endDate, publishedStartDate, publishedEndDate, groupId, sourceId, title }: FeedQueryState,
   pagination?: {
     page?: number;
     size?: number;
@@ -148,6 +148,14 @@ export function buildFeedSearch(
 
   if (endDate) {
     search.set("end", endDate);
+  }
+
+  if (publishedStartDate) {
+    search.set("publishedStart", publishedStartDate);
+  }
+
+  if (publishedEndDate) {
+    search.set("publishedEnd", publishedEndDate);
   }
 
   if (normalizedGroupId) {
