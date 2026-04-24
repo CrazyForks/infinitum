@@ -219,7 +219,7 @@ describe("/api/feed", () => {
       id: "cluster-a",
       title: "OpenAI Agent 发布",
       itemCount: 2,
-      score: 90,
+      score: 91,
     });
     expect(json.items[1]).toMatchObject({
       type: "single",
@@ -379,7 +379,7 @@ describe("/api/feed", () => {
       expect(json.items[1]).toMatchObject({
         type: "cluster",
         id: "cluster-a",
-        score: 90,
+        score: 91,
       });
       expect(json.items[2]).toMatchObject({
         type: "single",
@@ -392,6 +392,98 @@ describe("/api/feed", () => {
         score: 62,
       });
       expect(json.sort).toBe("score_desc");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("boosts multi-source clusters in score sorting", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-10T12:00:00.000Z"));
+
+    try {
+      const [firstSource, secondSource, thirdSource] = await Promise.all([
+        prisma.source.create({
+          data: {
+            name: "Boost Feed 1",
+            rssUrl: "https://boost-1.example.com/feed.xml",
+            siteUrl: "https://boost-1.example.com",
+            enabled: true,
+            aiParsingEnabled: true,
+          },
+        }),
+        prisma.source.create({
+          data: {
+            name: "Boost Feed 2",
+            rssUrl: "https://boost-2.example.com/feed.xml",
+            siteUrl: "https://boost-2.example.com",
+            enabled: true,
+            aiParsingEnabled: true,
+          },
+        }),
+        prisma.source.create({
+          data: {
+            name: "Boost Feed 3",
+            rssUrl: "https://boost-3.example.com/feed.xml",
+            siteUrl: "https://boost-3.example.com",
+            enabled: true,
+            aiParsingEnabled: true,
+          },
+        }),
+      ]);
+
+      await prisma.contentCluster.create({
+        data: {
+          id: "cluster-boosted",
+          kind: "topic",
+          title: "多来源聚合内容",
+          summary: "多来源聚合摘要",
+          score: 93,
+          itemCount: 3,
+          latestPublishedAt: new Date("2026-04-07T09:00:00.000Z"),
+          status: "active",
+          fingerprint: "boosted-cluster",
+        },
+      });
+
+      await prisma.item.createMany({
+        data: [firstSource, secondSource, thirdSource].map((source, index) => ({
+          id: `item-boosted-${index + 1}`,
+          sourceId: source.id,
+          clusterId: "cluster-boosted",
+          originalUrl: `https://boost-${index + 1}.example.com/story`,
+          canonicalUrl: `https://boost-${index + 1}.example.com/story`,
+          urlHash: `hash-boosted-${index + 1}`,
+          dedupeSignature: `boosted|story|${index + 1}`,
+          originalTitle: `Boosted Story ${index + 1}`,
+          translatedTitle: `加权内容 ${index + 1}`,
+          publishedAt: new Date(`2026-04-07T09:0${index}:00.000Z`),
+          summaryText: `加权摘要 ${index + 1}`,
+          status: "processed",
+          moderationStatus: "allowed",
+          qualityScore: 93,
+          qualityRationale: "多来源高质量",
+          language: "zh",
+          createdAt: new Date(`2026-04-07T09:1${index}:00.000Z`),
+        })),
+      });
+
+      const { GET } = await import("@/app/api/feed/route");
+      const response = await GET(new Request("http://localhost/api/feed?range=7d&sort=score_desc"));
+      const json = await response.json();
+
+      expect(json.items[0]).toMatchObject({
+        type: "cluster",
+        id: "cluster-boosted",
+        score: 100,
+        sourceCount: 3,
+        itemCount: 3,
+      });
+      expect(json.items[1]).toMatchObject({
+        type: "single",
+        id: "item-c1",
+        score: 98,
+      });
     } finally {
       vi.useRealTimers();
     }

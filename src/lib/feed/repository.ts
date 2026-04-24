@@ -363,14 +363,39 @@ function toIsoString(value: Date | string) {
  *
  * 算法：
  * - 基准分 = AI评分 (0-100)
- * - 净推荐值 = upvotes - downvotes
- * - 微调值 = clamp(净推荐值, -20, +20)  // 每个净推荐±1分，最多影响20分
- * - 综合评分 = clamp(基准分 + 微调值, 0, 100)
+ * - 投票微调 = clamp(upvotes - downvotes, -20, +20)
+ * - 来源加权 = min(8, max(0, sourceCount - 1) * 3)
+ * - 条目加权 = min(4, floor(log2(itemCount)))
+ * - 综合评分 = clamp(基准分 + 投票微调 + 来源加权 + 条目加权, 0, 100)
  */
-function calculateRecommendScore(aiScore: number, upvotes: number, downvotes: number): number {
+function calculateRecommendScore(
+  aiScore: number,
+  upvotes: number,
+  downvotes: number,
+  sourceCount: number,
+  itemCount: number,
+): number {
   const netVotes = upvotes - downvotes;
-  const adjustment = Math.max(-20, Math.min(20, netVotes));
-  return Math.max(0, Math.min(100, aiScore + adjustment));
+  const voteBoost = Math.max(-20, Math.min(20, netVotes));
+  const sourceBoost = Math.min(8, Math.max(0, sourceCount - 1) * 3);
+  const itemBoost = Math.min(4, Math.floor(Math.log2(Math.max(1, itemCount))));
+
+  return Math.max(0, Math.min(100, aiScore + voteBoost + sourceBoost + itemBoost));
+}
+
+function buildRecommendScoreSql(input: {
+  aiScore: Prisma.Sql;
+  upvotes: Prisma.Sql;
+  downvotes: Prisma.Sql;
+  sourceCount: Prisma.Sql;
+  itemCount: Prisma.Sql;
+}) {
+  const voteBoost = Prisma.sql`CASE WHEN (${input.upvotes} - ${input.downvotes}) > 20 THEN 20 WHEN (${input.upvotes} - ${input.downvotes}) < -20 THEN -20 ELSE (${input.upvotes} - ${input.downvotes}) END`;
+  const sourceBoost = Prisma.sql`CASE WHEN ((${input.sourceCount} - 1) * 3) > 8 THEN 8 WHEN ((${input.sourceCount} - 1) * 3) < 0 THEN 0 ELSE ((${input.sourceCount} - 1) * 3) END`;
+  const itemBoost = Prisma.sql`CASE WHEN ${input.itemCount} >= 16 THEN 4 WHEN ${input.itemCount} >= 8 THEN 3 WHEN ${input.itemCount} >= 4 THEN 2 WHEN ${input.itemCount} >= 2 THEN 1 ELSE 0 END`;
+  const combinedScore = Prisma.sql`${input.aiScore} + ${voteBoost} + ${sourceBoost} + ${itemBoost}`;
+
+  return Prisma.sql`CASE WHEN ${combinedScore} > 100 THEN 100 WHEN ${combinedScore} < 0 THEN 0 ELSE ${combinedScore} END`;
 }
 
 function buildFeedEntryCandidatesCte(filters: FeedFilters & { rangeStart: Date | null; rangeEnd: Date | null }) {
@@ -399,6 +424,14 @@ function buildFeedEntryCandidatesCte(filters: FeedFilters & { rangeStart: Date |
     whereClauses.push(Prisma.sql`s.id = ${filters.sourceId}`);
   }
 
+  const clusterAiScore = Prisma.sql`CAST(ROUND(AVG(fi."qualityScore")) AS INTEGER)`;
+  const clusterItemCount = Prisma.sql`COUNT(*)`;
+  const clusterSourceCount = Prisma.sql`COUNT(DISTINCT fi."sourceId")`;
+  const clusterUpvotes = Prisma.sql`COALESCE(MIN(cc.upvotes), 0)`;
+  const clusterDownvotes = Prisma.sql`COALESCE(MIN(cc.downvotes), 0)`;
+  const singleUpvotes = Prisma.sql`COALESCE(cg.upvotes, 0)`;
+  const singleDownvotes = Prisma.sql`COALESCE(cg.downvotes, 0)`;
+
   return Prisma.sql`
     WITH filtered_items AS (
       SELECT
@@ -424,17 +457,19 @@ function buildFeedEntryCandidatesCte(filters: FeedFilters & { rangeStart: Date |
         MIN(fi."clusterSummary") AS summary,
         MAX(fi."publishedAt") AS "latestPublishedAt",
         MAX(fi."createdAt") AS "createdAt",
-        CAST(ROUND(AVG(fi."qualityScore")) AS INTEGER) AS score,
-        COUNT(*) AS "itemCount",
-        COUNT(DISTINCT fi."sourceId") AS "sourceCount",
-        COALESCE(MIN(cc.upvotes), 0) AS upvotes,
-        COALESCE(MIN(cc.downvotes), 0) AS downvotes,
-        -- 综合推荐评分 = AI评分 + 访客投票微调（净推荐*1，限制在±20范围内，总分限制在0-100）
-        CASE
-          WHEN CAST(ROUND(AVG(fi."qualityScore")) AS INTEGER) + CASE WHEN (COALESCE(MIN(cc.upvotes), 0) - COALESCE(MIN(cc.downvotes), 0)) > 20 THEN 20 WHEN (COALESCE(MIN(cc.upvotes), 0) - COALESCE(MIN(cc.downvotes), 0)) < -20 THEN -20 ELSE (COALESCE(MIN(cc.upvotes), 0) - COALESCE(MIN(cc.downvotes), 0)) END > 100 THEN 100
-          WHEN CAST(ROUND(AVG(fi."qualityScore")) AS INTEGER) + CASE WHEN (COALESCE(MIN(cc.upvotes), 0) - COALESCE(MIN(cc.downvotes), 0)) > 20 THEN 20 WHEN (COALESCE(MIN(cc.upvotes), 0) - COALESCE(MIN(cc.downvotes), 0)) < -20 THEN -20 ELSE (COALESCE(MIN(cc.upvotes), 0) - COALESCE(MIN(cc.downvotes), 0)) END < 0 THEN 0
-          ELSE CAST(ROUND(AVG(fi."qualityScore")) AS INTEGER) + CASE WHEN (COALESCE(MIN(cc.upvotes), 0) - COALESCE(MIN(cc.downvotes), 0)) > 20 THEN 20 WHEN (COALESCE(MIN(cc.upvotes), 0) - COALESCE(MIN(cc.downvotes), 0)) < -20 THEN -20 ELSE (COALESCE(MIN(cc.upvotes), 0) - COALESCE(MIN(cc.downvotes), 0)) END
-        END AS "recommendScore"
+        ${clusterAiScore} AS score,
+        ${clusterItemCount} AS "itemCount",
+        ${clusterSourceCount} AS "sourceCount",
+        ${clusterUpvotes} AS upvotes,
+        ${clusterDownvotes} AS downvotes,
+        -- 综合推荐评分 = AI评分 + 投票微调 + 来源/条目聚合加权
+        ${buildRecommendScoreSql({
+          aiScore: clusterAiScore,
+          upvotes: clusterUpvotes,
+          downvotes: clusterDownvotes,
+          sourceCount: clusterSourceCount,
+          itemCount: clusterItemCount,
+        })} AS "recommendScore"
       FROM filtered_items fi
       INNER JOIN "content_clusters" cc ON cc.id = fi."clusterId"
       WHERE fi."clusterId" IS NOT NULL
@@ -454,12 +489,14 @@ function buildFeedEntryCandidatesCte(filters: FeedFilters & { rangeStart: Date |
         1 AS "itemCount",
         COALESCE(cg.upvotes, 0) AS upvotes,
         COALESCE(cg.downvotes, 0) AS downvotes,
-        -- 综合推荐评分 = AI评分 + 访客投票微调
-        CASE
-          WHEN fi."qualityScore" + CASE WHEN (COALESCE(cg.upvotes, 0) - COALESCE(cg.downvotes, 0)) > 20 THEN 20 WHEN (COALESCE(cg.upvotes, 0) - COALESCE(cg.downvotes, 0)) < -20 THEN -20 ELSE (COALESCE(cg.upvotes, 0) - COALESCE(cg.downvotes, 0)) END > 100 THEN 100
-          WHEN fi."qualityScore" + CASE WHEN (COALESCE(cg.upvotes, 0) - COALESCE(cg.downvotes, 0)) > 20 THEN 20 WHEN (COALESCE(cg.upvotes, 0) - COALESCE(cg.downvotes, 0)) < -20 THEN -20 ELSE (COALESCE(cg.upvotes, 0) - COALESCE(cg.downvotes, 0)) END < 0 THEN 0
-          ELSE fi."qualityScore" + CASE WHEN (COALESCE(cg.upvotes, 0) - COALESCE(cg.downvotes, 0)) > 20 THEN 20 WHEN (COALESCE(cg.upvotes, 0) - COALESCE(cg.downvotes, 0)) < -20 THEN -20 ELSE (COALESCE(cg.upvotes, 0) - COALESCE(cg.downvotes, 0)) END
-        END AS "recommendScore"
+        -- 综合推荐评分 = AI评分 + 投票微调，单条来源/条目加权为 0
+        ${buildRecommendScoreSql({
+          aiScore: Prisma.sql`fi."qualityScore"`,
+          upvotes: singleUpvotes,
+          downvotes: singleDownvotes,
+          sourceCount: Prisma.sql`1`,
+          itemCount: Prisma.sql`1`,
+        })} AS "recommendScore"
       FROM filtered_items fi
       LEFT JOIN cluster_groups cg ON cg.id = fi."clusterId"
       WHERE fi."clusterId" IS NULL OR cg."itemCount" = 1
@@ -790,12 +827,15 @@ export async function listAdminClusters() {
   });
 
   return clusters.map((cluster) => {
-    // 计算综合推荐评分（AI评分 + 访客投票微调）
+    // 计算综合推荐评分（AI评分 + 投票微调 + 来源/条目聚合加权）
     const clusterWithVotes = cluster as typeof cluster & { upvotes: number; downvotes: number };
+    const sourceCount = new Set(cluster.items.map((item) => item.sourceId)).size;
     const recommendScore = calculateRecommendScore(
       cluster.score,
       clusterWithVotes.upvotes ?? 0,
-      clusterWithVotes.downvotes ?? 0
+      clusterWithVotes.downvotes ?? 0,
+      sourceCount,
+      cluster.items.length,
     );
 
     return {
@@ -832,12 +872,15 @@ export async function getAdminCluster(clusterId: string) {
     return null;
   }
 
-  // 计算综合推荐评分（AI评分 + 访客投票微调）
+  // 计算综合推荐评分（AI评分 + 投票微调 + 来源/条目聚合加权）
   const clusterWithVotes = cluster as typeof cluster & { upvotes: number; downvotes: number };
+  const sourceCount = new Set(cluster.items.map((item) => item.sourceId)).size;
   const recommendScore = calculateRecommendScore(
     cluster.score,
     clusterWithVotes.upvotes ?? 0,
-    clusterWithVotes.downvotes ?? 0
+    clusterWithVotes.downvotes ?? 0,
+    sourceCount,
+    cluster.items.length,
   );
 
   return {
