@@ -17,8 +17,16 @@ const lockPath = `${dbPath}.setup.lock`;
 const lockTimeoutMs = Number.parseInt(process.env.SQLITE_SETUP_LOCK_TIMEOUT_MS || "30000", 10);
 const staleLockMs = Number.parseInt(process.env.SQLITE_SETUP_STALE_LOCK_MS || "120000", 10);
 const testHoldMs = Number.parseInt(process.env.SQLITE_SETUP_LOCK_HOLD_MS || "0", 10);
+const sqliteBusyTimeoutMs = Number.parseInt(process.env.SQLITE_BUSY_TIMEOUT_MS || "10000", 10);
 const sleepBuffer = new SharedArrayBuffer(4);
 const sleepView = new Int32Array(sleepBuffer);
+
+const sqliteRuntimePragmas = [
+  "PRAGMA journal_mode = WAL;",
+  `PRAGMA busy_timeout = ${sqliteBusyTimeoutMs};`,
+  "PRAGMA synchronous = NORMAL;",
+  "PRAGMA foreign_keys = ON;",
+].join("\n");
 
 function resolvePrismaCliPath() {
   const cliFileName = process.platform === "win32" ? "prisma.cmd" : "prisma";
@@ -128,7 +136,7 @@ try {
     rmSync(dbPath, { force: true });
   }
 
-  const sql = makeSqliteSchemaIdempotent(loadSchemaSql());
+  const sql = `${sqliteRuntimePragmas}\n${makeSqliteSchemaIdempotent(loadSchemaSql())}\n${sqliteRuntimePragmas}\n`;
   runSqlite([dbPath], {
     input: sql,
   });

@@ -1,4 +1,4 @@
-# Infinitum
+![](./imgs/infinitum.jpg)
 
 ## Infinitum 是什么？
 Infinitum 是基于 RSS 的资讯聚合工作台，用来完成 RSS 抓取、正文补抓、AI 摘要分析、事件归组等信息处理。目标是对日益膨胀的个人信息流进行必要但保守的预处理，提高信息获取效率。
@@ -12,7 +12,6 @@ Infinitum 是基于 RSS 的资讯聚合工作台，用来完成 RSS 抓取、正
 - **管理员工作台**：支持手动触发抓取、查看任务状态、过滤/恢复内容、重跑 AI、调整聚合关系、隐藏或合并聚合组。
 - **后台配置中心**：支持维护信息源、来源分组、黑名单、模型 API 配置、提示词配置和抓取调度。
 - **后台任务体系**：Web 负责入队，Worker 负责异步执行，支持监控、取消、重试和异常恢复。
-- **Docker 部署**：提供 app/worker 双服务 Compose 配置，默认带 SQLite 持久化卷。
 
 ## 使用流程
 
@@ -63,8 +62,8 @@ docker compose logs -f app worker
 
 默认访问地址：
 
-- Web：[http://localhost:3001](http://localhost:3001)
-- 管理员登录：[http://localhost:3001/login](http://localhost:3001/login)
+- Web：<http://localhost:3001>
+- 管理员登录：<http://localhost:3001/login>
 
 ## 本地开发
 
@@ -107,8 +106,8 @@ npm run worker
 
 本地默认访问地址：
 
-- Web：[http://localhost:3000](http://localhost:3000)
-- 管理后台登录：[http://localhost:3000/login](http://localhost:3000/login)
+- Web：<http://localhost:3000>
+- 管理后台登录：<http://localhost:3000/login>
 
 ## 运行配置
 
@@ -149,7 +148,7 @@ Web 只负责创建任务，真正执行抓取、AI 分析和归组的是 Worker
 
 ### 为什么 Docker 启动后访问不了 `localhost:3000`？
 
-因为默认 Compose 端口映射是 `3001:3000`，宿主机应该访问 [http://localhost:3001](http://localhost:3001)。
+因为默认 Compose 端口映射是 `3001:3000`，宿主机应该访问 <http://localhost:3001>。
 
 ### 为什么后台可以打开，但信息流一直没有更新？
 
