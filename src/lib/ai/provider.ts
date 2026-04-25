@@ -1,6 +1,11 @@
 import OpenAI from "openai";
 
 import {
+  MODEL_API_CIRCUIT_BREAKER_FAILURE_THRESHOLD,
+  MODEL_API_CIRCUIT_BREAKER_OPEN_MS,
+  MODEL_API_CIRCUIT_BREAKER_WINDOW_MS,
+} from "@/config/constants";
+import {
   DEFAULT_CLUSTER_MATCH_PROMPT,
   DEFAULT_CLUSTER_MATCH_USER_PROMPT_TEMPLATE,
   DEFAULT_CLUSTER_SUMMARY_PROMPT,
@@ -100,6 +105,13 @@ type CompletionResponseFormat = {
   type: "json_object";
 };
 
+type ModelApiCircuitState = {
+  failures: number[];
+  openUntil: number;
+};
+
+const modelApiCircuitStates = new Map<string, ModelApiCircuitState>();
+
 function getClient(config: RuntimeConfig["modelApi"]): OpenAICompatibleClient | null {
   const apiKey = config.apiKey;
 
@@ -113,6 +125,49 @@ function getClient(config: RuntimeConfig["modelApi"]): OpenAICompatibleClient | 
     apiKey,
     baseURL: config.baseURL || undefined,
   }) as unknown as OpenAICompatibleClient;
+}
+
+function getModelApiCircuitKey(config: RuntimeConfig["modelApi"]) {
+  return [config.apiKey, config.baseURL, config.model].join("|");
+}
+
+function isSameModelApiConfig(left: RuntimeConfig["modelApi"], right: RuntimeConfig["modelApi"]) {
+  return left.apiKey === right.apiKey && left.baseURL === right.baseURL && left.model === right.model;
+}
+
+function getCircuitState(config: RuntimeConfig["modelApi"]) {
+  const key = getModelApiCircuitKey(config);
+  const existing = modelApiCircuitStates.get(key);
+
+  if (existing) {
+    return existing;
+  }
+
+  const next = { failures: [], openUntil: 0 };
+  modelApiCircuitStates.set(key, next);
+  return next;
+}
+
+function isCircuitOpen(config: RuntimeConfig["modelApi"], now = Date.now()) {
+  return getCircuitState(config).openUntil > now;
+}
+
+function recordModelApiSuccess(config: RuntimeConfig["modelApi"]) {
+  const state = getCircuitState(config);
+  state.failures = [];
+  state.openUntil = 0;
+}
+
+function recordModelApiFailure(config: RuntimeConfig["modelApi"], now = Date.now()) {
+  const state = getCircuitState(config);
+  const windowStart = now - MODEL_API_CIRCUIT_BREAKER_WINDOW_MS;
+  state.failures = [...state.failures.filter((timestamp) => timestamp >= windowStart), now];
+
+  if (state.failures.length >= MODEL_API_CIRCUIT_BREAKER_FAILURE_THRESHOLD) {
+    state.openUntil = now + MODEL_API_CIRCUIT_BREAKER_OPEN_MS;
+  }
+
+  return state.openUntil > now;
 }
 
 function getClientForConfig(
@@ -456,29 +511,70 @@ export function createAiProvider(
   const getExecutionConfig = (promptConfig: PromptRuntimeConfig) => promptConfig.modelApi ?? config;
   const getExecutionClient = (promptConfig: PromptRuntimeConfig) => {
     const executionConfig = getExecutionConfig(promptConfig);
+    if (clientOverrideArg) {
+      return globalClient;
+    }
     if (
-      executionConfig.apiKey === config.apiKey &&
-      executionConfig.baseURL === config.baseURL &&
-      executionConfig.model === config.model
+      isSameModelApiConfig(executionConfig, config)
     ) {
       return globalClient;
     }
     return getClientForConfig(executionConfig, clientCache);
   };
+  const getClientForExecutionConfig = (executionConfig: RuntimeConfig["modelApi"]) => {
+    if (clientOverrideArg || isSameModelApiConfig(executionConfig, config)) {
+      return globalClient;
+    }
+
+    return getClientForConfig(executionConfig, clientCache);
+  };
+  const completeTextWithCircuitBreaker = async (
+    promptConfig: PromptRuntimeConfig,
+    userContent: string,
+    options?: {
+      responseFormat?: CompletionResponseFormat;
+    },
+  ) => {
+    const executionConfig = getExecutionConfig(promptConfig);
+    const isDefaultModel = isSameModelApiConfig(executionConfig, config);
+    const selectedConfig = !isDefaultModel && isCircuitOpen(executionConfig) ? config : executionConfig;
+    const selectedClient = getClientForExecutionConfig(selectedConfig);
+
+    if (!selectedClient) {
+      return null;
+    }
+
+    try {
+      const output = await completeText(selectedClient, selectedConfig, promptConfig, userContent, options);
+
+      if (!isDefaultModel && isSameModelApiConfig(selectedConfig, executionConfig)) {
+        recordModelApiSuccess(executionConfig);
+      }
+
+      return output;
+    } catch (error) {
+      if (isDefaultModel || !isSameModelApiConfig(selectedConfig, executionConfig)) {
+        throw error;
+      }
+
+      const opened = recordModelApiFailure(executionConfig);
+      if (!opened) {
+        throw error;
+      }
+
+      const defaultClient = getClientForExecutionConfig(config);
+      if (!defaultClient) {
+        throw error;
+      }
+
+      return completeText(defaultClient, config, promptConfig, userContent, options);
+    }
+  };
 
   return {
     async summarizeItem(inputText, metadata) {
       const fallback = getFallbackSummary(inputText);
-      const executionClient = getExecutionClient(itemSummaryConfig);
-      const executionConfig = getExecutionConfig(itemSummaryConfig);
-
-      if (!executionClient) {
-        return fallback;
-      }
-
-      const output = await completeText(
-        executionClient,
-        executionConfig,
+      const output = await completeTextWithCircuitBreaker(
         itemSummaryConfig,
         renderPromptTemplate(itemSummaryConfig.promptTemplate, {
           title: metadata.title,
@@ -487,16 +583,15 @@ export function createAiProvider(
         }),
       );
 
+      if (output == null) {
+        return fallback;
+      }
+
       return parseSummaryOutput(output, fallback);
     },
     async enrichContent(inputText, metadata) {
       const fallback = getFallbackEnrichment(metadata);
       const executionClient = getExecutionClient(itemAnalysisConfig);
-      const executionConfig = getExecutionConfig(itemAnalysisConfig);
-
-      if (!executionClient) {
-        return fallback;
-      }
 
       let lastFailureReason = "Unknown invalid ai enrichment response";
       let recoveredFallback: AiEnrichment | null = null;
@@ -507,16 +602,22 @@ export function createAiProvider(
         inputText,
       });
 
+      if (!executionClient) {
+        return fallback;
+      }
+
       for (let attempt = 0; attempt < 2; attempt += 1) {
-        const output = await completeText(
-          executionClient,
-          executionConfig,
+        const output = await completeTextWithCircuitBreaker(
           itemAnalysisConfig,
           userContent,
           {
             responseFormat: { type: "json_object" },
           },
         );
+
+        if (output == null) {
+          return fallback;
+        }
 
         const parsed = parseJsonLikeEnrichment(output, fallback, metadata.translateTitle);
 
@@ -540,16 +641,8 @@ export function createAiProvider(
       throw new Error(`Invalid AI enrichment response after retry. ${lastFailureReason}`);
     },
     async summarizeCluster(inputText, metadata) {
-      const executionClient = getExecutionClient(clusterSummaryConfig);
-      const executionConfig = getExecutionConfig(clusterSummaryConfig);
-
-      if (!executionClient) {
-        return getFallbackSummary(inputText);
-      }
-
-      const output = await completeText(
-        executionClient,
-        executionConfig,
+      const fallback = getFallbackSummary(inputText);
+      const output = await completeTextWithCircuitBreaker(
         clusterSummaryConfig,
         renderPromptTemplate(clusterSummaryConfig.promptTemplate, {
           title: metadata.title,
@@ -557,19 +650,18 @@ export function createAiProvider(
         }),
       );
 
-      return parseSummaryOutput(output, getFallbackSummary(inputText));
+      if (output == null) {
+        return fallback;
+      }
+
+      return parseSummaryOutput(output, fallback);
     },
     async matchClusterCandidate(inputText, metadata) {
-      const executionClient = getExecutionClient(clusterMatchConfig);
-      const executionConfig = getExecutionConfig(clusterMatchConfig);
-
-      if (!executionClient || metadata.candidates.length === 0) {
+      if (metadata.candidates.length === 0) {
         return null;
       }
 
-      const output = await completeText(
-        executionClient,
-        executionConfig,
+      const output = await completeTextWithCircuitBreaker(
         clusterMatchConfig,
         renderPromptTemplate(clusterMatchConfig.promptTemplate, {
           title: metadata.title,
@@ -580,6 +672,10 @@ export function createAiProvider(
           responseFormat: { type: "json_object" },
         },
       );
+
+      if (output == null) {
+        return null;
+      }
 
       return parseClusterMatchCandidateId(
         output,

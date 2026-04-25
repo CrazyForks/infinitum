@@ -385,6 +385,66 @@ describe("ai provider", () => {
     expect(create.mock.calls[0]?.[0]?.response_format).toBeUndefined();
   });
 
+  it("circuit-breaks failing non-default model api configs and falls back to the default model", async () => {
+    const create = vi.fn().mockImplementation(async (payload: { model?: string }) => {
+      if (payload.model === "custom-model") {
+        throw new Error("Custom model upstream failed");
+      }
+
+      return {
+        choices: [
+          {
+            message: {
+              content: "默认模型摘要",
+            },
+          },
+        ],
+      };
+    });
+    const provider = createAiProvider(
+      {
+        apiKey: "sk-default",
+        baseURL: "https://default.example.com/v1",
+        model: "default-model",
+      },
+      {
+        itemSummary: {
+          systemPrompt: "摘要提示词",
+          promptTemplate: "标题：{{title}}\n正文：{{inputText}}",
+          modelApi: {
+            apiKey: "sk-custom",
+            baseURL: "https://custom.example.com/v1",
+            model: "custom-model",
+          },
+        },
+      },
+      {
+        chat: {
+          completions: {
+            create,
+          },
+        },
+      },
+    );
+
+    await expect(provider.summarizeItem("正文 1", { title: "标题 1" })).rejects.toThrow(/upstream failed/i);
+    await expect(provider.summarizeItem("正文 2", { title: "标题 2" })).rejects.toThrow(/upstream failed/i);
+    await expect(provider.summarizeItem("正文 3", { title: "标题 3" })).rejects.toThrow(/upstream failed/i);
+    await expect(provider.summarizeItem("正文 4", { title: "标题 4" })).rejects.toThrow(/upstream failed/i);
+    await expect(provider.summarizeItem("正文 5", { title: "标题 5" })).resolves.toBe("默认模型摘要");
+    await expect(provider.summarizeItem("正文 6", { title: "标题 6" })).resolves.toBe("默认模型摘要");
+
+    expect(create.mock.calls.map((call) => call[0]?.model)).toEqual([
+      "custom-model",
+      "custom-model",
+      "custom-model",
+      "custom-model",
+      "custom-model",
+      "default-model",
+      "default-model",
+    ]);
+  });
+
   it("throws a descriptive error after repeated invalid responses", async () => {
     const create = vi.fn().mockResolvedValue({
       choices: [

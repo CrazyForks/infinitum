@@ -1,5 +1,6 @@
 import Parser from "rss-parser";
 
+import { RSS_FETCH_RETRY_COUNT } from "@/config/constants";
 import type { ParsedFeed, ParsedFeedItem, RssParserLike } from "@/lib/ingestion/types";
 
 export function createRssParser(): RssParserLike {
@@ -7,12 +8,31 @@ export function createRssParser(): RssParserLike {
 
   return {
     async parseURL(url: string, options?: { headers?: Record<string, string> }): Promise<ParsedFeed> {
-      const response = await fetch(url, {
-        headers: {
-          "User-Agent": "infinitum-feed-bot/1.0",
-          ...options?.headers,
-        },
-      });
+      let response: Response | null = null;
+      let lastError: unknown = null;
+
+      for (let attempt = 0; attempt <= RSS_FETCH_RETRY_COUNT; attempt += 1) {
+        try {
+          response = await fetch(url, {
+            headers: {
+              "User-Agent": "infinitum-feed-bot/1.0",
+              ...options?.headers,
+            },
+          });
+
+          if (response.ok || response.status === 304) {
+            break;
+          }
+
+          lastError = new Error(`RSS fetch failed with status ${response.status}`);
+        } catch (error) {
+          lastError = error;
+        }
+      }
+
+      if (!response) {
+        throw lastError instanceof Error ? lastError : new Error("RSS fetch failed");
+      }
 
       if (response.status === 304) {
         return {
@@ -24,7 +44,7 @@ export function createRssParser(): RssParserLike {
       }
 
       if (!response.ok) {
-        throw new Error(`RSS fetch failed with status ${response.status}`);
+        throw lastError instanceof Error ? lastError : new Error(`RSS fetch failed with status ${response.status}`);
       }
 
       const feed = await parser.parseString(await response.text());

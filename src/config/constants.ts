@@ -81,6 +81,22 @@ export const DEFAULT_POLL_INTERVAL_MS = 2 * 1000;
 /** 摄入进度刷新间隔: 750ms */
 export const INGESTION_PROGRESS_FLUSH_INTERVAL_MS = 750;
 
+/** RSS 抓取失败后的重试次数 */
+export const RSS_FETCH_RETRY_COUNT = 1;
+
+// =============================================================================
+// AI Provider
+// =============================================================================
+
+/** 非默认模型 API 熔断统计窗口: 1 分钟 */
+export const MODEL_API_CIRCUIT_BREAKER_WINDOW_MS = MINUTE_MS;
+
+/** 非默认模型 API 熔断阈值: 窗口内 3 次调用异常 */
+export const MODEL_API_CIRCUIT_BREAKER_FAILURE_THRESHOLD = 3;
+
+/** 非默认模型 API 熔断降级时长: 3 分钟 */
+export const MODEL_API_CIRCUIT_BREAKER_OPEN_MS = 3 * MINUTE_MS;
+
 // =============================================================================
 // UI / Components
 // =============================================================================
