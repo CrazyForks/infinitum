@@ -2,6 +2,7 @@ import { DEFAULT_BLACKLIST_KEYWORDS } from "@/config/blacklist";
 import {
   DEFAULT_CLUSTER_MATCH_PROMPT,
   DEFAULT_CLUSTER_SUMMARY_PROMPT,
+  DEFAULT_DAILY_REPORT_PROMPT,
   DEFAULT_ITEM_ANALYSIS_PROMPT,
   DEFAULT_ITEM_SUMMARY_PROMPT,
 } from "@/config/prompts";
@@ -32,6 +33,7 @@ export type RuntimeConfig = {
     itemAnalysis: string;
     clusterSummary: string;
     clusterMatch: string;
+    dailyReport: string;
   };
   selectedPromptConfigs?: {
     itemSummary: {
@@ -70,6 +72,15 @@ export type RuntimeConfig = {
       topP?: number | null;
       modelApi?: RuntimeConfig["modelApi"] | null;
     };
+    dailyReport: {
+      name: string;
+      systemPrompt: string;
+      promptTemplate: string;
+      temperature?: number | null;
+      maxTokens?: number | null;
+      topP?: number | null;
+      modelApi?: RuntimeConfig["modelApi"] | null;
+    };
   };
 };
 
@@ -94,6 +105,7 @@ export function getRuntimeConfig(): RuntimeConfig {
       itemAnalysis: DEFAULT_ITEM_ANALYSIS_PROMPT,
       clusterSummary: DEFAULT_CLUSTER_SUMMARY_PROMPT,
       clusterMatch: DEFAULT_CLUSTER_MATCH_PROMPT,
+      dailyReport: DEFAULT_DAILY_REPORT_PROMPT,
     },
   };
 }

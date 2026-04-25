@@ -8,17 +8,20 @@ import { IconGithub, IconLock, IconLogout, IconMonitor, IconMoon, IconRss, IconS
 import { cx } from "@/lib/ui/cx";
 
 type GlobalHeaderProps = {
-  activeNav: "home" | "admin" | null;
+  activeNav: "home" | "daily" | "admin" | null;
   isAdmin: boolean;
+  showShadow?: boolean;
+  rssHref?: string;
 };
 
 const navItems = [
   { href: "/", key: "home", label: "主页" },
+  { href: "/daily", key: "daily", label: "日报" },
 ] as const;
 
 type ThemePreference = "light" | "dark" | "system";
 
-export function GlobalHeader({ activeNav, isAdmin }: GlobalHeaderProps) {
+export function GlobalHeader({ activeNav, isAdmin, showShadow = true, rssHref }: GlobalHeaderProps) {
   const router = useRouter();
   const [isPending, setIsPending] = useState(false);
   const [theme, setTheme] = useState<ThemePreference>("system");
@@ -99,6 +102,14 @@ export function GlobalHeader({ activeNav, isAdmin }: GlobalHeaderProps) {
 
   const openRss = () => {
     if (typeof window === "undefined") return;
+    if (rssHref) {
+      window.open(rssHref, "_blank", "noopener,noreferrer");
+      return;
+    }
+    if (activeNav === "daily") {
+      window.open("/api/daily/rss", "_blank", "noopener,noreferrer");
+      return;
+    }
     // 构建 RSS URL，使用当前页面的查询参数
     const currentUrl = new URL(window.location.href);
     const rssUrl = `/api/feed/rss${currentUrl.search}`;
@@ -108,7 +119,8 @@ export function GlobalHeader({ activeNav, isAdmin }: GlobalHeaderProps) {
   return (
     <header
       className={cx(
-        "border-b border-[color:var(--line)] bg-[var(--surface)] shadow-[var(--shadow-sm)]",
+        "border-b border-[color:var(--line)] bg-[var(--surface)]",
+        showShadow ? "shadow-[var(--shadow-sm)]" : null,
         activeNav === "home" ? null : "sticky top-0 z-40",
       )}
     >

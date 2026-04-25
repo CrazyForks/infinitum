@@ -39,7 +39,7 @@ describe("rss parser", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(feed.title).toBe("Retry Feed");
-    expect(feed.items[0]?.title).toBe("Recovered item");
+    expect(feed.items?.[0]?.title).toBe("Recovered item");
   });
 
   it("throws the RSS fetch error after the retry also fails", async () => {

@@ -1,0 +1,47 @@
+type ApiResult<T> = {
+  ok: boolean;
+  status: number;
+  data: T;
+};
+
+type TaskRunPayload = {
+  taskRun?: { id: string } | null;
+  error?: string;
+};
+
+async function requestJsonWithMeta<T>(input: RequestInfo | URL, init?: RequestInit): Promise<ApiResult<T>> {
+  const response = await fetch(input, init);
+  return {
+    ok: response.ok,
+    status: response.status,
+    data: (await response.json()) as T,
+  };
+}
+
+export function requestDailyReportGeneration(date: string) {
+  return requestJsonWithMeta<TaskRunPayload>("/api/admin/daily-reports/generate", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ date }),
+  });
+}
+
+export function publishDailyReport(date: string) {
+  return requestJsonWithMeta<{ error?: string }>(`/api/admin/daily-reports/${date}/publish`, {
+    method: "POST",
+  });
+}
+
+export function unpublishDailyReport(date: string) {
+  return requestJsonWithMeta<{ error?: string }>(`/api/admin/daily-reports/${date}/unpublish`, {
+    method: "POST",
+  });
+}
+
+export function deleteDailyReport(date: string) {
+  return requestJsonWithMeta<{ deleted?: boolean; error?: string }>(`/api/admin/daily-reports/${date}`, {
+    method: "DELETE",
+  });
+}

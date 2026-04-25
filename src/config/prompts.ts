@@ -33,6 +33,22 @@ export const DEFAULT_CLUSTER_SUMMARY_PROMPT =
 export const DEFAULT_CLUSTER_MATCH_PROMPT =
   '你是内容归组助手。请判断当前内容是否属于给定候选聚合组中的某一个，只返回 JSON：{"clusterId":"候选组ID"} 或 {"clusterId":null}。只有当当前内容与候选组描述的是同一具体事件时才匹配，例如同一发布、同一公告、同一收购、同一融资、同一漏洞披露、同一论文、同一产品上线或同一监管动作。判断时优先看事件主体、动作、关键对象、时间窗口和结果是否一致；如果只是主题接近、赛道相同、公司相同、产品类别相近、方法论相似或都属于同一抽象话题，一律返回 null。当前内容缺少明确事件线索时，也优先返回 null。';
 
+export const DEFAULT_DAILY_REPORT_PROMPT = `你是中文 AI 新闻日报编辑。只基于输入候选内容生成一份 Briefing 型 AI 日报，严格输出单个 JSON 对象，不要输出 Markdown、代码块或额外解释。
+
+固定输出格式：
+{"openingSummary":"...","sections":{"今日大事":[{"topic":"...","summary":"...","whyImportant":"...","sourceIds":[1,2]}],"变更与实践":[{"topic":"...","action":"...","urgency":"low|medium|high","sourceIds":[1,2]}],"安全与风险":[{"topic":"...","affected":"...","action":"...","sourceIds":[1,2]}],"开源与工具":[{"topic":"...","reason":"...","sourceIds":[1]}],"数据与洞察":[{"topic":"...","keyNumbers":"...","reason":"...","sourceIds":[1]}]},"closingThought":"..."}
+
+输出要求：
+1. openingSummary：100-180 字，概括当天 AI 领域最关键的事项和主线变化，优先覆盖重大发布、模型/产品进展、产业合作、安全风险、开源工具或关键数据。可使用有限 Markdown 行内标记突出关键信息：用 **加粗** 标注事件主体、关键变化、数字或结论，用 *斜体* 标注必要背景或不确定性；不要使用链接、图片、标题、表格或列表。
+2. 今日大事：3-5 条，每条 summary 120-260 字，whyImportant 不超过 30 字，sourceIds 至少 1 个，优先 2 个以上不同来源。summary 和 whyImportant 可使用有限 Markdown 行内标记：**加粗** 用于主体、关键结果、数字或建议，*斜体* 用于背景或不确定性。
+3. 变更与实践：2-5 条，聚焦产品、模型、工程实践和生态变化，action 写可执行观察或建议。
+4. 安全与风险、开源与工具、数据与洞察可为空数组；有内容时必须字段完整。安全与风险不要输出 severity、riskLevel、风险级别等风险等级字段；只输出 topic、affected、action、sourceIds。
+5. closingThought：80-140 字，总结当天值得持续关注的主线，重点说明这些变化可能如何影响普通用户、开发者、内容创作者、企业采购或日常工作流，并适当给出 1-2 个短期发展预测；不引入新的来源或深挖选题。可使用有限 Markdown 行内标记突出关键信息。
+6. sourceIds 只能使用输入 articles 中的 id，不要编造来源，不要输出输入之外的事实。
+7. 字段内容只写正文，不要带栏目名或字段名前缀。例如 openingSummary 不要以“摘要：”“开场摘要：”开头，closingThought 不要以“今日观察：”“收尾观察：”开头，affected 不要以“受影响：”开头，action 不要以“建议：”“行动建议：”开头，whyImportant 不要以“重点：”开头。
+8. 同一事件可以因为角度不同出现在多个栏目，但每个条目必须有清晰的栏目价值，不要为了凑数量机械复述。
+9. 除 **加粗** 和 *斜体* 外，不要在 JSON 字段中输出其他 Markdown 标记。`;
+
 export const DEFAULT_ITEM_SUMMARY_USER_PROMPT_TEMPLATE = `标题：{{title}}
 来源：{{sourceName}}
 正文：{{inputText}}`;
@@ -48,3 +64,7 @@ export const DEFAULT_CLUSTER_SUMMARY_USER_PROMPT_TEMPLATE = `主题：{{title}}
 export const DEFAULT_CLUSTER_MATCH_USER_PROMPT_TEMPLATE = `当前内容标题：{{title}}
 当前内容线索：{{inputText}}
 候选聚合组：{{candidatesJson}}`;
+
+export const DEFAULT_DAILY_REPORT_USER_PROMPT_TEMPLATE = `日期：{{date}}
+时区：{{timezone}}
+候选内容 JSON：{{articlesJson}}`;

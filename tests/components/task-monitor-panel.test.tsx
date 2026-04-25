@@ -20,6 +20,7 @@ function buildMonitorSnapshot(): BackgroundTaskMonitorSnapshot {
       sourceConcurrency: 2,
       fullTextFetchThreshold: 80,
       perSourceItemLimit: 20,
+      dailyReportCandidateLimit: 120,
       timezone: "Asia/Shanghai",
       lastHeartbeatAt: null,
       lastRunStartedAt: null,

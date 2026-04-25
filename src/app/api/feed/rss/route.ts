@@ -56,6 +56,7 @@ export async function GET(request: Request) {
     title: feedTitle,
     description: feedDescription,
     link: baseUrl,
+    selfLink: url.toString(),
     lastBuildDate: new Date().toISOString(),
     items: rssItems,
   });

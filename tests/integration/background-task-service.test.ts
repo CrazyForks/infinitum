@@ -366,6 +366,12 @@ describe("background task persistence", () => {
         actual: 0,
         estimated: 2,
       },
+      {
+        key: "daily_report",
+        label: "AI 日报",
+        actual: 0,
+        estimated: 0,
+      },
     ]);
     expect(snapshot.recentTasks[0]?.stageTimings).toEqual([
       {

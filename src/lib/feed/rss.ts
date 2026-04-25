@@ -14,11 +14,12 @@ type RssFeed = {
   title: string;
   description: string;
   link: string;
+  selfLink?: string;
   lastBuildDate: string;
   items: RssItem[];
 };
 
-function escapeXml(unsafe: string): string {
+export function escapeXml(unsafe: string): string {
   return unsafe
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -62,7 +63,7 @@ function buildClusterDescription(
 }
 
 export function buildRssFeed(feed: RssFeed): string {
-  const { title, description, link, lastBuildDate, items } = feed;
+  const { title, description, link, selfLink = link, lastBuildDate, items } = feed;
 
   const itemsXml = items
     .map((item) => {
@@ -87,7 +88,7 @@ export function buildRssFeed(feed: RssFeed): string {
   <link>${escapeXml(link)}</link>
   <lastBuildDate>${new Date(lastBuildDate).toUTCString()}</lastBuildDate>
   <language>zh-CN</language>
-  <atom:link href="${escapeXml(link)}" rel="self" type="application/rss+xml" />
+  <atom:link href="${escapeXml(selfLink)}" rel="self" type="application/rss+xml" />
 ${itemsXml}
 </channel>
 </rss>`;

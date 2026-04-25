@@ -429,14 +429,10 @@ describe("ai provider", () => {
 
     await expect(provider.summarizeItem("正文 1", { title: "标题 1" })).rejects.toThrow(/upstream failed/i);
     await expect(provider.summarizeItem("正文 2", { title: "标题 2" })).rejects.toThrow(/upstream failed/i);
-    await expect(provider.summarizeItem("正文 3", { title: "标题 3" })).rejects.toThrow(/upstream failed/i);
-    await expect(provider.summarizeItem("正文 4", { title: "标题 4" })).rejects.toThrow(/upstream failed/i);
-    await expect(provider.summarizeItem("正文 5", { title: "标题 5" })).resolves.toBe("默认模型摘要");
-    await expect(provider.summarizeItem("正文 6", { title: "标题 6" })).resolves.toBe("默认模型摘要");
+    await expect(provider.summarizeItem("正文 3", { title: "标题 3" })).resolves.toBe("默认模型摘要");
+    await expect(provider.summarizeItem("正文 4", { title: "标题 4" })).resolves.toBe("默认模型摘要");
 
     expect(create.mock.calls.map((call) => call[0]?.model)).toEqual([
-      "custom-model",
-      "custom-model",
       "custom-model",
       "custom-model",
       "custom-model",

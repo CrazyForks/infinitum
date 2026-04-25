@@ -23,6 +23,7 @@ import {
   IconArrowDown,
   IconFilter,
 } from "@/components/ui/icons";
+import type { PromptConfigType } from "@/lib/settings/types";
 
 type PrimaryTab = "monitoring" | "settings";
 type MonitorSubSection = "content" | "tasks";
@@ -69,6 +70,20 @@ function normalizeSettingsSection(value: string | null): SettingsSection {
 
 function normalizeAISubSection(value: string | null): AISubSection {
   return value === "prompt" ? "prompt" : "model-api";
+}
+
+function normalizePromptType(value: string | null): PromptConfigType {
+  if (
+    value === "item_summary" ||
+    value === "item_analysis" ||
+    value === "cluster_summary" ||
+    value === "cluster_match" ||
+    value === "daily_report"
+  ) {
+    return value;
+  }
+
+  return "item_summary";
 }
 
 function normalizeTaskId(value: string | null): string | null {
@@ -129,6 +144,7 @@ export function AdminPageClient({
   const taskPageSize = normalizePositiveInteger(searchParams.get("taskPageSize"));
   const contentPage = normalizePositiveInteger(searchParams.get("contentPage"));
   const contentPageSize = normalizePositiveInteger(searchParams.get("contentPageSize"));
+  const selectedPromptType = normalizePromptType(searchParams.get("promptType"));
   const [collapsedSections, setCollapsedSections] = useState<{
     ai: boolean;
     content: boolean;
@@ -286,6 +302,7 @@ export function AdminPageClient({
           <AdminSettingsPanel
             initialSettings={initialSettings}
             activeSection="ai-prompt"
+            initialPromptType={selectedPromptType}
             embedMode
           />
         );

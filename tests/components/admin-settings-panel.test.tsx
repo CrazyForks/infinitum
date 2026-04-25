@@ -83,12 +83,29 @@ function buildInitialSettings(): AdminSettingsSnapshot {
       sourceConcurrency: 2,
       fullTextFetchThreshold: 80,
       perSourceItemLimit: 20,
+      dailyReportCandidateLimit: 120,
       timezone: "Asia/Shanghai",
       lastHeartbeatAt: "2026-04-20T10:00:00.000Z",
       lastRunStartedAt: "2026-04-20T10:00:00.000Z",
       lastRunFinishedAt: "2026-04-20T10:05:00.000Z",
       lastRunStatus: "succeeded" as const,
       nextRunAt: "2026-04-20T11:00:00.000Z",
+      isHeartbeatStale: false,
+    },
+    dailyReportSchedule: {
+      key: "daily_report_default",
+      enabled: false,
+      cronExpression: "30 8 * * *",
+      sourceConcurrency: 2,
+      fullTextFetchThreshold: 80,
+      perSourceItemLimit: 20,
+      dailyReportCandidateLimit: 120,
+      timezone: "Asia/Shanghai",
+      lastHeartbeatAt: "2026-04-20T10:00:00.000Z",
+      lastRunStartedAt: null,
+      lastRunFinishedAt: null,
+      lastRunStatus: null,
+      nextRunAt: "2026-04-21T00:30:00.000Z",
       isHeartbeatStale: false,
     },
     groups: [{ id: "group-1", name: "Core", sortOrder: 0 }],
@@ -141,7 +158,7 @@ describe("AdminSettingsPanel", () => {
       "true",
     );
     expect(within(settingsNav).getByRole("tab", { name: "提示词" })).toBeInTheDocument();
-    expect(within(settingsNav).getByRole("tab", { name: "任务配置" })).toBeInTheDocument();
+    expect(within(settingsNav).getByRole("tab", { name: "采集任务" })).toBeInTheDocument();
     expect(screen.getByText("模型API配置")).toBeInTheDocument();
     expect(screen.getAllByText("默认模型配置").length).toBeGreaterThan(0);
     expect(screen.getByText("抓取并发：")).toBeInTheDocument();
@@ -864,13 +881,13 @@ describe("AdminSettingsPanel", () => {
     renderWithProviders(<AdminSettingsPanel initialSettings={buildInitialSettings()} />);
 
     const tabs = screen.getAllByRole("tab");
-    expect(tabs.at(-1)).toHaveAccessibleName("任务配置");
+    expect(tabs.at(-1)).toHaveAccessibleName("采集任务");
 
-    await user.click(screen.getByRole("tab", { name: "任务配置" }));
+    await user.click(screen.getByRole("tab", { name: "采集任务" }));
 
     const taskPanel = screen.getByRole("tabpanel");
 
-    expect(within(taskPanel).getByText("任务配置")).toBeInTheDocument();
+    expect(within(taskPanel).getByText("采集任务")).toBeInTheDocument();
     expect(within(taskPanel).queryByText("默认抓取任务")).not.toBeInTheDocument();
     expect(within(taskPanel).queryByText("调度状态")).not.toBeInTheDocument();
     expect(within(taskPanel).queryByDisplayValue("调度器在线")).not.toBeInTheDocument();
@@ -901,6 +918,54 @@ describe("AdminSettingsPanel", () => {
           fullTextFetchThreshold: 120,
           perSourceItemLimit: 20,
           processingStartAt: null,
+        }),
+      });
+    });
+  });
+
+  it("submits the daily report schedule candidate limit", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          schedule: {
+            ...buildInitialSettings().dailyReportSchedule,
+            enabled: true,
+            cronExpression: "0 9 * * *",
+            dailyReportCandidateLimit: 80,
+          },
+        }),
+      ),
+    );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderWithProviders(<AdminSettingsPanel initialSettings={buildInitialSettings()} />);
+
+    await user.click(screen.getByRole("tab", { name: "采集任务" }));
+
+    const taskPanel = screen.getByRole("tabpanel");
+
+    expect(within(taskPanel).queryByText("下次运行")).not.toBeInTheDocument();
+    expect(within(taskPanel).getByLabelText("候选内容上限")).toHaveValue(120);
+
+    await user.click(within(taskPanel).getByLabelText("启用 AI 日报任务"));
+    await user.clear(within(taskPanel).getByLabelText("日报 Cron 表达式"));
+    await user.type(within(taskPanel).getByLabelText("日报 Cron 表达式"), "0 9 * * *");
+    await user.clear(within(taskPanel).getByLabelText("候选内容上限"));
+    await user.type(within(taskPanel).getByLabelText("候选内容上限"), "80");
+    await user.click(within(taskPanel).getByRole("button", { name: "保存配置吧" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/admin/monitor/schedule/daily-report-default", {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          enabled: true,
+          cronExpression: "0 9 * * *",
+          dailyReportCandidateLimit: 80,
         }),
       });
     });

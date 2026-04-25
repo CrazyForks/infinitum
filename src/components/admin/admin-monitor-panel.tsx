@@ -53,6 +53,7 @@ const statusLabels = {
 
 const taskKindLabels = {
   cluster_regenerate_summary: "聚合摘要重生成",
+  daily_report_generate: "AI 日报生成",
   ingestion: "抓取任务",
   item_reanalyze: "内容重分析",
   item_regenerate_summary: "摘要重生成",
@@ -505,7 +506,7 @@ export function AdminMonitorPanel({
         </div>
 
         <p className="text-sm leading-6 text-[var(--muted)]">
-          控制默认抓取任务的频率与开关，同时查看调度器健康和下次运行时间。
+          控制默认抓取任务的频率与开关，同时查看调度器健康状态。
         </p>
       </div>
 
@@ -685,10 +686,6 @@ export function AdminMonitorPanel({
               ? statusLabels[snapshot.schedule.lastRunStatus]
               : "暂无"
           }
-        />
-        <TaskFact
-          label="Next Run"
-          value={formatDateTime(snapshot.schedule.nextRunAt)}
         />
         <TaskFact
           label="Source Concurrency"

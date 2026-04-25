@@ -2,7 +2,8 @@ export type PromptConfigType =
   | "item_summary"
   | "item_analysis"
   | "cluster_summary"
-  | "cluster_match";
+  | "cluster_match"
+  | "daily_report";
 
 export type AdminModelApiConfig = {
   id: string;
@@ -51,6 +52,24 @@ export type AdminSettingsSnapshot = {
     sourceConcurrency: number;
     fullTextFetchThreshold: number;
     perSourceItemLimit: number;
+    dailyReportCandidateLimit: number;
+    processingStartAt?: string | null;
+    timezone: string;
+    lastHeartbeatAt: string | null;
+    lastRunStartedAt: string | null;
+    lastRunFinishedAt: string | null;
+    lastRunStatus: "queued" | "running" | "succeeded" | "failed" | "partial" | "cancelled" | null;
+    nextRunAt: string;
+    isHeartbeatStale: boolean;
+  };
+  dailyReportSchedule: {
+    key: "daily_report_default";
+    enabled: boolean;
+    cronExpression: string;
+    sourceConcurrency: number;
+    fullTextFetchThreshold: number;
+    perSourceItemLimit: number;
+    dailyReportCandidateLimit: number;
     processingStartAt?: string | null;
     timezone: string;
     lastHeartbeatAt: string | null;

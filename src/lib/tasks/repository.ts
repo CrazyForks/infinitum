@@ -3,11 +3,16 @@ import {
   computeNextRunAt,
   DEFAULT_SCHEDULE_CRON_EXPRESSION,
   DEFAULT_FULL_TEXT_FETCH_THRESHOLD,
+  DEFAULT_DAILY_REPORT_CANDIDATE_LIMIT,
   DEFAULT_SCHEDULE_TIMEZONE,
   DEFAULT_SOURCE_CONCURRENCY,
   DEFAULT_PER_SOURCE_ITEM_LIMIT,
 } from "@/lib/tasks/scheduler";
-import { DEFAULT_INGESTION_SCHEDULE_KEY, type EnqueueTaskRunInput } from "@/lib/tasks/types";
+import {
+  DEFAULT_DAILY_REPORT_SCHEDULE_KEY,
+  DEFAULT_INGESTION_SCHEDULE_KEY,
+  type EnqueueTaskRunInput,
+} from "@/lib/tasks/types";
 
 export async function upsertDefaultIngestionSchedule() {
   const now = new Date();
@@ -22,9 +27,34 @@ export async function upsertDefaultIngestionSchedule() {
       sourceConcurrency: DEFAULT_SOURCE_CONCURRENCY,
       fullTextFetchThreshold: DEFAULT_FULL_TEXT_FETCH_THRESHOLD,
       perSourceItemLimit: DEFAULT_PER_SOURCE_ITEM_LIMIT,
+      dailyReportCandidateLimit: DEFAULT_DAILY_REPORT_CANDIDATE_LIMIT,
       timezone: DEFAULT_SCHEDULE_TIMEZONE,
       nextRunAt: computeNextRunAt({
         cronExpression: DEFAULT_SCHEDULE_CRON_EXPRESSION,
+        now,
+        timezone: DEFAULT_SCHEDULE_TIMEZONE,
+      }),
+    },
+  });
+}
+
+export async function upsertDefaultDailyReportSchedule() {
+  const now = new Date();
+
+  return prisma.taskSchedule.upsert({
+    where: { key: DEFAULT_DAILY_REPORT_SCHEDULE_KEY },
+    update: {},
+    create: {
+      key: DEFAULT_DAILY_REPORT_SCHEDULE_KEY,
+      enabled: false,
+      cronExpression: "30 8 * * *",
+      sourceConcurrency: DEFAULT_SOURCE_CONCURRENCY,
+      fullTextFetchThreshold: DEFAULT_FULL_TEXT_FETCH_THRESHOLD,
+      perSourceItemLimit: DEFAULT_PER_SOURCE_ITEM_LIMIT,
+      dailyReportCandidateLimit: DEFAULT_DAILY_REPORT_CANDIDATE_LIMIT,
+      timezone: DEFAULT_SCHEDULE_TIMEZONE,
+      nextRunAt: computeNextRunAt({
+        cronExpression: "30 8 * * *",
         now,
         timezone: DEFAULT_SCHEDULE_TIMEZONE,
       }),

@@ -4,9 +4,10 @@ import { DEFAULT_POLL_INTERVAL_MS, DEFAULT_TASK_STALE_MS } from "@/config/consta
 import { prisma } from "@/lib/db";
 import { executeTaskRun as defaultExecuteTaskRun } from "@/lib/tasks/handlers";
 import { computeNextRunAt } from "@/lib/tasks/scheduler";
-import { DEFAULT_INGESTION_TASK_LABEL } from "@/lib/tasks/types";
+import { DEFAULT_DAILY_REPORT_TASK_LABEL, DEFAULT_INGESTION_TASK_LABEL } from "@/lib/tasks/types";
 import {
   claimNextQueuedTaskRun,
+  ensureDefaultDailyReportSchedule,
   ensureDefaultIngestionSchedule,
   enqueueTaskRun,
   TASK_RUN_CANCELLED_LABEL,
@@ -20,10 +21,15 @@ function sleep(ms: number) {
 }
 
 async function touchScheduleHeartbeat(now: Date) {
-  const schedule = await ensureDefaultIngestionSchedule();
+  await ensureDefaultIngestionSchedule();
+  await ensureDefaultDailyReportSchedule();
 
-  return prisma.taskSchedule.update({
-    where: { id: schedule.id },
+  return prisma.taskSchedule.updateMany({
+    where: {
+      key: {
+        in: ["ingestion_default", "daily_report_default"],
+      },
+    },
     data: {
       lastHeartbeatAt: now,
     },
@@ -54,6 +60,54 @@ async function enqueueScheduledIngestionIfDue(now: Date) {
     kind: "ingestion",
     triggerType: "scheduled",
     label: DEFAULT_INGESTION_TASK_LABEL,
+  });
+
+  await prisma.taskSchedule.update({
+    where: { id: schedule.id },
+    data: {
+      nextRunAt: computeNextRunAt({
+        cronExpression: schedule.cronExpression,
+        now,
+        anchor: schedule.nextRunAt,
+        timezone: schedule.timezone,
+      }),
+    },
+  });
+
+  return true;
+}
+
+function getScheduledReportDate(now: Date) {
+  const shanghaiTime = new Date(now.getTime() + 8 * 60 * 60 * 1000);
+  return shanghaiTime.toISOString().slice(0, 10);
+}
+
+async function enqueueScheduledDailyReportIfDue(now: Date) {
+  const schedule = await ensureDefaultDailyReportSchedule();
+
+  if (!schedule.enabled || schedule.nextRunAt.getTime() > now.getTime()) {
+    return false;
+  }
+
+  const activeDailyReportCount = await prisma.backgroundTaskRun.count({
+    where: {
+      kind: "daily_report_generate",
+      status: {
+        in: ["queued", "running"],
+      },
+    },
+  });
+
+  if (activeDailyReportCount > 0) {
+    return false;
+  }
+
+  const date = getScheduledReportDate(now);
+  await enqueueTaskRun({
+    kind: "daily_report_generate",
+    triggerType: "scheduled",
+    label: `${DEFAULT_DAILY_REPORT_TASK_LABEL} ${date}`,
+    entityId: date,
   });
 
   await prisma.taskSchedule.update({
@@ -195,8 +249,10 @@ export async function runWorkerCycle(options?: {
   const now = options?.now ?? new Date();
 
   await ensureDefaultIngestionSchedule();
+  await ensureDefaultDailyReportSchedule();
   await touchScheduleHeartbeat(now);
   const enqueuedScheduledRun = await enqueueScheduledIngestionIfDue(now);
+  const enqueuedScheduledDailyReport = await enqueueScheduledDailyReportIfDue(now);
   const claimedTaskRun = await claimNextQueuedTaskRun();
 
   if (claimedTaskRun) {
@@ -205,6 +261,7 @@ export async function runWorkerCycle(options?: {
 
   return {
     enqueuedScheduledRun,
+    enqueuedScheduledDailyReport,
     claimedTaskRunId: claimedTaskRun?.id ?? null,
   };
 }

@@ -167,6 +167,7 @@ describe("runIngestion", () => {
       { key: "item_analysis", label: "内容分析", actual: 2, estimated: 2 },
       { key: "cluster_match", label: "聚合匹配", actual: 0, estimated: 0 },
       { key: "cluster_summary", label: "聚合摘要", actual: 1, estimated: 1 },
+      { key: "daily_report", label: "AI 日报", actual: 0, estimated: 0 },
     ]);
     expect(taskTimeline.map((node) => node.key)).toEqual([
       "source_fetch",

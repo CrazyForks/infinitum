@@ -46,7 +46,8 @@ describe("admin settings service", () => {
     expect(settings.modelApiConfigs[0]?.baseUrl).toBe("");
     expect(settings.modelApiConfigs[0]?.apiKeyMasked).toBe("");
     expect(settings.modelApiConfigs[0]?.ingestionItemConcurrency).toBe(3);
-    expect(settings.promptConfigs).toHaveLength(4);
+    expect(settings.promptConfigs).toHaveLength(5);
+    expect(settings.promptConfigs.find((config) => config.type === "daily_report")?.systemPrompt).toContain("AI 新闻日报");
     expect(settings.taskSchedule.key).toBe("ingestion_default");
     expect(settings.taskSchedule.enabled).toBe(false);
     expect(settings.taskSchedule.cronExpression).toBe("0 * * * *");

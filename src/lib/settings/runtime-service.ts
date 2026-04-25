@@ -12,7 +12,7 @@ import {
   toSourceConfig,
 } from "@/lib/settings/core";
 import type { AdminSettingsSnapshot } from "@/lib/settings/types";
-import { ensureDefaultIngestionSchedule, toTaskScheduleSnapshot } from "@/lib/tasks/service";
+import { ensureDefaultDailyReportSchedule, ensureDefaultIngestionSchedule, toTaskScheduleSnapshot } from "@/lib/tasks/service";
 
 export async function getIngestionRuntimeConfig(): Promise<RuntimeConfig> {
   await ensureRuntimeConfigSeeded();
@@ -53,6 +53,7 @@ export async function getIngestionRuntimeConfig(): Promise<RuntimeConfig> {
   const itemSummaryConfig = pickPromptConfigByType(promptConfigs, PromptConfigType.item_summary);
   const clusterSummaryConfig = pickPromptConfigByType(promptConfigs, PromptConfigType.cluster_summary);
   const clusterMatchConfig = pickPromptConfigByType(promptConfigs, PromptConfigType.cluster_match);
+  const dailyReportConfig = pickPromptConfigByType(promptConfigs, PromptConfigType.daily_report);
 
   return {
     rssSources: sources.map((source) => toSourceConfig(source)),
@@ -70,12 +71,14 @@ export async function getIngestionRuntimeConfig(): Promise<RuntimeConfig> {
       itemAnalysis: itemAnalysisConfig.systemPrompt || itemAnalysisConfig.prompt,
       clusterSummary: clusterSummaryConfig.systemPrompt || clusterSummaryConfig.prompt,
       clusterMatch: clusterMatchConfig.systemPrompt || clusterMatchConfig.prompt,
+      dailyReport: dailyReportConfig.systemPrompt || dailyReportConfig.prompt,
     },
     selectedPromptConfigs: {
       itemSummary: serializeSelectedPromptConfig(itemSummaryConfig),
       itemAnalysis: serializeSelectedPromptConfig(itemAnalysisConfig),
       clusterSummary: serializeSelectedPromptConfig(clusterSummaryConfig),
       clusterMatch: serializeSelectedPromptConfig(clusterMatchConfig),
+      dailyReport: serializeSelectedPromptConfig(dailyReportConfig),
     },
   };
 }
@@ -83,7 +86,7 @@ export async function getIngestionRuntimeConfig(): Promise<RuntimeConfig> {
 export async function getAdminSettings(): Promise<AdminSettingsSnapshot> {
   await ensureRuntimeConfigSeeded();
 
-  const [modelApiConfigs, promptConfigs, blacklist, groups, sources, taskSchedule] = await Promise.all([
+  const [modelApiConfigs, promptConfigs, blacklist, groups, sources, taskSchedule, dailyReportSchedule] = await Promise.all([
     prisma.modelApiConfig.findMany({
       orderBy: [{ isDefault: "desc" }, { createdAt: "desc" }],
     }),
@@ -108,6 +111,7 @@ export async function getAdminSettings(): Promise<AdminSettingsSnapshot> {
       orderBy: [{ name: "asc" }],
     }),
     ensureDefaultIngestionSchedule(),
+    ensureDefaultDailyReportSchedule(),
   ]);
   const latestItemsBySource = await prisma.item.groupBy({
     by: ["sourceId"],
@@ -125,7 +129,8 @@ export async function getAdminSettings(): Promise<AdminSettingsSnapshot> {
     modelApiConfigs: modelApiConfigs.map(serializeAdminModelApiConfig),
     promptConfigs: promptConfigs.map((config) => serializeAdminPromptConfig(config, defaultModelConfig)),
     blacklistKeywords: blacklist.map((entry) => entry.keyword),
-    taskSchedule: toTaskScheduleSnapshot(taskSchedule),
+    taskSchedule: toTaskScheduleSnapshot(taskSchedule) as AdminSettingsSnapshot["taskSchedule"],
+    dailyReportSchedule: toTaskScheduleSnapshot(dailyReportSchedule) as AdminSettingsSnapshot["dailyReportSchedule"],
     groups: groups.map((group) => ({
       id: group.id,
       name: group.name,

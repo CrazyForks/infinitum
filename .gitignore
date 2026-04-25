@@ -45,8 +45,12 @@ next-env.d.ts
 /src/generated/prisma
 /prisma/*.db
 /prisma/*.db-journal
+/prisma/*.db-shm
+/prisma/*.db-wal
 /prisma/prisma/*.db
 /prisma/prisma/*.db-journal
+/prisma/prisma/*.db-shm
+/prisma/prisma/*.db-wal
 /.env.docker
 
 # local runtime / deployment files
@@ -58,3 +62,5 @@ next-env.d.ts
 /scripts/deploy-local/
 /.npm/
 /Library/
+/.playwright-mcp/
+/daily-detail*.png

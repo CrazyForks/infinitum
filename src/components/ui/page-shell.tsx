@@ -4,11 +4,13 @@ import { AppFooter } from "@/components/ui/app-footer";
 import { GlobalHeader } from "@/components/ui/global-header";
 import { cx } from "@/lib/ui/cx";
 
-type PageShellNav = "home" | "admin" | null;
+type PageShellNav = "home" | "daily" | "admin" | null;
 
 type PageShellHeader = {
   activeNav: PageShellNav;
   isAdmin: boolean;
+  showShadow?: boolean;
+  rssHref?: string;
 };
 
 type PageShellProps = ComponentPropsWithoutRef<"main"> & {
@@ -44,7 +46,14 @@ export function PageShell({
       )}
       {...props}
     >
-      {header ? <GlobalHeader activeNav={header.activeNav} isAdmin={header.isAdmin} /> : null}
+      {header ? (
+        <GlobalHeader
+          activeNav={header.activeNav}
+          isAdmin={header.isAdmin}
+          showShadow={header.showShadow}
+          rssHref={header.rssHref}
+        />
+      ) : null}
 
       {!header && chromeLabel ? (
         <div className="border-b border-[color:var(--line)] bg-[color-mix(in_srgb,var(--surface)_80%,transparent)] backdrop-blur">

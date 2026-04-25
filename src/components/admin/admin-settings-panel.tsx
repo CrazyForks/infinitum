@@ -22,6 +22,7 @@ import {
   importSourcesFromOpmlText,
   reorderSourceGroups,
   resolveSourceFromRssUrl,
+  saveDefaultDailyReportSchedule,
   saveDefaultIngestionSchedule,
   submitAdminSettingsAction,
 } from "@/components/admin/admin-settings-panel.api";
@@ -39,7 +40,7 @@ import { PaginationControls } from "@/components/ui/pagination-controls";
 import { TextArea } from "@/components/ui/text-area";
 import { TextInput } from "@/components/ui/text-input";
 import { useToast } from "@/components/ui/toast";
-import type { AdminSettingsSnapshot } from "@/lib/settings/types";
+import type { AdminSettingsSnapshot, PromptConfigType } from "@/lib/settings/types";
 import {
   DEFAULT_SCHEDULE_TIMEZONE,
   MAX_FULL_TEXT_FETCH_THRESHOLD,
@@ -47,7 +48,9 @@ import {
   MIN_FULL_TEXT_FETCH_THRESHOLD,
   MIN_SOURCE_CONCURRENCY,
   MAX_PER_SOURCE_ITEM_LIMIT,
+  MAX_DAILY_REPORT_CANDIDATE_LIMIT,
   MIN_PER_SOURCE_ITEM_LIMIT,
+  MIN_DAILY_REPORT_CANDIDATE_LIMIT,
 } from "@/lib/tasks/scheduler";
 import { cx } from "@/lib/ui/cx";
 
@@ -56,6 +59,7 @@ type AdminSettingsPanelProps = {
   onRefresh?: () => void;
   embedMode?: boolean;
   activeSection?: AdminSettingsSection;
+  initialPromptType?: PromptConfigType;
 };
 
 type AdminSettingsSection =
@@ -79,7 +83,7 @@ const settingsNavItems: Array<{
   { key: "blacklist", label: "黑名单" },
   { key: "groups", label: "分组" },
   { key: "sources", label: "信息源" },
-  { key: "tasks", label: "任务配置" },
+  { key: "tasks", label: "采集任务" },
 ] as const;
 
 function toDateTimeLocalValue(value: string | null | undefined) {
@@ -200,6 +204,7 @@ export function AdminSettingsPanel({
   onRefresh,
   embedMode,
   activeSection: externalActiveSection,
+  initialPromptType,
 }: AdminSettingsPanelProps) {
   type AdminSource = AdminSettingsSnapshot["sources"][number];
   const [isPending, startTransition] = useTransition();
@@ -256,6 +261,18 @@ export function AdminSettingsPanel({
   );
   const [taskScheduleSnapshot, setTaskScheduleSnapshot] = useState(
     initialSettings.taskSchedule,
+  );
+  const [dailyReportScheduleEnabled, setDailyReportScheduleEnabled] = useState(
+    initialSettings.dailyReportSchedule.enabled,
+  );
+  const [dailyReportScheduleCronExpression, setDailyReportScheduleCronExpression] = useState(
+    initialSettings.dailyReportSchedule.cronExpression,
+  );
+  const [dailyReportCandidateLimit, setDailyReportCandidateLimit] = useState(
+    String(initialSettings.dailyReportSchedule.dailyReportCandidateLimit),
+  );
+  const [dailyReportScheduleSnapshot, setDailyReportScheduleSnapshot] = useState(
+    initialSettings.dailyReportSchedule,
   );
   const normalizedBlacklistKeywords = blacklistText
     .split("\n")
@@ -733,6 +750,39 @@ export function AdminSettingsPanel({
       }
     });
   };
+  const saveDailyReportSchedule = () => {
+    const parsedDailyReportCandidateLimit = Number.parseInt(dailyReportCandidateLimit.trim(), 10);
+
+    if (
+      !Number.isInteger(parsedDailyReportCandidateLimit) ||
+      parsedDailyReportCandidateLimit < MIN_DAILY_REPORT_CANDIDATE_LIMIT ||
+      parsedDailyReportCandidateLimit > MAX_DAILY_REPORT_CANDIDATE_LIMIT
+    ) {
+      showToast(
+        `日报候选上限需为 ${MIN_DAILY_REPORT_CANDIDATE_LIMIT}-${MAX_DAILY_REPORT_CANDIDATE_LIMIT} 的整数。`,
+        "error",
+      );
+      return;
+    }
+
+    startTransition(async () => {
+      try {
+        const schedule = await saveDefaultDailyReportSchedule({
+          enabled: dailyReportScheduleEnabled,
+          cronExpression: dailyReportScheduleCronExpression,
+          dailyReportCandidateLimit: parsedDailyReportCandidateLimit,
+        });
+
+        setDailyReportScheduleSnapshot(schedule);
+        setDailyReportScheduleEnabled(schedule.enabled);
+        setDailyReportScheduleCronExpression(schedule.cronExpression);
+        setDailyReportCandidateLimit(String(schedule.dailyReportCandidateLimit));
+        showToast("日报任务配置已保存。", "success");
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : "日报任务配置保存失败。", "error");
+      }
+    });
+  };
   const taskScheduleIsDirty =
     taskScheduleEnabled !== taskScheduleSnapshot.enabled ||
     taskScheduleCronExpression.trim() !== taskScheduleSnapshot.cronExpression ||
@@ -740,6 +790,10 @@ export function AdminSettingsPanel({
     taskScheduleFullTextFetchThreshold.trim() !== String(taskScheduleSnapshot.fullTextFetchThreshold) ||
     taskSchedulePerSourceItemLimit.trim() !== String(taskScheduleSnapshot.perSourceItemLimit) ||
     taskScheduleProcessingStartAt.trim() !== toDateTimeLocalValue(taskScheduleSnapshot.processingStartAt);
+  const dailyReportScheduleIsDirty =
+    dailyReportScheduleEnabled !== dailyReportScheduleSnapshot.enabled ||
+    dailyReportScheduleCronExpression.trim() !== dailyReportScheduleSnapshot.cronExpression ||
+    dailyReportCandidateLimit.trim() !== String(dailyReportScheduleSnapshot.dailyReportCandidateLimit);
 
   const content = (
     <section aria-label="后台设置工作台" className="space-y-4">
@@ -754,7 +808,7 @@ export function AdminSettingsPanel({
         ) : null}
 
         {activeSection === "ai-prompt" ? (
-          <AiSettingsPanel initialSettings={initialSettings} mode="prompt" />
+          <AiSettingsPanel initialSettings={initialSettings} mode="prompt" initialPromptType={initialPromptType} />
         ) : null}
 
         {activeSection === "blacklist" ? (
@@ -1423,7 +1477,7 @@ export function AdminSettingsPanel({
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="space-y-1">
                 <h2 className="text-lg font-semibold text-[var(--text-1)]">
-                  任务配置
+                  采集任务
                 </h2>
                 <p className="text-sm text-[var(--text-3)]">
                   配置抓取任务的启用状态、Cron 调度、源抓取并发与正文补抓阈值
@@ -1562,6 +1616,68 @@ export function AdminSettingsPanel({
                   />
                 </FormField>
               ) : null}
+            </div>
+
+            <div className="border-t border-[color:var(--line)] pt-6">
+              <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                <div className="space-y-1">
+                  <h3 className="text-base font-semibold text-[var(--text-1)]">
+                    日报任务
+                  </h3>
+                  <p className="text-sm text-[var(--text-3)]">
+                    独立控制日报草稿生成时间，不影响 采集任务。
+                  </p>
+                </div>
+                <Button
+                  variant="primary"
+                  size="md"
+                  onClick={saveDailyReportSchedule}
+                  disabled={isPending || !dailyReportScheduleCronExpression.trim() || !dailyReportScheduleIsDirty}
+                >
+                  保存配置
+                </Button>
+              </div>
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                <div className="space-y-1.5">
+                  <div className="block text-sm text-[var(--muted)]">任务开关</div>
+                  <label className="flex min-h-10 items-center gap-2 rounded-sm border border-[color:var(--line)] bg-[var(--surface)] px-3 text-sm text-[var(--text-2)]">
+                    <input
+                      aria-label="启用 AI 日报任务"
+                      checked={dailyReportScheduleEnabled}
+                      className={checkboxInputClassName}
+                      type="checkbox"
+                      onChange={(event) => setDailyReportScheduleEnabled(event.target.checked)}
+                    />
+                    <span>启用 AI 日报任务</span>
+                  </label>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label
+                    htmlFor="daily-report-schedule-cron"
+                    className="block text-sm text-[var(--muted)]"
+                  >
+                    日报 Cron 表达式
+                  </label>
+                  <TextInput
+                    id="daily-report-schedule-cron"
+                    value={dailyReportScheduleCronExpression}
+                    onChange={(event) => setDailyReportScheduleCronExpression(event.target.value)}
+                    placeholder="例如 30 8 * * *"
+                  />
+                </div>
+
+                <FormField label="候选内容上限" htmlFor="daily-report-candidate-limit">
+                  <TextInput
+                    id="daily-report-candidate-limit"
+                    type="number"
+                    min={MIN_DAILY_REPORT_CANDIDATE_LIMIT}
+                    max={MAX_DAILY_REPORT_CANDIDATE_LIMIT}
+                    value={dailyReportCandidateLimit}
+                    onChange={(event) => setDailyReportCandidateLimit(event.target.value)}
+                  />
+                </FormField>
+              </div>
             </div>
           </div>
         ) : null}

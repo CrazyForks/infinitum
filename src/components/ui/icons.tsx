@@ -301,8 +301,19 @@ export function IconX(props: IconProps) {
 export function IconEye(props: IconProps) {
   return (
     <IconBase {...props}>
-      <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+      <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12Z" />
       <circle cx="12" cy="12" r="3" />
+    </IconBase>
+  );
+}
+
+export function IconEyeOff(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M17.94 17.94A10.94 10.94 0 0 1 12 19c-7 0-11-7-11-7a21.7 21.7 0 0 1 5.06-5.94" />
+      <path d="M1 1l22 22" />
+      <path d="M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 7 11 7a21.7 21.7 0 0 1-4.46 5.52" />
+      <path d="M14.12 14.12a3 3 0 0 1-4.24-4.24" />
     </IconBase>
   );
 }

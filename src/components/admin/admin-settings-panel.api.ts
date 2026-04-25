@@ -24,6 +24,11 @@ type SchedulePayload = {
   schedule?: AdminSettingsSnapshot["taskSchedule"];
 };
 
+type DailyReportSchedulePayload = {
+  error?: string;
+  schedule?: AdminSettingsSnapshot["dailyReportSchedule"];
+};
+
 type GroupReorderPayload = {
   error?: string;
   groups?: AdminSettingsSnapshot["groups"];
@@ -102,6 +107,25 @@ export async function saveDefaultIngestionSchedule(input: {
 
   if (!payload.schedule) {
     throw new Error("任务配置保存失败。");
+  }
+
+  return payload.schedule;
+}
+
+export async function saveDefaultDailyReportSchedule(input: {
+  enabled: boolean;
+  cronExpression: string;
+  dailyReportCandidateLimit: number;
+}) {
+  const payload = await requestAdminSettingsJson<DailyReportSchedulePayload>(
+    "/api/admin/monitor/schedule/daily-report-default",
+    "PATCH",
+    input,
+    "日报任务配置保存失败。",
+  );
+
+  if (!payload.schedule) {
+    throw new Error("日报任务配置保存失败。");
   }
 
   return payload.schedule;

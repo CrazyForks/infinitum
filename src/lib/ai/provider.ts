@@ -10,6 +10,8 @@ import {
   DEFAULT_CLUSTER_MATCH_USER_PROMPT_TEMPLATE,
   DEFAULT_CLUSTER_SUMMARY_PROMPT,
   DEFAULT_CLUSTER_SUMMARY_USER_PROMPT_TEMPLATE,
+  DEFAULT_DAILY_REPORT_PROMPT,
+  DEFAULT_DAILY_REPORT_USER_PROMPT_TEMPLATE,
   DEFAULT_ITEM_ANALYSIS_PROMPT,
   DEFAULT_ITEM_ANALYSIS_USER_PROMPT_TEMPLATE,
   DEFAULT_ITEM_SUMMARY_PROMPT,
@@ -69,6 +71,10 @@ export type AiProvider = {
     inputText: string,
     metadata: { title: string; candidates: Array<{ id: string; title: string; summary: string }> },
   ): Promise<string | null>;
+  generateDailyReport(
+    input: { date: string; timezone: string; articles: unknown[] },
+  ): Promise<string | null>;
+  repairDailyReportJson(rawContent: string): Promise<string | null>;
 };
 
 type OpenAICompatibleClient = {
@@ -99,6 +105,7 @@ type PromptOverrides = {
   itemAnalysis?: PromptRuntimeConfig;
   clusterSummary?: PromptRuntimeConfig;
   clusterMatch?: PromptRuntimeConfig;
+  dailyReport?: PromptRuntimeConfig;
 };
 
 type CompletionResponseFormat = {
@@ -507,6 +514,11 @@ export function createAiProvider(
     DEFAULT_CLUSTER_MATCH_USER_PROMPT_TEMPLATE,
     promptOverrides?.clusterMatch,
   );
+  const dailyReportConfig = resolvePromptConfig(
+    DEFAULT_DAILY_REPORT_PROMPT,
+    DEFAULT_DAILY_REPORT_USER_PROMPT_TEMPLATE,
+    promptOverrides?.dailyReport,
+  );
 
   const getExecutionConfig = (promptConfig: PromptRuntimeConfig) => promptConfig.modelApi ?? config;
   const getExecutionClient = (promptConfig: PromptRuntimeConfig) => {
@@ -680,6 +692,33 @@ export function createAiProvider(
       return parseClusterMatchCandidateId(
         output,
         metadata.candidates.map((candidate) => candidate.id),
+      );
+    },
+    async generateDailyReport(input) {
+      return completeTextWithCircuitBreaker(
+        dailyReportConfig,
+        renderPromptTemplate(dailyReportConfig.promptTemplate, {
+          date: input.date,
+          timezone: input.timezone,
+          articlesJson: JSON.stringify(input.articles),
+        }),
+        {
+          responseFormat: { type: "json_object" },
+        },
+      );
+    },
+    async repairDailyReportJson(rawContent) {
+      return completeTextWithCircuitBreaker(
+        {
+          ...dailyReportConfig,
+          systemPrompt: "你是 JSON 修复器。请把用户提供的内容修复为合法 JSON 对象，只输出修复后的 JSON，不要输出 Markdown、代码块或解释。不要补充新事实，不要改写字段含义。",
+          temperature: 0,
+          maxTokens: dailyReportConfig.maxTokens ?? 4096,
+        },
+        `待修复内容：\n${rawContent}`,
+        {
+          responseFormat: { type: "json_object" },
+        },
       );
     },
   };

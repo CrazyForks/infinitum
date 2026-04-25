@@ -40,6 +40,7 @@ describe("AdminMonitorPanel", () => {
       sourceConcurrency: 2,
       fullTextFetchThreshold: 80,
       perSourceItemLimit: 20,
+      dailyReportCandidateLimit: 120,
       timezone: "Asia/Shanghai",
       lastHeartbeatAt: "2026-04-12T00:00:00.000Z",
       lastRunStartedAt: null,

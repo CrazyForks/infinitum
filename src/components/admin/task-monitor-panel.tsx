@@ -20,7 +20,7 @@ import { cx } from "@/lib/ui/cx";
 
 // Task status filter options
 type TaskStatusFilter = "" | BackgroundTaskRunStatus;
-type TaskKindFilter = "" | "ingestion" | "item" | "cluster";
+type TaskKindFilter = "" | "ingestion" | "item" | "cluster" | "daily";
 type TimeRangeFilter = "" | "today" | "week" | "month";
 
 const statusOptions: Array<{ value: TaskStatusFilter; label: string }> = [
@@ -38,6 +38,7 @@ const kindOptions: Array<{ value: TaskKindFilter; label: string }> = [
   { value: "ingestion", label: "抓取任务" },
   { value: "item", label: "内容处理" },
   { value: "cluster", label: "聚合处理" },
+  { value: "daily", label: "AI 日报" },
 ];
 
 const timeRangeOptions: Array<{ value: TimeRangeFilter; label: string }> = [
@@ -62,6 +63,7 @@ const kindLabels: Record<TaskRunSnapshot["kind"], string> = {
   item_regenerate_summary: "摘要重生成",
   item_regenerate_translation: "译文重生成",
   cluster_regenerate_summary: "聚合摘要重生成",
+  daily_report_generate: "AI 日报生成",
 };
 
 const triggerLabels: Record<TaskRunSnapshot["triggerType"], string> = {
@@ -223,6 +225,7 @@ function filterTasks(
       if (kindFilter === "item" && !task.kind.startsWith("item_")) return false;
       if (kindFilter === "cluster" && !task.kind.startsWith("cluster_"))
         return false;
+      if (kindFilter === "daily" && task.kind !== "daily_report_generate") return false;
     }
     if (timeRangeFilter && task.startedAt) {
       const taskDate = new Date(task.startedAt);

@@ -54,6 +54,7 @@ enum BackgroundTaskKind {
   item_regenerate_summary
   item_reanalyze
   cluster_regenerate_summary
+  daily_report_generate
 }
 
 enum BackgroundTaskTrigger {
@@ -85,6 +86,13 @@ enum PromptConfigType {
   item_analysis
   cluster_summary
   cluster_match
+  daily_report
+}
+
+enum DailyReportStatus {
+  draft
+  published
+  failed
 }
 
 model Source {
@@ -148,6 +156,7 @@ model Item {
   updatedAt        DateTime   @updatedAt
   source           Source     @relation(fields: [sourceId], references: [id], onDelete: Cascade)
   cluster          ContentCluster? @relation(fields: [clusterId], references: [id], onDelete: SetNull)
+  dailyReportSources DailyReportSource[]
 
   @@index([sourceId, publishedAt])
   @@index([status, publishedAt])
@@ -180,6 +189,7 @@ model ContentCluster {
   updatedAt       DateTime @updatedAt
   items           Item[]
   visitorVotes    VisitorClusterVote[]
+  dailyReportSources DailyReportSource[]
 
   @@index([status, latestPublishedAt])
   @@index([upvotes, downvotes])
@@ -233,6 +243,7 @@ model TaskSchedule {
   sourceConcurrency Int                   @default(2)
   fullTextFetchThreshold Int              @default(80)
   perSourceItemLimit Int                  @default(20)
+  dailyReportCandidateLimit Int           @default(120)
   processingStartAt DateTime?
   timezone          String
   lastHeartbeatAt   DateTime?
@@ -270,10 +281,59 @@ model BackgroundTaskRun {
   createdAt       DateTime              @default(now())
   updatedAt       DateTime              @updatedAt
   fetchRuns       FetchRun[]
+  dailyReports    DailyReport[]
 
   @@index([status, createdAt])
   @@index([kind, status, createdAt])
   @@map("background_task_runs")
+}
+
+model DailyReport {
+  id              String            @id @default(cuid())
+  date            String
+  timezone        String            @default("Asia/Shanghai")
+  status          DailyReportStatus @default(draft)
+  title           String
+  openingSummary  String
+  closingThought  String
+  summaryJson     String
+  renderedMarkdown String
+  inputHash       String
+  modelName       String?
+  taskRunId       String?
+  errorMessage    String?
+  publishedAt     DateTime?
+  generatedAt     DateTime          @default(now())
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  taskRun         BackgroundTaskRun? @relation(fields: [taskRunId], references: [id], onDelete: SetNull)
+  sources         DailyReportSource[]
+
+  @@unique([date, timezone])
+  @@index([status, date])
+  @@index([taskRunId])
+  @@map("daily_reports")
+}
+
+model DailyReportSource {
+  id            String @id @default(cuid())
+  dailyReportId String
+  itemId        String?
+  clusterId     String?
+  sourceName    String
+  title         String
+  url           String
+  sectionName   String?
+  topic         String?
+  createdAt     DateTime @default(now())
+  dailyReport   DailyReport @relation(fields: [dailyReportId], references: [id], onDelete: Cascade)
+  item          Item? @relation(fields: [itemId], references: [id], onDelete: SetNull)
+  cluster       ContentCluster? @relation(fields: [clusterId], references: [id], onDelete: SetNull)
+
+  @@index([dailyReportId])
+  @@index([itemId])
+  @@index([clusterId])
+  @@map("daily_report_sources")
 }
 
 model SourceGroup {

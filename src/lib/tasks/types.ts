@@ -1,14 +1,18 @@
 export const DEFAULT_INGESTION_SCHEDULE_KEY = "ingestion_default" as const;
+export const DEFAULT_DAILY_REPORT_SCHEDULE_KEY = "daily_report_default" as const;
 export const DEFAULT_INGESTION_TASK_LABEL = "默认抓取任务";
+export const DEFAULT_DAILY_REPORT_TASK_LABEL = "AI 日报生成";
 
 export type DefaultIngestionScheduleKey = typeof DEFAULT_INGESTION_SCHEDULE_KEY;
+export type DefaultDailyReportScheduleKey = typeof DEFAULT_DAILY_REPORT_SCHEDULE_KEY;
 
 export type BackgroundTaskRunKind =
   | "ingestion"
   | "item_regenerate_translation"
   | "item_regenerate_summary"
   | "item_reanalyze"
-  | "cluster_regenerate_summary";
+  | "cluster_regenerate_summary"
+  | "daily_report_generate";
 
 export type BackgroundTaskRunTrigger = "scheduled" | "manual" | "admin_action";
 
@@ -74,7 +78,8 @@ export type TaskAiCallBreakdownKey =
   | "item_summary"
   | "item_analysis"
   | "cluster_match"
-  | "cluster_summary";
+  | "cluster_summary"
+  | "daily_report";
 
 export type TaskAiCallBreakdownSnapshot = {
   key: TaskAiCallBreakdownKey;
@@ -108,12 +113,13 @@ export type TaskRunSnapshot = {
 };
 
 export type TaskScheduleSnapshot = {
-  key: DefaultIngestionScheduleKey;
+  key: DefaultIngestionScheduleKey | DefaultDailyReportScheduleKey;
   enabled: boolean;
   cronExpression: string;
   sourceConcurrency: number;
   fullTextFetchThreshold: number;
   perSourceItemLimit: number;
+  dailyReportCandidateLimit: number;
   processingStartAt?: string | null;
   timezone: string;
   lastHeartbeatAt: string | null;

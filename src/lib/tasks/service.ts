@@ -3,9 +3,17 @@ import {
   createTaskRun,
   findNextQueuedTaskRun,
   findRecentTaskRuns,
+  upsertDefaultDailyReportSchedule,
   upsertDefaultIngestionSchedule,
 } from "@/lib/tasks/repository";
-import { computeNextRunAt, isSchedulerHeartbeatStale, normalizeScheduleInput } from "@/lib/tasks/scheduler";
+import {
+  computeNextRunAt,
+  DEFAULT_DAILY_REPORT_CANDIDATE_LIMIT,
+  isSchedulerHeartbeatStale,
+  MAX_DAILY_REPORT_CANDIDATE_LIMIT,
+  MIN_DAILY_REPORT_CANDIDATE_LIMIT,
+  normalizeScheduleInput,
+} from "@/lib/tasks/scheduler";
 import {
   DEFAULT_INGESTION_SCHEDULE_KEY,
   type TaskAiCallBreakdownKey,
@@ -30,6 +38,7 @@ const TASK_AI_CALL_BREAKDOWN_LABELS: Record<TaskAiCallBreakdownKey, string> = {
   item_analysis: "内容分析",
   cluster_match: "聚合匹配",
   cluster_summary: "聚合摘要",
+  daily_report: "AI 日报",
 };
 
 function getDefaultTaskAiCallBreakdown(): TaskAiCallBreakdownSnapshot[] {
@@ -52,7 +61,8 @@ function normalizeTaskAiCallBreakdownSnapshot(value: unknown): TaskAiCallBreakdo
     maybeSnapshot.key !== "item_summary" &&
     maybeSnapshot.key !== "item_analysis" &&
     maybeSnapshot.key !== "cluster_match" &&
-    maybeSnapshot.key !== "cluster_summary"
+    maybeSnapshot.key !== "cluster_summary" &&
+    maybeSnapshot.key !== "daily_report"
   ) {
     return null;
   }
@@ -289,6 +299,10 @@ export async function ensureDefaultIngestionSchedule() {
   return upsertDefaultIngestionSchedule();
 }
 
+export async function ensureDefaultDailyReportSchedule() {
+  return upsertDefaultDailyReportSchedule();
+}
+
 export async function enqueueTaskRun(input: EnqueueTaskRunInput) {
   return createTaskRun(input);
 }
@@ -406,6 +420,7 @@ export function toTaskScheduleSnapshot(schedule: {
   sourceConcurrency: number;
   fullTextFetchThreshold: number;
   perSourceItemLimit: number | null;
+  dailyReportCandidateLimit: number | null;
   processingStartAt: Date | null;
   timezone: string;
   lastHeartbeatAt: Date | null;
@@ -421,6 +436,7 @@ export function toTaskScheduleSnapshot(schedule: {
     sourceConcurrency: schedule.sourceConcurrency,
     fullTextFetchThreshold: schedule.fullTextFetchThreshold,
     perSourceItemLimit: schedule.perSourceItemLimit ?? 20,
+    dailyReportCandidateLimit: schedule.dailyReportCandidateLimit ?? DEFAULT_DAILY_REPORT_CANDIDATE_LIMIT,
     processingStartAt: schedule.processingStartAt?.toISOString() ?? null,
     timezone: schedule.timezone,
     lastHeartbeatAt: schedule.lastHeartbeatAt?.toISOString() ?? null,
@@ -463,6 +479,53 @@ export async function updateDefaultIngestionSchedule(input: {
       fullTextFetchThreshold: normalizedInput.fullTextFetchThreshold,
       perSourceItemLimit: normalizedInput.perSourceItemLimit,
       processingStartAt: normalizedInput.processingStartAt ? new Date(normalizedInput.processingStartAt) : null,
+      nextRunAt,
+    },
+  });
+}
+
+export async function updateDefaultDailyReportSchedule(input: {
+  enabled: boolean;
+  cronExpression: string;
+  dailyReportCandidateLimit: number;
+}) {
+  const cronExpression = input.cronExpression.trim();
+
+  if (!cronExpression) {
+    throw new Error("Cron expression is required.");
+  }
+
+  computeNextRunAt({
+    cronExpression,
+    now: new Date(),
+    timezone: "Asia/Shanghai",
+  });
+
+  if (
+    !Number.isInteger(input.dailyReportCandidateLimit) ||
+    input.dailyReportCandidateLimit < MIN_DAILY_REPORT_CANDIDATE_LIMIT ||
+    input.dailyReportCandidateLimit > MAX_DAILY_REPORT_CANDIDATE_LIMIT
+  ) {
+    throw new Error(
+      `Daily report candidate limit must be an integer between ${MIN_DAILY_REPORT_CANDIDATE_LIMIT} and ${MAX_DAILY_REPORT_CANDIDATE_LIMIT}.`,
+    );
+  }
+
+  const currentSchedule = await ensureDefaultDailyReportSchedule();
+  const now = new Date();
+  const nextRunAt = computeNextRunAt({
+    cronExpression,
+    now,
+    anchor: currentSchedule.lastRunFinishedAt ?? now,
+    timezone: currentSchedule.timezone,
+  });
+
+  return prisma.taskSchedule.update({
+    where: { id: currentSchedule.id },
+    data: {
+      enabled: input.enabled,
+      cronExpression,
+      dailyReportCandidateLimit: input.dailyReportCandidateLimit,
       nextRunAt,
     },
   });
@@ -523,6 +586,7 @@ export async function requestTaskRunCancellation(id: string) {
 
 export async function getBackgroundTaskMonitorSnapshot(now = new Date()): Promise<BackgroundTaskMonitorSnapshot> {
   const schedule = await ensureDefaultIngestionSchedule();
+  await ensureDefaultDailyReportSchedule();
   const [runningTasks, recentTasks] = await Promise.all([
     prisma.backgroundTaskRun.findMany({
       where: {

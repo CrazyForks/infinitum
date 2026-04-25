@@ -52,6 +52,7 @@ type AiSettingsPanelMode = "model-api" | "prompt";
 type AiSettingsPanelProps = {
   initialSettings: AdminSettingsSnapshot;
   mode: AiSettingsPanelMode;
+  initialPromptType?: PromptConfigType;
 };
 
 type ModelFormState = {
@@ -159,17 +160,6 @@ async function writeClipboardText(value: string): Promise<boolean> {
   }
 }
 
-function getInitialPromptType(): PromptConfigType {
-  if (typeof window === "undefined") {
-    return "item_summary";
-  }
-
-  const promptType = new URLSearchParams(window.location.search).get("promptType");
-  return PROMPT_TYPE_OPTIONS.some((option) => option.value === promptType)
-    ? (promptType as PromptConfigType)
-    : "item_summary";
-}
-
 function updatePromptTypeUrl(promptType: PromptConfigType) {
   if (typeof window === "undefined") {
     return;
@@ -184,11 +174,11 @@ function updatePromptTypeUrl(promptType: PromptConfigType) {
   window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
-export function AiSettingsPanel({ initialSettings, mode }: AiSettingsPanelProps) {
+export function AiSettingsPanel({ initialSettings, mode, initialPromptType = "item_summary" }: AiSettingsPanelProps) {
   const { showToast } = useToast();
   const [modelConfigs, setModelConfigs] = useState(initialSettings.modelApiConfigs);
   const [promptConfigs, setPromptConfigs] = useState(initialSettings.promptConfigs);
-  const [selectedPromptType, setSelectedPromptType] = useState<PromptConfigType>(getInitialPromptType);
+  const [selectedPromptType, setSelectedPromptType] = useState<PromptConfigType>(initialPromptType);
 
   const [showModelModal, setShowModelModal] = useState(false);
   const [editingModelConfig, setEditingModelConfig] = useState<AdminModelApiConfig | null>(null);

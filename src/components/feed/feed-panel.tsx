@@ -50,6 +50,7 @@ import {
   toDayjsRange,
 } from "@/components/feed/feed-panel.utils";
 import { PageShell } from "@/components/ui/page-shell";
+import { BackToTopButton } from "@/components/ui/back-to-top-button";
 import { StatusBanner } from "@/components/ui/status-banner";
 import { DateRangePicker } from "@/components/ui/date-range-picker";
 import { FilterInput } from "@/components/ui/filter-input";
@@ -266,39 +267,6 @@ function renderMarkdownInline(text: string): ReactNode[] {
 
 function SummaryMarkdown({ text }: { text: string }) {
   return <>{renderMarkdownInline(text)}</>;
-}
-
-function BackToTopButton() {
-  const [visible, setVisible] = useState(false);
-
-  useEffect(() => {
-    const handleScroll = () => {
-      setVisible(window.scrollY > 300);
-    };
-
-    handleScroll();
-    window.addEventListener("scroll", handleScroll, { passive: true });
-
-    return () => {
-      window.removeEventListener("scroll", handleScroll);
-    };
-  }, []);
-
-  if (!visible) {
-    return null;
-  }
-
-  return (
-    <button
-      type="button"
-      onClick={() => scrollToPageTop()}
-      className="fixed bottom-8 right-8 z-50 flex h-12 w-12 items-center justify-center rounded-full border border-[color:var(--line)] bg-[var(--surface)] text-xl leading-none text-[var(--text-2)] shadow-md transition hover:bg-[var(--bg-muted)] hover:text-[var(--text-1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]/35 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)]"
-      title="回到顶部"
-      aria-label="回到顶部"
-    >
-      ↑
-    </button>
-  );
 }
 
 function SummaryText({ title, summary, className, clickableClassName, onOpen }: SummaryTextProps) {
