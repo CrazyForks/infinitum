@@ -33,7 +33,7 @@ import { FilterInput } from "@/components/ui/filter-input";
 import { FilterSelect } from "@/components/ui/filter-select";
 import { FormField } from "@/components/ui/form-field";
 import { IconButton } from "@/components/ui/icon-button";
-import { IconCheck, IconEdit, IconGrip, IconPlus, IconTag, IconTrash, IconX } from "@/components/ui/icons";
+import { IconCheck, IconEdit, IconGrip, IconLink, IconPlus, IconTag, IconTrash, IconX } from "@/components/ui/icons";
 import { ModalShell } from "@/components/ui/modal-shell";
 import { PaginationControls } from "@/components/ui/pagination-controls";
 import { TextArea } from "@/components/ui/text-area";
@@ -204,6 +204,7 @@ export function AdminSettingsPanel({
   type AdminSource = AdminSettingsSnapshot["sources"][number];
   const [isPending, startTransition] = useTransition();
   const { showToast } = useToast();
+  const [sourceGroupOverrides, setSourceGroupOverrides] = useState<Record<string, { groupId: string | null; groupName: string | null }>>({});
   const [internalActiveSection, setInternalActiveSection] =
     useState<AdminSettingsSection>(externalActiveSection ?? "ai-model-api");
   const activeSection = externalActiveSection ?? internalActiveSection;
@@ -213,6 +214,13 @@ export function AdminSettingsPanel({
   const [showCreateGroupComposer, setShowCreateGroupComposer] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
   const [orderedGroups, setOrderedGroups] = useState(initialSettings.groups);
+  const [sourceGroupLinkTarget, setSourceGroupLinkTarget] = useState<AdminSettingsSnapshot["groups"][number] | null>(null);
+  const [sourceGroupLinkSearch, setSourceGroupLinkSearch] = useState("");
+  const [sourceGroupAssociationConfirm, setSourceGroupAssociationConfirm] = useState<{
+    source: AdminSource;
+    group: AdminSettingsSnapshot["groups"][number];
+    nextGroupId: string | null;
+  } | null>(null);
   const opmlFileInputRef = useRef<HTMLInputElement | null>(null);
   const [sourceModalMode, setSourceModalMode] = useState<"create" | "edit" | null>(null);
   const [editingSourceId, setEditingSourceId] = useState<string | null>(null);
@@ -253,10 +261,18 @@ export function AdminSettingsPanel({
     .split("\n")
     .map((keyword) => keyword.trim())
     .filter(Boolean);
+  const sources = useMemo(
+    () =>
+      initialSettings.sources.map((source) => ({
+        ...source,
+        ...(sourceGroupOverrides[source.id] ?? {}),
+      })),
+    [initialSettings.sources, sourceGroupOverrides],
+  );
   const filteredSources = useMemo(() => {
     const keyword = sourceNameFilter.trim().toLowerCase();
 
-    return initialSettings.sources.filter((source) => {
+    return sources.filter((source) => {
       const matchesName =
         !keyword ||
         source.name.toLowerCase().includes(keyword) ||
@@ -272,7 +288,7 @@ export function AdminSettingsPanel({
 
       return matchesName && matchesGroup && matchesEnabled;
     });
-  }, [initialSettings.sources, sourceEnabledFilter, sourceGroupFilter, sourceNameFilter]);
+  }, [sourceEnabledFilter, sourceGroupFilter, sourceNameFilter, sources]);
   const sourceTotalPages = Math.max(1, Math.ceil(filteredSources.length / sourcePageSize));
   const safeSourcePage = Math.min(sourcePage, sourceTotalPages);
   const paginatedSources = useMemo(
@@ -283,6 +299,22 @@ export function AdminSettingsPanel({
       ),
     [filteredSources, safeSourcePage, sourcePageSize],
   );
+  const sourceGroupLinkSources = useMemo(() => {
+    const keyword = sourceGroupLinkSearch.trim().toLowerCase();
+
+    return sources.filter((source) => {
+      if (!keyword) {
+        return true;
+      }
+
+      return (
+        source.name.toLowerCase().includes(keyword) ||
+        source.rssUrl.toLowerCase().includes(keyword) ||
+        source.siteUrl.toLowerCase().includes(keyword) ||
+        (source.groupName ?? "未分组").toLowerCase().includes(keyword)
+      );
+    });
+  }, [sourceGroupLinkSearch, sources]);
 
   const updateSourceFilterUrl = (next: {
     name?: string;
@@ -367,6 +399,67 @@ export function AdminSettingsPanel({
     });
   };
 
+  const openSourceGroupLinkModal = (group: AdminSettingsSnapshot["groups"][number]) => {
+    setSourceGroupLinkTarget(group);
+    setSourceGroupLinkSearch("");
+  };
+
+  const openSourceGroupAssociationConfirm = (source: AdminSource, groupId: string | null) => {
+    if (!sourceGroupLinkTarget) {
+      return;
+    }
+
+    setSourceGroupAssociationConfirm({
+      source,
+      group: sourceGroupLinkTarget,
+      nextGroupId: groupId,
+    });
+  };
+
+  const confirmSourceGroupAssociation = () => {
+    if (!sourceGroupAssociationConfirm) {
+      return;
+    }
+
+    const { source, group, nextGroupId } = sourceGroupAssociationConfirm;
+    const isUnlinking = nextGroupId === null;
+
+    startTransition(async () => {
+      try {
+        await submitAdminSettingsAction(
+          `/api/admin/settings/sources/${source.id}`,
+          "PATCH",
+          {
+            name: source.name,
+            rssUrl: source.rssUrl,
+            siteUrl: source.siteUrl,
+            enabled: source.enabled,
+            aiParsingEnabled: source.aiParsingEnabled,
+            aggregationEnabled: source.aggregationEnabled,
+            groupId: nextGroupId,
+          },
+        );
+
+        showToast(
+          isUnlinking
+            ? `已取消「${source.name}」与「${group.name}」的关联。`
+            : `已将「${source.name}」关联到「${group.name}」。`,
+          "success",
+        );
+        setSourceGroupOverrides((currentOverrides) => ({
+          ...currentOverrides,
+          [source.id]: {
+            groupId: nextGroupId,
+            groupName: nextGroupId ? group.name : null,
+          },
+        }));
+        setSourceGroupAssociationConfirm(null);
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : "信息源分组更新失败。", "error");
+      }
+    });
+  };
+
   const openEditSourceModal = (source: AdminSource) => {
     setSourceModalMode("edit");
     setEditingSourceId(source.id);
@@ -437,7 +530,7 @@ export function AdminSettingsPanel({
     const groupedSources = new Map<string, AdminSource[]>();
     const ungroupedSources: AdminSource[] = [];
 
-    for (const source of initialSettings.sources) {
+    for (const source of sources) {
       if (source.groupId) {
         groupedSources.set(source.groupId, [...(groupedSources.get(source.groupId) ?? []), source]);
       } else {
@@ -823,6 +916,7 @@ export function AdminSettingsPanel({
                         key={group.id}
                         group={group}
                         submitJson={submitJson}
+                        onOpenSourceLink={openSourceGroupLinkModal}
                       />
                     ))}
                   </div>
@@ -840,6 +934,104 @@ export function AdminSettingsPanel({
                 暂无分组
               </EmptyState>
             )}
+
+            <ModalShell
+              isOpen={Boolean(sourceGroupLinkTarget)}
+              onClose={() => {
+                setSourceGroupLinkTarget(null);
+                setSourceGroupLinkSearch("");
+              }}
+              title={sourceGroupLinkTarget ? `关联信息源：${sourceGroupLinkTarget.name}` : "关联信息源"}
+              widthClassName="max-w-2xl"
+              bodyClassName="space-y-4 p-6"
+              footerClassName="border-t border-[color:var(--line)] bg-[var(--bg-muted)] p-6"
+              footer={
+                <div className="flex justify-end">
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      setSourceGroupLinkTarget(null);
+                      setSourceGroupLinkSearch("");
+                    }}
+                  >
+                    关闭
+                  </Button>
+                </div>
+              }
+            >
+              <TextInput
+                aria-label="搜索信息源"
+                placeholder="搜索信息源名称、RSS、站点或当前分组"
+                value={sourceGroupLinkSearch}
+                onChange={(event) => setSourceGroupLinkSearch(event.target.value)}
+              />
+
+              <div className="max-h-96 space-y-2 overflow-y-auto rounded-sm border border-[color:var(--line)] p-2">
+                {sourceGroupLinkSources.length ? (
+                  sourceGroupLinkSources.map((source) => {
+                    const isLinked = source.groupId === sourceGroupLinkTarget?.id;
+
+                    return (
+                      <div
+                        key={source.id}
+                        className="flex flex-col gap-3 rounded-sm border border-[color:var(--line)] bg-[var(--surface)] px-3 py-3 sm:flex-row sm:items-center sm:justify-between"
+                      >
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-semibold text-[var(--text-1)]">{source.name}</div>
+                          <div className="mt-1 truncate text-xs text-[var(--text-3)]">{source.rssUrl}</div>
+                          <div className="mt-1 text-xs text-[var(--text-2)]">
+                            当前分组：{source.groupName ?? "未分组"}
+                          </div>
+                        </div>
+                        <Button
+                          variant={isLinked ? "secondary" : "primary"}
+                          size="sm"
+                          disabled={isPending}
+                          onClick={() => openSourceGroupAssociationConfirm(source, isLinked ? null : sourceGroupLinkTarget?.id ?? null)}
+                        >
+                          {isLinked ? "取消关联" : `关联到 ${sourceGroupLinkTarget?.name ?? ""}`}
+                        </Button>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="px-3 py-8 text-center text-sm text-[var(--text-3)]">没有匹配的信息源。</div>
+                )}
+              </div>
+            </ModalShell>
+
+            <ModalShell
+              isOpen={Boolean(sourceGroupAssociationConfirm)}
+              onClose={() => setSourceGroupAssociationConfirm(null)}
+              title={sourceGroupAssociationConfirm?.nextGroupId === null ? "确认取消关联" : "确认关联信息源"}
+              widthClassName="max-w-md"
+              bodyClassName="space-y-3 p-6"
+              footerClassName="border-t border-[color:var(--line)] bg-[var(--bg-muted)] p-6"
+              footer={
+                <div className="flex justify-end gap-2">
+                  <Button
+                    variant="secondary"
+                    onClick={() => setSourceGroupAssociationConfirm(null)}
+                    disabled={isPending}
+                  >
+                    取消
+                  </Button>
+                  <Button
+                    variant="primary"
+                    onClick={confirmSourceGroupAssociation}
+                    disabled={isPending}
+                  >
+                    确认
+                  </Button>
+                </div>
+              }
+            >
+              <p className="text-sm leading-6 text-[var(--text-2)]">
+                {sourceGroupAssociationConfirm?.nextGroupId === null
+                  ? `确认取消「${sourceGroupAssociationConfirm?.source.name ?? ""}」与「${sourceGroupAssociationConfirm?.group.name ?? ""}」的分组关联？`
+                  : `确认将「${sourceGroupAssociationConfirm?.source.name ?? ""}」关联到「${sourceGroupAssociationConfirm?.group.name ?? ""}」？`}
+              </p>
+            </ModalShell>
           </div>
         ) : null}
 
@@ -875,7 +1067,7 @@ export function AdminSettingsPanel({
                   variant="secondary"
                   size="md"
                   onClick={exportOpml}
-                  disabled={initialSettings.sources.length === 0}
+                  disabled={sources.length === 0}
                 >
                   导出 OPML
                 </Button>
@@ -939,7 +1131,7 @@ export function AdminSettingsPanel({
 
             {paginatedSources.length === 0 ? (
               <EmptyState>
-                {filteredSources.length === 0 && initialSettings.sources.length > 0
+                {filteredSources.length === 0 && sources.length > 0
                   ? "暂无匹配信息源"
                   : "暂无信息源"}
               </EmptyState>
@@ -1450,6 +1642,7 @@ function AdminWorkspaceSidebar({
 function GroupRow({
   group,
   submitJson,
+  onOpenSourceLink,
 }: {
   group: AdminSettingsSnapshot["groups"][number];
   submitJson: (
@@ -1459,6 +1652,7 @@ function GroupRow({
     successMessage: string,
     reload?: boolean,
   ) => void;
+  onOpenSourceLink: (group: AdminSettingsSnapshot["groups"][number]) => void;
 }) {
   const [name, setName] = useState(group.name);
   const [isEditing, setIsEditing] = useState(false);
@@ -1562,6 +1756,15 @@ function GroupRow({
               <IconEdit className="h-4 w-4" />
             </IconButton>
           )}
+          <IconButton
+            variant="secondary"
+            size="sm"
+            title="关联信息源"
+            aria-label={`关联信息源：${group.name}`}
+            onClick={() => onOpenSourceLink(group)}
+          >
+            <IconLink className="h-4 w-4" />
+          </IconButton>
           <IconButton
             variant="secondary"
             size="sm"

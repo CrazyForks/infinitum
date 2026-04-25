@@ -35,11 +35,19 @@ export function formatRunSummary(status: FetchRunSnapshot | null): string {
     return "最近抓取：尚未执行";
   }
 
-  const timestamp = formatDate(status.finishedAt ?? status.startedAt);
+  const timestamp = formatRunTime(status) ?? "";
   const statusLabel = FETCH_STATUS_LABELS[status.status];
   const addedInfo = status.itemsAdded > 0 ? ` · 新增${status.itemsAdded}条` : "";
 
   return `最近抓取：${statusLabel}${addedInfo} · ${timestamp}`;
+}
+
+export function formatRunTime(status: FetchRunSnapshot | null): string | null {
+  if (!status) {
+    return null;
+  }
+
+  return formatDate(status.finishedAt ?? status.startedAt);
 }
 
 export function formatRunDetail(status: FetchRunSnapshot | null): string | null {

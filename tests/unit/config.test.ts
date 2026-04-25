@@ -18,6 +18,8 @@ describe("runtime config defaults", () => {
     expect(defaults.prompts.itemSummary.length).toBeGreaterThan(0);
     expect(defaults.prompts.itemSummary).toContain("单条新闻摘要助手");
     expect(defaults.prompts.itemSummary).toContain("只输出摘要正文");
+    expect(defaults.prompts.itemSummary).toContain("**加粗**");
+    expect(defaults.prompts.itemSummary).toContain("*斜体*");
     expect(defaults.prompts.itemSummary).not.toContain('{"summary"');
     expect(defaults.prompts.itemAnalysis.length).toBeGreaterThan(0);
     expect(defaults.prompts.itemAnalysis).toContain("固定输出格式");
@@ -28,6 +30,8 @@ describe("runtime config defaults", () => {
     expect(defaults.prompts.clusterSummary.length).toBeGreaterThan(0);
     expect(defaults.prompts.clusterSummary).toContain("聚合摘要助手");
     expect(defaults.prompts.clusterSummary).toContain("只输出摘要正文");
+    expect(defaults.prompts.clusterSummary).toContain("**加粗**");
+    expect(defaults.prompts.clusterSummary).toContain("*斜体*");
     expect(defaults.prompts.clusterSummary).not.toContain('{"summary"');
     expect(defaults.prompts.clusterMatch.length).toBeGreaterThan(0);
     expect(defaults.prompts.clusterMatch).toContain('{"clusterId":"候选组ID"}');

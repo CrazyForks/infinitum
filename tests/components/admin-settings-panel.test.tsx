@@ -586,6 +586,131 @@ describe("AdminSettingsPanel", () => {
     });
   });
 
+  it("links a source to a group from the group management row", async () => {
+    const user = userEvent.setup();
+    const refreshSpy = vi.fn();
+    const initialSettings = buildInitialSettings();
+    const targetSource = {
+      id: "source-2",
+      name: "Other Source",
+      rssUrl: "https://other.example.com/feed.xml",
+      siteUrl: "https://other.example.com",
+      enabled: true,
+      aiParsingEnabled: true,
+      aggregationEnabled: false,
+      groupId: null,
+      groupName: null,
+      lastItemCreatedAt: null,
+    };
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ ok: true })));
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderWithProviders(
+      <AdminSettingsPanel
+        onRefresh={refreshSpy}
+        initialSettings={{
+          ...initialSettings,
+          sources: [...initialSettings.sources, targetSource],
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole("tab", { name: "分组" }));
+    await user.click(screen.getByRole("button", { name: "关联信息源：Core" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "关联信息源：Core" });
+    await user.type(within(dialog).getByLabelText("搜索信息源"), "Other");
+
+    expect(within(dialog).getByText("Other Source")).toBeInTheDocument();
+    expect(within(dialog).getByText("当前分组：未分组")).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: "关联到 Core" }));
+
+    const confirmDialog = await screen.findByRole("dialog", { name: "确认关联信息源" });
+    expect(
+      within(confirmDialog).getByText("确认将「Other Source」关联到「Core」？"),
+    ).toBeInTheDocument();
+    await user.click(within(confirmDialog).getByRole("button", { name: "确认" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/admin/settings/sources/source-2", {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          name: "Other Source",
+          rssUrl: "https://other.example.com/feed.xml",
+          siteUrl: "https://other.example.com",
+          enabled: true,
+          aiParsingEnabled: true,
+          aggregationEnabled: false,
+          groupId: "group-1",
+        }),
+      });
+    });
+
+    await waitFor(() => {
+      expect(within(dialog).getByText("当前分组：Core")).toBeInTheDocument();
+    });
+    expect(within(dialog).getByRole("button", { name: "取消关联" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "确认关联信息源" })).not.toBeInTheDocument();
+    expect(refreshSpy).not.toHaveBeenCalled();
+  });
+
+  it("unlinks an already associated source from the group management dialog", async () => {
+    const user = userEvent.setup();
+    const refreshSpy = vi.fn();
+    const initialSettings = buildInitialSettings();
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ ok: true })));
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderWithProviders(
+      <AdminSettingsPanel onRefresh={refreshSpy} initialSettings={initialSettings} />,
+    );
+
+    await user.click(screen.getByRole("tab", { name: "分组" }));
+    await user.click(screen.getByRole("button", { name: "关联信息源：Core" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "关联信息源：Core" });
+    expect(within(dialog).getByText("Existing Source")).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: "取消关联" }));
+
+    const confirmDialog = await screen.findByRole("dialog", { name: "确认取消关联" });
+    expect(
+      within(confirmDialog).getByText("确认取消「Existing Source」与「Core」的分组关联？"),
+    ).toBeInTheDocument();
+    await user.click(within(confirmDialog).getByRole("button", { name: "确认" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/admin/settings/sources/source-1", {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          name: "Existing Source",
+          rssUrl: "https://example.com/feed.xml",
+          siteUrl: "https://example.com",
+          enabled: true,
+          aiParsingEnabled: true,
+          aggregationEnabled: true,
+          groupId: null,
+        }),
+      });
+    });
+
+    await waitFor(() => {
+      expect(within(dialog).getByText("当前分组：未分组")).toBeInTheDocument();
+    });
+    expect(within(dialog).getByRole("button", { name: "关联到 Core" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "确认取消关联" })).not.toBeInTheDocument();
+    expect(refreshSpy).not.toHaveBeenCalled();
+  });
+
   it("renders the Lumina-like blacklist layout and keeps the original save payload", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ ok: true })));

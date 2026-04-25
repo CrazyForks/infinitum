@@ -2,11 +2,12 @@ import { act, fireEvent, render as testingRender, screen, waitFor, within } from
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { openMock, pushMock, refreshMock, replaceMock } = vi.hoisted(() => ({
+const { openMock, pushMock, refreshMock, replaceMock, scrollToMock } = vi.hoisted(() => ({
   openMock: vi.fn(),
   pushMock: vi.fn(),
   refreshMock: vi.fn(),
   replaceMock: vi.fn(),
+  scrollToMock: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -158,6 +159,7 @@ afterEach(() => {
   pushMock.mockReset();
   refreshMock.mockReset();
   replaceMock.mockReset();
+  scrollToMock.mockReset();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   vi.useRealTimers();
@@ -166,6 +168,7 @@ afterEach(() => {
 describe("FeedPanel", () => {
   beforeEach(() => {
     vi.stubGlobal("open", openMock);
+    vi.stubGlobal("scrollTo", scrollToMock);
   });
 
   it("formats published timestamps with an explicit timezone to avoid hydration mismatch", () => {
@@ -277,6 +280,7 @@ describe("FeedPanel", () => {
       expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=1m&sort=time_desc&tzOffsetMinutes=-480");
     });
 
+    expect(scrollToMock).toHaveBeenCalledWith({ top: 0, behavior: "smooth" });
     expect(await screen.findByText("一月内标题")).toBeInTheDocument();
   });
 
@@ -386,7 +390,7 @@ describe("FeedPanel", () => {
           nextCursor: null,
           pagination: {
             page: 1,
-            size: 20,
+            size: 50,
             total: 1,
             totalPages: 1,
           },
@@ -449,7 +453,7 @@ describe("FeedPanel", () => {
           nextCursor: null,
           pagination: {
             page: 1,
-            size: 20,
+            size: 50,
             total: 1,
             totalPages: 1,
           },
@@ -509,7 +513,7 @@ describe("FeedPanel", () => {
           nextCursor: null,
           pagination: {
             page: 1,
-            size: 20,
+            size: 50,
             total: 1,
             totalPages: 1,
           },
@@ -624,7 +628,7 @@ describe("FeedPanel", () => {
           nextCursor: null,
           pagination: {
             page: 1,
-            size: 20,
+            size: 50,
             total: 1,
             totalPages: 1,
           },
@@ -686,7 +690,7 @@ describe("FeedPanel", () => {
     expect(screen.getByText("标题：Agent")).toBeInTheDocument();
   });
 
-  it("renders the latest ingestion result inside the filter summary area", () => {
+  it("renders only the latest ingestion time for visitors", () => {
     render(
       <FeedPanel
         initialItems={initialEntries}
@@ -714,9 +718,8 @@ describe("FeedPanel", () => {
 
     const filterRegion = screen.getByRole("region", { name: "信息流筛选" });
 
-    expect(
-      within(filterRegion).queryByText(/最近抓取：部分成功 · 新增12条 · 2026\/04\/10 18:06/),
-    ).not.toBeInTheDocument();
+    expect(within(filterRegion).getByText("更新时间：2026/04/10 18:06")).toBeInTheDocument();
+    expect(within(filterRegion).queryByText(/最近抓取：部分成功/)).not.toBeInTheDocument();
     expect(within(filterRegion).queryByText("抓取说明：2 个源抓取失败")).not.toBeInTheDocument();
   });
 
@@ -988,7 +991,7 @@ describe("FeedPanel", () => {
     await user.click(screen.getByRole("button", { name: "展开相关内容" }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("/api/feed/clusters/cluster-1?range=7d&sort=time_desc&tzOffsetMinutes=-480");
+      expect(fetchMock).toHaveBeenCalledWith("/api/feed/clusters/cluster-1?range=all&sort=time_desc&tzOffsetMinutes=-480");
     });
 
     expect(await screen.findByText("详细标题")).toBeInTheDocument();
@@ -1035,7 +1038,7 @@ describe("FeedPanel", () => {
     await user.click(screen.getByRole("heading", { name: "OpenAI Agent 发布" }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("/api/feed/clusters/cluster-1?range=7d&sort=time_desc&tzOffsetMinutes=-480");
+      expect(fetchMock).toHaveBeenCalledWith("/api/feed/clusters/cluster-1?range=all&sort=time_desc&tzOffsetMinutes=-480");
     });
     expect(await screen.findByText("详细标题")).toBeInTheDocument();
   });
@@ -1045,7 +1048,7 @@ describe("FeedPanel", () => {
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
       const url = getFetchUrl(input);
 
-      if (url === "/api/feed/clusters/cluster-1?range=7d&sort=time_desc&tzOffsetMinutes=-480") {
+      if (url === "/api/feed/clusters/cluster-1?range=all&sort=time_desc&tzOffsetMinutes=-480") {
         return new Response(
           JSON.stringify({
             items: [
@@ -1507,7 +1510,7 @@ describe("FeedPanel", () => {
             ],
             pagination: {
               page: 1,
-              size: 20,
+              size: 50,
               total: 1,
               totalPages: 1,
             },
@@ -1586,7 +1589,7 @@ describe("FeedPanel", () => {
             items: [initialEntries[0]],
             pagination: {
               page: 1,
-              size: 20,
+              size: 50,
               total: 1,
               totalPages: 1,
             },
@@ -1658,7 +1661,7 @@ describe("FeedPanel", () => {
             items: [initialEntries[0]],
             pagination: {
               page: 1,
-              size: 20,
+              size: 50,
               total: 1,
               totalPages: 1,
             },
@@ -1794,6 +1797,66 @@ describe("FeedPanel", () => {
     expect(regenerateButton.querySelector("svg")?.getAttribute("viewBox")).toBe("0 0 24 24");
     expect(singleSummary.className).not.toContain("max-w-4xl");
     expect(clusterSummary.className).not.toContain("max-w-4xl");
+  });
+
+  it("renders supported inline markdown in feed summaries", () => {
+    render(
+      <FeedPanel
+        initialItems={[
+          {
+            ...initialEntries[1],
+            summary: "**OpenAI** 发布 *Agent 工具*，影响开发者工作流。",
+          },
+        ]}
+        initialRange="7d"
+        initialSort="time_desc"
+        initialStartDate={null}
+        initialEndDate={null}
+        initialNextCursor={null}
+        initialStatus={null}
+        isAdmin={false}
+      />,
+    );
+
+    const summary = screen.getByText((_content, element) =>
+      element?.tagName === "P" && element.textContent === "OpenAI 发布 Agent 工具，影响开发者工作流。",
+    );
+
+    expect(summary.querySelector("strong")).toHaveTextContent("OpenAI");
+    expect(summary.querySelector("em")).toHaveTextContent("Agent 工具");
+  });
+
+  it("shows the Lumina-style back-to-top button after scrolling", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <FeedPanel
+        initialItems={initialEntries}
+        initialRange="7d"
+        initialSort="time_desc"
+        initialStartDate={null}
+        initialEndDate={null}
+        initialNextCursor={null}
+        initialStatus={null}
+        isAdmin={false}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "回到顶部" })).not.toBeInTheDocument();
+
+    Object.defineProperty(window, "scrollY", {
+      configurable: true,
+      value: 301,
+    });
+    fireEvent.scroll(window);
+
+    const backToTop = await screen.findByRole("button", { name: "回到顶部" });
+    expect(backToTop.className).toContain("fixed bottom-8 right-8");
+    expect(backToTop).toHaveTextContent("↑");
+
+    await user.click(backToTop);
+
+    expect(scrollToMock).toHaveBeenCalledWith({ top: 0, behavior: "smooth" });
   });
 
   it("renders the regenerate range select at full width inside the dialog", async () => {
@@ -2083,7 +2146,7 @@ describe("FeedPanel", () => {
         initialEndDate={null}
         initialPagination={{
           page: 1,
-          size: 20,
+          size: 50,
           total: 21,
           totalPages: 2,
         }}
@@ -2097,7 +2160,7 @@ describe("FeedPanel", () => {
     expect(screen.getByRole("button", { name: "下一页" })).toBeEnabled();
     expect(screen.getByText("第 1 / 2 页")).toBeInTheDocument();
     expect(screen.getByText("条，共 21 条")).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "每页显示" })).toHaveValue("20");
+    expect(screen.getByRole("combobox", { name: "每页显示" })).toHaveValue("50");
     expect(screen.getByRole("spinbutton", { name: "跳转页码" })).toHaveValue(1);
     expect(screen.getByText("每页显示").parentElement).toHaveClass("text-sm");
     expect(screen.getByRole("button", { name: "上一页" })).toHaveClass("text-sm");
@@ -2128,7 +2191,7 @@ describe("FeedPanel", () => {
             ],
             pagination: {
               page: 2,
-              size: 20,
+              size: 50,
               total: 21,
               totalPages: 2,
             },
@@ -2143,7 +2206,7 @@ describe("FeedPanel", () => {
         );
       }
 
-      if (url === "/api/feed?range=7d&sort=time_desc&size=10&tzOffsetMinutes=-480") {
+      if (url === "/api/feed?range=7d&sort=time_desc&size=100&tzOffsetMinutes=-480") {
         return new Response(
           JSON.stringify({
             items: [
@@ -2155,8 +2218,8 @@ describe("FeedPanel", () => {
             ],
             pagination: {
               page: 1,
-              size: 10,
-              total: 21,
+              size: 100,
+              total: 250,
               totalPages: 3,
             },
             range: "7d" satisfies FeedRange,
@@ -2170,7 +2233,7 @@ describe("FeedPanel", () => {
         );
       }
 
-      if (url === "/api/feed?range=7d&sort=time_desc&page=3&size=10&tzOffsetMinutes=-480") {
+      if (url === "/api/feed?range=7d&sort=time_desc&page=3&size=100&tzOffsetMinutes=-480") {
         return new Response(
           JSON.stringify({
             items: [
@@ -2183,8 +2246,8 @@ describe("FeedPanel", () => {
             ],
             pagination: {
               page: 3,
-              size: 10,
-              total: 21,
+              size: 100,
+              total: 250,
               totalPages: 3,
             },
             range: "7d" satisfies FeedRange,
@@ -2198,21 +2261,21 @@ describe("FeedPanel", () => {
         );
       }
 
-      if (url === "/api/feed?range=7d&sort=time_desc&page=2&size=10&tzOffsetMinutes=-480") {
+      if (url === "/api/feed?range=7d&sort=time_desc&page=2&size=100&tzOffsetMinutes=-480") {
         return new Response(
           JSON.stringify({
             items: [
               {
                 ...initialEntries[1],
-                id: "item-page-2-size-10",
-                title: "第二页十条模式",
-                summary: "第二页十条摘要",
+                id: "item-page-2-size-100",
+                title: "第二页百条模式",
+                summary: "第二页百条摘要",
               },
             ],
             pagination: {
               page: 2,
-              size: 10,
-              total: 21,
+              size: 100,
+              total: 250,
               totalPages: 3,
             },
             range: "7d" satisfies FeedRange,
@@ -2240,7 +2303,7 @@ describe("FeedPanel", () => {
         initialEndDate={null}
         initialPagination={{
           page: 1,
-          size: 20,
+          size: 50,
           total: 21,
           totalPages: 2,
         }}
@@ -2259,22 +2322,22 @@ describe("FeedPanel", () => {
     expect(screen.queryByText("OpenAI Agent 发布")).not.toBeInTheDocument();
     expect(screen.getByText("第 2 / 2 页")).toBeInTheDocument();
 
-    await selectFilterOption(user, "每页显示", "10");
+    await selectFilterOption(user, "每页显示", "100");
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=7d&sort=time_desc&size=10&tzOffsetMinutes=-480");
+      expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=7d&sort=time_desc&size=100&tzOffsetMinutes=-480");
     });
 
     expect(await screen.findByText("分页尺寸第一页")).toBeInTheDocument();
     expect(screen.getByText("第 1 / 3 页")).toBeInTheDocument();
-    expect(screen.getByText("条，共 21 条")).toBeInTheDocument();
+    expect(screen.getByText("条，共 250 条")).toBeInTheDocument();
 
     await user.clear(screen.getByRole("spinbutton", { name: "跳转页码" }));
     await user.type(screen.getByRole("spinbutton", { name: "跳转页码" }), "3");
     await user.click(screen.getByRole("button", { name: "跳转" }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=7d&sort=time_desc&page=3&size=10&tzOffsetMinutes=-480");
+      expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=7d&sort=time_desc&page=3&size=100&tzOffsetMinutes=-480");
     });
 
     expect(await screen.findByText("第三页标题")).toBeInTheDocument();
@@ -2283,10 +2346,10 @@ describe("FeedPanel", () => {
     await user.click(screen.getByRole("button", { name: "上一页" }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=7d&sort=time_desc&page=2&size=10&tzOffsetMinutes=-480");
+      expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=7d&sort=time_desc&page=2&size=100&tzOffsetMinutes=-480");
     });
 
-    expect(await screen.findByText("第二页十条模式")).toBeInTheDocument();
+    expect(await screen.findByText("第二页百条模式")).toBeInTheDocument();
     expect(screen.getByText("第 2 / 3 页")).toBeInTheDocument();
   });
 });

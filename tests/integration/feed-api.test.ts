@@ -244,7 +244,7 @@ describe("/api/feed", () => {
     });
     expect(json.pagination).toMatchObject({
       page: 1,
-      size: 20,
+      size: 50,
       total: 4,
       totalPages: 1,
     });
@@ -748,6 +748,18 @@ describe("/api/feed", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("returns all cluster child items regardless of feed time filters", async () => {
+    const { GET } = await import("@/app/api/feed/clusters/[id]/route");
+    const response = await GET(
+      new Request("http://localhost/api/feed/clusters/cluster-a?range=all&start=2026-04-11&end=2026-04-11"),
+      { params: Promise.resolve({ id: "cluster-a" }) },
+    );
+
+    const json = await response.json();
+
+    expect(json.items.map((item: { id: string }) => item.id)).toEqual(["item-a1", "item-a2"]);
   });
 
   it("downgrades a filtered cluster into a single entry when only one source item matches", async () => {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState, useTransition, useCallback, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition, useCallback, type MouseEvent, type ReactNode } from "react";
 
 import { STATUS_POLL_INTERVAL_MS, TITLE_SEARCH_DEBOUNCE_MS } from "@/config/constants";
 import {
@@ -39,6 +39,7 @@ import {
   formatMetaLabel,
   formatRangeLabel,
   formatRunSummary,
+  formatRunTime,
   formatScore,
   formatGroupOptionLabel,
   getAllSelectableItemIds,
@@ -122,6 +123,10 @@ function openTaskDetailInNewWindow(taskRunId: string) {
   window.open(`/admin?tab=monitoring&section=tasks&task=${encodeURIComponent(taskRunId)}`, "_blank", "noopener,noreferrer");
 }
 
+function scrollToPageTop(behavior: ScrollBehavior = "smooth") {
+  window.scrollTo({ top: 0, behavior });
+}
+
 function ChevronIcon({ expanded, className }: { expanded: boolean; className?: string }) {
   return (
     <svg
@@ -150,6 +155,64 @@ function getVisibleAuthorLabel(author: string | null | undefined) {
   return normalized && normalized !== "未知作者" ? normalized : null;
 }
 
+const READING_PROGRESS_STORAGE_KEY = "infinitum.feed.readingProgress.v1";
+
+type ReadingProgress = {
+  filterKey: string;
+  entryId: string;
+  entryType: FeedEntryDTO["type"];
+  page: number;
+  size: number;
+  updatedAt: string;
+};
+
+function buildReadingProgressFilterKey(query: FeedQueryState) {
+  return JSON.stringify({
+    range: query.range,
+    sort: query.sort,
+    startDate: query.startDate ?? "",
+    endDate: query.endDate ?? "",
+    publishedStartDate: query.publishedStartDate ?? "",
+    publishedEndDate: query.publishedEndDate ?? "",
+    groupId: query.groupId ?? "",
+    sourceId: query.sourceId ?? "",
+    title: query.title ?? "",
+  });
+}
+
+function readStoredReadingProgress(filterKey: string): ReadingProgress | null {
+  try {
+    const rawValue = window.localStorage.getItem(READING_PROGRESS_STORAGE_KEY);
+    if (!rawValue) {
+      return null;
+    }
+
+    const parsed = JSON.parse(rawValue) as Partial<ReadingProgress>;
+    if (
+      parsed.filterKey !== filterKey ||
+      typeof parsed.entryId !== "string" ||
+      (parsed.entryType !== "cluster" && parsed.entryType !== "single") ||
+      typeof parsed.page !== "number" ||
+      typeof parsed.size !== "number" ||
+      typeof parsed.updatedAt !== "string"
+    ) {
+      return null;
+    }
+
+    return parsed as ReadingProgress;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredReadingProgress(progress: ReadingProgress) {
+  try {
+    window.localStorage.setItem(READING_PROGRESS_STORAGE_KEY, JSON.stringify(progress));
+  } catch {
+    // localStorage may be unavailable in private or restricted browsing contexts.
+  }
+}
+
 type FullSummaryDialogState = {
   title: string;
   summary: string;
@@ -162,6 +225,81 @@ type SummaryTextProps = {
   clickableClassName: string;
   onOpen: (state: Exclude<FullSummaryDialogState, null>) => void;
 };
+
+function renderMarkdownInline(text: string): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  const markdownPattern = /(\*\*[^*\n]+?\*\*|__[^_\n]+?__|\*[^*\n]+?\*|_[^_\n]+?_)/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = markdownPattern.exec(text)) !== null) {
+    const token = match[0];
+    const start = match.index;
+
+    if (start > lastIndex) {
+      nodes.push(text.slice(lastIndex, start));
+    }
+
+    if (token.startsWith("**") || token.startsWith("__")) {
+      nodes.push(
+        <strong key={`${start}-strong`} className="font-semibold text-[var(--foreground)]">
+          {token.slice(2, -2)}
+        </strong>,
+      );
+    } else {
+      nodes.push(
+        <em key={`${start}-em`} className="italic text-[var(--foreground)]">
+          {token.slice(1, -1)}
+        </em>,
+      );
+    }
+
+    lastIndex = start + token.length;
+  }
+
+  if (lastIndex < text.length) {
+    nodes.push(text.slice(lastIndex));
+  }
+
+  return nodes;
+}
+
+function SummaryMarkdown({ text }: { text: string }) {
+  return <>{renderMarkdownInline(text)}</>;
+}
+
+function BackToTopButton() {
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      setVisible(window.scrollY > 300);
+    };
+
+    handleScroll();
+    window.addEventListener("scroll", handleScroll, { passive: true });
+
+    return () => {
+      window.removeEventListener("scroll", handleScroll);
+    };
+  }, []);
+
+  if (!visible) {
+    return null;
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => scrollToPageTop()}
+      className="fixed bottom-8 right-8 z-50 flex h-12 w-12 items-center justify-center rounded-full border border-[color:var(--line)] bg-[var(--surface)] text-xl leading-none text-[var(--text-2)] shadow-md transition hover:bg-[var(--bg-muted)] hover:text-[var(--text-1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]/35 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)]"
+      title="回到顶部"
+      aria-label="回到顶部"
+    >
+      ↑
+    </button>
+  );
+}
 
 function SummaryText({ title, summary, className, clickableClassName, onOpen }: SummaryTextProps) {
   const summaryRef = useRef<HTMLElement | null>(null);
@@ -198,7 +336,7 @@ function SummaryText({ title, summary, className, clickableClassName, onOpen }: 
   if (!isOverflowing) {
     return (
       <p ref={summaryRef as React.RefObject<HTMLParagraphElement>} className={className}>
-        {summary}
+        <SummaryMarkdown text={summary} />
       </p>
     );
   }
@@ -212,7 +350,7 @@ function SummaryText({ title, summary, className, clickableClassName, onOpen }: 
       title="点击查看完整摘要"
       aria-label={`查看完整摘要：${title}`}
     >
-      {summary}
+      <SummaryMarkdown text={summary} />
     </button>
   );
 }
@@ -278,8 +416,13 @@ export function FeedPanel({
     Boolean(initialStartDate || initialEndDate || initialPublishedStartDate || initialPublishedEndDate || initialSourceId || initialTitle),
   );
   const [groupSidebarExpanded, setGroupSidebarExpanded] = useState(true);
+  const [readingProgress, setReadingProgress] = useState<ReadingProgress | null>(null);
+  const [isReadingProgressHidden, setIsReadingProgressHidden] = useState(false);
+  const [pendingRestoreEntryId, setPendingRestoreEntryId] = useState<string | null>(null);
   const skipTitleEffectRef = useRef(true);
   const didHydrateTimeZoneRef = useRef(false);
+  const progressWriteTimerRef = useRef<number | null>(null);
+  const lastSavedProgressRef = useRef<string | null>(null);
   const latestQueryRef = useRef<FeedQueryState>({
     range: initialRange,
     sort: initialSort,
@@ -300,6 +443,20 @@ export function FeedPanel({
   const total = pagination.total;
   const totalPages = pagination.totalPages;
   const shouldShowPagination = total > 0;
+  const readingProgressFilterKey = useMemo(
+    () => buildReadingProgressFilterKey({
+      range,
+      sort,
+      startDate,
+      endDate,
+      publishedStartDate,
+      publishedEndDate,
+      groupId,
+      sourceId,
+      title: titleFilter,
+    }),
+    [endDate, groupId, publishedEndDate, publishedStartDate, range, sort, sourceId, startDate, titleFilter],
+  );
 
   const summary = useMemo(
     () => ({
@@ -372,7 +529,14 @@ export function FeedPanel({
     query: FeedQueryState,
     page = 1,
     size = pageSize,
+    options?: {
+      scrollToTop?: boolean;
+    },
   ) => {
+    if (options?.scrollToTop) {
+      scrollToPageTop();
+    }
+
     syncUrlWithQuery(query, page, size);
     startTransition(async () => {
       const payload = await requestFeed(query, { page, size });
@@ -405,12 +569,12 @@ export function FeedPanel({
       startDate: null,
       endDate: null,
     });
-    loadFeed(query, 1);
+    loadFeed(query, 1, pageSize, { scrollToTop: true });
   };
 
   const changeSort = (nextSort: FeedSort) => {
     setSort(nextSort);
-    loadFeed(buildQuery({ sort: nextSort }), 1);
+    loadFeed(buildQuery({ sort: nextSort }), 1, pageSize, { scrollToTop: true });
   };
 
   const changeGroup = (nextGroupId: string) => {
@@ -425,13 +589,13 @@ export function FeedPanel({
     loadFeed(buildQuery({
       groupId: normalizedGroupId,
       sourceId: nextSourceId,
-    }), 1);
+    }), 1, pageSize, { scrollToTop: true });
   };
 
   const changeSource = (nextSourceId: string) => {
     const normalizedSourceId = normalizeOptionalId(nextSourceId);
     setSourceId(normalizedSourceId);
-    loadFeed(buildQuery({ sourceId: normalizedSourceId }), 1);
+    loadFeed(buildQuery({ sourceId: normalizedSourceId }), 1, pageSize, { scrollToTop: true });
   };
 
   const changeDateRange = (nextRange: DateRangeValue) => {
@@ -442,7 +606,7 @@ export function FeedPanel({
     loadFeed(buildQuery({
       startDate: normalizedStartDate,
       endDate: normalizedEndDate,
-    }), 1);
+    }), 1, pageSize, { scrollToTop: true });
   };
 
   const changePublishedDateRange = (nextRange: DateRangeValue) => {
@@ -453,7 +617,7 @@ export function FeedPanel({
     loadFeed(buildQuery({
       publishedStartDate: normalizedStartDate,
       publishedEndDate: normalizedEndDate,
-    }), 1);
+    }), 1, pageSize, { scrollToTop: true });
   };
 
   const clearFilters = () => {
@@ -478,7 +642,7 @@ export function FeedPanel({
       groupId: null,
       sourceId: null,
       title: null,
-    }, 1);
+    }, 1, pageSize, { scrollToTop: true });
   };
 
   const refresh = () => {
@@ -1003,6 +1167,120 @@ export function FeedPanel({
   }, [endDate, groupId, publishedEndDate, publishedStartDate, range, sort, sourceId, startDate, titleFilter]);
 
   useEffect(() => {
+    const progress = readStoredReadingProgress(readingProgressFilterKey);
+    setReadingProgress(progress);
+    setIsReadingProgressHidden(false);
+    lastSavedProgressRef.current = progress
+      ? `${progress.filterKey}:${progress.entryId}:${progress.page}:${progress.size}`
+      : null;
+  }, [readingProgressFilterKey]);
+
+  useEffect(() => {
+    if (items.length === 0 || typeof IntersectionObserver === "undefined") {
+      return;
+    }
+
+    const observedElements = Array.from(
+      document.querySelectorAll<HTMLElement>("[data-feed-entry-id][data-feed-entry-type]"),
+    );
+
+    if (observedElements.length === 0) {
+      return;
+    }
+
+    const saveVisibleProgress = () => {
+      if (window.scrollY < 80 && currentPage === 1) {
+        return;
+      }
+
+      const viewportHeight = window.innerHeight;
+      const visibleElement = observedElements
+        .map((element) => ({
+          element,
+          rect: element.getBoundingClientRect(),
+        }))
+        .filter(({ rect }) => rect.bottom > 80 && rect.top < viewportHeight * 0.7)
+        .sort((a, b) => Math.abs(a.rect.top - 120) - Math.abs(b.rect.top - 120))[0]?.element;
+
+      const entryId = visibleElement?.dataset.feedEntryId;
+      const entryType = visibleElement?.dataset.feedEntryType;
+
+      if (!entryId || (entryType !== "cluster" && entryType !== "single")) {
+        return;
+      }
+
+      const progressKey = `${readingProgressFilterKey}:${entryId}:${currentPage}:${pageSize}`;
+      if (progressKey === lastSavedProgressRef.current) {
+        return;
+      }
+
+      const progress: ReadingProgress = {
+        filterKey: readingProgressFilterKey,
+        entryId,
+        entryType,
+        page: currentPage,
+        size: pageSize,
+        updatedAt: new Date().toISOString(),
+      };
+
+      lastSavedProgressRef.current = progressKey;
+      setReadingProgress(progress);
+      writeStoredReadingProgress(progress);
+    };
+
+    const scheduleSave = () => {
+      if (progressWriteTimerRef.current !== null) {
+        window.clearTimeout(progressWriteTimerRef.current);
+      }
+
+      progressWriteTimerRef.current = window.setTimeout(saveVisibleProgress, 350);
+    };
+
+    const observer = new IntersectionObserver(scheduleSave, {
+      root: null,
+      rootMargin: "-10% 0px -45% 0px",
+      threshold: [0, 0.25, 0.5, 0.75],
+    });
+
+    observedElements.forEach((element) => observer.observe(element));
+    window.addEventListener("scroll", scheduleSave, { passive: true });
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("scroll", scheduleSave);
+      if (progressWriteTimerRef.current !== null) {
+        window.clearTimeout(progressWriteTimerRef.current);
+        progressWriteTimerRef.current = null;
+      }
+    };
+  }, [currentPage, items, pageSize, readingProgressFilterKey]);
+
+  useEffect(() => {
+    if (!pendingRestoreEntryId || isPending) {
+      return;
+    }
+
+    const target = document.querySelector<HTMLElement>(
+      `[data-feed-entry-id="${CSS.escape(pendingRestoreEntryId)}"]`,
+    );
+
+    if (!target) {
+      setRefreshFeedback({
+        tone: "info",
+        message: "上次阅读的内容位置已变化，已为你打开保存的页码。",
+      });
+      setPendingRestoreEntryId(null);
+      return;
+    }
+
+    window.setTimeout(() => {
+      target.scrollIntoView({ behavior: "smooth", block: "start" });
+      target.focus({ preventScroll: true });
+    }, 50);
+    setPendingRestoreEntryId(null);
+  }, [isPending, items, pendingRestoreEntryId]);
+
+  useEffect(() => {
     if (didHydrateTimeZoneRef.current) {
       return;
     }
@@ -1056,7 +1334,7 @@ export function FeedPanel({
       loadFeed({
         ...latestQueryRef.current,
         title: normalizedTitle,
-      }, 1);
+      }, 1, pageSize, { scrollToTop: true });
     }, TITLE_SEARCH_DEBOUNCE_MS);
 
     return () => {
@@ -1157,6 +1435,31 @@ export function FeedPanel({
     loadFeed(buildQuery(), normalizedPage, pageSize);
   };
 
+  const resumeReadingProgress = () => {
+    if (!readingProgress || isPending) {
+      return;
+    }
+
+    setIsReadingProgressHidden(true);
+    const restoredPage = Math.min(Math.max(1, readingProgress.page), totalPages || readingProgress.page);
+    setPendingRestoreEntryId(readingProgress.entryId);
+
+    if (restoredPage === currentPage && readingProgress.size === pageSize) {
+      const target = document.querySelector<HTMLElement>(
+        `[data-feed-entry-id="${CSS.escape(readingProgress.entryId)}"]`,
+      );
+
+      if (target) {
+        target.scrollIntoView({ behavior: "smooth", block: "start" });
+        target.focus({ preventScroll: true });
+        setPendingRestoreEntryId(null);
+        return;
+      }
+    }
+
+    loadFeed(buildQuery(), restoredPage, readingProgress.size);
+  };
+
   const neutralBadgeClassName =
     "inline-flex items-center rounded-sm border border-[color:var(--line)] bg-[var(--surface-muted)] px-2 py-1 text-xs text-[var(--muted)]";
   const denseCardClassName =
@@ -1173,6 +1476,7 @@ export function FeedPanel({
     "inline-flex shrink-0 items-center gap-1 bg-transparent px-0 py-0 text-left text-[11px] leading-none text-[var(--muted)] transition hover:text-[var(--foreground)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(59,130,246,0.28)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)] disabled:cursor-not-allowed disabled:opacity-55";
   const hasClearableFilters = activeFilterSummary.length > 0;
   const latestRunSummary = formatRunSummary(status);
+  const latestRunTime = formatRunTime(status);
   const isRefreshDisabled =
     isPending || status?.status === "running" || Boolean(queuedRefreshAt);
   const renderSummary = (title: string, summaryText: string) => (
@@ -1250,6 +1554,10 @@ export function FeedPanel({
                 {isAdmin ? (
                   <span className="min-w-0 text-sm text-[var(--text-2)] lg:truncate">
                     {latestRunSummary}
+                  </span>
+                ) : latestRunTime ? (
+                  <span className="min-w-0 text-sm text-[var(--text-2)] lg:truncate">
+                    更新时间：{latestRunTime}
                   </span>
                 ) : null}
               </div>
@@ -1360,7 +1668,7 @@ export function FeedPanel({
               onClear={clearFilters}
               canClear={hasClearableFilters && !isPending}
               details={null}
-              className="pt-1"
+              className="pt-5"
             />
 
             {/* 批量操作工具栏 */}
@@ -1443,7 +1751,13 @@ export function FeedPanel({
           ) : (
             items.map((entry) =>
               entry.type === "cluster" ? (
-                <article key={entry.id} className={denseCardClassName}>
+                <article
+                  key={entry.id}
+                  data-feed-entry-id={entry.id}
+                  data-feed-entry-type={entry.type}
+                  tabIndex={-1}
+                  className={denseCardClassName}
+                >
                   {/* 聚合条目头部 */}
                   <div
                     className="flex cursor-pointer items-start gap-3"
@@ -1651,7 +1965,13 @@ export function FeedPanel({
                   ) : null}
                 </article>
               ) : (
-                <article key={entry.id} className={denseCardClassName}>
+                <article
+                  key={entry.id}
+                  data-feed-entry-id={entry.id}
+                  data-feed-entry-type={entry.type}
+                  tabIndex={-1}
+                  className={denseCardClassName}
+                >
                   <div className="flex items-start gap-3">
                     {isAdmin && (
                       <input
@@ -1805,7 +2125,7 @@ export function FeedPanel({
           <div className="space-y-3">
             <h4 className="text-base font-semibold leading-6 text-[var(--foreground)]">{fullSummaryDialog?.title ?? ""}</h4>
             <p className="max-h-[60vh] overflow-y-auto whitespace-pre-wrap text-sm leading-7 text-[var(--muted)]">
-              {fullSummaryDialog?.summary ?? ""}
+              <SummaryMarkdown text={fullSummaryDialog?.summary ?? ""} />
             </p>
           </div>
         </ModalShell>
@@ -2050,6 +2370,19 @@ export function FeedPanel({
             <p>删除后会立即从主页列表移除，此操作不可恢复。</p>
           </div>
         </ModalShell>
+        {readingProgress && !isReadingProgressHidden ? (
+          <button
+            type="button"
+            onClick={resumeReadingProgress}
+            disabled={isPending}
+            className="fixed right-4 top-20 z-50 inline-flex items-center justify-center rounded-full bg-emerald-100 px-4 py-2 text-sm font-medium text-emerald-800 shadow-md transition hover:bg-emerald-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/45 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)] disabled:cursor-not-allowed disabled:opacity-50 sm:right-8"
+            title="继续阅读"
+            aria-label="继续阅读"
+          >
+            <span>继续阅读</span>
+          </button>
+        ) : null}
+        <BackToTopButton />
       </section>
     </PageShell>
   );

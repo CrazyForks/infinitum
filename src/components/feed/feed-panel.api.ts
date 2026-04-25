@@ -83,8 +83,16 @@ export async function requestFeed(
 }
 
 export async function requestClusterItems(clusterId: string, query: FeedQueryState) {
+  const clusterItemQuery: FeedQueryState = {
+    ...query,
+    range: "all",
+    startDate: null,
+    endDate: null,
+    publishedStartDate: null,
+    publishedEndDate: null,
+  };
   const payload = await requestJson<{ items: FeedClusterPreviewItemDTO[] }>(
-    `/api/feed/clusters/${clusterId}?${buildFeedSearch(query)}`,
+    `/api/feed/clusters/${clusterId}?${buildFeedSearch(clusterItemQuery)}`,
   );
 
   return payload.items;

@@ -35,7 +35,7 @@ function parsePage(value: string | undefined): number {
 
 function parsePageSize(value: string | undefined): number {
   const parsed = Number.parseInt(value ?? "", 10);
-  return Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, 100) : DEFAULT_FEED_PAGE_SIZE;
+  return Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, 200) : DEFAULT_FEED_PAGE_SIZE;
 }
 
 export function resolveFeedRequest(searchParams: SearchParamSource, now = new Date()): ResolvedFeedRequest {
