@@ -129,6 +129,36 @@ function buildEmptyPromptForm(type: PromptConfigType): PromptFormState {
   };
 }
 
+async function writeClipboardText(value: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      return true;
+    }
+  } catch {
+    // Fall through to the legacy copy path below.
+  }
+
+  const textArea = document.createElement("textarea");
+  textArea.value = value;
+  textArea.setAttribute("readonly", "");
+  textArea.style.position = "fixed";
+  textArea.style.top = "-9999px";
+  textArea.style.opacity = "0";
+
+  document.body.appendChild(textArea);
+  textArea.focus();
+  textArea.select();
+
+  try {
+    return document.execCommand("copy");
+  } catch {
+    return false;
+  } finally {
+    document.body.removeChild(textArea);
+  }
+}
+
 function getInitialPromptType(): PromptConfigType {
   if (typeof window === "undefined") {
     return "item_summary";
@@ -211,8 +241,13 @@ export function AiSettingsPanel({ initialSettings, mode }: AiSettingsPanelProps)
   );
 
   const copyText = async (value: string, message = "已复制。") => {
-    await navigator.clipboard.writeText(value);
-    showToast(message, "success");
+    if (!value) {
+      showToast("没有可复制的内容。", "error");
+      return;
+    }
+
+    const copied = await writeClipboardText(value);
+    showToast(copied ? message : "复制失败，请手动复制。", copied ? "success" : "error");
   };
 
   const openCreateModelModal = () => {
