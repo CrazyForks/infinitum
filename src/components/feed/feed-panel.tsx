@@ -423,6 +423,7 @@ export function FeedPanel({
   const didHydrateTimeZoneRef = useRef(false);
   const progressWriteTimerRef = useRef<number | null>(null);
   const lastSavedProgressRef = useRef<string | null>(null);
+  const pendingScrollToTopRef = useRef(false);
   const latestQueryRef = useRef<FeedQueryState>({
     range: initialRange,
     sort: initialSort,
@@ -534,7 +535,8 @@ export function FeedPanel({
     },
   ) => {
     if (options?.scrollToTop) {
-      scrollToPageTop();
+      pendingScrollToTopRef.current = true;
+      setPendingRestoreEntryId(null);
     }
 
     syncUrlWithQuery(query, page, size);
@@ -544,6 +546,11 @@ export function FeedPanel({
       setGroups(payload.groups ?? availableGroups);
       setGroupTotalCount(payload.groupTotalCount ?? payload.pagination.total);
       setRefreshFeedback(null);
+
+      if (pendingScrollToTopRef.current) {
+        pendingScrollToTopRef.current = false;
+        window.requestAnimationFrame(() => scrollToPageTop("auto"));
+      }
     });
   }, [pageSize, availableGroups, syncUrlWithQuery, replaceFeedData]);
 

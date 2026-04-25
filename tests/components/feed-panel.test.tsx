@@ -280,8 +280,10 @@ describe("FeedPanel", () => {
       expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=1m&sort=time_desc&tzOffsetMinutes=-480");
     });
 
-    expect(scrollToMock).toHaveBeenCalledWith({ top: 0, behavior: "smooth" });
     expect(await screen.findByText("一月内标题")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(scrollToMock).toHaveBeenCalledWith({ top: 0, behavior: "auto" });
+    });
   });
 
   it("renders the group sidebar expanded by default and keeps the mobile inline entry", () => {
