@@ -2215,6 +2215,125 @@ describe("runIngestion", () => {
     expect(storedItem.errorMessage).toBeNull();
   });
 
+  it("preserves a manual cluster assignment when the source disables automatic aggregation", async () => {
+    const source = await prisma.source.create({
+      data: {
+        name: "Manual Feed",
+        rssUrl: "https://manual.example.com/feed.xml",
+        siteUrl: "https://manual.example.com",
+        enabled: true,
+        aiParsingEnabled: false,
+        aggregationEnabled: false,
+      },
+    });
+    const manualCluster = await prisma.contentCluster.create({
+      data: {
+        id: "manual-target-cluster",
+        kind: "topic",
+        title: "管理员指定聚合",
+        summary: "管理员指定聚合摘要",
+        score: 75,
+        itemCount: 1,
+        latestPublishedAt: new Date("2026-04-10T09:00:00.000Z"),
+        status: "active",
+        fingerprint: "manual-target-cluster",
+      },
+    });
+    const publishedAt = new Date("2026-04-10T09:00:00.000Z");
+    const originalUrl = "https://manual.example.com/posts/manual";
+    const originalTitle = "Manually grouped story";
+    const dedupeKeys = buildDedupeKeys({
+      sourceName: source.name,
+      canonicalUrl: originalUrl,
+      title: originalTitle,
+      publishedAt,
+    });
+
+    await prisma.item.create({
+      data: {
+        sourceId: source.id,
+        clusterId: manualCluster.id,
+        manualClusterAssignedAt: new Date("2026-04-10T09:10:00.000Z"),
+        originalUrl,
+        canonicalUrl: dedupeKeys.canonicalUrl,
+        urlHash: dedupeKeys.urlHash,
+        dedupeSignature: dedupeKeys.signature,
+        originalTitle,
+        translatedTitle: null,
+        author: "Alex",
+        publishedAt,
+        rssExcerpt: "Old manual summary",
+        rssContent: "Old manual summary",
+        summaryText: "Old manual summary",
+        status: "processed",
+        summaryStatus: "pending",
+        analysisStatus: "pending",
+        moderationStatus: "allowed",
+        qualityScore: 50,
+        qualityRationale: "AI parsing disabled for this source",
+      },
+    });
+
+    const parser = {
+      parseURL: vi.fn().mockResolvedValue({
+        items: [
+          {
+            title: originalTitle,
+            link: originalUrl,
+            isoDate: "2026-04-10T09:00:00.000Z",
+            contentSnippet: "Updated manual summary",
+            creator: "Alex",
+          },
+        ],
+      }),
+    };
+    const aiProvider = buildAiProviderMock({
+      summarizeItem: vi.fn().mockResolvedValue("不应该被调用"),
+      enrichContent: vi.fn().mockResolvedValue({
+        translatedTitle: "不应该被调用",
+        moderationStatus: "allowed",
+        moderationReason: null,
+        moderationDetail: null,
+        qualityScore: 99,
+        qualityRationale: "不应该被调用",
+        eventSignature: buildEventSignature(),
+      }),
+      summarizeCluster: vi.fn().mockResolvedValue("不会被使用"),
+      matchClusterCandidate: vi.fn().mockResolvedValue(null),
+    });
+
+    await runIngestion({
+      trigger: "manual",
+      parser,
+      articleFetcher: vi.fn(),
+      aiProvider,
+      sourceConfigs: [
+        {
+          name: source.name,
+          rssUrl: source.rssUrl,
+          siteUrl: source.siteUrl,
+          enabled: true,
+          aiParsingEnabled: false,
+          aggregationEnabled: false,
+        },
+      ],
+      blacklist: [],
+      now: new Date("2026-04-10T10:00:00.000Z"),
+    });
+
+    expect(aiProvider.matchClusterCandidate).not.toHaveBeenCalled();
+
+    const storedItem = await prisma.item.findFirstOrThrow({
+      where: { sourceId: source.id },
+    });
+    const clusterCount = await prisma.contentCluster.count();
+
+    expect(storedItem.clusterId).toBe(manualCluster.id);
+    expect(storedItem.manualClusterAssignedAt).toBeInstanceOf(Date);
+    expect(storedItem.rssExcerpt).toBe("Updated manual summary");
+    expect(clusterCount).toBe(1);
+  });
+
   it("uses database-backed runtime settings when explicit ingestion options are omitted", async () => {
     const modelConfig = await prisma.modelApiConfig.create({
       data: {

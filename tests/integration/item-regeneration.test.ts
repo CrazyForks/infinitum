@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AiProvider } from "@/lib/ai/provider";
+import { normalizeFingerprint } from "@/lib/clusters/helpers";
 import { executeClusterSummaryTask } from "@/lib/clusters/service";
 import { prisma } from "@/lib/db";
 import {
@@ -306,8 +307,131 @@ describe("regenerateItemContent", () => {
     });
 
     expect(storedTaskRun.status).toBe("succeeded");
-    expect(storedTaskRun.aiCallCountActual).toBe(2);
-    expect(storedTaskRun.aiCallCountEstimated).toBe(2);
+    expect(storedTaskRun.aiCallCountActual).toBe(1);
+    expect(storedTaskRun.aiCallCountEstimated).toBe(1);
+  });
+
+  it("reattaches summary regeneration targets to a matching cluster and records the match in task progress", async () => {
+    const source = await prisma.source.create({
+      data: {
+        name: "Example Feed",
+        rssUrl: "https://example.com/feed.xml",
+        siteUrl: "https://example.com",
+        enabled: true,
+        aiParsingEnabled: true,
+      },
+    });
+    const matchingFingerprint = normalizeFingerprint("launch|OpenAI|发布|toolkit|2026-04-10");
+    const matchingCluster = await prisma.contentCluster.create({
+      data: {
+        id: "matching-cluster",
+        kind: "topic",
+        title: "OpenAI Toolkit 发布",
+        summary: "已有聚合摘要",
+        score: 88,
+        itemCount: 1,
+        latestPublishedAt: new Date("2026-04-10T09:00:00.000Z"),
+        status: "active",
+        fingerprint: matchingFingerprint,
+        eventType: "launch",
+        eventSubject: "OpenAI",
+        eventAction: "发布",
+        eventObject: "toolkit",
+        eventDate: "2026-04-10",
+      },
+    });
+    const previousCluster = await prisma.contentCluster.create({
+      data: {
+        id: "previous-single-cluster",
+        kind: "topic",
+        title: "旧单条聚合",
+        summary: "旧单条摘要",
+        score: 70,
+        itemCount: 1,
+        latestPublishedAt: new Date("2026-04-10T10:00:00.000Z"),
+        status: "active",
+        fingerprint: "previous-single-cluster",
+      },
+    });
+
+    await prisma.item.create({
+      data: {
+        id: "matching-seed-item",
+        sourceId: source.id,
+        clusterId: matchingCluster.id,
+        originalUrl: "https://example.com/posts/matching-seed",
+        canonicalUrl: "https://example.com/posts/matching-seed",
+        urlHash: "matching-seed",
+        dedupeSignature: "matching-seed|1",
+        originalTitle: "OpenAI toolkit seed",
+        translatedTitle: "OpenAI 工具包发布",
+        summaryText: "已有聚合条目",
+        publishedAt: new Date("2026-04-10T09:00:00.000Z"),
+        status: "processed",
+        moderationStatus: "allowed",
+        qualityScore: 88,
+        qualityRationale: "高质量",
+        eventType: "launch",
+        eventSubject: "OpenAI",
+        eventAction: "发布",
+        eventObject: "toolkit",
+        eventDate: "2026-04-10",
+        language: "en",
+        fullText: "Seed body",
+      },
+    });
+    await prisma.item.create({
+      data: {
+        id: "summary-regeneration-match-target",
+        sourceId: source.id,
+        clusterId: previousCluster.id,
+        originalUrl: "https://example.com/posts/matching-target",
+        canonicalUrl: "https://example.com/posts/matching-target",
+        urlHash: "matching-target",
+        dedupeSignature: "matching-target|1",
+        originalTitle: "OpenAI ships toolkit",
+        translatedTitle: "OpenAI 发布工具包",
+        summaryText: "旧摘要",
+        publishedAt: new Date("2026-04-10T10:00:00.000Z"),
+        status: "processed",
+        moderationStatus: "allowed",
+        qualityScore: 86,
+        qualityRationale: "高质量",
+        eventType: "launch",
+        eventSubject: "OpenAI",
+        eventAction: "发布",
+        eventObject: "toolkit",
+        eventDate: "2026-04-10",
+        language: "en",
+        fullText: "Target body",
+      },
+    });
+
+    const taskRun = await prisma.backgroundTaskRun.create({
+      data: {
+        kind: "item_regenerate_summary",
+        triggerType: "admin_action",
+        status: "queued",
+        label: "重生成摘要",
+        entityId: "summary-regeneration-match-target",
+      },
+    });
+
+    await executeItemRegenerationTask(taskRun, "summary", {
+      aiProvider: buildAiProviderMock({
+        summarizeItem: vi.fn().mockResolvedValue("新的摘要内容"),
+        summarizeCluster: vi.fn().mockResolvedValue("新的聚合摘要"),
+        matchClusterCandidate: vi.fn().mockResolvedValue(null),
+      }),
+    });
+
+    const [storedTaskRun, updatedItem] = await Promise.all([
+      prisma.backgroundTaskRun.findUniqueOrThrow({ where: { id: taskRun.id } }),
+      prisma.item.findUniqueOrThrow({ where: { id: "summary-regeneration-match-target" } }),
+    ]);
+
+    expect(updatedItem.clusterId).toBe(matchingCluster.id);
+    expect(storedTaskRun.progressLabel).toBe("已完成条目更新，聚合匹配成功：OpenAI Toolkit 发布");
   });
 
   it("records ai usage for item reanalyze tasks", async () => {

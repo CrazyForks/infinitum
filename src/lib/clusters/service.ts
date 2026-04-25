@@ -495,7 +495,13 @@ export async function detachItemFromCluster(itemId: string, aiProvider?: AiProvi
   }
 
   const previousClusterId = item.clusterId;
-  await setItemCluster(itemId, null);
+  await prisma.item.update({
+    where: { id: itemId },
+    data: {
+      clusterId: null,
+      manualClusterAssignedAt: null,
+    },
+  });
   await recomputeCluster(previousClusterId, aiProvider);
   invalidateFeedCache();
 
@@ -509,6 +515,7 @@ export async function moveItemToCluster(itemId: string, clusterId: string, aiPro
       select: {
         id: true,
         clusterId: true,
+        manualClusterAssignedAt: true,
         moderationStatus: true,
         status: true,
       },
@@ -531,11 +538,25 @@ export async function moveItemToCluster(itemId: string, clusterId: string, aiPro
   }
 
   if (item.clusterId === clusterId) {
+    if (!item.manualClusterAssignedAt) {
+      await prisma.item.update({
+        where: { id: itemId },
+        data: { manualClusterAssignedAt: new Date() },
+      });
+      invalidateFeedCache();
+    }
+
     return clusterId;
   }
 
   const previousClusterId = item.clusterId;
-  await setItemCluster(itemId, clusterId);
+  await prisma.item.update({
+    where: { id: itemId },
+    data: {
+      clusterId,
+      manualClusterAssignedAt: new Date(),
+    },
+  });
   await recomputeCluster(clusterId, aiProvider);
 
   if (previousClusterId) {

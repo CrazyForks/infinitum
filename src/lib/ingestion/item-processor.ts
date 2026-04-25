@@ -4,6 +4,7 @@ import type { AiEventSignature } from "@/lib/ai/provider";
 import { shouldRegenerateChineseSummary } from "@/lib/ai/summary-language";
 import type { ClusterAssignmentCoordinator } from "@/lib/clusters/helpers";
 import { assignItemToCluster } from "@/lib/clusters/service";
+import { prisma } from "@/lib/db";
 import {
   findExistingItem,
   upsertItem,
@@ -425,6 +426,7 @@ export async function processFeedItem({
         eventDate: eventSignature?.eventDate ?? null,
         aiProcessedAt: null,
         clusterId: null,
+        manualClusterAssignedAt: null,
         errorMessage: null,
       },
     );
@@ -484,6 +486,7 @@ export async function processFeedItem({
             eventDate: eventSignature?.eventDate ?? null,
             aiProcessedAt: existing.aiProcessedAt,
             clusterId: existing.clusterId ?? null,
+            manualClusterAssignedAt: existing.manualClusterAssignedAt,
             errorMessage: null,
           },
         )
@@ -644,6 +647,7 @@ export async function processFeedItem({
       eventDate: eventSignature?.eventDate ?? null,
       aiProcessedAt: analysisStatus === "succeeded" ? new Date() : null,
       clusterId: moderationStatus === "filtered" ? null : existing?.clusterId ?? null,
+      manualClusterAssignedAt: moderationStatus === "filtered" ? null : existing?.manualClusterAssignedAt ?? null,
       errorMessage: issues.length > 0 ? issues.join(" | ") : null,
     },
   );
@@ -655,7 +659,30 @@ export async function processFeedItem({
     if (existing?.clusterId) {
       affectedClusterId = existing.clusterId;
     }
-  } else {
+  } else if (existing?.manualClusterAssignedAt && stored.clusterId) {
+    const manualCluster = await prisma.contentCluster.findUnique({
+      where: { id: stored.clusterId },
+      select: { id: true, status: true },
+    });
+
+    if (manualCluster?.status === "active") {
+      affectedClusterId = stored.clusterId;
+    } else {
+      await prisma.item.update({
+        where: { id: stored.id },
+        data: { manualClusterAssignedAt: null },
+      });
+    }
+  }
+
+  if (moderationStatus !== "filtered" && (!existing?.manualClusterAssignedAt || !stored.clusterId || !affectedClusterId)) {
+    if (existing?.manualClusterAssignedAt && stored.clusterId) {
+      await prisma.item.update({
+        where: { id: stored.id },
+        data: { manualClusterAssignedAt: null },
+      });
+    }
+
     const clusterAssignment = await assignItemToCluster(stored.id, {
       eventSignature,
       aiProvider,

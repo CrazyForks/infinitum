@@ -104,6 +104,12 @@ function applyIncrementalMigrations() {
       input: `ALTER TABLE "sources" ADD COLUMN "aggregationEnabled" BOOLEAN NOT NULL DEFAULT true;\n`,
     });
   }
+
+  if (!columnExists("items", "manualClusterAssignedAt")) {
+    runSqlite([dbPath], {
+      input: `ALTER TABLE "items" ADD COLUMN "manualClusterAssignedAt" DATETIME;\n`,
+    });
+  }
 }
 
 function sleep(ms) {
@@ -167,6 +173,8 @@ acquireSetupLock();
 try {
   if (shouldReset) {
     rmSync(dbPath, { force: true });
+    rmSync(`${dbPath}-shm`, { force: true });
+    rmSync(`${dbPath}-wal`, { force: true });
   }
 
   const sql = `${sqliteRuntimePragmas}\n${makeSqliteSchemaIdempotent(loadSchemaSql())}\n${sqliteRuntimePragmas}\n`;

@@ -15,6 +15,14 @@ type RegenerationOptions = {
   aiProvider?: AiProvider;
 };
 
+type ClusterReassignmentResult = {
+  clusterId: string | null;
+  clusterTitle: string | null;
+  matchedExistingCluster: boolean;
+  createdNewCluster: boolean;
+  skippedIncompleteSignature: boolean;
+};
+
 function getItemSourceText(item: Item): string {
   return item.fullText || item.rssContent || item.rssExcerpt || item.originalTitle;
 }
@@ -96,7 +104,7 @@ export async function regenerateItemContent(
   itemId: string,
   target: RegenerationTarget,
   options?: RegenerationOptions,
-) {
+): Promise<Item & { source: { name: string }; clusterReassignment?: ClusterReassignmentResult }> {
   const item = await prisma.item.findUnique({
     where: { id: itemId },
     include: { source: true },
@@ -107,6 +115,8 @@ export async function regenerateItemContent(
   }
 
   const aiProvider = await resolveAiProvider(options?.aiProvider);
+  const previousClusterId = item.clusterId;
+  let clusterReassignment: ClusterReassignmentResult | undefined;
 
   try {
     if (target === "translation") {
@@ -142,8 +152,40 @@ export async function regenerateItemContent(
       });
     }
 
-    if (item.clusterId) {
-      await recomputeCluster(item.clusterId, aiProvider);
+    if (previousClusterId) {
+      await prisma.item.update({
+        where: { id: item.id },
+        data: {
+          clusterId: null,
+          manualClusterAssignedAt: null,
+        },
+      });
+    }
+
+    const assignment = await assignItemToCluster(item.id, {
+      aiProvider,
+    });
+    const assignedCluster = assignment.clusterId
+      ? await prisma.contentCluster.findUnique({
+          where: { id: assignment.clusterId },
+          select: { title: true },
+        })
+      : null;
+
+    clusterReassignment = {
+      clusterId: assignment.clusterId,
+      clusterTitle: assignedCluster?.title ?? null,
+      matchedExistingCluster: Boolean(assignment.clusterId && !assignment.createdNewCluster),
+      createdNewCluster: assignment.createdNewCluster,
+      skippedIncompleteSignature: assignment.skippedIncompleteSignature,
+    };
+
+    if (assignment.clusterId) {
+      await recomputeCluster(assignment.clusterId, aiProvider);
+    }
+
+    if (previousClusterId && previousClusterId !== assignment.clusterId) {
+      await recomputeCluster(previousClusterId, aiProvider);
     }
 
     invalidateFeedCache();
@@ -163,10 +205,15 @@ export async function regenerateItemContent(
     });
   }
 
-  return prisma.item.findUniqueOrThrow({
+  const regenerated = await prisma.item.findUniqueOrThrow({
     where: { id: item.id },
     include: { source: true },
   });
+
+  return {
+    ...regenerated,
+    clusterReassignment,
+  };
 }
 
 export async function executeItemRegenerationTask(
@@ -197,12 +244,23 @@ export async function executeItemRegenerationTask(
     aiProvider: trackedAiProvider,
   });
   const succeeded = !item.errorMessage;
+  const clusterReassignment = item.clusterReassignment;
+  const successProgressLabel =
+    clusterReassignment
+      ? clusterReassignment.matchedExistingCluster && clusterReassignment.clusterTitle
+        ? `已完成条目更新，聚合匹配成功：${clusterReassignment.clusterTitle}`
+        : clusterReassignment.createdNewCluster && clusterReassignment.clusterTitle
+          ? `已完成条目更新，未匹配已有聚合，已新建聚合：${clusterReassignment.clusterTitle}`
+          : clusterReassignment.skippedIncompleteSignature
+            ? "已完成条目更新，聚合匹配未命中：事件签名不完整"
+            : "已完成条目更新，聚合匹配未命中"
+      : "已完成条目更新";
 
   await updateTaskRun(taskRun.id, {
     status: succeeded ? "succeeded" : "failed",
     progressCurrent: 1,
     progressTotal: 1,
-    progressLabel: succeeded ? "已完成条目更新" : "条目更新失败",
+    progressLabel: succeeded ? successProgressLabel : "条目更新失败",
     aiCallCountActual: aiUsage.snapshot().actual,
     aiCallCountEstimated: aiUsage.snapshot().estimated,
     aiCallBreakdown: aiUsage.snapshot().breakdown,
@@ -264,6 +322,7 @@ export async function manuallyFilterItem(itemId: string, options?: RegenerationO
       moderationDetail: "管理员手动过滤",
       status: "filtered",
       clusterId: null,
+      manualClusterAssignedAt: null,
       restoredByAdminAt: null,
       errorMessage: null,
     },
@@ -349,6 +408,7 @@ async function reanalyzeItem(itemId: string, options?: RegenerationOptions) {
       aiProcessedAt: new Date(),
       status: nextStatus,
       clusterId: moderationStatus === "filtered" ? null : item.clusterId,
+      manualClusterAssignedAt: moderationStatus === "filtered" ? null : item.manualClusterAssignedAt,
       errorMessage: null,
     },
     include: { source: true },

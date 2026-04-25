@@ -141,6 +141,7 @@ model Item {
   eventObject      String?
   eventDate        String?
   aiProcessedAt    DateTime?
+  manualClusterAssignedAt DateTime?
   restoredByAdminAt DateTime?
   errorMessage     String?
   createdAt        DateTime   @default(now())

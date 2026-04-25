@@ -220,6 +220,7 @@ describe("/api/admin/items", () => {
       where: { id: "item-visible" },
     });
     expect(stored.clusterId).toBe("cluster-singleton");
+    expect(stored.manualClusterAssignedAt).toBeInstanceOf(Date);
 
     const updatedCluster = await prisma.contentCluster.findUniqueOrThrow({
       where: { id: "cluster-singleton" },

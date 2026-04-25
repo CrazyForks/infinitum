@@ -1416,7 +1416,7 @@ export function FeedPanel({
     if (!FEED_PAGE_SIZE_OPTIONS.includes(nextSize as (typeof FEED_PAGE_SIZE_OPTIONS)[number])) {
       return;
     }
-    loadFeed(buildQuery(), 1, nextSize);
+    loadFeed(buildQuery(), 1, nextSize, { scrollToTop: true });
   };
 
   const handleJumpToPage = () => {
@@ -1432,7 +1432,7 @@ export function FeedPanel({
       return;
     }
 
-    loadFeed(buildQuery(), normalizedPage, pageSize);
+    loadFeed(buildQuery(), normalizedPage, pageSize, { scrollToTop: true });
   };
 
   const resumeReadingProgress = () => {
@@ -2098,7 +2098,7 @@ export function FeedPanel({
             totalPages={totalPages}
             pageSize={pageSize}
             pageSizeOptions={FEED_PAGE_SIZE_OPTIONS}
-            onPageChange={(nextPage) => loadFeed(buildQuery(), nextPage, pageSize)}
+            onPageChange={(nextPage) => loadFeed(buildQuery(), nextPage, pageSize, { scrollToTop: true })}
             onPageSizeChange={handlePageSizeChange}
             disabled={isPending}
             nextLabel={isPending ? "加载中..." : "下一页"}
@@ -2112,7 +2112,7 @@ export function FeedPanel({
           isOpen={Boolean(fullSummaryDialog)}
           onClose={() => setFullSummaryDialog(null)}
           title="完整摘要"
-          widthClassName="max-w-2xl"
+          widthClassName="max-w-5xl"
           bodyClassName="space-y-3 p-4"
           footer={
             <div className="flex justify-end">
