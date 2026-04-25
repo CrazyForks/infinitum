@@ -947,7 +947,7 @@ export async function getAdminCluster(clusterId: string) {
     title: cluster.title,
     summary: cluster.summary,
     score: recommendScore,
-    itemCount: cluster.itemCount,
+    itemCount: cluster.items.length,
     latestPublishedAt: cluster.latestPublishedAt.toISOString(),
     status: cluster.status,
     items: cluster.items.map(mapItemToClusterPreview),

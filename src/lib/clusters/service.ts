@@ -33,6 +33,7 @@ import {
   createContentCluster,
   deleteCluster,
   findActiveClusterByFingerprint,
+  findActiveClusterByTitle,
   findRecentActiveClusterCandidates,
   getClusterWithItems,
   setItemCluster,
@@ -72,6 +73,7 @@ async function findClusterForItem(
     eventSignature?: AiEventSignature | null;
     aiProvider?: AiProvider;
     coordinator?: ClusterAssignmentCoordinator;
+    titleFallback?: string;
   },
 ): Promise<{
   cluster: ClusterAssignmentCandidate | null;
@@ -98,6 +100,20 @@ async function findClusterForItem(
       matchSource: "exact_match" as const,
       skippedIncompleteSignature: false,
     };
+  }
+
+  const titleFallback = options.titleFallback?.trim() ?? "";
+  if (titleFallback) {
+    const titleMatch = await findActiveClusterByTitle(titleFallback, since, until);
+
+    if (titleMatch) {
+      return {
+        cluster: toClusterAssignmentCandidate(titleMatch),
+        fingerprint,
+        matchSource: "exact_match" as const,
+        skippedIncompleteSignature: false,
+      };
+    }
   }
 
   if (!options.aiProvider) {
@@ -302,18 +318,20 @@ export async function assignItemToCluster(
       } satisfies ClusterAssignmentResult;
     }
 
+    const eventDisplayTitle = buildEventDisplayTitle(resolvedEventSignature);
+    const clusterTitle = eventDisplayTitle || getDisplayTitle(item.originalTitle, item.translatedTitle);
     const { cluster: matchedCluster, fingerprint, matchSource, skippedIncompleteSignature } =
       await findClusterForItem(item, {
         ...options,
         eventSignature: resolvedEventSignature,
+        titleFallback: clusterTitle,
       });
-    const eventDisplayTitle = buildEventDisplayTitle(resolvedEventSignature);
     const createdNewCluster = !matchedCluster;
     const cluster =
       matchedCluster ??
       (await createContentCluster({
         fingerprint: fingerprint || `single-${item.id}`,
-        title: eventDisplayTitle || getDisplayTitle(item.originalTitle, item.translatedTitle),
+        title: clusterTitle,
         summary: buildItemSummary(item),
         score: item.qualityScore,
         latestPublishedAt: item.publishedAt,
@@ -433,6 +451,37 @@ export async function recomputeCluster(
     summaryAttempted: presentation.summaryAttempted,
     summarySucceeded: presentation.summarySucceeded,
   } satisfies ClusterRecomputeResult;
+}
+
+async function refreshClusterStats(clusterId: string) {
+  const cluster = await getClusterWithItems(clusterId);
+
+  if (!cluster) {
+    return null;
+  }
+
+  if (cluster.items.length === 0) {
+    await deleteCluster(clusterId);
+    return null;
+  }
+
+  const eventSignature = buildClusterEventSignature(cluster.items);
+  const score = Math.max(...cluster.items.map((item) => item.qualityScore));
+  const latestPublishedAt = cluster.items[0]!.publishedAt;
+
+  return prisma.contentCluster.update({
+    where: { id: clusterId },
+    data: {
+      score,
+      itemCount: cluster.items.length,
+      latestPublishedAt,
+      eventType: eventSignature?.eventType ?? null,
+      eventSubject: eventSignature?.eventSubject ?? null,
+      eventAction: eventSignature?.eventAction ?? null,
+      eventObject: eventSignature?.eventObject ?? null,
+      eventDate: eventSignature?.eventDate ?? null,
+    },
+  });
 }
 
 export async function detachItemFromCluster(itemId: string, aiProvider?: AiProvider) {
@@ -668,14 +717,13 @@ export async function mergeClusters(
     data: { clusterId: targetClusterId },
   });
 
-  // 将被合并的聚合组标记为隐藏（而不是删除，保留历史记录）
-  await prisma.contentCluster.updateMany({
-    where: { id: { in: sourceClusterIds } },
-    data: {
-      status: "hidden",
-      itemCount: 0,
+  await prisma.contentCluster.deleteMany({
+    where: {
+      id: { in: sourceClusterIds },
+      items: { none: {} },
     },
   });
+  await refreshClusterStats(targetClusterId);
 
   // 清除缓存
   invalidateFeedCache();

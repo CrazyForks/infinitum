@@ -39,6 +39,37 @@ export async function findActiveClusterByFingerprint(fingerprint: string, since:
   });
 }
 
+export async function findActiveClusterByTitle(title: string, since: Date, until?: Date) {
+  const normalizedTitle = title.trim();
+
+  if (!normalizedTitle) {
+    return null;
+  }
+
+  return prisma.contentCluster.findFirst({
+    where: {
+      title: normalizedTitle,
+      status: "active",
+      items: {
+        some: {
+          status: "processed",
+          moderationStatus: {
+            in: ["allowed", "restored"],
+          },
+          source: {
+            aggregationEnabled: true,
+          },
+        },
+      },
+      latestPublishedAt: {
+        gte: since,
+        lte: until,
+      },
+    },
+    orderBy: [{ latestPublishedAt: "desc" }, { updatedAt: "desc" }],
+  });
+}
+
 export async function findRecentActiveClusterCandidates(options: { since: Date; until: Date }) {
   return prisma.contentCluster.findMany({
     where: {
