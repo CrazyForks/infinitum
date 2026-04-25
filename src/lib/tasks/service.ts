@@ -540,7 +540,59 @@ export async function getBackgroundTaskMonitorSnapshot(now = new Date()): Promis
 
   return {
     schedule: toTaskScheduleSnapshot(schedule, now),
-    runningTasks: runningTasks.map(toTaskRunSnapshot),
-    recentTasks: recentTasks.map(toTaskRunSnapshot),
+    runningTasks: await attachTaskEntityTitles(runningTasks.map(toTaskRunSnapshot)),
+    recentTasks: await attachTaskEntityTitles(recentTasks.map(toTaskRunSnapshot)),
   };
+}
+
+async function attachTaskEntityTitles(tasks: TaskRunSnapshot[]): Promise<TaskRunSnapshot[]> {
+  const itemIds = Array.from(
+    new Set(
+      tasks
+        .filter((task) => task.entityId && task.kind.startsWith("item_"))
+        .map((task) => task.entityId as string),
+    ),
+  );
+  const clusterIds = Array.from(
+    new Set(
+      tasks
+        .filter((task) => task.entityId && task.kind.startsWith("cluster_"))
+        .map((task) => task.entityId as string),
+    ),
+  );
+
+  if (itemIds.length === 0 && clusterIds.length === 0) {
+    return tasks;
+  }
+
+  const [items, clusters] = await Promise.all([
+    itemIds.length > 0
+      ? prisma.item.findMany({
+          where: { id: { in: itemIds } },
+          select: { id: true, translatedTitle: true, originalTitle: true },
+        })
+      : [],
+    clusterIds.length > 0
+      ? prisma.contentCluster.findMany({
+          where: { id: { in: clusterIds } },
+          select: { id: true, title: true },
+        })
+      : [],
+  ]);
+  const itemTitles = new Map(items.map((item) => [item.id, item.translatedTitle?.trim() || item.originalTitle]));
+  const clusterTitles = new Map(clusters.map((cluster) => [cluster.id, cluster.title]));
+
+  return tasks.map((task) => {
+    if (!task.entityId) {
+      return task;
+    }
+
+    const entityTitle = task.kind.startsWith("item_")
+      ? itemTitles.get(task.entityId)
+      : task.kind.startsWith("cluster_")
+        ? clusterTitles.get(task.entityId)
+        : null;
+
+    return entityTitle ? { ...task, entityTitle } : task;
+  });
 }

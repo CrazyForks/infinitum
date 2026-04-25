@@ -215,6 +215,60 @@ describe("TaskMonitorPanel", () => {
     expect(within(dialog).getByText("参与重算 2 · 完成更新 2 · 摘要完成 1 · 摘要失败 0 · 已删除 0")).toBeInTheDocument();
   });
 
+  it("shows item or cluster title in regeneration task details", async () => {
+    renderWithProviders(
+      <TaskMonitorPanel
+        runningTasks={[]}
+        recentTasks={[
+          {
+            ...buildMonitorSnapshot().runningTasks[0],
+            id: "task-item",
+            kind: "item_regenerate_summary",
+            label: "重生成摘要",
+            entityId: "item-1",
+            entityTitle: "单条新闻标题",
+            status: "succeeded",
+            startedAt: "2026-04-21T00:00:00.000Z",
+            finishedAt: "2026-04-21T00:00:10.000Z",
+          },
+        ]}
+        initialFocusTaskId="task-item"
+      />,
+    );
+
+    const dialog = await screen.findByRole("dialog", { name: "任务详情" });
+    expect(within(dialog).getByText("条目标题:")).toBeInTheDocument();
+    expect(within(dialog).getByText("单条新闻标题")).toBeInTheDocument();
+  });
+
+  it("keeps current pagination when opening a task detail route", async () => {
+    const user = userEvent.setup();
+    const onDetailRouteChange = vi.fn();
+
+    renderWithProviders(
+      <TaskMonitorPanel
+        runningTasks={[]}
+        recentTasks={Array.from({ length: 12 }, (_, index) => ({
+          ...buildMonitorSnapshot().runningTasks[0],
+          id: `task-${index + 1}`,
+          status: "succeeded",
+          startedAt: "2026-04-21T00:00:00.000Z",
+          finishedAt: "2026-04-21T00:00:10.000Z",
+        }))}
+        initialPage={2}
+        initialPageSize={10}
+        onDetailRouteChange={onDetailRouteChange}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /默认抓取任务\s+#task-11/ }));
+
+    expect(onDetailRouteChange).toHaveBeenLastCalledWith("task-11", {
+      page: 2,
+      pageSize: 10,
+    });
+  });
+
   it("refreshes task progress from the task detail modal", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(

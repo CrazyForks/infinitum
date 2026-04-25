@@ -6,10 +6,12 @@ import type { AdminSettingsSnapshot } from "@/lib/settings/types";
 import type { BackgroundTaskMonitorSnapshot } from "@/lib/tasks/types";
 
 const {
+  openMock,
   pushMock,
   pathnameMock,
   searchParamsState,
 } = vi.hoisted(() => ({
+  openMock: vi.fn(),
   pushMock: vi.fn(),
   pathnameMock: "/admin",
   searchParamsState: {
@@ -30,8 +32,16 @@ vi.mock("@/components/ui/global-header", () => ({
 }));
 
 vi.mock("@/components/admin/content-review-panel", () => ({
-  ContentReviewPanel: ({ activeTab }: { activeTab: string }) => (
-    <div>{`内容审核:${activeTab}`}</div>
+  ContentReviewPanel: ({
+    activeTab,
+    initialPage,
+    initialPageSize,
+  }: {
+    activeTab: string;
+    initialPage?: number | null;
+    initialPageSize?: number | null;
+  }) => (
+    <div>{`内容审核:${activeTab}:${initialPage ?? "none"}:${initialPageSize ?? "none"}`}</div>
   ),
 }));
 
@@ -99,8 +109,10 @@ function buildInitialSnapshot(): BackgroundTaskMonitorSnapshot {
 }
 
 afterEach(() => {
+  openMock.mockReset();
   pushMock.mockReset();
   searchParamsState.value = "";
+  vi.unstubAllGlobals();
 });
 
 describe("AdminPageClient", () => {
@@ -128,7 +140,20 @@ describe("AdminPageClient", () => {
       />,
     );
 
-    expect(screen.getByText("内容审核:clusters")).toBeInTheDocument();
+    expect(screen.getByText("内容审核:clusters:none:none")).toBeInTheDocument();
+  });
+
+  it("passes content pagination from the url into the content review panel", () => {
+    searchParamsState.value = "tab=monitoring&section=content&view=clusters&contentPage=3&contentPageSize=20";
+
+    render(
+      <AdminPageClient
+        initialSettings={buildInitialSettings()}
+        initialSnapshot={buildInitialSnapshot()}
+      />,
+    );
+
+    expect(screen.getByText("内容审核:clusters:3:20")).toBeInTheDocument();
   });
 
   it("passes the task id from the url query into the task monitor panel", () => {

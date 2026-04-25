@@ -76,6 +76,15 @@ function normalizeTaskId(value: string | null): string | null {
   return normalized ? normalized : null;
 }
 
+function normalizePositiveInteger(value: string | null): number | null {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
 function resolveRouteState(searchParams: AdminSearchParams): AdminRouteState {
   const primaryTab = normalizePrimaryTab(searchParams.get("tab"));
 
@@ -116,6 +125,10 @@ export function AdminPageClient({
     aiSubSection,
   } = routeState;
   const focusedTaskId = normalizeTaskId(searchParams.get("task"));
+  const taskPage = normalizePositiveInteger(searchParams.get("taskPage"));
+  const taskPageSize = normalizePositiveInteger(searchParams.get("taskPageSize"));
+  const contentPage = normalizePositiveInteger(searchParams.get("contentPage"));
+  const contentPageSize = normalizePositiveInteger(searchParams.get("contentPageSize"));
   const [collapsedSections, setCollapsedSections] = useState<{
     ai: boolean;
     content: boolean;
@@ -161,6 +174,45 @@ export function AdminPageClient({
     settingsSection,
   ]);
 
+  const navigateTaskDetail = useCallback((taskId: string | null, state?: { page: number; pageSize: number }) => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("tab", "monitoring");
+    params.set("section", "tasks");
+    params.delete("view");
+
+    if (state) {
+      params.set("taskPage", String(state.page));
+      params.set("taskPageSize", String(state.pageSize));
+    }
+
+    if (taskId) {
+      params.set("task", taskId);
+    } else {
+      params.delete("task");
+    }
+
+    router.push(`${pathname}?${params.toString()}`, { scroll: false });
+  }, [pathname, router, searchParams]);
+
+  const replaceContentPageState = useCallback((state: { page: number; pageSize: number }) => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("tab", "monitoring");
+    params.set("section", "content");
+    params.set("view", contentSubSection);
+    params.set("contentPage", String(state.page));
+    params.set("contentPageSize", String(state.pageSize));
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  }, [contentSubSection, pathname, router, searchParams]);
+
+  const navigateTaskFromContent = useCallback((taskId: string, state: { page: number; pageSize: number }) => {
+    replaceContentPageState(state);
+    window.open(
+      `${pathname}?tab=monitoring&section=tasks&task=${encodeURIComponent(taskId)}&taskPage=1&taskPageSize=${taskPageSize ?? 10}`,
+      "_blank",
+      "noopener,noreferrer",
+    );
+  }, [pathname, replaceContentPageState, taskPageSize]);
+
   const handleToggleAISection = useCallback(() => {
     const nextCollapsed = !isAISectionCollapsed;
     setCollapsedSections((prev) => ({
@@ -192,7 +244,16 @@ export function AdminPageClient({
   const renderMainContent = () => {
     // Monitoring - Content Review
     if (primaryTab === "monitoring" && monitoringSubSection === "content") {
-      return <ContentReviewPanel embedMode activeTab={contentSubSection} />;
+      return (
+        <ContentReviewPanel
+          embedMode
+          activeTab={contentSubSection}
+          initialPage={contentPage}
+          initialPageSize={contentPageSize}
+          onPageStateChange={replaceContentPageState}
+          onTaskCreated={navigateTaskFromContent}
+        />
+      );
     }
 
     // Monitoring - Tasks
@@ -202,6 +263,9 @@ export function AdminPageClient({
           runningTasks={initialSnapshot.runningTasks}
           recentTasks={initialSnapshot.recentTasks}
           initialFocusTaskId={focusedTaskId}
+          initialPage={taskPage}
+          initialPageSize={taskPageSize}
+          onDetailRouteChange={navigateTaskDetail}
         />
       );
     }

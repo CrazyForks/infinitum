@@ -140,16 +140,6 @@ function getReviewReasonLabel(reason: ReviewItemDTO["moderationReason"]) {
   return reviewReasonLabels[reason];
 }
 
-function truncateText(value: string | null | undefined, maxLength: number) {
-  if (!value) {
-    return "暂无摘要。";
-  }
-  if (value.length <= maxLength) {
-    return value;
-  }
-  return `${value.slice(0, maxLength).trimEnd()}...`;
-}
-
 async function executeWithPendingId(
   id: string,
   setPendingId: Dispatch<SetStateAction<string | null>>,
@@ -431,9 +421,19 @@ function ClusterDetailModal({
 
 interface ContentReviewContentProps {
   initialTab?: ReviewTab;
+  initialPage?: number | null;
+  initialPageSize?: number | null;
+  onPageStateChange?: (state: { page: number; pageSize: number }) => void;
+  onTaskCreated?: (taskId: string, state: { page: number; pageSize: number }) => void;
 }
 
-function ContentReviewContent({ initialTab = "filtered" }: ContentReviewContentProps) {
+function ContentReviewContent({
+  initialTab = "filtered",
+  initialPage = null,
+  initialPageSize = null,
+  onPageStateChange,
+  onTaskCreated,
+}: ContentReviewContentProps) {
   const { showToast } = useToast();
   const activeTab = initialTab;
   const [filteredItems, setFilteredItems] = useState<ReviewItemDTO[]>([]);
@@ -445,8 +445,8 @@ function ContentReviewContent({ initialTab = "filtered" }: ContentReviewContentP
   const [clusterStatus, setClusterStatus] = useState<ClusterDTO["status"] | "">("");
   const [clusterTimeRange, setClusterTimeRange] = useState<TimeRangeFilter>("");
   const [isPending, startTransition] = useTransition();
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [page, setPage] = useState(initialPage ?? 1);
+  const [pageSize, setPageSize] = useState(initialPageSize ?? 10);
 
   // Detail modal states
   const [selectedFilteredItem, setSelectedFilteredItem] = useState<ReviewItemDTO | null>(null);
@@ -652,6 +652,17 @@ function ContentReviewContent({ initialTab = "filtered" }: ContentReviewContentP
       ? filteredSearch || filteredSource || filteredReason
       : clusterSearch || clusterStatus || clusterTimeRange;
 
+  const updatePage = useCallback((nextPage: number) => {
+    setPage(nextPage);
+    onPageStateChange?.({ page: nextPage, pageSize });
+  }, [onPageStateChange, pageSize]);
+
+  const updatePageSize = useCallback((nextPageSize: number) => {
+    setPageSize(nextPageSize);
+    setPage(1);
+    onPageStateChange?.({ page: 1, pageSize: nextPageSize });
+  }, [onPageStateChange]);
+
   const handleClearFilters = () => {
     if (activeTab === "filtered") {
       setFilteredSearch("");
@@ -717,6 +728,11 @@ function ContentReviewContent({ initialTab = "filtered" }: ContentReviewContentP
       await executeWithPendingId(clusterId, setRegeneratingClusterId, async () => {
         await postAction(`/api/admin/clusters/${clusterId}/regenerate-summary`, "已创建后台任务，正在处理中。", {
           requiredField: "taskRun",
+          onSuccess: (payload) => {
+            if (payload.taskRun?.id) {
+              onTaskCreated?.(payload.taskRun.id, { page: currentPage, pageSize });
+            }
+          },
         });
       });
     });
@@ -1005,33 +1021,35 @@ function ContentReviewContent({ initialTab = "filtered" }: ContentReviewContentP
           {hasFilters ? "暂无匹配内容" : activeTab === "filtered" ? "当前没有待处理的过滤内容" : "当前没有可管理的聚合结果"}
         </EmptyState>
       ) : activeTab === "filtered" ? (
-        <div className="w-full overflow-x-auto">
-          <table className="w-full table-auto text-sm">
+        <div className="w-full overflow-hidden">
+          <table className="w-full table-fixed text-sm">
             <thead className="bg-[var(--bg-muted)] text-[var(--muted)]">
               <tr>
-                <th className="w-[35%] text-left px-4 py-3">标题</th>
-                <th className="w-[12%] whitespace-nowrap text-left px-4 py-3">来源</th>
-                <th className="w-[12%] whitespace-nowrap text-left px-4 py-3">原因</th>
-                <th className="w-[10%] whitespace-nowrap text-left px-4 py-3">质量</th>
-                <th className="w-[15%] whitespace-nowrap text-left px-4 py-3">时间</th>
-                <th className="w-[16%] whitespace-nowrap text-right px-4 py-3">操作</th>
+                <th className="w-[34%] text-left px-4 py-3">标题</th>
+                <th className="w-[22%] whitespace-nowrap text-left px-4 py-3">来源</th>
+                <th className="w-[14%] whitespace-nowrap text-left px-4 py-3">原因</th>
+                <th className="w-[8%] whitespace-nowrap text-left px-4 py-3">质量</th>
+                <th className="w-[12%] whitespace-nowrap text-left px-4 py-3">时间</th>
+                <th className="w-[10%] whitespace-nowrap text-right px-4 py-3">操作</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[color:var(--line)]">
               {(paginatedItems as ReviewItemDTO[]).map((item) => (
                 <tr key={item.id} className="hover:bg-[var(--bg-muted)] transition-colors">
-                  <td className="px-4 py-3">
+                  <td className="px-4 py-3 max-w-0">
                     <button
                       type="button"
                       onClick={() => handleOpenFilteredDetail(item)}
                       className="w-full text-left group"
                     >
-                      <div className="font-medium text-[var(--foreground)] group-hover:text-[var(--accent)] transition-colors truncate max-w-[280px]">
+                      <div className="font-medium text-[var(--foreground)] group-hover:text-[var(--accent)] transition-colors truncate">
                         {item.title}
                       </div>
                     </button>
                   </td>
-                  <td className="px-4 py-3 text-[var(--text-2)]">{item.sourceName}</td>
+                  <td className="px-4 py-3 max-w-0 text-[var(--text-2)]">
+                    <div className="truncate" title={item.sourceName}>{item.sourceName}</div>
+                  </td>
                   <td className="px-4 py-3">
                     <StatusTag tone={reviewReasonTone[item.moderationReason ?? "other"]}>
                       {getReviewReasonLabel(item.moderationReason)}
@@ -1152,11 +1170,8 @@ function ContentReviewContent({ initialTab = "filtered" }: ContentReviewContentP
           page={currentPage}
           totalPages={totalPages}
           pageSize={pageSize}
-          onPageChange={setPage}
-          onPageSizeChange={(nextPageSize) => {
-            setPageSize(nextPageSize);
-            setPage(1);
-          }}
+          onPageChange={updatePage}
+          onPageSizeChange={updatePageSize}
         />
       )}
 
@@ -1232,11 +1247,31 @@ function ContentReviewContent({ initialTab = "filtered" }: ContentReviewContentP
 interface ContentReviewPanelProps {
   embedMode?: boolean;
   activeTab?: ReviewTab;
+  initialPage?: number | null;
+  initialPageSize?: number | null;
+  onPageStateChange?: (state: { page: number; pageSize: number }) => void;
+  onTaskCreated?: (taskId: string, state: { page: number; pageSize: number }) => void;
 }
 
-export function ContentReviewPanel({ embedMode, activeTab = "filtered" }: ContentReviewPanelProps) {
+export function ContentReviewPanel({
+  embedMode,
+  activeTab = "filtered",
+  initialPage = null,
+  initialPageSize = null,
+  onPageStateChange,
+  onTaskCreated,
+}: ContentReviewPanelProps) {
   if (embedMode) {
-    return <ContentReviewContent key={activeTab} initialTab={activeTab} />;
+    return (
+      <ContentReviewContent
+        key={activeTab}
+        initialTab={activeTab}
+        initialPage={initialPage}
+        initialPageSize={initialPageSize}
+        onPageStateChange={onPageStateChange}
+        onTaskCreated={onTaskCreated}
+      />
+    );
   }
 
   return (

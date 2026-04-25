@@ -134,10 +134,6 @@ function getClientForConfig(
   return client;
 }
 
-function truncate(text: string, maxLength: number): string {
-  return text.length <= maxLength ? text : `${text.slice(0, maxLength).trim()}...`;
-}
-
 function renderPromptTemplate(template: string, values: Record<string, string>): string {
   return template.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, key: string) => values[key] ?? "");
 }
@@ -163,7 +159,7 @@ function getFallbackEnrichment(
 }
 
 function getFallbackSummary(inputText: string): string {
-  return truncate(inputText.trim(), 180);
+  return inputText.trim();
 }
 
 function stripCodeFence(value: string): string {
@@ -487,7 +483,7 @@ export function createAiProvider(
         renderPromptTemplate(itemSummaryConfig.promptTemplate, {
           title: metadata.title,
           sourceName: metadata.sourceName ?? "未知来源",
-          inputText: truncate(inputText, 4000),
+          inputText,
         }),
       );
 
@@ -557,7 +553,7 @@ export function createAiProvider(
         clusterSummaryConfig,
         renderPromptTemplate(clusterSummaryConfig.promptTemplate, {
           title: metadata.title,
-          inputText: truncate(inputText, 4000),
+          inputText,
         }),
       );
 
@@ -577,7 +573,7 @@ export function createAiProvider(
         clusterMatchConfig,
         renderPromptTemplate(clusterMatchConfig.promptTemplate, {
           title: metadata.title,
-          inputText: truncate(inputText, 2000),
+          inputText,
           candidatesJson: JSON.stringify(metadata.candidates),
         }),
         {

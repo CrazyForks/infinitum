@@ -336,6 +336,14 @@ function TaskDetailModal({
                 {statusLabels[task.status]}
               </StatusTag>
             </div>
+            {task.entityTitle ? (
+              <div className="col-span-2 min-w-0">
+                <span className="text-[var(--text-3)]">
+                  {task.kind.startsWith("cluster_") ? "聚合标题:" : "条目标题:"}
+                </span>{" "}
+                <span className="break-words text-[var(--text-2)]">{task.entityTitle}</span>
+              </div>
+            ) : null}
           </div>
         </div>
 
@@ -415,6 +423,9 @@ interface TaskMonitorPanelProps {
   runningTasks: TaskRunSnapshot[];
   recentTasks: TaskRunSnapshot[];
   initialFocusTaskId?: string | null;
+  initialPage?: number | null;
+  initialPageSize?: number | null;
+  onDetailRouteChange?: (taskId: string | null, state: { page: number; pageSize: number }) => void;
 }
 
 function isTaskMonitorSnapshot(value: unknown): value is BackgroundTaskMonitorSnapshot {
@@ -429,6 +440,9 @@ export function TaskMonitorPanel({
   runningTasks,
   recentTasks,
   initialFocusTaskId = null,
+  initialPage = null,
+  initialPageSize = null,
+  onDetailRouteChange,
 }: TaskMonitorPanelProps) {
   const { showToast } = useToast();
   const [taskLists, setTaskLists] = useState(() => ({
@@ -438,8 +452,8 @@ export function TaskMonitorPanel({
   const [statusFilter, setStatusFilter] = useState<TaskStatusFilter>("");
   const [kindFilter, setKindFilter] = useState<TaskKindFilter>("");
   const [timeRangeFilter, setTimeRangeFilter] = useState<TimeRangeFilter>("");
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [page, setPage] = useState(initialPage ?? 1);
+  const [pageSize, setPageSize] = useState(initialPageSize ?? 10);
   const [isRefreshingSnapshot, setIsRefreshingSnapshot] = useState(false);
   const [selectedTask, setSelectedTask] = useState<TaskRunSnapshot | null>(
     null
@@ -454,7 +468,7 @@ export function TaskMonitorPanel({
   const [confirmTask, setConfirmTask] = useState<TaskRunSnapshot | null>(null);
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const [confirmAction, setConfirmAction] = useState<"retrigger" | "cancel">("retrigger");
-  const hasAppliedInitialFocusRef = useRef(false);
+  const pendingRouteTaskIdRef = useRef<string | null>(null);
 
   const allTasks = useMemo(() => {
     // Merge and deduplicate by task id (runningTasks takes precedence)
@@ -487,7 +501,18 @@ export function TaskMonitorPanel({
   }, [allTasks, selectedTask]);
 
   useEffect(() => {
-    if (!initialFocusTaskId || hasAppliedInitialFocusRef.current) {
+    if (initialFocusTaskId === pendingRouteTaskIdRef.current) {
+      pendingRouteTaskIdRef.current = null;
+    }
+
+    if (!initialFocusTaskId) {
+      if (pendingRouteTaskIdRef.current) {
+        return;
+      }
+      if (isDetailOpen) {
+        setIsDetailOpen(false);
+        setSelectedTask(null);
+      }
       return;
     }
 
@@ -496,10 +521,11 @@ export function TaskMonitorPanel({
       return;
     }
 
-    setSelectedTask(initialTask);
-    setIsDetailOpen(true);
-    hasAppliedInitialFocusRef.current = true;
-  }, [allTasks, initialFocusTaskId]);
+    if (selectedTask?.id !== initialTask.id || !isDetailOpen) {
+      setSelectedTask(initialTask);
+      setIsDetailOpen(true);
+    }
+  }, [allTasks, initialFocusTaskId, isDetailOpen, selectedTask?.id]);
 
   const filteredTasks = useMemo(
     () => filterTasks(allTasks, statusFilter, kindFilter, timeRangeFilter),
@@ -578,13 +604,17 @@ export function TaskMonitorPanel({
   };
 
   const handleOpenDetail = (task: TaskRunSnapshot) => {
+    pendingRouteTaskIdRef.current = task.id;
     setSelectedTask(task);
     setIsDetailOpen(true);
+    onDetailRouteChange?.(task.id, { page, pageSize });
   };
 
   const handleCloseDetail = () => {
+    pendingRouteTaskIdRef.current = null;
     setIsDetailOpen(false);
     setSelectedTask(null);
+    onDetailRouteChange?.(null, { page, pageSize });
   };
 
   const handleRetrigger = async (taskId: string) => {

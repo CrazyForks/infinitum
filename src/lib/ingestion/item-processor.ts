@@ -101,16 +101,6 @@ function normalizeUrl(url: string): string {
   }
 }
 
-function truncateText(value: string, maxLength = 180): string {
-  const trimmed = stripHtmlTags(value);
-
-  if (!trimmed) {
-    return "";
-  }
-
-  return trimmed.length <= maxLength ? trimmed : `${trimmed.slice(0, maxLength).trim()}...`;
-}
-
 function appendIssue(issues: string[], error: unknown, fallbackMessage: string) {
   issues.push(error instanceof Error ? error.message : fallbackMessage);
 }
@@ -128,7 +118,7 @@ function buildFallbackSummary(rssExcerpt: string | null, fallbackBody: string | 
   }
 
   if (sanitizedBody) {
-    return truncateText(sanitizedBody);
+    return sanitizedBody;
   }
 
   return null;

@@ -1,8 +1,9 @@
 import { act, fireEvent, render as testingRender, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { pushMock, refreshMock, replaceMock } = vi.hoisted(() => ({
+const { openMock, pushMock, refreshMock, replaceMock } = vi.hoisted(() => ({
+  openMock: vi.fn(),
   pushMock: vi.fn(),
   refreshMock: vi.fn(),
   replaceMock: vi.fn(),
@@ -153,6 +154,7 @@ async function selectFilterOption(user: ReturnType<typeof userEvent.setup>, name
 }
 
 afterEach(() => {
+  openMock.mockReset();
   pushMock.mockReset();
   refreshMock.mockReset();
   replaceMock.mockReset();
@@ -162,6 +164,10 @@ afterEach(() => {
 });
 
 describe("FeedPanel", () => {
+  beforeEach(() => {
+    vi.stubGlobal("open", openMock);
+  });
+
   it("formats published timestamps with an explicit timezone to avoid hydration mismatch", () => {
     function MockDateTimeFormat(locale?: string | string[], options?: Intl.DateTimeFormatOptions) {
       return {
@@ -1110,7 +1116,11 @@ describe("FeedPanel", () => {
     });
 
     await waitFor(() => {
-      expect(pushMock).toHaveBeenCalledWith("/admin?tab=monitoring&section=tasks&task=task-cluster-child-1");
+      expect(openMock).toHaveBeenCalledWith(
+        "/admin?tab=monitoring&section=tasks&task=task-cluster-child-1",
+        "_blank",
+        "noopener,noreferrer",
+      );
     });
   });
 
@@ -1429,7 +1439,11 @@ describe("FeedPanel", () => {
     });
 
     await waitFor(() => {
-      expect(pushMock).toHaveBeenCalledWith("/admin?tab=monitoring&section=tasks&task=task-2");
+      expect(openMock).toHaveBeenCalledWith(
+        "/admin?tab=monitoring&section=tasks&task=task-2",
+        "_blank",
+        "noopener,noreferrer",
+      );
     });
     expect(screen.getByText("摘要内容")).toBeInTheDocument();
   });
@@ -1748,7 +1762,11 @@ describe("FeedPanel", () => {
     });
 
     await waitFor(() => {
-      expect(pushMock).toHaveBeenCalledWith("/admin?tab=monitoring&section=tasks&task=task-both");
+      expect(openMock).toHaveBeenCalledWith(
+        "/admin?tab=monitoring&section=tasks&task=task-both",
+        "_blank",
+        "noopener,noreferrer",
+      );
     });
   });
 

@@ -159,7 +159,7 @@ describe("ai provider", () => {
     });
 
     const userPrompt = create.mock.calls[0]?.[0]?.messages?.[1]?.content as string;
-    expect(userPrompt).toContain(longBody.slice(0, 4000));
+    expect(userPrompt).toContain(longBody);
   });
 
   it("falls back to the original title and truncated plain text when no api key is configured", async () => {
@@ -189,6 +189,59 @@ describe("ai provider", () => {
       eventObject: null,
       eventDate: null,
     });
+  });
+
+  it("keeps item summary fallback text untruncated when no api key is configured", async () => {
+    const provider = createAiProvider({
+      apiKey: "",
+      baseURL: "",
+      model: "test-model",
+    });
+    const body = "Fallback summary body. ".repeat(30).trim();
+
+    const summary = await provider.summarizeItem(body, {
+      title: "Original title",
+      sourceName: "Example Feed",
+    });
+
+    expect(summary).toBe(body);
+    expect(summary).not.toMatch(/\.\.\.$/);
+  });
+
+  it("keeps empty item summary response fallback text untruncated", async () => {
+    const create = vi.fn().mockResolvedValue({
+      choices: [
+        {
+          message: {
+            content: "",
+          },
+        },
+      ],
+    });
+    const provider = createAiProvider(
+      {
+        apiKey: "sk-test",
+        baseURL: "https://example.com/v1",
+        model: "test-model",
+      },
+      undefined,
+      {
+        chat: {
+          completions: {
+            create,
+          },
+        },
+      },
+    );
+    const body = "Empty model response fallback body. ".repeat(30).trim();
+
+    const summary = await provider.summarizeItem(body, {
+      title: "Original title",
+      sourceName: "Example Feed",
+    });
+
+    expect(summary).toBe(body);
+    expect(summary).not.toMatch(/\.\.\.$/);
   });
 
   it("retries once when the provider returns invalid json before succeeding", async () => {

@@ -118,6 +118,10 @@ function RefreshIcon() {
   );
 }
 
+function openTaskDetailInNewWindow(taskRunId: string) {
+  window.open(`/admin?tab=monitoring&section=tasks&task=${encodeURIComponent(taskRunId)}`, "_blank", "noopener,noreferrer");
+}
+
 function ChevronIcon({ expanded, className }: { expanded: boolean; className?: string }) {
   return (
     <svg
@@ -144,6 +148,73 @@ function isInteractiveClickTarget(target: EventTarget | null) {
 function getVisibleAuthorLabel(author: string | null | undefined) {
   const normalized = author?.trim();
   return normalized && normalized !== "未知作者" ? normalized : null;
+}
+
+type FullSummaryDialogState = {
+  title: string;
+  summary: string;
+} | null;
+
+type SummaryTextProps = {
+  title: string;
+  summary: string;
+  className: string;
+  clickableClassName: string;
+  onOpen: (state: Exclude<FullSummaryDialogState, null>) => void;
+};
+
+function SummaryText({ title, summary, className, clickableClassName, onOpen }: SummaryTextProps) {
+  const summaryRef = useRef<HTMLElement | null>(null);
+  const [isOverflowing, setIsOverflowing] = useState(false);
+
+  const measureOverflow = useCallback(() => {
+    const element = summaryRef.current;
+
+    if (!element) {
+      return;
+    }
+
+    setIsOverflowing(element.scrollHeight > element.clientHeight + 1);
+  }, []);
+
+  useEffect(() => {
+    measureOverflow();
+
+    const element = summaryRef.current;
+    if (!element) {
+      return;
+    }
+
+    const resizeObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measureOverflow);
+    resizeObserver?.observe(element);
+    window.addEventListener("resize", measureOverflow);
+
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", measureOverflow);
+    };
+  }, [measureOverflow, summary]);
+
+  if (!isOverflowing) {
+    return (
+      <p ref={summaryRef as React.RefObject<HTMLParagraphElement>} className={className}>
+        {summary}
+      </p>
+    );
+  }
+
+  return (
+    <button
+      ref={summaryRef as React.RefObject<HTMLButtonElement>}
+      type="button"
+      className={clickableClassName}
+      onClick={() => onOpen({ title, summary })}
+      title="点击查看完整摘要"
+      aria-label={`查看完整摘要：${title}`}
+    >
+      {summary}
+    </button>
+  );
 }
 
 export function FeedPanel({
@@ -196,6 +267,7 @@ export function FeedPanel({
   const [manualFilterDialog, setManualFilterDialog] = useState<ManualFilterDialogState>(null);
   const [deleteItemDialog, setDeleteItemDialog] = useState<DeleteItemDialogState>(null);
   const [batchActionDialog, setBatchActionDialog] = useState<BatchActionDialogState>(null);
+  const [fullSummaryDialog, setFullSummaryDialog] = useState<FullSummaryDialogState>(null);
   const [batchRegenerateMode, setBatchRegenerateMode] = useState<RegenerateMode>("summary");
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [clusterOptions, setClusterOptions] = useState<ClusterDTO[]>([]);
@@ -620,7 +692,7 @@ export function FeedPanel({
         return;
       }
 
-      router.push(`/admin?tab=monitoring&section=tasks&task=${encodeURIComponent(primaryTaskRunId)}`);
+      openTaskDetailInNewWindow(primaryTaskRunId);
 
       if (shouldAnnounceClusterRefresh) {
         setRefreshFeedback(null);
@@ -705,7 +777,7 @@ export function FeedPanel({
         }
 
         setRefreshFeedback({ tone: "success", message: "聚合摘要重生成任务已进入队列。" });
-        router.push(`/admin?tab=monitoring&section=tasks&task=${encodeURIComponent(result.data.taskRun.id)}`);
+        openTaskDetailInNewWindow(result.data.taskRun.id);
       } catch {
         setRefreshFeedback({ tone: "error", message: "创建聚合摘要重生成任务失败，请稍后重试。" });
       }
@@ -1091,6 +1163,8 @@ export function FeedPanel({
     "w-full rounded-lg border border-[color:var(--line)] bg-[var(--surface)] px-4 py-4 shadow-[var(--shadow-sm)] transition hover:border-[color:var(--line-strong)] hover:shadow-md sm:px-6 sm:py-5";
   const cardMetaRowClassName = "flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-[var(--muted)]";
   const cardSummaryClassName = "line-clamp-5 text-sm leading-6 text-[var(--muted)]";
+  const clickableCardSummaryClassName =
+    "line-clamp-5 w-full cursor-pointer bg-transparent p-0 text-left text-sm leading-6 text-[var(--muted)] transition hover:text-[var(--foreground)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]/35 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)]";
   const cardTitleClassName = "text-xl font-semibold leading-7 text-[var(--foreground)]";
   const metaTextClassName = "inline-flex items-center";
   const iconButtonClassName =
@@ -1101,6 +1175,16 @@ export function FeedPanel({
   const latestRunSummary = formatRunSummary(status);
   const isRefreshDisabled =
     isPending || status?.status === "running" || Boolean(queuedRefreshAt);
+  const renderSummary = (title: string, summaryText: string) => (
+    <SummaryText
+      title={title}
+      summary={summaryText}
+      className={cardSummaryClassName}
+      clickableClassName={clickableCardSummaryClassName}
+      onOpen={setFullSummaryDialog}
+    />
+  );
+
   return (
     <PageShell
       header={{
@@ -1449,7 +1533,7 @@ export function FeedPanel({
                         ) : null}
                         <span className={metaTextClassName}>{formatMetaLabel("发表", formatDate(entry.latestPublishedAt))}</span>
                       </div>
-                      <p className={cardSummaryClassName}>{entry.summary}</p>
+                      {renderSummary(entry.title, entry.summary)}
                       <div className="mt-4">
                         <div className="flex items-center gap-3">
                           <button
@@ -1558,7 +1642,7 @@ export function FeedPanel({
                                 ) : null}
                                 <span className={metaTextClassName}>{formatMetaLabel("发表", formatDate(clusterItem.publishedAt))}</span>
                               </div>
-                              <p className={cardSummaryClassName}>{clusterItem.summary}</p>
+                              {renderSummary(clusterItem.title, clusterItem.summary)}
                             </div>
                           </div>
                         </div>
@@ -1677,7 +1761,7 @@ export function FeedPanel({
                       ) : null}
                       <span className={metaTextClassName}>{formatMetaLabel("发表", formatDate(entry.publishedAt))}</span>
                     </div>
-                    <p className={cardSummaryClassName}>{entry.summary}</p>
+                    {renderSummary(entry.title, entry.summary)}
                   </div>
                 </div>
               </article>
@@ -1703,6 +1787,28 @@ export function FeedPanel({
             onJump={handleJumpToPage}
           />
         ) : null}
+
+        <ModalShell
+          isOpen={Boolean(fullSummaryDialog)}
+          onClose={() => setFullSummaryDialog(null)}
+          title="完整摘要"
+          widthClassName="max-w-2xl"
+          bodyClassName="space-y-3 p-4"
+          footer={
+            <div className="flex justify-end">
+              <Button type="button" variant="secondary" onClick={() => setFullSummaryDialog(null)}>
+                关闭
+              </Button>
+            </div>
+          }
+        >
+          <div className="space-y-3">
+            <h4 className="text-base font-semibold leading-6 text-[var(--foreground)]">{fullSummaryDialog?.title ?? ""}</h4>
+            <p className="max-h-[60vh] overflow-y-auto whitespace-pre-wrap text-sm leading-7 text-[var(--muted)]">
+              {fullSummaryDialog?.summary ?? ""}
+            </p>
+          </div>
+        </ModalShell>
 
         <ModalShell
           isOpen={Boolean(assignClusterDialog)}

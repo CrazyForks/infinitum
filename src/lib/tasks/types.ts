@@ -90,6 +90,7 @@ export type TaskRunSnapshot = {
   status: BackgroundTaskRunStatus;
   label: string;
   entityId: string | null;
+  entityTitle?: string | null;
   progressCurrent: number;
   progressTotal: number;
   progressLabel: string | null;
