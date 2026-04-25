@@ -28,6 +28,7 @@ export async function upsertDefaultIngestionSchedule() {
       fullTextFetchThreshold: DEFAULT_FULL_TEXT_FETCH_THRESHOLD,
       perSourceItemLimit: DEFAULT_PER_SOURCE_ITEM_LIMIT,
       dailyReportCandidateLimit: DEFAULT_DAILY_REPORT_CANDIDATE_LIMIT,
+      dailyReportAutoPublish: false,
       timezone: DEFAULT_SCHEDULE_TIMEZONE,
       nextRunAt: computeNextRunAt({
         cronExpression: DEFAULT_SCHEDULE_CRON_EXPRESSION,
@@ -52,6 +53,7 @@ export async function upsertDefaultDailyReportSchedule() {
       fullTextFetchThreshold: DEFAULT_FULL_TEXT_FETCH_THRESHOLD,
       perSourceItemLimit: DEFAULT_PER_SOURCE_ITEM_LIMIT,
       dailyReportCandidateLimit: DEFAULT_DAILY_REPORT_CANDIDATE_LIMIT,
+      dailyReportAutoPublish: false,
       timezone: DEFAULT_SCHEDULE_TIMEZONE,
       nextRunAt: computeNextRunAt({
         cronExpression: "30 8 * * *",

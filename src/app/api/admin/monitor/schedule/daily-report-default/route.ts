@@ -8,6 +8,7 @@ const scheduleUpdateSchema = z.object({
   enabled: z.boolean(),
   cronExpression: z.string().trim().min(1),
   dailyReportCandidateLimit: z.number().int().min(2).max(500),
+  dailyReportAutoPublish: z.boolean(),
 });
 
 export async function PATCH(request: Request) {

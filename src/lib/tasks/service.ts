@@ -421,6 +421,7 @@ export function toTaskScheduleSnapshot(schedule: {
   fullTextFetchThreshold: number;
   perSourceItemLimit: number | null;
   dailyReportCandidateLimit: number | null;
+  dailyReportAutoPublish: boolean | null;
   processingStartAt: Date | null;
   timezone: string;
   lastHeartbeatAt: Date | null;
@@ -437,6 +438,7 @@ export function toTaskScheduleSnapshot(schedule: {
     fullTextFetchThreshold: schedule.fullTextFetchThreshold,
     perSourceItemLimit: schedule.perSourceItemLimit ?? 20,
     dailyReportCandidateLimit: schedule.dailyReportCandidateLimit ?? DEFAULT_DAILY_REPORT_CANDIDATE_LIMIT,
+    dailyReportAutoPublish: schedule.dailyReportAutoPublish ?? false,
     processingStartAt: schedule.processingStartAt?.toISOString() ?? null,
     timezone: schedule.timezone,
     lastHeartbeatAt: schedule.lastHeartbeatAt?.toISOString() ?? null,
@@ -488,6 +490,7 @@ export async function updateDefaultDailyReportSchedule(input: {
   enabled: boolean;
   cronExpression: string;
   dailyReportCandidateLimit: number;
+  dailyReportAutoPublish: boolean;
 }) {
   const cronExpression = input.cronExpression.trim();
 
@@ -526,6 +529,7 @@ export async function updateDefaultDailyReportSchedule(input: {
       enabled: input.enabled,
       cronExpression,
       dailyReportCandidateLimit: input.dailyReportCandidateLimit,
+      dailyReportAutoPublish: input.dailyReportAutoPublish,
       nextRunAt,
     },
   });

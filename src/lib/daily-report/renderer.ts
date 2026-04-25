@@ -4,7 +4,7 @@ import {
   type DailyReportContent,
 } from "@/lib/daily-report/types";
 
-export const DAILY_REPORT_AI_NOTICE = "完全使用AI生成，可能存在错误，需谨慎甄别。";
+export const DAILY_REPORT_AI_NOTICE = "声明：完全使用AI生成，可能存在错误，需谨慎甄别。";
 
 function escapeMarkdown(value: string) {
   return value.replace(/\r/g, "").trim();

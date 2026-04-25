@@ -158,6 +158,8 @@ export async function generateDailyReport(input: {
   const renderedMarkdown = renderDailyReportMarkdown(content, candidates, title);
   const sourceRows = getSectionSourceIds(content);
   const candidatesById = new Map(candidates.map((candidate) => [candidate.id, candidate]));
+  const shouldAutoPublish = schedule.dailyReportAutoPublish;
+  const publishedAt = shouldAutoPublish ? new Date() : null;
 
   const report = await prisma.$transaction(async (tx) => {
     const saved = await tx.dailyReport.upsert({
@@ -168,7 +170,7 @@ export async function generateDailyReport(input: {
         },
       },
       update: {
-        status: "draft",
+        status: shouldAutoPublish ? "published" : "draft",
         title,
         openingSummary: content.openingSummary,
         closingThought: content.closingThought,
@@ -178,13 +180,13 @@ export async function generateDailyReport(input: {
         modelName: runtimeConfig.modelApi.model,
         taskRunId: input.taskRunId ?? null,
         errorMessage: null,
-        publishedAt: null,
+        publishedAt,
         generatedAt: new Date(),
       },
       create: {
         date,
         timezone: DAILY_REPORT_TIMEZONE,
-        status: "draft",
+        status: shouldAutoPublish ? "published" : "draft",
         title,
         openingSummary: content.openingSummary,
         closingThought: content.closingThought,
@@ -193,6 +195,7 @@ export async function generateDailyReport(input: {
         inputHash,
         modelName: runtimeConfig.modelApi.model,
         taskRunId: input.taskRunId ?? null,
+        publishedAt,
       },
     });
 
@@ -258,7 +261,9 @@ export async function executeDailyReportTask(taskRun: BackgroundTaskRun) {
       status: "succeeded",
       progressCurrent: 1,
       progressTotal: 1,
-      progressLabel: result.skipped ? result.reason : `已生成 ${date} AI 日报草稿`,
+      progressLabel: result.skipped
+        ? result.reason
+        : `已生成 ${date} AI 日报${result.report?.status === "published" ? "并发布" : "草稿"}`,
       aiCallCountActual: result.skipped ? 0 : 1,
       aiCallCountEstimated: 1,
       aiCallBreakdown: [

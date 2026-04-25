@@ -171,7 +171,7 @@ describe("daily report utilities", () => {
     const markdown = renderDailyReportMarkdown(content, candidates, "2026-04-24 AI 日报");
 
     expect(markdown).toContain("# 2026-04-24 AI 日报");
-    expect(markdown).toContain("> 完全使用AI生成，可能存在错误，需谨慎甄别。");
+    expect(markdown).toContain("> 声明：完全使用AI生成，可能存在错误，需谨慎甄别。");
     expect(markdown).toContain("## 摘要");
     expect(markdown).toContain("## 今日大事");
     expect(markdown).not.toContain("风险级别");

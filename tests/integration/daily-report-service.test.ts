@@ -102,6 +102,23 @@ async function createPublishedReport() {
   });
 }
 
+async function createDailyReportSchedule(input: { autoPublish: boolean }) {
+  return prisma.taskSchedule.create({
+    data: {
+      key: "daily_report_default",
+      enabled: false,
+      cronExpression: "30 8 * * *",
+      sourceConcurrency: 2,
+      fullTextFetchThreshold: 80,
+      perSourceItemLimit: 20,
+      dailyReportCandidateLimit: 120,
+      dailyReportAutoPublish: input.autoPublish,
+      timezone: "Asia/Shanghai",
+      nextRunAt: new Date("2026-04-25T00:30:00.000Z"),
+    },
+  });
+}
+
 describe("daily report service", () => {
   beforeEach(async () => {
     generateDailyReportMock.mockReset();
@@ -133,6 +150,20 @@ describe("daily report service", () => {
     expect(report.publishedAt).toBeNull();
     expect(report.errorMessage).toBeNull();
     expect(report.renderedMarkdown).toContain(`# ${REPORT_DATE} AI 日报`);
+  });
+
+  it("publishes the report immediately when daily report auto publish is enabled", async () => {
+    await createDailyReportSchedule({ autoPublish: true });
+    await createReportCandidates();
+    generateDailyReportMock.mockResolvedValue(buildDailyReportOutput());
+
+    await generateDailyReport({ date: REPORT_DATE, force: true });
+
+    const report = await prisma.dailyReport.findFirstOrThrow({
+      where: { date: REPORT_DATE, timezone: "Asia/Shanghai" },
+    });
+    expect(report.status).toBe("published");
+    expect(report.publishedAt).toBeInstanceOf(Date);
   });
 
   it("preserves an existing report status and content when regeneration fails", async () => {

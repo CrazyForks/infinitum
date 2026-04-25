@@ -84,6 +84,7 @@ function buildInitialSettings(): AdminSettingsSnapshot {
       fullTextFetchThreshold: 80,
       perSourceItemLimit: 20,
       dailyReportCandidateLimit: 120,
+      dailyReportAutoPublish: false,
       timezone: "Asia/Shanghai",
       lastHeartbeatAt: "2026-04-20T10:00:00.000Z",
       lastRunStartedAt: "2026-04-20T10:00:00.000Z",
@@ -100,6 +101,7 @@ function buildInitialSettings(): AdminSettingsSnapshot {
       fullTextFetchThreshold: 80,
       perSourceItemLimit: 20,
       dailyReportCandidateLimit: 120,
+      dailyReportAutoPublish: false,
       timezone: "Asia/Shanghai",
       lastHeartbeatAt: "2026-04-20T10:00:00.000Z",
       lastRunStartedAt: null,
@@ -933,6 +935,7 @@ describe("AdminSettingsPanel", () => {
             enabled: true,
             cronExpression: "0 9 * * *",
             dailyReportCandidateLimit: 80,
+            dailyReportAutoPublish: true,
           },
         }),
       ),
@@ -954,7 +957,8 @@ describe("AdminSettingsPanel", () => {
     await user.type(within(taskPanel).getByLabelText("日报 Cron 表达式"), "0 9 * * *");
     await user.clear(within(taskPanel).getByLabelText("候选内容上限"));
     await user.type(within(taskPanel).getByLabelText("候选内容上限"), "80");
-    await user.click(within(taskPanel).getByRole("button", { name: "保存配置吧" }));
+    await user.click(within(taskPanel).getByLabelText("生成后自动发布 AI 日报"));
+    await user.click(within(taskPanel).getByRole("button", { name: "保存配置" }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith("/api/admin/monitor/schedule/daily-report-default", {
@@ -966,6 +970,7 @@ describe("AdminSettingsPanel", () => {
           enabled: true,
           cronExpression: "0 9 * * *",
           dailyReportCandidateLimit: 80,
+          dailyReportAutoPublish: true,
         }),
       });
     });

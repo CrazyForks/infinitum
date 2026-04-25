@@ -55,6 +55,12 @@ function flushList(lines: string[], html: string[]) {
   lines.length = 0;
 }
 
+function flushBlockquote(lines: string[], html: string[]) {
+  if (lines.length === 0) return;
+  html.push("<blockquote>", ...lines.map((line) => `<p>${renderInline(line)}</p>`), "</blockquote>");
+  lines.length = 0;
+}
+
 function isLabelLine(line: string) {
   return /^(\*\*)?(重点|来源)：(\*\*)?/.test(line);
 }
@@ -63,6 +69,7 @@ export function renderSafeMarkdown(markdown: string, options: RenderSafeMarkdown
   const html: string[] = [];
   const paragraphLines: string[] = [];
   const listLines: string[] = [];
+  const blockquoteLines: string[] = [];
   let headingIndex = 0;
 
   for (const rawLine of markdown.replace(/\r\n/g, "\n").split("\n")) {
@@ -71,12 +78,22 @@ export function renderSafeMarkdown(markdown: string, options: RenderSafeMarkdown
     if (!line) {
       flushParagraph(paragraphLines, html);
       flushList(listLines, html);
+      flushBlockquote(blockquoteLines, html);
+      continue;
+    }
+
+    const blockquote = /^>\s?(.+)$/.exec(line);
+    if (blockquote) {
+      flushParagraph(paragraphLines, html);
+      flushList(listLines, html);
+      blockquoteLines.push(blockquote[1]);
       continue;
     }
 
     if (isLabelLine(line)) {
       flushParagraph(paragraphLines, html);
       flushList(listLines, html);
+      flushBlockquote(blockquoteLines, html);
       html.push(`<p>${renderInline(line)}</p>`);
       continue;
     }
@@ -85,6 +102,7 @@ export function renderSafeMarkdown(markdown: string, options: RenderSafeMarkdown
     if (heading) {
       flushParagraph(paragraphLines, html);
       flushList(listLines, html);
+      flushBlockquote(blockquoteLines, html);
       const level = Math.min(6, heading[1].length);
       const id = options.headingIdPrefix ? ` id="${options.headingIdPrefix}-${headingIndex}"` : "";
       headingIndex += 1;
@@ -95,16 +113,19 @@ export function renderSafeMarkdown(markdown: string, options: RenderSafeMarkdown
     const listItem = /^[-*]\s+(.+)$/.exec(line);
     if (listItem) {
       flushParagraph(paragraphLines, html);
+      flushBlockquote(blockquoteLines, html);
       listLines.push(listItem[1]);
       continue;
     }
 
     flushList(listLines, html);
+    flushBlockquote(blockquoteLines, html);
     paragraphLines.push(line);
   }
 
   flushParagraph(paragraphLines, html);
   flushList(listLines, html);
+  flushBlockquote(blockquoteLines, html);
 
   return html.join("\n");
 }

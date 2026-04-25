@@ -271,6 +271,9 @@ export function AdminSettingsPanel({
   const [dailyReportCandidateLimit, setDailyReportCandidateLimit] = useState(
     String(initialSettings.dailyReportSchedule.dailyReportCandidateLimit),
   );
+  const [dailyReportAutoPublish, setDailyReportAutoPublish] = useState(
+    initialSettings.dailyReportSchedule.dailyReportAutoPublish,
+  );
   const [dailyReportScheduleSnapshot, setDailyReportScheduleSnapshot] = useState(
     initialSettings.dailyReportSchedule,
   );
@@ -771,12 +774,14 @@ export function AdminSettingsPanel({
           enabled: dailyReportScheduleEnabled,
           cronExpression: dailyReportScheduleCronExpression,
           dailyReportCandidateLimit: parsedDailyReportCandidateLimit,
+          dailyReportAutoPublish,
         });
 
         setDailyReportScheduleSnapshot(schedule);
         setDailyReportScheduleEnabled(schedule.enabled);
         setDailyReportScheduleCronExpression(schedule.cronExpression);
         setDailyReportCandidateLimit(String(schedule.dailyReportCandidateLimit));
+        setDailyReportAutoPublish(schedule.dailyReportAutoPublish);
         showToast("日报任务配置已保存。", "success");
       } catch (error) {
         showToast(error instanceof Error ? error.message : "日报任务配置保存失败。", "error");
@@ -793,7 +798,8 @@ export function AdminSettingsPanel({
   const dailyReportScheduleIsDirty =
     dailyReportScheduleEnabled !== dailyReportScheduleSnapshot.enabled ||
     dailyReportScheduleCronExpression.trim() !== dailyReportScheduleSnapshot.cronExpression ||
-    dailyReportCandidateLimit.trim() !== String(dailyReportScheduleSnapshot.dailyReportCandidateLimit);
+    dailyReportCandidateLimit.trim() !== String(dailyReportScheduleSnapshot.dailyReportCandidateLimit) ||
+    dailyReportAutoPublish !== dailyReportScheduleSnapshot.dailyReportAutoPublish;
 
   const content = (
     <section aria-label="后台设置工作台" className="space-y-4">
@@ -1497,10 +1503,10 @@ export function AdminSettingsPanel({
 
             <div className="space-y-6">
               {/* Row 1: 任务开关 + Cron 表达式 + 处理开始时间点 */}
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                 <div className="space-y-1.5">
                   <div className="block text-sm text-[var(--muted)]">任务开关</div>
-                  <label className="flex min-h-10 items-center gap-2 rounded-sm border border-[color:var(--line)] bg-[var(--surface)] px-3 text-sm text-[var(--text-2)]">
+                  <label className="flex min-h-10 w-full items-center gap-2 rounded-sm border border-[color:var(--line)] bg-[var(--surface)] px-3 text-sm text-[var(--text-2)]">
                     <input
                       aria-label="启用默认抓取任务"
                       checked={taskScheduleEnabled}
@@ -1621,9 +1627,9 @@ export function AdminSettingsPanel({
             <div className="border-t border-[color:var(--line)] pt-6">
               <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
                 <div className="space-y-1">
-                  <h3 className="text-base font-semibold text-[var(--text-1)]">
+                  <h2 className="text-lg font-semibold text-[var(--text-1)]">
                     日报任务
-                  </h3>
+                  </h2>
                   <p className="text-sm text-[var(--text-3)]">
                     独立控制日报草稿生成时间，不影响 采集任务。
                   </p>
@@ -1637,10 +1643,10 @@ export function AdminSettingsPanel({
                   保存配置
                 </Button>
               </div>
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+              <div className="grid w-full grid-cols-1 gap-4 md:grid-cols-2">
                 <div className="space-y-1.5">
                   <div className="block text-sm text-[var(--muted)]">任务开关</div>
-                  <label className="flex min-h-10 items-center gap-2 rounded-sm border border-[color:var(--line)] bg-[var(--surface)] px-3 text-sm text-[var(--text-2)]">
+                  <label className="flex min-h-10 w-full items-center gap-2 rounded-sm border border-[color:var(--line)] bg-[var(--surface)] px-3 text-sm text-[var(--text-2)]">
                     <input
                       aria-label="启用 AI 日报任务"
                       checked={dailyReportScheduleEnabled}
@@ -1652,6 +1658,22 @@ export function AdminSettingsPanel({
                   </label>
                 </div>
 
+                <div className="space-y-1.5">
+                  <div className="block text-sm text-[var(--muted)]">发布方式</div>
+                  <label className="flex min-h-10 w-full items-center gap-2 rounded-sm border border-[color:var(--line)] bg-[var(--surface)] px-3 text-sm text-[var(--text-2)]">
+                    <input
+                      aria-label="生成后自动发布 AI 日报"
+                      checked={dailyReportAutoPublish}
+                      className={checkboxInputClassName}
+                      type="checkbox"
+                      onChange={(event) => setDailyReportAutoPublish(event.target.checked)}
+                    />
+                    <span>生成后自动发布</span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
                 <div className="space-y-1.5">
                   <label
                     htmlFor="daily-report-schedule-cron"

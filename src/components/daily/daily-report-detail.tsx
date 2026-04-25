@@ -83,7 +83,7 @@ function buildDetailMarkdown(report: DailyReportDetailDTO) {
     .replace(/^(\s*)(?:\*\*)?(?:摘要|开场摘要|今日观察|收尾观察|受影响|影响对象|建议|建议动作|行动建议)\s*[：:]\s*(?:\*\*)?\s*/gm, "$1")
     .replace(/^重点：\s*/gm, "**重点：** ")
     .replace(/^来源：\s*$/gm, "**来源：**");
-  const withNotice = /^>\s*完全使用AI生成，可能存在错误，需谨慎甄别。/m.test(normalizedHeadings)
+  const withNotice = /^>\s*声明：完全使用AI生成，可能存在错误，需谨慎甄别。/m.test(normalizedHeadings)
     ? normalizedHeadings
     : `> ${DAILY_REPORT_AI_NOTICE}\n\n${normalizedHeadings}`;
   if (/^##\s+摘要/m.test(normalizedHeadings)) {
