@@ -3,9 +3,22 @@ import { resolveFeedRequest } from "@/lib/feed/request";
 import { getCachedFeedItems } from "@/lib/feed/service";
 import { resolvePublicOrigin, resolvePublicRequestUrl } from "@/lib/http/public-origin";
 
+const TIME_FILTER_KEYS = ["range", "start", "end", "publishedStart", "publishedEnd"] as const;
+
+function withDefaultRssRange(searchParams: URLSearchParams) {
+  const rssSearchParams = new URLSearchParams(searchParams);
+  const hasTimeFilter = TIME_FILTER_KEYS.some((key) => rssSearchParams.has(key));
+
+  if (!hasTimeFilter) {
+    rssSearchParams.set("range", "all");
+  }
+
+  return rssSearchParams;
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const { filters } = resolveFeedRequest(searchParams);
+  const { filters } = resolveFeedRequest(withDefaultRssRange(searchParams));
 
   const baseUrl = resolvePublicOrigin(request);
   const selfLink = resolvePublicRequestUrl(request);

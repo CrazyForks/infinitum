@@ -110,10 +110,7 @@ export function GlobalHeader({ activeNav, isAdmin, showShadow = true, rssHref }:
       window.open("/api/daily/rss", "_blank", "noopener,noreferrer");
       return;
     }
-    // 构建 RSS URL，使用当前页面的查询参数
-    const currentUrl = new URL(window.location.href);
-    const rssUrl = `/api/feed/rss${currentUrl.search}`;
-    window.open(rssUrl, "_blank", "noopener,noreferrer");
+    window.open("/api/feed/rss", "_blank", "noopener,noreferrer");
   };
 
   return (

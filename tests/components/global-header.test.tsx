@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const { pushMock, refreshMock } = vi.hoisted(() => ({
@@ -73,5 +74,31 @@ describe("GlobalHeader", () => {
     render(<GlobalHeader activeNav={null} isAdmin={false} />);
 
     expect(screen.getByRole("link", { name: "主页" })).not.toHaveAttribute("aria-current", "page");
+  });
+
+  it("opens the default homepage rss feed without page filters", async () => {
+    const user = userEvent.setup();
+    const openMock = vi.fn();
+    vi.stubGlobal("open", openMock);
+    window.history.pushState({}, "", "/?range=today&title=Agent");
+
+    render(<GlobalHeader activeNav="home" isAdmin={false} />);
+
+    await user.click(screen.getByRole("button", { name: "RSS 订阅" }));
+
+    expect(openMock).toHaveBeenCalledWith("/api/feed/rss", "_blank", "noopener,noreferrer");
+  });
+
+  it("opens the default daily rss feed without page filters", async () => {
+    const user = userEvent.setup();
+    const openMock = vi.fn();
+    vi.stubGlobal("open", openMock);
+    window.history.pushState({}, "", "/daily?week=2026-04-20");
+
+    render(<GlobalHeader activeNav="daily" isAdmin={false} />);
+
+    await user.click(screen.getByRole("button", { name: "RSS 订阅" }));
+
+    expect(openMock).toHaveBeenCalledWith("/api/daily/rss", "_blank", "noopener,noreferrer");
   });
 });

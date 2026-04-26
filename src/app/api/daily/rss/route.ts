@@ -1,6 +1,6 @@
 import { buildRssFeed, escapeXml } from "@/lib/feed/rss";
 import { listDailyReports } from "@/lib/daily-report/repository";
-import { resolvePublicOrigin } from "@/lib/http/public-origin";
+import { resolvePublicOrigin, resolvePublicRequestUrl } from "@/lib/http/public-origin";
 
 export const revalidate = 300;
 
@@ -15,6 +15,7 @@ function stripInlineMarkdown(value: string) {
 
 export async function GET(request: Request) {
   const baseUrl = resolvePublicOrigin(request);
+  const selfLink = resolvePublicRequestUrl(request);
   const reports = await listDailyReports({
     isAdmin: false,
     status: "published",
@@ -34,7 +35,7 @@ export async function GET(request: Request) {
     title: "Infinitum AI 日报",
     description: "Infinitum AI 日报 RSS 订阅",
     link: `${baseUrl}/daily`,
-    selfLink: `${baseUrl}/api/daily/rss`,
+    selfLink,
     lastBuildDate: new Date().toISOString(),
     items,
   });

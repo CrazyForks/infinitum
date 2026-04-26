@@ -360,6 +360,24 @@ describe("/api/feed", () => {
     }
   });
 
+  it("defaults rss to the latest items without a time filter", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-10T12:00:00.000Z"));
+
+    try {
+      const { GET } = await import("@/app/api/feed/rss/route");
+      const response = await GET(new Request("http://localhost/api/feed/rss"));
+
+      const xml = await response.text();
+
+      expect(xml).toContain("<title>OpenAI Agent 发布</title>");
+      expect(xml).toContain("<title>按创建时间归档</title>");
+      expect(xml).toContain("<title>发布时间新但创建时间旧</title>");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("sorts the mixed feed by score when requested", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-10T12:00:00.000Z"));
