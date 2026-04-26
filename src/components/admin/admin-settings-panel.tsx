@@ -1524,7 +1524,7 @@ export function AdminSettingsPanel({
 
             <div className="space-y-6">
               {/* Row 1: 任务开关 + Cron 表达式 + 处理开始时间点 */}
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
                 <div className="space-y-1.5">
                   <div className="block text-sm text-[var(--muted)]">任务开关</div>
                   <label className="flex min-h-10 w-full items-center gap-2 rounded-sm border border-[color:var(--line)] bg-[var(--surface)] px-3 text-sm text-[var(--text-2)]">
