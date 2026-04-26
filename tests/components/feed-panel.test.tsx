@@ -169,6 +169,10 @@ describe("FeedPanel", () => {
   beforeEach(() => {
     vi.stubGlobal("open", openMock);
     vi.stubGlobal("scrollTo", scrollToMock);
+    Object.defineProperty(window, "scrollTo", {
+      configurable: true,
+      value: scrollToMock,
+    });
   });
 
   it("formats published timestamps with an explicit timezone to avoid hydration mismatch", () => {
@@ -1846,15 +1850,20 @@ describe("FeedPanel", () => {
 
     expect(screen.queryByRole("button", { name: "回到顶部" })).not.toBeInTheDocument();
 
+    const hiddenBackToTop = screen.getByTitle("回到顶部");
+    expect(hiddenBackToTop).toHaveAttribute("aria-hidden", "true");
+    expect(hiddenBackToTop).toHaveAttribute("tabindex", "-1");
+
     Object.defineProperty(window, "scrollY", {
       configurable: true,
-      value: 301,
+      value: 421,
     });
     fireEvent.scroll(window);
 
     const backToTop = await screen.findByRole("button", { name: "回到顶部" });
     expect(backToTop.className).toContain("fixed bottom-8 right-8");
-    expect(backToTop).toHaveTextContent("↑");
+    expect(backToTop).toHaveAttribute("aria-hidden", "false");
+    expect(backToTop).toHaveAttribute("tabindex", "0");
 
     await user.click(backToTop);
 
@@ -2334,8 +2343,12 @@ describe("FeedPanel", () => {
     expect(screen.getByText("第 1 / 3 页")).toBeInTheDocument();
     expect(screen.getByText("条，共 250 条")).toBeInTheDocument();
 
-    await user.clear(screen.getByRole("spinbutton", { name: "跳转页码" }));
-    await user.type(screen.getByRole("spinbutton", { name: "跳转页码" }), "3");
+    await waitFor(() => {
+      expect(screen.getByRole("spinbutton", { name: "跳转页码" })).toBeEnabled();
+    });
+    const jumpInput = screen.getByRole("spinbutton", { name: "跳转页码" });
+    await user.clear(jumpInput);
+    await user.type(jumpInput, "3");
     await user.click(screen.getByRole("button", { name: "跳转" }));
 
     await waitFor(() => {

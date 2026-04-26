@@ -87,6 +87,10 @@ function columnExists(tableName, columnName) {
 }
 
 function applyIncrementalMigrations() {
+  runSqlite([dbPath], {
+    input: `CREATE INDEX IF NOT EXISTS "items_status_moderationStatus_updatedAt_idx" ON "items"("status", "moderationStatus", "updatedAt");\n`,
+  });
+
   if (!columnExists("source_groups", "sortOrder")) {
     runSqlite([dbPath], {
       input: `ALTER TABLE "source_groups" ADD COLUMN "sortOrder" INTEGER NOT NULL DEFAULT 0;\nCREATE INDEX IF NOT EXISTS "source_groups_sortOrder_name_idx" ON "source_groups"("sortOrder", "name");\n`,

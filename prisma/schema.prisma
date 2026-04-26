@@ -162,6 +162,7 @@ model Item {
   @@index([status, publishedAt])
   @@index([moderationStatus, publishedAt])
   @@index([status, moderationStatus, createdAt])
+  @@index([status, moderationStatus, updatedAt])
   @@index([clusterId, publishedAt])
   @@index([qualityScore, publishedAt])
   @@map("items")

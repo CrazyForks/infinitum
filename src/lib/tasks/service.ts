@@ -19,6 +19,7 @@ import {
 } from "@/lib/tasks/scheduler";
 import {
   DEFAULT_INGESTION_SCHEDULE_KEY,
+  DEFAULT_DAILY_REPORT_SCHEDULE_KEY,
   type TaskAiCallBreakdownKey,
   type TaskAiCallBreakdownSnapshot,
   type BackgroundTaskMonitorSnapshot,
@@ -30,6 +31,7 @@ import {
   type TaskTimelineNodeStatus,
   type TaskRunSnapshot,
   type TaskScheduleSnapshot,
+  type BackgroundTaskRunKind,
 } from "@/lib/tasks/types";
 import { prisma } from "@/lib/db";
 
@@ -300,6 +302,12 @@ function serializeTaskTimeline(taskTimeline: TaskTimelineNodeSnapshot[] | null) 
   return JSON.stringify(taskTimeline);
 }
 
+function getHeartbeatScheduleKeyForTaskKind(kind: BackgroundTaskRunKind) {
+  return kind === "daily_report_generate"
+    ? DEFAULT_DAILY_REPORT_SCHEDULE_KEY
+    : DEFAULT_INGESTION_SCHEDULE_KEY;
+}
+
 export async function ensureDefaultIngestionSchedule() {
   return upsertDefaultIngestionSchedule();
 }
@@ -348,8 +356,8 @@ export async function updateTaskRun(
 ) {
   const now = new Date();
   const { stageTimings, aiCallBreakdown, taskTimeline, ...taskRunData } = data;
-  const [taskRun] = await prisma.$transaction([
-    prisma.backgroundTaskRun.update({
+  const taskRun = await prisma.$transaction(async (tx) => {
+    const updatedTaskRun = await tx.backgroundTaskRun.update({
       where: { id },
       data: {
         ...taskRunData,
@@ -360,14 +368,17 @@ export async function updateTaskRun(
         taskTimelineJson:
           taskTimeline === undefined ? undefined : serializeTaskTimeline(taskTimeline),
       },
-    }),
-    prisma.taskSchedule.updateMany({
-      where: { key: DEFAULT_INGESTION_SCHEDULE_KEY },
+    });
+
+    await tx.taskSchedule.updateMany({
+      where: { key: getHeartbeatScheduleKeyForTaskKind(updatedTaskRun.kind) },
       data: {
         lastHeartbeatAt: now,
       },
-    }),
-  ]);
+    });
+
+    return updatedTaskRun;
+  });
 
   return taskRun;
 }

@@ -896,12 +896,12 @@ describe("AdminSettingsPanel", () => {
     expect(within(taskPanel).queryByText("调度状态")).not.toBeInTheDocument();
     expect(within(taskPanel).queryByDisplayValue("调度器在线")).not.toBeInTheDocument();
     expect(within(taskPanel).queryByDisplayValue("已成功")).not.toBeInTheDocument();
-    expect(within(taskPanel).getByLabelText("Cron 表达式")).toHaveValue("0 * * * *");
+    expect(within(taskPanel).getByLabelText("采集 Cron 表达式")).toHaveValue("0 * * * *");
     expect(within(taskPanel).getByLabelText("源抓取并发")).toHaveValue(2);
     expect(within(taskPanel).getByLabelText("正文补抓阈值")).toHaveValue(80);
 
-    await user.clear(within(taskPanel).getByLabelText("Cron 表达式"));
-    await user.type(within(taskPanel).getByLabelText("Cron 表达式"), "*/15 * * * *");
+    await user.clear(within(taskPanel).getByLabelText("采集 Cron 表达式"));
+    await user.type(within(taskPanel).getByLabelText("采集 Cron 表达式"), "*/15 * * * *");
     await user.clear(within(taskPanel).getByLabelText("源抓取并发"));
     await user.type(within(taskPanel).getByLabelText("源抓取并发"), "4");
     await user.clear(within(taskPanel).getByLabelText("正文补抓阈值"));
@@ -957,8 +957,8 @@ describe("AdminSettingsPanel", () => {
     expect(within(taskPanel).getByLabelText("候选内容上限")).toHaveValue(120);
 
     await user.click(within(taskPanel).getByLabelText("启用 AI 日报任务"));
-    await user.clear(within(taskPanel).getByLabelText("Cron 表达式"));
-    await user.type(within(taskPanel).getByLabelText("Cron 表达式"), "0 9 * * *");
+    await user.clear(within(taskPanel).getByLabelText("日报 Cron 表达式"));
+    await user.type(within(taskPanel).getByLabelText("日报 Cron 表达式"), "0 9 * * *");
     await user.clear(within(taskPanel).getByLabelText("T-"));
     await user.type(within(taskPanel).getByLabelText("T-"), "1");
     await user.clear(within(taskPanel).getByLabelText("候选内容上限"));

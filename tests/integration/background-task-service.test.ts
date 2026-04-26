@@ -527,4 +527,65 @@ describe("background task persistence", () => {
     expect(updatedSchedule.lastHeartbeatAt).not.toBeNull();
     expect(updatedSchedule.lastHeartbeatAt?.getTime()).toBeGreaterThan(schedule.lastHeartbeatAt?.getTime() ?? 0);
   });
+
+  it("refreshes the daily report scheduler heartbeat for daily report task progress", async () => {
+    const ingestionSchedule = await prisma.taskSchedule.create({
+      data: {
+        key: "ingestion_default",
+        enabled: true,
+        cronExpression: "0 * * * *",
+        sourceConcurrency: 2,
+        fullTextFetchThreshold: 80,
+        timezone: "Asia/Shanghai",
+        nextRunAt: new Date("2026-04-12T01:00:00.000Z"),
+        lastHeartbeatAt: new Date("2026-04-12T00:00:00.000Z"),
+      },
+    });
+    const dailyReportSchedule = await prisma.taskSchedule.create({
+      data: {
+        key: "daily_report_default",
+        enabled: true,
+        cronExpression: "30 8 * * *",
+        sourceConcurrency: 2,
+        fullTextFetchThreshold: 80,
+        perSourceItemLimit: 20,
+        dailyReportCandidateLimit: 120,
+        dailyReportOffsetDays: 0,
+        dailyReportAutoPublish: false,
+        timezone: "Asia/Shanghai",
+        nextRunAt: new Date("2026-04-12T00:30:00.000Z"),
+        lastHeartbeatAt: new Date("2026-04-12T00:00:00.000Z"),
+      },
+    });
+    const taskRun = await prisma.backgroundTaskRun.create({
+      data: {
+        kind: "daily_report_generate",
+        triggerType: "scheduled",
+        status: "running",
+        label: "AI 日报生成",
+        entityId: "2026-04-12",
+        startedAt: new Date("2026-04-12T00:31:00.000Z"),
+      },
+    });
+
+    await updateTaskRun(taskRun.id, {
+      status: "running",
+      progressCurrent: 0,
+      progressTotal: 1,
+      progressLabel: "正在生成 2026-04-12 AI 日报",
+    });
+
+    const [updatedIngestionSchedule, updatedDailyReportSchedule] = await Promise.all([
+      prisma.taskSchedule.findUniqueOrThrow({ where: { id: ingestionSchedule.id } }),
+      prisma.taskSchedule.findUniqueOrThrow({ where: { id: dailyReportSchedule.id } }),
+    ]);
+
+    expect(updatedDailyReportSchedule.lastHeartbeatAt).not.toBeNull();
+    expect(updatedDailyReportSchedule.lastHeartbeatAt?.getTime()).toBeGreaterThan(
+      dailyReportSchedule.lastHeartbeatAt?.getTime() ?? 0,
+    );
+    expect(updatedIngestionSchedule.lastHeartbeatAt?.getTime()).toBe(
+      ingestionSchedule.lastHeartbeatAt?.getTime(),
+    );
+  });
 });

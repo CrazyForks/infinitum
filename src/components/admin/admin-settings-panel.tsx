@@ -1544,7 +1544,7 @@ export function AdminSettingsPanel({
                     htmlFor="task-schedule-cron"
                     className="block text-sm text-[var(--muted)]"
                   >
-                    Cron 表达式
+                    采集 Cron 表达式
                   </label>
                   <TextInput
                     id="task-schedule-cron"
@@ -1700,7 +1700,7 @@ export function AdminSettingsPanel({
                     htmlFor="daily-report-schedule-cron"
                     className="block text-sm text-[var(--muted)]"
                   >
-                    Cron 表达式
+                    日报 Cron 表达式
                   </label>
                   <TextInput
                     id="daily-report-schedule-cron"

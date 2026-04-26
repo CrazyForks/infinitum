@@ -236,6 +236,28 @@ function getExistingItemForLookup(
   return existingByUrlHash.get(lookup.dedupeKeys.urlHash) ?? existingByDedupeSignature.get(lookup.dedupeKeys.signature) ?? null;
 }
 
+function dedupePreparedLookupsByDedupeKey<T extends { lookup: PreparedFeedItemLookup | null }>(entries: T[]) {
+  const seen = new Set<string>();
+  const deduped: T[] = [];
+
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index]!;
+    if (!entry.lookup) {
+      deduped.unshift(entry);
+      continue;
+    }
+
+    const dedupeKey = `${entry.lookup.dedupeKeys.urlHash}:${entry.lookup.dedupeKeys.signature}`;
+    if (seen.has(dedupeKey)) {
+      continue;
+    }
+
+    seen.add(dedupeKey);
+    deduped.unshift(entry);
+  }
+
+  return deduped;
+}
 
 async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
   const {
@@ -382,12 +404,12 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
     timelineCounters.sourceFetch.sourcesFetched = sources.length;
   }
 
-  const preparedLookups = preparedItems
+  const preparedLookups = dedupePreparedLookupsByDedupeKey(preparedItems
     .map((preparedItem) => ({
       preparedItem,
       lookup: buildPreparedFeedItemLookup(preparedItem, now),
     }))
-    .filter((entry) => !entry.lookup || !processingStartAt || entry.lookup.publishedAt >= processingStartAt);
+    .filter((entry) => !entry.lookup || !processingStartAt || entry.lookup.publishedAt >= processingStartAt));
   processableItemCount = preparedLookups.length;
   timelineCounters.sourceFetch.itemsFetched = processableItemCount;
   const existingItems = await findExistingItemsForDedupeKeys(

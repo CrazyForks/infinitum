@@ -18,6 +18,34 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const WEEK_MS = 7 * DAY_MS;
 const DAILY_REPORT_ARCHIVE_WEEK_COUNT = 53;
 
+async function getDailyReportCacheVersion(isAdmin: boolean) {
+  const latestReport = await prisma.dailyReport.findFirst({
+    where: isAdmin
+      ? { status: { not: "failed" } }
+      : { status: "published" },
+    select: {
+      id: true,
+      updatedAt: true,
+      generatedAt: true,
+      publishedAt: true,
+      status: true,
+    },
+    orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+  });
+
+  if (!latestReport) {
+    return "no-daily-reports";
+  }
+
+  return [
+    latestReport.id,
+    latestReport.status,
+    latestReport.updatedAt.toISOString(),
+    latestReport.generatedAt.toISOString(),
+    latestReport.publishedAt?.toISOString() ?? "unpublished",
+  ].join(":");
+}
+
 export async function listDailyReportCandidates(date: string, limit = 120) {
   const { start, end } = getDailyReportDateRange(date);
   const rows = await prisma.item.findMany({
@@ -119,8 +147,10 @@ export async function listDailyReports(input: {
   week?: string | null;
 }) {
   if (!input.isAdmin) {
+    const cacheVersion = await getDailyReportCacheVersion(false);
+
     return withDailyReportCache(
-      `daily:list:${input.status ?? "published"}:${input.week ?? "all"}`,
+      `daily:list:${cacheVersion}:${input.status ?? "published"}:${input.week ?? "all"}`,
       () => listDailyReportsUncached(input),
     );
   }
@@ -220,8 +250,10 @@ export async function listDailyReportArchiveWeeks(input: {
   status?: "draft" | "published" | "all";
 }) {
   if (!input.isAdmin) {
+    const cacheVersion = await getDailyReportCacheVersion(false);
+
     return withDailyReportCache(
-      `daily:weeks:${input.status ?? "published"}`,
+      `daily:weeks:${cacheVersion}:${input.status ?? "published"}`,
       () => listDailyReportArchiveWeeksUncached(input),
     );
   }
@@ -279,7 +311,9 @@ async function listDailyReportArchiveWeeksUncached(input: {
 
 export async function getDailyReportByDate(date: string, isAdmin: boolean): Promise<DailyReportDetailDTO | null> {
   if (!isAdmin) {
-    return withDailyReportCache(`daily:detail:${date}`, () => getDailyReportByDateUncached(date, false));
+    const cacheVersion = await getDailyReportCacheVersion(false);
+
+    return withDailyReportCache(`daily:detail:${cacheVersion}:${date}`, () => getDailyReportByDateUncached(date, false));
   }
 
   return getDailyReportByDateUncached(date, isAdmin);

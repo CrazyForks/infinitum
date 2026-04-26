@@ -22,6 +22,8 @@ export function BackToTopButton() {
     <button
       type="button"
       aria-label="回到顶部"
+      aria-hidden={!visible}
+      tabIndex={visible ? 0 : -1}
       title="回到顶部"
       onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
       className={cx(
