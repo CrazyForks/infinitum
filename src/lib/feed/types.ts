@@ -1,3 +1,5 @@
+import type { GroupBadge } from "@/lib/groups/badge";
+
 export type FeedRange = "today" | "3d" | "7d" | "1m" | "1y" | "all";
 export type FeedSort = "time_desc" | "score_desc";
 
@@ -35,6 +37,7 @@ export type FeedSingleEntryDTO = {
   sourceName: string;
   author?: string | null;
   summary: string;
+  group?: GroupBadge | null;
   score: number;
   sourceCount: number;
   itemCount: number;
@@ -52,6 +55,7 @@ export type FeedClusterPreviewItemDTO = {
   sourceName: string;
   author?: string | null;
   summary: string;
+  group?: GroupBadge | null;
   score: number;
   canRegenerateTranslation?: boolean;
 };
@@ -61,6 +65,7 @@ export type FeedClusterEntryDTO = {
   type: "cluster";
   title: string;
   summary: string;
+  group?: GroupBadge | null;
   publishedAt: string;
   createdAt: string;
   latestPublishedAt: string;
@@ -126,6 +131,7 @@ export type FeedGroupOption = {
   id: string;
   name: string;
   count: number;
+  color?: string;
 };
 
 export type FeedSourceOption = {

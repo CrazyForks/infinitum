@@ -54,6 +54,7 @@ import {
   MIN_PER_SOURCE_ITEM_LIMIT,
   MIN_DAILY_REPORT_CANDIDATE_LIMIT,
 } from "@/lib/tasks/scheduler";
+import { getStableGroupBadgeColor } from "@/lib/groups/badge";
 import { cx } from "@/lib/ui/cx";
 
 type AdminSettingsPanelProps = {
@@ -110,32 +111,6 @@ function toIsoDateTimeOrNull(value: string) {
 
   const date = new Date(normalized);
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
-}
-
-const groupBadgePalette = [
-  "#3b82f6",
-  "#14b8a6",
-  "#f59e0b",
-  "#ef4444",
-  "#8b5cf6",
-  "#06b6d4",
-  "#22c55e",
-  "#f97316",
-] as const;
-
-function getStableGroupBadgeColor(groupName: string) {
-  const normalized = groupName.trim().toLowerCase();
-
-  if (!normalized) {
-    return groupBadgePalette[0];
-  }
-
-  let hash = 0;
-  for (const char of normalized) {
-    hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
-  }
-
-  return groupBadgePalette[hash % groupBadgePalette.length];
 }
 
 function refreshPage() {

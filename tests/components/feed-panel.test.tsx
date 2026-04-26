@@ -53,6 +53,11 @@ const initialEntries: FeedEntryDTO[] = [
     type: "cluster",
     title: "OpenAI Agent 发布",
     summary: "聚合摘要内容",
+    group: {
+      id: "group-ai",
+      name: "AI",
+      color: "#3b82f6",
+    },
     publishedAt: "2026-04-10T09:00:00.000Z",
     createdAt: "2026-04-10T09:00:00.000Z",
     latestPublishedAt: "2026-04-10T09:00:00.000Z",
@@ -71,6 +76,11 @@ const initialEntries: FeedEntryDTO[] = [
         sourceName: "Example Feed",
         author: "Alex",
         summary: "预览摘要",
+        group: {
+          id: "group-ai",
+          name: "AI",
+          color: "#3b82f6",
+        },
         score: 88,
         canRegenerateTranslation: true,
       },
@@ -89,6 +99,11 @@ const initialEntries: FeedEntryDTO[] = [
     sourceName: "Example Feed",
     author: "Alex",
     summary: "摘要内容",
+    group: {
+      id: "group-research",
+      name: "研究",
+      color: "#14b8a6",
+    },
     score: 72,
     sourceCount: 1,
     itemCount: 1,
@@ -272,6 +287,8 @@ describe("FeedPanel", () => {
     expect(within(overviewRegion).getByText("聚合摘要内容")).toBeInTheDocument();
     expect(within(overviewRegion).getByText("摘要内容")).toBeInTheDocument();
     expect(within(overviewRegion).getByText("聚合")).toBeInTheDocument();
+    expect(within(overviewRegion).getByText("AI")).toBeInTheDocument();
+    expect(within(overviewRegion).getByText("研究")).toBeInTheDocument();
     expect(within(overviewRegion).queryByText("单条条目")).not.toBeInTheDocument();
     expect(within(overviewRegion).queryByText("聚合事件")).not.toBeInTheDocument();
     expect(within(overviewRegion).queryByText("预览标题")).not.toBeInTheDocument();

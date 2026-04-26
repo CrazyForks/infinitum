@@ -1,7 +1,17 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState, useTransition, useCallback, type MouseEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+  useCallback,
+  type CSSProperties,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
 
 import { STATUS_POLL_INTERVAL_MS, TITLE_SEARCH_DEBOUNCE_MS } from "@/config/constants";
 import {
@@ -75,6 +85,7 @@ import type {
   FetchRunSnapshot,
 } from "@/lib/feed/types";
 import { FEED_PAGE_SIZE_OPTIONS } from "@/lib/feed/types";
+import type { GroupBadge as FeedGroupBadge } from "@/lib/groups/badge";
 import { cx } from "@/lib/ui/cx";
 import { Button } from "@/components/ui/button";
 
@@ -154,6 +165,28 @@ function isInteractiveClickTarget(target: EventTarget | null) {
 function getVisibleAuthorLabel(author: string | null | undefined) {
   const normalized = author?.trim();
   return normalized && normalized !== "未知作者" ? normalized : null;
+}
+
+function GroupBadge({ group }: { group: FeedGroupBadge | null | undefined }) {
+  if (!group) {
+    return null;
+  }
+
+  const badgeStyle = {
+    backgroundColor: `${group.color}14`,
+    borderColor: `${group.color}66`,
+    color: group.color,
+  } satisfies CSSProperties;
+
+  return (
+    <span
+      className="inline-flex items-center rounded-sm border px-2 py-1 text-[11px] font-medium"
+      style={badgeStyle}
+      title={`分组：${group.name}`}
+    >
+      <span>{group.name}</span>
+    </span>
+  );
 }
 
 const READING_PROGRESS_STORAGE_KEY = "infinitum.feed.readingProgress.v1";
@@ -1813,6 +1846,7 @@ export function FeedPanel({
                       </div>
                       <div className={cardMetaRowClassName}>
                         <span className="rounded-sm bg-[var(--accent-soft)] px-2 py-1 text-[11px] text-[var(--accent-strong)]">聚合</span>
+                        <GroupBadge group={entry.group} />
                         <span className={neutralBadgeClassName}>{formatScore(entry.score)}</span>
                         <span className={metaTextClassName}>{formatMetaLabel("来源", formatClusterSourceLabel(entry))}</span>
                         {getVisibleAuthorLabel(formatClusterAuthorLabel(entry)) ? (
@@ -1922,6 +1956,7 @@ export function FeedPanel({
                                 ) : null}
                               </div>
                               <div className={cardMetaRowClassName}>
+                                <GroupBadge group={clusterItem.group} />
                                 <span className={neutralBadgeClassName}>{formatScore(clusterItem.score)}</span>
                                 <span className={metaTextClassName}>{formatMetaLabel("来源", clusterItem.sourceName)}</span>
                                 {getVisibleAuthorLabel(clusterItem.author) ? (
@@ -2047,6 +2082,7 @@ export function FeedPanel({
                         </div>
                       </div>
                     <div className={cardMetaRowClassName}>
+                      <GroupBadge group={entry.group} />
                       <span className={neutralBadgeClassName}>{formatScore(entry.score)}</span>
                       <span className={metaTextClassName}>{formatMetaLabel("来源", entry.sourceName)}</span>
                       {getVisibleAuthorLabel(entry.author) ? (

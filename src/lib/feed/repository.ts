@@ -4,10 +4,12 @@ import {
   type Item,
   Prisma,
   type Source,
+  type SourceGroup,
 } from "@prisma/client";
 
 import { prisma } from "@/lib/db";
 import { getDisplaySummary, getDisplayTitle, shouldTranslateTitle } from "@/lib/feed/presentation";
+import { toGroupBadge, type GroupBadge } from "@/lib/groups/badge";
 import type {
   ClusterDTO,
   FeedGroupOption,
@@ -24,7 +26,7 @@ import type {
 
 const DISPLAYABLE_MODERATION_STATUSES = ["allowed", "restored"] as const;
 
-type ItemWithSource = Item & { source: Source };
+type ItemWithSource = Item & { source: Source & { group?: SourceGroup | null } };
 type FeedEntryRow = {
   id: string;
   entryType: "single" | "cluster";
@@ -276,6 +278,7 @@ function mapItemToClusterPreview(item: ItemWithSource): FeedClusterPreviewItemDT
     sourceName: item.source.name,
     author: item.author,
     summary: getDisplaySummary(item.summaryText, item.rssExcerpt, item.fullText ?? item.rssContent),
+    group: toGroupBadge(item.source.group),
     score: item.qualityScore,
     canRegenerateTranslation: shouldTranslateTitle(item.originalTitle),
   };
@@ -294,6 +297,7 @@ function mapItemToFeedItem(item: ItemWithSource): FeedItemDTO {
     sourceName: item.source.name,
     author: item.author,
     summary: getDisplaySummary(item.summaryText, item.rssExcerpt, item.fullText ?? item.rssContent),
+    group: toGroupBadge(item.source.group),
     score: item.qualityScore,
     sourceCount: 1,
     itemCount: 1,
@@ -302,6 +306,35 @@ function mapItemToFeedItem(item: ItemWithSource): FeedItemDTO {
     userVote: null,
     canRegenerateTranslation: shouldTranslateTitle(item.originalTitle),
   };
+}
+
+function selectDominantGroupBadge(items: ItemWithSource[], selectedGroup: GroupBadge | null): GroupBadge | null {
+  if (selectedGroup) {
+    return selectedGroup;
+  }
+
+  const groupCounts = new Map<string, { group: GroupBadge; count: number; firstIndex: number }>();
+  items.forEach((item, index) => {
+    const group = toGroupBadge(item.source.group);
+    if (!group) {
+      return;
+    }
+
+    const current = groupCounts.get(group.id);
+    groupCounts.set(group.id, {
+      group,
+      count: (current?.count ?? 0) + 1,
+      firstIndex: current?.firstIndex ?? index,
+    });
+  });
+
+  return [...groupCounts.values()].sort((left, right) => {
+    if (right.count !== left.count) {
+      return right.count - left.count;
+    }
+
+    return left.firstIndex - right.firstIndex;
+  })[0]?.group ?? null;
 }
 
 export function mapItemToReviewItem(item: ItemWithSource): ReviewItemDTO {
@@ -619,6 +652,7 @@ export async function listFeedFilterOptions(): Promise<{
       id: group.id,
       name: group.name,
       count: group._count.sources,
+      color: toGroupBadge(group)?.color,
     })),
     sources: sources.map((source) => ({
       id: source.id,
@@ -670,6 +704,7 @@ async function listFeedGroupCounts(
       id: row.id,
       name: row.name,
       count: toNumber(row.count),
+      color: toGroupBadge(row)?.color,
     })),
     totalCount: toNumber(totalRows[0]?.total ?? BigInt(0)),
   };
@@ -734,7 +769,11 @@ export async function listFeedItems(
             },
           },
           include: {
-            source: true,
+            source: {
+              include: {
+                group: true,
+              },
+            },
           },
         })
       : Promise.resolve([]),
@@ -742,7 +781,11 @@ export async function listFeedItems(
       ? prisma.item.findMany({
           where: buildItemWhere(filters, clusterIds),
           include: {
-            source: true,
+            source: {
+              include: {
+                group: true,
+              },
+            },
           },
           orderBy: [{ publishedAt: "desc" }, { createdAt: "desc" }],
         })
@@ -751,6 +794,9 @@ export async function listFeedItems(
   ]);
   const singleItemMap = new Map(singleItems.map((item) => [item.id, mapItemToFeedItem(item)]));
   const clusterItemMap = new Map<string, ItemWithSource[]>();
+  const selectedGroup = filters.groupId
+    ? toGroupBadge(groupCounts.groups.find((group) => group.id === filters.groupId))
+    : null;
 
   for (const item of clusterItems) {
     if (!item.clusterId) {
@@ -799,7 +845,8 @@ export async function listFeedItems(
       }];
     }
 
-    const previewItems = (clusterItemMap.get(row.id) ?? []).slice(0, 3).map(mapItemToClusterPreview);
+    const clusterItemsForEntry = clusterItemMap.get(row.id) ?? [];
+    const previewItems = clusterItemsForEntry.slice(0, 3).map(mapItemToClusterPreview);
     const itemCount = toNumber(row.itemCount);
 
     return [
@@ -808,6 +855,7 @@ export async function listFeedItems(
         type: "cluster",
         title: row.title,
         summary: row.summary ?? "",
+        group: selectDominantGroupBadge(clusterItemsForEntry, selectedGroup),
         publishedAt: toIsoString(row.latestPublishedAt),
         createdAt: toIsoString(row.createdAt),
         latestPublishedAt: toIsoString(row.latestPublishedAt),
@@ -850,7 +898,13 @@ export async function listClusterItems(
 ) {
   const items = await prisma.item.findMany({
     where: buildItemWhere(filters, clusterId),
-    include: { source: true },
+    include: {
+      source: {
+        include: {
+          group: true,
+        },
+      },
+    },
     orderBy: [{ publishedAt: "desc" }, { createdAt: "desc" }],
   });
 
@@ -877,7 +931,13 @@ export async function listAdminClusters() {
             in: [...DISPLAYABLE_MODERATION_STATUSES],
           },
         },
-        include: { source: true },
+        include: {
+          source: {
+            include: {
+              group: true,
+            },
+          },
+        },
         orderBy: [{ publishedAt: "desc" }, { createdAt: "desc" }],
         take: 5,
       },
@@ -921,7 +981,13 @@ export async function getAdminCluster(clusterId: string) {
             in: [...DISPLAYABLE_MODERATION_STATUSES],
           },
         },
-        include: { source: true },
+        include: {
+          source: {
+            include: {
+              group: true,
+            },
+          },
+        },
         orderBy: [{ publishedAt: "desc" }, { createdAt: "desc" }],
       },
     },

@@ -360,6 +360,176 @@ describe("/api/feed", () => {
     }
   });
 
+  it("returns group badges for single entries and cluster majority groups", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-10T12:00:00.000Z"));
+
+    try {
+      const [aiGroup, researchGroup] = await Promise.all([
+        prisma.sourceGroup.create({ data: { id: "group-ai", name: "AI", sortOrder: 1 } }),
+        prisma.sourceGroup.create({ data: { id: "group-research", name: "研究", sortOrder: 2 } }),
+      ]);
+      const baseSource = await prisma.source.findFirstOrThrow({
+        where: { rssUrl: "https://api.example.com/feed.xml" },
+      });
+      await prisma.source.update({
+        where: { id: baseSource.id },
+        data: { groupId: aiGroup.id },
+      });
+      const researchSource = await prisma.source.create({
+        data: {
+          id: "source-research",
+          name: "Research Feed",
+          rssUrl: "https://research.example.com/feed.xml",
+          siteUrl: "https://research.example.com",
+          groupId: researchGroup.id,
+          enabled: true,
+          aiParsingEnabled: true,
+        },
+      });
+      await prisma.contentCluster.create({
+        data: {
+          id: "cluster-dominant-group",
+          kind: "topic",
+          title: "Dominant Group Cluster",
+          summary: "Dominant group summary",
+          score: 80,
+          itemCount: 5,
+          latestPublishedAt: new Date("2026-04-10T11:00:00.000Z"),
+          status: "active",
+          fingerprint: "dominant-group-cluster",
+        },
+      });
+      await prisma.item.createMany({
+        data: [
+          {
+            id: "dominant-ai-1",
+            sourceId: baseSource.id,
+            clusterId: "cluster-dominant-group",
+            originalUrl: "https://api.example.com/dominant-ai-1",
+            canonicalUrl: "https://api.example.com/dominant-ai-1",
+            urlHash: "hash-dominant-ai-1",
+            dedupeSignature: "dominant ai 1",
+            originalTitle: "Dominant AI 1",
+            publishedAt: new Date("2026-04-10T11:00:00.000Z"),
+            summaryText: "AI 1",
+            status: "processed",
+            moderationStatus: "allowed",
+            qualityScore: 81,
+            qualityRationale: "测试",
+            language: "en",
+            createdAt: new Date("2026-04-10T11:00:00.000Z"),
+          },
+          {
+            id: "dominant-ai-2",
+            sourceId: baseSource.id,
+            clusterId: "cluster-dominant-group",
+            originalUrl: "https://api.example.com/dominant-ai-2",
+            canonicalUrl: "https://api.example.com/dominant-ai-2",
+            urlHash: "hash-dominant-ai-2",
+            dedupeSignature: "dominant ai 2",
+            originalTitle: "Dominant AI 2",
+            publishedAt: new Date("2026-04-10T10:59:00.000Z"),
+            summaryText: "AI 2",
+            status: "processed",
+            moderationStatus: "allowed",
+            qualityScore: 80,
+            qualityRationale: "测试",
+            language: "en",
+            createdAt: new Date("2026-04-10T10:59:00.000Z"),
+          },
+          {
+            id: "dominant-research-1",
+            sourceId: researchSource.id,
+            clusterId: "cluster-dominant-group",
+            originalUrl: "https://research.example.com/dominant-1",
+            canonicalUrl: "https://research.example.com/dominant-1",
+            urlHash: "hash-dominant-research-1",
+            dedupeSignature: "dominant research 1",
+            originalTitle: "Dominant Research 1",
+            publishedAt: new Date("2026-04-10T10:58:00.000Z"),
+            summaryText: "Research 1",
+            status: "processed",
+            moderationStatus: "allowed",
+            qualityScore: 82,
+            qualityRationale: "测试",
+            language: "en",
+            createdAt: new Date("2026-04-10T10:58:00.000Z"),
+          },
+          {
+            id: "dominant-research-2",
+            sourceId: researchSource.id,
+            clusterId: "cluster-dominant-group",
+            originalUrl: "https://research.example.com/dominant-2",
+            canonicalUrl: "https://research.example.com/dominant-2",
+            urlHash: "hash-dominant-research-2",
+            dedupeSignature: "dominant research 2",
+            originalTitle: "Dominant Research 2",
+            publishedAt: new Date("2026-04-10T10:57:00.000Z"),
+            summaryText: "Research 2",
+            status: "processed",
+            moderationStatus: "allowed",
+            qualityScore: 83,
+            qualityRationale: "测试",
+            language: "en",
+            createdAt: new Date("2026-04-10T10:57:00.000Z"),
+          },
+          {
+            id: "dominant-research-3",
+            sourceId: researchSource.id,
+            clusterId: "cluster-dominant-group",
+            originalUrl: "https://research.example.com/dominant-3",
+            canonicalUrl: "https://research.example.com/dominant-3",
+            urlHash: "hash-dominant-research-3",
+            dedupeSignature: "dominant research 3",
+            originalTitle: "Dominant Research 3",
+            publishedAt: new Date("2026-04-10T10:56:00.000Z"),
+            summaryText: "Research 3",
+            status: "processed",
+            moderationStatus: "allowed",
+            qualityScore: 84,
+            qualityRationale: "测试",
+            language: "en",
+            createdAt: new Date("2026-04-10T10:56:00.000Z"),
+          },
+        ],
+      });
+
+      const { GET } = await import("@/app/api/feed/route");
+      const [defaultResponse, aiResponse] = await Promise.all([
+        GET(new Request("http://localhost/api/feed?range=all")),
+        GET(new Request(`http://localhost/api/feed?range=all&groupId=${aiGroup.id}`)),
+      ]);
+      const defaultJson = await defaultResponse.json();
+      const aiJson = await aiResponse.json();
+      const defaultCluster = defaultJson.items.find((item: { id: string }) => item.id === "cluster-dominant-group");
+      const filteredCluster = aiJson.items.find((item: { id: string }) => item.id === "cluster-dominant-group");
+
+      expect(defaultCluster).toMatchObject({
+        type: "cluster",
+        group: {
+          id: researchGroup.id,
+          name: "研究",
+        },
+      });
+      expect(filteredCluster).toMatchObject({
+        type: "cluster",
+        group: {
+          id: aiGroup.id,
+          name: "AI",
+        },
+      });
+      expect(defaultJson.items.find((item: { id: string }) => item.id === "item-timezone-created")).toMatchObject({
+        group: {
+          id: aiGroup.id,
+          name: "AI",
+        },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("defaults rss to the latest items without a time filter", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-10T12:00:00.000Z"));
