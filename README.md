@@ -236,6 +236,9 @@ docker compose logs -f app worker
 
 可在任务监控页查看 `AI 日报生成` 任务的状态、错误信息和 AI 调用统计。
 
+## 友链
+[linux.do](https://linux.do/)
+
 ## 许可证
 
 CC BY 4.0 License
