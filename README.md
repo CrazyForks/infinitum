@@ -25,7 +25,6 @@ Infinitum 是基于 RSS 的资讯聚合工作台，用来完成 RSS 抓取、正
 
 - **事件归组**：将描述同一事件的多条内容聚合为 cluster，支持基于事件签名的快速匹配和 AI 匹配，减少信息流重复噪声。
 
-
 ![](./imgs/image-6.png)
 
 - **公开信息流浏览**：支持按系统收录时间、原文发布时间、来源、分组、标题关键词筛选，支持按时间或推荐评分排序，并混合展示聚合内容与单条内容。
@@ -55,6 +54,12 @@ flowchart LR
     E --> H["AI 日报生成"]
     H --> I["草稿复核或自动发布"]
 ```
+
+### RSS 阅读
+
+Android 手机端 RSS 阅读可使用 [readrops-lumina](https://github.com/shawnxie94/readrops-lumina), [安装包](https://github.com/shawnxie94/readrops-lumina/releases)，支持快速采集内容到 [Lumina](https://github.com/shawnxie94/lumina)。
+
+![](./imgs/image-9.png)
 
 ## 快速开始
 
