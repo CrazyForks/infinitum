@@ -53,6 +53,7 @@ export type AdminSettingsSnapshot = {
     fullTextFetchThreshold: number;
     perSourceItemLimit: number;
     dailyReportCandidateLimit: number;
+    dailyReportOffsetDays: number;
     dailyReportAutoPublish: boolean;
     processingStartAt?: string | null;
     timezone: string;
@@ -71,6 +72,7 @@ export type AdminSettingsSnapshot = {
     fullTextFetchThreshold: number;
     perSourceItemLimit: number;
     dailyReportCandidateLimit: number;
+    dailyReportOffsetDays: number;
     dailyReportAutoPublish: boolean;
     processingStartAt?: string | null;
     timezone: string;

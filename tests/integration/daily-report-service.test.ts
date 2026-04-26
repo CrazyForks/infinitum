@@ -112,6 +112,7 @@ async function createDailyReportSchedule(input: { autoPublish: boolean }) {
       fullTextFetchThreshold: 80,
       perSourceItemLimit: 20,
       dailyReportCandidateLimit: 120,
+      dailyReportOffsetDays: 0,
       dailyReportAutoPublish: input.autoPublish,
       timezone: "Asia/Shanghai",
       nextRunAt: new Date("2026-04-25T00:30:00.000Z"),

@@ -8,6 +8,7 @@ const scheduleUpdateSchema = z.object({
   enabled: z.boolean(),
   cronExpression: z.string().trim().min(1),
   dailyReportCandidateLimit: z.number().int().min(2).max(500),
+  dailyReportOffsetDays: z.number().int().min(0).max(365),
   dailyReportAutoPublish: z.boolean(),
 });
 

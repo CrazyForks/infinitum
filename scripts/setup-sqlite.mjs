@@ -105,6 +105,12 @@ function applyIncrementalMigrations() {
     });
   }
 
+  if (!columnExists("task_schedules", "dailyReportOffsetDays")) {
+    runSqlite([dbPath], {
+      input: `ALTER TABLE "task_schedules" ADD COLUMN "dailyReportOffsetDays" INTEGER NOT NULL DEFAULT 0;\n`,
+    });
+  }
+
   if (!columnExists("task_schedules", "dailyReportAutoPublish")) {
     runSqlite([dbPath], {
       input: `ALTER TABLE "task_schedules" ADD COLUMN "dailyReportAutoPublish" BOOLEAN NOT NULL DEFAULT false;\n`,

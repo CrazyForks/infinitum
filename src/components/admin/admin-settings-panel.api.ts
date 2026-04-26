@@ -116,6 +116,7 @@ export async function saveDefaultDailyReportSchedule(input: {
   enabled: boolean;
   cronExpression: string;
   dailyReportCandidateLimit: number;
+  dailyReportOffsetDays: number;
   dailyReportAutoPublish: boolean;
 }) {
   const payload = await requestAdminSettingsJson<DailyReportSchedulePayload>(

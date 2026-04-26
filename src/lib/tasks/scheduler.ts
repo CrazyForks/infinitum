@@ -8,6 +8,7 @@ export const DEFAULT_SOURCE_CONCURRENCY = 2;
 export const DEFAULT_FULL_TEXT_FETCH_THRESHOLD = 80;
 export const DEFAULT_PER_SOURCE_ITEM_LIMIT = 20;
 export const DEFAULT_DAILY_REPORT_CANDIDATE_LIMIT = 120;
+export const DEFAULT_DAILY_REPORT_OFFSET_DAYS = 0;
 export const MIN_SOURCE_CONCURRENCY = 1;
 export const MAX_SOURCE_CONCURRENCY = 10;
 export const MIN_FULL_TEXT_FETCH_THRESHOLD = 0;
@@ -16,6 +17,8 @@ export const MIN_PER_SOURCE_ITEM_LIMIT = 1;
 export const MAX_PER_SOURCE_ITEM_LIMIT = 200;
 export const MIN_DAILY_REPORT_CANDIDATE_LIMIT = 2;
 export const MAX_DAILY_REPORT_CANDIDATE_LIMIT = 500;
+export const MIN_DAILY_REPORT_OFFSET_DAYS = 0;
+export const MAX_DAILY_REPORT_OFFSET_DAYS = 365;
 
 function normalizeProcessingStartAt(value: string | null): string | null {
   const normalized = value?.trim();

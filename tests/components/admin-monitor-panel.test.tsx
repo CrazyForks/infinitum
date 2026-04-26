@@ -41,6 +41,7 @@ describe("AdminMonitorPanel", () => {
       fullTextFetchThreshold: 80,
       perSourceItemLimit: 20,
       dailyReportCandidateLimit: 120,
+      dailyReportOffsetDays: 0,
       dailyReportAutoPublish: false,
       timezone: "Asia/Shanghai",
       lastHeartbeatAt: "2026-04-12T00:00:00.000Z",

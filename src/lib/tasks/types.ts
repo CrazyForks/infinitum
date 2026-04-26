@@ -120,6 +120,7 @@ export type TaskScheduleSnapshot = {
   fullTextFetchThreshold: number;
   perSourceItemLimit: number;
   dailyReportCandidateLimit: number;
+  dailyReportOffsetDays: number;
   dailyReportAutoPublish: boolean;
   processingStartAt?: string | null;
   timezone: string;

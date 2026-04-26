@@ -21,6 +21,7 @@ function buildMonitorSnapshot(): BackgroundTaskMonitorSnapshot {
       fullTextFetchThreshold: 80,
       perSourceItemLimit: 20,
       dailyReportCandidateLimit: 120,
+      dailyReportOffsetDays: 0,
       dailyReportAutoPublish: false,
       timezone: "Asia/Shanghai",
       lastHeartbeatAt: null,

@@ -77,8 +77,8 @@ async function enqueueScheduledIngestionIfDue(now: Date) {
   return true;
 }
 
-function getScheduledReportDate(now: Date) {
-  const shanghaiTime = new Date(now.getTime() + 8 * 60 * 60 * 1000);
+function getScheduledReportDate(now: Date, offsetDays: number) {
+  const shanghaiTime = new Date(now.getTime() + 8 * 60 * 60 * 1000 - offsetDays * 24 * 60 * 60 * 1000);
   return shanghaiTime.toISOString().slice(0, 10);
 }
 
@@ -102,7 +102,7 @@ async function enqueueScheduledDailyReportIfDue(now: Date) {
     return false;
   }
 
-  const date = getScheduledReportDate(now);
+  const date = getScheduledReportDate(now, schedule.dailyReportOffsetDays);
   await enqueueTaskRun({
     kind: "daily_report_generate",
     triggerType: "scheduled",

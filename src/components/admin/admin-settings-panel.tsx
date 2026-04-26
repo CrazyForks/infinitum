@@ -43,8 +43,10 @@ import { useToast } from "@/components/ui/toast";
 import type { AdminSettingsSnapshot, PromptConfigType } from "@/lib/settings/types";
 import {
   DEFAULT_SCHEDULE_TIMEZONE,
+  MAX_DAILY_REPORT_OFFSET_DAYS,
   MAX_FULL_TEXT_FETCH_THRESHOLD,
   MAX_SOURCE_CONCURRENCY,
+  MIN_DAILY_REPORT_OFFSET_DAYS,
   MIN_FULL_TEXT_FETCH_THRESHOLD,
   MIN_SOURCE_CONCURRENCY,
   MAX_PER_SOURCE_ITEM_LIMIT,
@@ -270,6 +272,9 @@ export function AdminSettingsPanel({
   );
   const [dailyReportCandidateLimit, setDailyReportCandidateLimit] = useState(
     String(initialSettings.dailyReportSchedule.dailyReportCandidateLimit),
+  );
+  const [dailyReportOffsetDays, setDailyReportOffsetDays] = useState(
+    String(initialSettings.dailyReportSchedule.dailyReportOffsetDays),
   );
   const [dailyReportAutoPublish, setDailyReportAutoPublish] = useState(
     initialSettings.dailyReportSchedule.dailyReportAutoPublish,
@@ -755,6 +760,7 @@ export function AdminSettingsPanel({
   };
   const saveDailyReportSchedule = () => {
     const parsedDailyReportCandidateLimit = Number.parseInt(dailyReportCandidateLimit.trim(), 10);
+    const parsedDailyReportOffsetDays = Number.parseInt(dailyReportOffsetDays.trim(), 10);
 
     if (
       !Number.isInteger(parsedDailyReportCandidateLimit) ||
@@ -768,12 +774,25 @@ export function AdminSettingsPanel({
       return;
     }
 
+    if (
+      !Number.isInteger(parsedDailyReportOffsetDays) ||
+      parsedDailyReportOffsetDays < MIN_DAILY_REPORT_OFFSET_DAYS ||
+      parsedDailyReportOffsetDays > MAX_DAILY_REPORT_OFFSET_DAYS
+    ) {
+      showToast(
+        `T- 天数需为 ${MIN_DAILY_REPORT_OFFSET_DAYS}-${MAX_DAILY_REPORT_OFFSET_DAYS} 的整数。`,
+        "error",
+      );
+      return;
+    }
+
     startTransition(async () => {
       try {
         const schedule = await saveDefaultDailyReportSchedule({
           enabled: dailyReportScheduleEnabled,
           cronExpression: dailyReportScheduleCronExpression,
           dailyReportCandidateLimit: parsedDailyReportCandidateLimit,
+          dailyReportOffsetDays: parsedDailyReportOffsetDays,
           dailyReportAutoPublish,
         });
 
@@ -781,6 +800,7 @@ export function AdminSettingsPanel({
         setDailyReportScheduleEnabled(schedule.enabled);
         setDailyReportScheduleCronExpression(schedule.cronExpression);
         setDailyReportCandidateLimit(String(schedule.dailyReportCandidateLimit));
+        setDailyReportOffsetDays(String(schedule.dailyReportOffsetDays));
         setDailyReportAutoPublish(schedule.dailyReportAutoPublish);
         showToast("日报任务配置已保存。", "success");
       } catch (error) {
@@ -799,6 +819,7 @@ export function AdminSettingsPanel({
     dailyReportScheduleEnabled !== dailyReportScheduleSnapshot.enabled ||
     dailyReportScheduleCronExpression.trim() !== dailyReportScheduleSnapshot.cronExpression ||
     dailyReportCandidateLimit.trim() !== String(dailyReportScheduleSnapshot.dailyReportCandidateLimit) ||
+    dailyReportOffsetDays.trim() !== String(dailyReportScheduleSnapshot.dailyReportOffsetDays) ||
     dailyReportAutoPublish !== dailyReportScheduleSnapshot.dailyReportAutoPublish;
 
   const content = (
@@ -1673,13 +1694,13 @@ export function AdminSettingsPanel({
                 </div>
               </div>
 
-              <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
                 <div className="space-y-1.5">
                   <label
                     htmlFor="daily-report-schedule-cron"
                     className="block text-sm text-[var(--muted)]"
                   >
-                    日报 Cron 表达式
+                    Cron 表达式
                   </label>
                   <TextInput
                     id="daily-report-schedule-cron"
@@ -1688,6 +1709,17 @@ export function AdminSettingsPanel({
                     placeholder="例如 30 8 * * *"
                   />
                 </div>
+
+                <FormField label="T-" htmlFor="daily-report-offset-days">
+                  <TextInput
+                    id="daily-report-offset-days"
+                    type="number"
+                    min={MIN_DAILY_REPORT_OFFSET_DAYS}
+                    max={MAX_DAILY_REPORT_OFFSET_DAYS}
+                    value={dailyReportOffsetDays}
+                    onChange={(event) => setDailyReportOffsetDays(event.target.value)}
+                  />
+                </FormField>
 
                 <FormField label="候选内容上限" htmlFor="daily-report-candidate-limit">
                   <TextInput

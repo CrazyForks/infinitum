@@ -9,9 +9,12 @@ import {
 import {
   computeNextRunAt,
   DEFAULT_DAILY_REPORT_CANDIDATE_LIMIT,
+  DEFAULT_DAILY_REPORT_OFFSET_DAYS,
   isSchedulerHeartbeatStale,
   MAX_DAILY_REPORT_CANDIDATE_LIMIT,
+  MAX_DAILY_REPORT_OFFSET_DAYS,
   MIN_DAILY_REPORT_CANDIDATE_LIMIT,
+  MIN_DAILY_REPORT_OFFSET_DAYS,
   normalizeScheduleInput,
 } from "@/lib/tasks/scheduler";
 import {
@@ -421,6 +424,7 @@ export function toTaskScheduleSnapshot(schedule: {
   fullTextFetchThreshold: number;
   perSourceItemLimit: number | null;
   dailyReportCandidateLimit: number | null;
+  dailyReportOffsetDays: number | null;
   dailyReportAutoPublish: boolean | null;
   processingStartAt: Date | null;
   timezone: string;
@@ -438,6 +442,7 @@ export function toTaskScheduleSnapshot(schedule: {
     fullTextFetchThreshold: schedule.fullTextFetchThreshold,
     perSourceItemLimit: schedule.perSourceItemLimit ?? 20,
     dailyReportCandidateLimit: schedule.dailyReportCandidateLimit ?? DEFAULT_DAILY_REPORT_CANDIDATE_LIMIT,
+    dailyReportOffsetDays: schedule.dailyReportOffsetDays ?? DEFAULT_DAILY_REPORT_OFFSET_DAYS,
     dailyReportAutoPublish: schedule.dailyReportAutoPublish ?? false,
     processingStartAt: schedule.processingStartAt?.toISOString() ?? null,
     timezone: schedule.timezone,
@@ -490,6 +495,7 @@ export async function updateDefaultDailyReportSchedule(input: {
   enabled: boolean;
   cronExpression: string;
   dailyReportCandidateLimit: number;
+  dailyReportOffsetDays: number;
   dailyReportAutoPublish: boolean;
 }) {
   const cronExpression = input.cronExpression.trim();
@@ -514,6 +520,16 @@ export async function updateDefaultDailyReportSchedule(input: {
     );
   }
 
+  if (
+    !Number.isInteger(input.dailyReportOffsetDays) ||
+    input.dailyReportOffsetDays < MIN_DAILY_REPORT_OFFSET_DAYS ||
+    input.dailyReportOffsetDays > MAX_DAILY_REPORT_OFFSET_DAYS
+  ) {
+    throw new Error(
+      `Daily report T- days must be an integer between ${MIN_DAILY_REPORT_OFFSET_DAYS} and ${MAX_DAILY_REPORT_OFFSET_DAYS}.`,
+    );
+  }
+
   const currentSchedule = await ensureDefaultDailyReportSchedule();
   const now = new Date();
   const nextRunAt = computeNextRunAt({
@@ -529,6 +545,7 @@ export async function updateDefaultDailyReportSchedule(input: {
       enabled: input.enabled,
       cronExpression,
       dailyReportCandidateLimit: input.dailyReportCandidateLimit,
+      dailyReportOffsetDays: input.dailyReportOffsetDays,
       dailyReportAutoPublish: input.dailyReportAutoPublish,
       nextRunAt,
     },

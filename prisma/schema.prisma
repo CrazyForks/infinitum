@@ -244,6 +244,7 @@ model TaskSchedule {
   fullTextFetchThreshold Int              @default(80)
   perSourceItemLimit Int                  @default(20)
   dailyReportCandidateLimit Int           @default(120)
+  dailyReportOffsetDays Int                @default(0)
   dailyReportAutoPublish Boolean          @default(false)
   processingStartAt DateTime?
   timezone          String

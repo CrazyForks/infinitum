@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
 import {
   claimNextQueuedTaskRun,
+  ensureDefaultDailyReportSchedule,
   getBackgroundTaskMonitorSnapshot,
   ensureDefaultIngestionSchedule,
   enqueueTaskRun,
@@ -245,6 +246,63 @@ describe("background task persistence", () => {
     expect(ingestionTasks).toHaveLength(1);
     expect(ingestionTasks[0]?.triggerType).toBe("scheduled");
     expect(ingestionTasks[0]?.status).toBe("running");
+  });
+
+  it("enqueues a scheduled daily report for the current Shanghai day by default when due", async () => {
+    await ensureDefaultDailyReportSchedule();
+    await prisma.taskSchedule.update({
+      where: { key: "daily_report_default" },
+      data: {
+        enabled: true,
+        cronExpression: "30 8 * * *",
+        nextRunAt: new Date("2026-04-25T00:30:00.000Z"),
+      },
+    });
+
+    const result = await runWorkerCycle({
+      now: new Date("2026-04-25T00:30:00.000Z"),
+      executeTaskRun: async () => undefined,
+    });
+    const dailyReportTasks = await prisma.backgroundTaskRun.findMany({
+      where: { kind: "daily_report_generate" },
+      orderBy: { createdAt: "asc" },
+    });
+
+    expect(result.enqueuedScheduledDailyReport).toBe(true);
+    expect(dailyReportTasks).toHaveLength(1);
+    expect(dailyReportTasks[0]?.triggerType).toBe("scheduled");
+    expect(dailyReportTasks[0]?.entityId).toBe("2026-04-25");
+    expect(dailyReportTasks[0]?.label).toContain("2026-04-25");
+    expect(dailyReportTasks[0]?.status).toBe("running");
+  });
+
+  it("enqueues a scheduled daily report for T-minus configured Shanghai days", async () => {
+    await ensureDefaultDailyReportSchedule();
+    await prisma.taskSchedule.update({
+      where: { key: "daily_report_default" },
+      data: {
+        enabled: true,
+        cronExpression: "30 8 * * *",
+        dailyReportOffsetDays: 1,
+        nextRunAt: new Date("2026-04-25T00:30:00.000Z"),
+      },
+    });
+
+    const result = await runWorkerCycle({
+      now: new Date("2026-04-25T00:30:00.000Z"),
+      executeTaskRun: async () => undefined,
+    });
+    const dailyReportTasks = await prisma.backgroundTaskRun.findMany({
+      where: { kind: "daily_report_generate" },
+      orderBy: { createdAt: "asc" },
+    });
+
+    expect(result.enqueuedScheduledDailyReport).toBe(true);
+    expect(dailyReportTasks).toHaveLength(1);
+    expect(dailyReportTasks[0]?.triggerType).toBe("scheduled");
+    expect(dailyReportTasks[0]?.entityId).toBe("2026-04-24");
+    expect(dailyReportTasks[0]?.label).toContain("2026-04-24");
+    expect(dailyReportTasks[0]?.status).toBe("running");
   });
 
   it("updates the default ingestion schedule", async () => {

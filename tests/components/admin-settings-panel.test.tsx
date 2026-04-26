@@ -84,6 +84,7 @@ function buildInitialSettings(): AdminSettingsSnapshot {
       fullTextFetchThreshold: 80,
       perSourceItemLimit: 20,
       dailyReportCandidateLimit: 120,
+      dailyReportOffsetDays: 0,
       dailyReportAutoPublish: false,
       timezone: "Asia/Shanghai",
       lastHeartbeatAt: "2026-04-20T10:00:00.000Z",
@@ -101,6 +102,7 @@ function buildInitialSettings(): AdminSettingsSnapshot {
       fullTextFetchThreshold: 80,
       perSourceItemLimit: 20,
       dailyReportCandidateLimit: 120,
+      dailyReportOffsetDays: 0,
       dailyReportAutoPublish: false,
       timezone: "Asia/Shanghai",
       lastHeartbeatAt: "2026-04-20T10:00:00.000Z",
@@ -905,7 +907,7 @@ describe("AdminSettingsPanel", () => {
     await user.clear(within(taskPanel).getByLabelText("正文补抓阈值"));
     await user.type(within(taskPanel).getByLabelText("正文补抓阈值"), "120");
     await user.click(within(taskPanel).getByLabelText("启用默认抓取任务"));
-    await user.click(within(taskPanel).getByRole("button", { name: "保存配置" }));
+    await user.click(within(taskPanel).getAllByRole("button", { name: "保存配置" })[0]!);
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith("/api/admin/monitor/schedule/ingestion-default", {
@@ -935,6 +937,7 @@ describe("AdminSettingsPanel", () => {
             enabled: true,
             cronExpression: "0 9 * * *",
             dailyReportCandidateLimit: 80,
+            dailyReportOffsetDays: 1,
             dailyReportAutoPublish: true,
           },
         }),
@@ -950,15 +953,18 @@ describe("AdminSettingsPanel", () => {
     const taskPanel = screen.getByRole("tabpanel");
 
     expect(within(taskPanel).queryByText("下次运行")).not.toBeInTheDocument();
+    expect(within(taskPanel).getByLabelText("T-")).toHaveValue(0);
     expect(within(taskPanel).getByLabelText("候选内容上限")).toHaveValue(120);
 
     await user.click(within(taskPanel).getByLabelText("启用 AI 日报任务"));
-    await user.clear(within(taskPanel).getByLabelText("日报 Cron 表达式"));
-    await user.type(within(taskPanel).getByLabelText("日报 Cron 表达式"), "0 9 * * *");
+    await user.clear(within(taskPanel).getByLabelText("Cron 表达式"));
+    await user.type(within(taskPanel).getByLabelText("Cron 表达式"), "0 9 * * *");
+    await user.clear(within(taskPanel).getByLabelText("T-"));
+    await user.type(within(taskPanel).getByLabelText("T-"), "1");
     await user.clear(within(taskPanel).getByLabelText("候选内容上限"));
     await user.type(within(taskPanel).getByLabelText("候选内容上限"), "80");
     await user.click(within(taskPanel).getByLabelText("生成后自动发布 AI 日报"));
-    await user.click(within(taskPanel).getByRole("button", { name: "保存配置" }));
+    await user.click(within(taskPanel).getAllByRole("button", { name: "保存配置" })[1]!);
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith("/api/admin/monitor/schedule/daily-report-default", {
@@ -970,6 +976,7 @@ describe("AdminSettingsPanel", () => {
           enabled: true,
           cronExpression: "0 9 * * *",
           dailyReportCandidateLimit: 80,
+          dailyReportOffsetDays: 1,
           dailyReportAutoPublish: true,
         }),
       });
