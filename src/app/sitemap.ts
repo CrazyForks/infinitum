@@ -3,6 +3,7 @@ import type { MetadataRoute } from "next";
 import { listDailyReports } from "@/lib/daily-report/repository";
 import { getSiteOrigin } from "@/lib/seo/metadata";
 
+export const dynamic = "force-dynamic";
 export const revalidate = 300;
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
