@@ -8,6 +8,8 @@ services:
       PORT: 3000
       HOSTNAME: 0.0.0.0
       DATABASE_URL: file:/app/data/dev.db
+      # Canonical public origin for RSS links, e.g. https://your-domain.example
+      # SITE_URL: ""
       ADMIN_PASSWORD: change-me
       ADMIN_SESSION_SECRET: replace-with-a-long-random-secret
       ADMIN_SESSION_COOKIE_SECURE: "true"

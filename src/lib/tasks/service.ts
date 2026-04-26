@@ -210,6 +210,8 @@ function normalizeTaskTimelineNodeSnapshot(value: unknown): TaskTimelineNodeSnap
   const key = maybeNode.key;
   const status = maybeNode.status;
   const supportedKeys = new Set<TaskTimelineNodeKey>([
+    "daily_report_generate",
+    "task_finished",
     "source_fetch",
     "rule_filter",
     "item_summary",

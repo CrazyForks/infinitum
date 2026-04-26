@@ -1,5 +1,6 @@
 import { buildRssFeed, escapeXml } from "@/lib/feed/rss";
 import { listDailyReports } from "@/lib/daily-report/repository";
+import { resolvePublicOrigin } from "@/lib/http/public-origin";
 
 export const revalidate = 300;
 
@@ -13,8 +14,7 @@ function stripInlineMarkdown(value: string) {
 }
 
 export async function GET(request: Request) {
-  const url = new URL(request.url);
-  const baseUrl = `${url.protocol}//${url.host}`;
+  const baseUrl = resolvePublicOrigin(request);
   const reports = await listDailyReports({
     isAdmin: false,
     status: "published",

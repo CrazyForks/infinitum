@@ -70,6 +70,7 @@ cp docker-compose.yml.example docker-compose.yml
 
 - `ADMIN_PASSWORD`
 - `ADMIN_SESSION_SECRET`
+- `SITE_URL`：生产环境建议设置为实际访问域名，例如 `https://your-domain.example`，用于 RSS XML 中的站点与订阅链接
 
 如通过 HTTP 在可信内网访问，可将 `ADMIN_SESSION_COOKIE_SECURE` 改为 `"false"`。
 
@@ -119,6 +120,7 @@ cp .env.example .env
 DATABASE_URL="file:./prisma/dev.db"
 ADMIN_PASSWORD="change-me"
 ADMIN_SESSION_SECRET="replace-with-a-long-random-secret"
+# SITE_URL="https://your-domain.example"
 ```
 
 ### 3. 初始化数据库

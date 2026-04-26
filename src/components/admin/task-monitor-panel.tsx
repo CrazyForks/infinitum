@@ -106,6 +106,10 @@ function formatTaskTimelineDetail(task: TaskRunSnapshot, node: NonNullable<TaskR
   const getValue = (label: string) => metricMap.get(label) ?? 0;
 
   switch (node.key) {
+    case "daily_report_generate":
+      return `总候选数 ${getValue("总候选数")}`;
+    case "task_finished":
+      return `最后入选数 ${getValue("最后入选数")}`;
     case "source_fetch":
       return `抓取 ${getValue("抓取源")} 个源 · ${getValue("抓取内容")} 篇内容 · 正文补抓 ${getValue("正文补抓")} 篇`;
     case "rule_filter":

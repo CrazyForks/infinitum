@@ -1,14 +1,14 @@
 import { buildRssFeed, mapFeedEntriesToRssItems } from "@/lib/feed/rss";
 import { resolveFeedRequest } from "@/lib/feed/request";
 import { getCachedFeedItems } from "@/lib/feed/service";
+import { resolvePublicOrigin, resolvePublicRequestUrl } from "@/lib/http/public-origin";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const { filters } = resolveFeedRequest(searchParams);
 
-  // 获取请求的基础 URL 用于构建 RSS 链接
-  const url = new URL(request.url);
-  const baseUrl = `${url.protocol}//${url.host}`;
+  const baseUrl = resolvePublicOrigin(request);
+  const selfLink = resolvePublicRequestUrl(request);
 
   // RSS feed 默认获取较多条目（50条）
   const rssPagination = {
@@ -56,7 +56,7 @@ export async function GET(request: Request) {
     title: feedTitle,
     description: feedDescription,
     link: baseUrl,
-    selfLink: url.toString(),
+    selfLink,
     lastBuildDate: new Date().toISOString(),
     items: rssItems,
   });

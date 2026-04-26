@@ -17,7 +17,7 @@ import {
 } from "@/lib/daily-report/types";
 import { parseDailyReportContent } from "@/lib/daily-report/validator";
 import { getIngestionRuntimeConfig } from "@/lib/settings/runtime-service";
-import { DEFAULT_DAILY_REPORT_TASK_LABEL } from "@/lib/tasks/types";
+import { DEFAULT_DAILY_REPORT_TASK_LABEL, type TaskTimelineNodeSnapshot } from "@/lib/tasks/types";
 import { enqueueTaskRun, ensureDefaultDailyReportSchedule, updateTaskRun } from "@/lib/tasks/service";
 
 const MIN_CANDIDATE_COUNT = 2;
@@ -53,6 +53,79 @@ function getSectionSourceIds(content: DailyReportContent) {
   }
 
   return rows;
+}
+
+function countSelectedDailyReportCandidates(content: DailyReportContent) {
+  const selectedIds = new Set<number>();
+
+  for (const row of getSectionSourceIds(content)) {
+    selectedIds.add(row.sourceId);
+  }
+
+  return selectedIds.size;
+}
+
+async function countExistingSelectedDailyReportCandidates(dailyReportId: string) {
+  const rows = await prisma.dailyReportSource.findMany({
+    where: { dailyReportId },
+    select: {
+      itemId: true,
+      clusterId: true,
+      url: true,
+    },
+  });
+
+  return new Set(rows.map((row) => row.itemId ?? row.clusterId ?? row.url)).size;
+}
+
+function getDailyReportTaskFinishedLabel(status: "succeeded" | "failed" | "skipped") {
+  if (status === "failed") return "失败";
+  if (status === "skipped") return "已跳过";
+  return "已完成";
+}
+
+function buildDailyReportTaskTimeline(input: {
+  taskRun: BackgroundTaskRun;
+  status: "running" | "succeeded" | "failed" | "skipped";
+  candidateCount?: number | null;
+  selectedCount?: number | null;
+  finishedAt?: Date | null;
+}): TaskTimelineNodeSnapshot[] {
+  const taskStartedAt = input.taskRun.startedAt ?? input.taskRun.createdAt;
+  const startedAt = taskStartedAt.toISOString();
+  const finishedAt = input.finishedAt?.toISOString() ?? null;
+  const durationMs = input.finishedAt ? input.finishedAt.getTime() - taskStartedAt.getTime() : null;
+
+  const generationNode: TaskTimelineNodeSnapshot = {
+    key: "daily_report_generate",
+    label: "AI 日报生成",
+    status: input.status === "running" ? "running" : input.status === "failed" ? "failed" : "succeeded",
+    startedAt,
+    finishedAt: input.status === "running" ? null : finishedAt,
+    durationMs: input.status === "running" ? null : durationMs,
+    metrics: [
+      { label: "总候选数", value: input.candidateCount ?? 0 },
+    ],
+  };
+
+  if (input.status === "running") {
+    return [generationNode];
+  }
+
+  return [
+    generationNode,
+    {
+      key: "task_finished",
+      label: getDailyReportTaskFinishedLabel(input.status),
+      status: input.status === "failed" ? "failed" : input.status === "skipped" ? "skipped" : "succeeded",
+      startedAt: finishedAt,
+      finishedAt,
+      durationMs: null,
+      metrics: [
+        { label: "最后入选数", value: input.selectedCount ?? 0 },
+      ],
+    },
+  ];
 }
 
 async function markDailyScheduleRunFinished(taskRun: BackgroundTaskRun, status: "succeeded" | "failed" | "partial") {
@@ -100,10 +173,12 @@ export async function generateDailyReport(input: {
   date: string;
   taskRunId?: string | null;
   force?: boolean;
+  onCandidatesLoaded?: (candidateCount: number) => Promise<void>;
 }) {
   const { date } = getDailyReportDateRange(input.date);
   const schedule = await ensureDefaultDailyReportSchedule();
   const candidates = await listDailyReportCandidates(date, schedule.dailyReportCandidateLimit);
+  await input.onCandidatesLoaded?.(candidates.length);
   const inputHash = buildInputHash(date, candidates);
   const existing = await prisma.dailyReport.findUnique({
     where: {
@@ -120,6 +195,7 @@ export async function generateDailyReport(input: {
       skipped: true,
       reason: "日报输入未变化，已跳过生成。",
       candidateCount: candidates.length,
+      selectedCount: await countExistingSelectedDailyReportCandidates(existing.id),
     };
   }
 
@@ -129,6 +205,7 @@ export async function generateDailyReport(input: {
       skipped: true,
       reason: `候选内容不足 ${MIN_CANDIDATE_COUNT} 条，已跳过生成。`,
       candidateCount: candidates.length,
+      selectedCount: 0,
     };
   }
 
@@ -157,6 +234,7 @@ export async function generateDailyReport(input: {
   const title = buildDailyReportTitle(date);
   const renderedMarkdown = renderDailyReportMarkdown(content, candidates, title);
   const sourceRows = getSectionSourceIds(content);
+  const selectedCount = countSelectedDailyReportCandidates(content);
   const candidatesById = new Map(candidates.map((candidate) => [candidate.id, candidate]));
   const shouldAutoPublish = schedule.dailyReportAutoPublish;
   const publishedAt = shouldAutoPublish ? new Date() : null;
@@ -231,6 +309,7 @@ export async function generateDailyReport(input: {
     skipped: false,
     reason: null,
     candidateCount: candidates.length,
+    selectedCount,
   };
 }
 
@@ -238,6 +317,7 @@ export async function executeDailyReportTask(taskRun: BackgroundTaskRun) {
   const date = taskRun.entityId && /^\d{4}-\d{2}-\d{2}$/.test(taskRun.entityId)
     ? taskRun.entityId
     : getTodayDailyReportDate();
+  let candidateCount = 0;
 
   try {
     await updateTaskRun(taskRun.id, {
@@ -245,6 +325,10 @@ export async function executeDailyReportTask(taskRun: BackgroundTaskRun) {
       progressCurrent: 0,
       progressTotal: 1,
       progressLabel: `正在生成 ${date} AI 日报`,
+      taskTimeline: buildDailyReportTaskTimeline({
+        taskRun,
+        status: "running",
+      }),
       aiCallCountEstimated: 1,
       aiCallBreakdown: [
         { key: "daily_report", label: "AI 日报", actual: 0, estimated: 1 },
@@ -255,8 +339,19 @@ export async function executeDailyReportTask(taskRun: BackgroundTaskRun) {
       date,
       taskRunId: taskRun.id,
       force: taskRun.triggerType !== "scheduled",
+      onCandidatesLoaded: async (loadedCandidateCount) => {
+        candidateCount = loadedCandidateCount;
+        await updateTaskRun(taskRun.id, {
+          taskTimeline: buildDailyReportTaskTimeline({
+            taskRun,
+            status: "running",
+            candidateCount,
+          }),
+        });
+      },
     });
 
+    const finishedAt = new Date();
     await updateTaskRun(taskRun.id, {
       status: "succeeded",
       progressCurrent: 1,
@@ -269,7 +364,14 @@ export async function executeDailyReportTask(taskRun: BackgroundTaskRun) {
       aiCallBreakdown: [
         { key: "daily_report", label: "AI 日报", actual: result.skipped ? 0 : 1, estimated: 1 },
       ],
-      finishedAt: new Date(),
+      taskTimeline: buildDailyReportTaskTimeline({
+        taskRun,
+        status: result.skipped ? "skipped" : "succeeded",
+        candidateCount: result.candidateCount,
+        selectedCount: result.selectedCount,
+        finishedAt,
+      }),
+      finishedAt,
     });
     await markDailyScheduleRunFinished(taskRun, "succeeded");
   } catch (error) {
@@ -293,11 +395,18 @@ export async function executeDailyReportTask(taskRun: BackgroundTaskRun) {
       });
     }
     invalidateDailyReportCache();
+    const finishedAt = new Date();
     await updateTaskRun(taskRun.id, {
       status: "failed",
       progressLabel: message,
       errorSummary: message,
-      finishedAt: new Date(),
+      taskTimeline: buildDailyReportTaskTimeline({
+        taskRun,
+        status: "failed",
+        candidateCount,
+        finishedAt,
+      }),
+      finishedAt,
     });
     await markDailyScheduleRunFinished(taskRun, "failed");
   }

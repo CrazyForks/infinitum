@@ -43,6 +43,8 @@ export type TaskStageTimingSnapshot = {
 };
 
 export type TaskTimelineNodeKey =
+  | "daily_report_generate"
+  | "task_finished"
   | "source_fetch"
   | "rule_filter"
   | "item_summary"

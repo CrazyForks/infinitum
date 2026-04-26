@@ -166,6 +166,44 @@ describe("daily report service", () => {
     expect(report.publishedAt).toBeInstanceOf(Date);
   });
 
+  it("records candidate and selected counts in the daily report task timeline", async () => {
+    await createReportCandidates();
+    const taskRun = await prisma.backgroundTaskRun.create({
+      data: {
+        kind: "daily_report_generate",
+        triggerType: "manual",
+        status: "queued",
+        label: "AI 日报生成",
+        entityId: REPORT_DATE,
+      },
+    });
+    generateDailyReportMock.mockResolvedValue(buildDailyReportOutput());
+
+    await executeDailyReportTask(taskRun);
+
+    const storedTaskRun = await prisma.backgroundTaskRun.findUniqueOrThrow({
+      where: { id: taskRun.id },
+    });
+    const timeline = JSON.parse(storedTaskRun.taskTimelineJson ?? "[]") as Array<{
+      key: string;
+      label: string;
+      metrics: Array<{ label: string; value: number }>;
+    }>;
+
+    expect(timeline).toMatchObject([
+      {
+        key: "daily_report_generate",
+        label: "AI 日报生成",
+        metrics: [{ label: "总候选数", value: 2 }],
+      },
+      {
+        key: "task_finished",
+        label: "已完成",
+        metrics: [{ label: "最后入选数", value: 2 }],
+      },
+    ]);
+  });
+
   it("preserves an existing report status and content when regeneration fails", async () => {
     await createReportCandidates();
     const existing = await createPublishedReport();
