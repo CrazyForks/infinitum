@@ -4,6 +4,8 @@ const PUBLIC_SITE_URL_ENV_KEYS = [
   "PUBLIC_SITE_URL",
 ] as const;
 
+const LOCAL_SITE_ORIGIN = "http://localhost:3000";
+
 function firstHeaderValue(value: string | null) {
   return value?.split(",")[0]?.trim() || null;
 }
@@ -36,12 +38,25 @@ function normalizeProtocol(value: string | null | undefined) {
   return protocol === "http" || protocol === "https" ? protocol : null;
 }
 
-export function resolvePublicOrigin(request: Request) {
+export function resolveConfiguredPublicOrigin() {
   for (const key of PUBLIC_SITE_URL_ENV_KEYS) {
     const configuredOrigin = normalizeOrigin(process.env[key]);
     if (configuredOrigin) {
       return configuredOrigin;
     }
+  }
+
+  return null;
+}
+
+export function resolveSiteOrigin() {
+  return resolveConfiguredPublicOrigin() ?? LOCAL_SITE_ORIGIN;
+}
+
+export function resolvePublicOrigin(request: Request) {
+  const configuredOrigin = resolveConfiguredPublicOrigin();
+  if (configuredOrigin) {
+    return configuredOrigin;
   }
 
   const requestUrl = new URL(request.url);

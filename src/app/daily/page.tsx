@@ -1,14 +1,75 @@
+import type { Metadata } from "next";
+
 import { getAdminSession } from "@/lib/admin/session";
 import { DailyReportList } from "@/components/daily/daily-report-list";
 import { BackToTopButton } from "@/components/ui/back-to-top-button";
 import { listDailyReportArchiveWeeks, listDailyReports } from "@/lib/daily-report/repository";
 import { PageShell } from "@/components/ui/page-shell";
+import {
+  getSiteOrigin,
+  PUBLIC_ROBOTS,
+  serializeJsonLd,
+  SITE_NAME,
+  toSeoDescription,
+} from "@/lib/seo/metadata";
 
 export const dynamic = "force-dynamic";
 
 type DailyPageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
+
+const DAILY_TITLE = "AI 日报";
+const DAILY_DESCRIPTION = "按日期归档的 Infinitum AI 日报，汇总每日值得关注的技术资讯、变更、安全风险、开源工具和数据洞察。";
+
+export const metadata: Metadata = {
+  title: DAILY_TITLE,
+  description: DAILY_DESCRIPTION,
+  robots: PUBLIC_ROBOTS,
+  alternates: {
+    canonical: "/daily",
+    types: {
+      "application/rss+xml": [{ title: "Infinitum AI 日报 RSS", url: "/api/daily/rss" }],
+    },
+  },
+  openGraph: {
+    type: "website",
+    locale: "zh_CN",
+    siteName: SITE_NAME,
+    title: DAILY_TITLE,
+    description: DAILY_DESCRIPTION,
+    url: "/daily",
+  },
+  twitter: {
+    card: "summary",
+    title: DAILY_TITLE,
+    description: DAILY_DESCRIPTION,
+  },
+};
+
+function buildDailyListJsonLd(reports: Awaited<ReturnType<typeof listDailyReports>>) {
+  const origin = getSiteOrigin();
+
+  return {
+    "@context": "https://schema.org",
+    "@type": "CollectionPage",
+    name: "Infinitum AI 日报",
+    url: `${origin}/daily`,
+    inLanguage: "zh-CN",
+    description: DAILY_DESCRIPTION,
+    mainEntity: {
+      "@type": "ItemList",
+      itemListElement: reports.slice(0, 30).map((report, index) => ({
+        "@type": "ListItem",
+        position: index + 1,
+        url: `${origin}/daily/${report.date}`,
+        name: report.title,
+        description: toSeoDescription(report.openingSummary, DAILY_DESCRIPTION),
+        datePublished: report.publishedAt ?? report.generatedAt,
+      })),
+    },
+  };
+}
 
 export default async function DailyPage({ searchParams }: DailyPageProps) {
   const resolvedSearchParams = (await searchParams) ?? {};
@@ -27,6 +88,7 @@ export default async function DailyPage({ searchParams }: DailyPageProps) {
       status: selectedStatus,
     }),
   ]);
+  const jsonLd = buildDailyListJsonLd(reports);
 
   return (
     <PageShell
@@ -43,6 +105,10 @@ export default async function DailyPage({ searchParams }: DailyPageProps) {
         isAdmin={session.isAdmin}
         selectedWeek={selectedWeek}
         selectedStatus={selectedStatus}
+      />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: serializeJsonLd(jsonLd) }}
       />
       <BackToTopButton />
     </PageShell>
