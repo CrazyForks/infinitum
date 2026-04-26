@@ -54,6 +54,7 @@ export async function listDailyReportCandidates(date: string, limit = 120) {
       eventSubject: true,
       eventAction: true,
       eventObject: true,
+      eventDate: true,
       source: {
         select: {
           name: true,
@@ -78,6 +79,7 @@ export async function listDailyReportCandidates(date: string, limit = 120) {
     eventSubject: item.eventSubject,
     eventAction: item.eventAction,
     eventObject: item.eventObject,
+    eventDate: item.eventDate,
   }));
 }
 

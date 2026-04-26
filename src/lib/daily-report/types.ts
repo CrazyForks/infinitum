@@ -27,6 +27,7 @@ export type DailyReportCandidate = {
   eventSubject: string | null;
   eventAction: string | null;
   eventObject: string | null;
+  eventDate: string | null;
 };
 
 export type DailyReportTopItem = {
@@ -39,7 +40,6 @@ export type DailyReportTopItem = {
 export type DailyReportActionItem = {
   topic: string;
   action: string;
-  urgency: "low" | "medium" | "high";
   sourceIds: number[];
 };
 

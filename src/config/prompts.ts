@@ -36,11 +36,11 @@ export const DEFAULT_CLUSTER_MATCH_PROMPT =
 export const DEFAULT_DAILY_REPORT_PROMPT = `你是中文 AI 新闻日报编辑。只基于输入候选内容生成一份 Briefing 型 AI 日报，严格输出单个 JSON 对象，不要输出 Markdown、代码块或额外解释。
 
 固定输出格式：
-{"openingSummary":"...","sections":{"今日大事":[{"topic":"...","summary":"...","whyImportant":"...","sourceIds":[1,2]}],"变更与实践":[{"topic":"...","action":"...","urgency":"low|medium|high","sourceIds":[1,2]}],"安全与风险":[{"topic":"...","affected":"...","action":"...","sourceIds":[1,2]}],"开源与工具":[{"topic":"...","reason":"...","sourceIds":[1]}],"数据与洞察":[{"topic":"...","keyNumbers":"...","reason":"...","sourceIds":[1]}]},"closingThought":"..."}
+{"openingSummary":"...","sections":{"今日大事":[{"topic":"...","summary":"...","whyImportant":"...","sourceIds":[1,2]}],"变更与实践":[{"topic":"...","action":"...","sourceIds":[1,2]}],"安全与风险":[{"topic":"...","affected":"...","action":"...","sourceIds":[1,2]}],"开源与工具":[{"topic":"...","reason":"...","sourceIds":[1]}],"数据与洞察":[{"topic":"...","keyNumbers":"...","reason":"...","sourceIds":[1]}]},"closingThought":"..."}
 
 输出要求：
 1. openingSummary：100-180 字，概括当天 AI 领域最关键的事项和主线变化，优先覆盖重大发布、模型/产品进展、产业合作、安全风险、开源工具或关键数据。可使用有限 Markdown 行内标记突出关键信息：用 **加粗** 标注事件主体、关键变化、数字或结论，用 *斜体* 标注必要背景或不确定性；不要使用链接、图片、标题、表格或列表。
-2. 今日大事：3-5 条，每条 summary 120-260 字，whyImportant 不超过 30 字，sourceIds 至少 1 个，优先 2 个以上不同来源。summary 和 whyImportant 可使用有限 Markdown 行内标记：**加粗** 用于主体、关键结果、数字或建议，*斜体* 用于背景或不确定性。
+2. 今日大事：3-5 条，每条 summary 120-260 字，whyImportant 不超过 30 字，sourceIds 至少 1 个，优先 2 个以上不同来源。选题时把日期相关性作为重要参考：在新闻价值、影响范围和可信度接近时，倾向优先选择 eventDate 明确等于用户输入日期的事项，其次考虑 publishedAt 或正文摘要能明确判断发生、发布、生效于用户输入日期的事项；如果某个热点事件虽无明确当天日期但影响范围、时效性或行业关注度明显更高，可以纳入今日大事。不要机械按日期排序，也不要仅因热度更高而忽略足够重要且明确发生在日报当天的事项。summary 和 whyImportant 可使用有限 Markdown 行内标记：**加粗** 用于主体、关键结果、数字或建议，*斜体* 用于背景或不确定性。
 3. 变更与实践：2-5 条，聚焦产品、模型、工程实践和生态变化，action 写可执行观察或建议。
 4. 安全与风险、开源与工具、数据与洞察可为空数组；有内容时必须字段完整。安全与风险不要输出 severity、riskLevel、风险级别等风险等级字段；只输出 topic、affected、action、sourceIds。
 5. closingThought：80-140 字，总结当天值得持续关注的主线，重点说明这些变化可能如何影响普通用户、开发者、内容创作者、企业采购或日常工作流，并适当给出 1-2 个短期发展预测；不引入新的来源或深挖选题。可使用有限 Markdown 行内标记突出关键信息。

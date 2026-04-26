@@ -48,13 +48,13 @@ function buildFallbackMarkdown(report: DailyReportDetailDTO) {
       lines.push(`### ${item.topic}`);
       if ("summary" in item) {
         lines.push(item.summary);
-      } else if ("urgency" in item) {
-        lines.push(`优先级：${item.urgency}；${item.action}`);
       } else if ("affected" in item) {
         if (item.affected) lines.push(item.affected);
         if (item.action) lines.push(item.action);
       } else if ("keyNumbers" in item) {
         lines.push(`${item.reason}${item.keyNumbers ? `（${item.keyNumbers}）` : ""}`);
+      } else if ("action" in item) {
+        lines.push(item.action);
       } else {
         lines.push(item.reason);
       }

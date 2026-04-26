@@ -15,7 +15,7 @@ function safeText(value: unknown) {
 export function stripDailyReportGeneratedLabel(value: unknown) {
   return safeText(value)
     .replace(
-      /^(?:\*\*)?\s*(?:摘要|开场摘要|今日观察|收尾观察|重点|为什么重要|来源|受影响|影响对象|建议|建议动作|行动建议|优先级|风险级别|关键数字|数据|适用场景|价值)\s*[：:]\s*(?:\*\*)?\s*/,
+      /^(?:\*\*)?\s*(?:摘要|开场摘要|今日观察|收尾观察|重点|为什么重要|来源|受影响|影响对象|建议|建议动作|行动建议|风险级别|关键数字|数据|适用场景|价值)\s*[：:]\s*(?:\*\*)?\s*/,
       "",
     )
     .trim();
@@ -31,10 +31,6 @@ function normalizeIds(value: unknown, maxId: number) {
       value.filter((entry): entry is number => Number.isInteger(entry) && entry >= 1 && entry <= maxId),
     ),
   );
-}
-
-function normalizeEnum<T extends string>(value: unknown, allowed: readonly T[], fallback: T) {
-  return allowed.includes(value as T) ? (value as T) : fallback;
 }
 
 export function parseDailyReportContent(rawContent: string, maxSourceId: number): DailyReportContent {
@@ -84,7 +80,6 @@ export function parseDailyReportContent(rawContent: string, maxSourceId: number)
       变更与实践: normalizeList("变更与实践").slice(0, 5).map((item, index) => ({
         topic: stripDailyReportGeneratedLabel(requireTopic(item, `sections.变更与实践[${index}]`)),
         action: stripDailyReportGeneratedLabel(item.action),
-        urgency: normalizeEnum(item.urgency, ["low", "medium", "high"] as const, "medium"),
         sourceIds: requireSourceIds(item, `sections.变更与实践[${index}]`),
       })),
       安全与风险: normalizeList("安全与风险").slice(0, 5).map((item, index) => ({

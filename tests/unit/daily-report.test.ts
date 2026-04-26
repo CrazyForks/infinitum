@@ -21,6 +21,7 @@ const candidates: DailyReportCandidate[] = [
     eventSubject: "OpenAI",
     eventAction: "发布",
     eventObject: "新模型",
+    eventDate: "2026-04-24",
   },
   {
     id: 2,
@@ -37,6 +38,7 @@ const candidates: DailyReportCandidate[] = [
     eventSubject: "Tool",
     eventAction: "更新",
     eventObject: "CLI",
+    eventDate: null,
   },
 ];
 
@@ -55,7 +57,6 @@ const content: DailyReportContent = {
       {
         topic: "开发者工具更新",
         action: "关注 CLI 与 IDE 工作流是否需要调整。",
-        urgency: "medium",
         sourceIds: [2],
       },
     ],
@@ -147,13 +148,11 @@ describe("daily report utilities", () => {
           {
             topic: "OpenAI 发布新模型",
             action: "重复主题也会保留。",
-            urgency: "medium",
             sourceIds: [1],
           },
           {
             topic: "开发者工具更新",
             action: "同栏目重复主题也会保留。",
-            urgency: "medium",
             sourceIds: [2],
           },
         ],
@@ -175,6 +174,7 @@ describe("daily report utilities", () => {
     expect(markdown).toContain("## 摘要");
     expect(markdown).toContain("## 今日大事");
     expect(markdown).not.toContain("风险级别");
+    expect(markdown).toContain("关注 CLI 与 IDE 工作流是否需要调整。");
     expect(markdown).toContain("**重点：**");
     expect(markdown).toContain("**来源：**");
     expect(markdown).toContain("[OpenAI 发布新模型](https://example.com/a)");

@@ -30,7 +30,6 @@ function buildDailyReportOutput() {
       变更与实践: [{
         topic: "开发者工具更新",
         action: "关注 CLI 与 IDE 工作流是否需要调整。",
-        urgency: "medium",
         sourceIds: [2],
       }],
       安全与风险: [],

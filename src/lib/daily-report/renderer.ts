@@ -45,13 +45,13 @@ export function renderDailyReportMarkdown(
       lines.push(`### ${escapeMarkdown(item.topic)}`);
       if ("summary" in item) {
         lines.push(escapeMarkdown(item.summary));
-      } else if ("urgency" in item) {
-        lines.push(`优先级：${item.urgency}；${escapeMarkdown(item.action)}`);
       } else if ("affected" in item) {
         if (item.affected) lines.push(escapeMarkdown(item.affected));
         if (item.action) lines.push(escapeMarkdown(item.action));
       } else if ("keyNumbers" in item) {
         lines.push(`${escapeMarkdown(item.reason)}${item.keyNumbers ? `（${escapeMarkdown(item.keyNumbers)}）` : ""}`);
+      } else if ("action" in item) {
+        lines.push(escapeMarkdown(item.action));
       } else {
         lines.push(escapeMarkdown(item.reason));
       }
