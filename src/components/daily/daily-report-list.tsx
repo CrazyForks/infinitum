@@ -243,7 +243,7 @@ export function DailyReportList({
               {reports.map((report) => (
                 <article
                   key={report.id}
-                  className="panel-raised relative rounded-sm border border-[color:var(--line)] p-4 sm:p-5"
+                  className="relative w-full rounded-lg border border-[color:var(--line)] bg-[var(--surface)] px-4 py-4 shadow-[var(--shadow-sm)] transition hover:border-[color:var(--line-strong)] hover:shadow-md sm:px-6 sm:py-5"
                 >
                   {isAdmin ? (
                     <div className="absolute right-4 top-4 flex items-center gap-1 sm:right-5 sm:top-5">
