@@ -10,14 +10,15 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const INACTIVITY_BUCKETS: Array<{
   key: SourceInactivityBucketKey;
   label: string;
-  days: number;
+  minDays: number;
+  maxDays: number | null;
 }> = [
-  { key: "day", label: "1天", days: 1 },
-  { key: "week", label: "1周", days: 7 },
-  { key: "month", label: "1月", days: 30 },
-  { key: "quarter", label: "3月", days: 90 },
-  { key: "half_year", label: "6月", days: 180 },
-  { key: "year", label: "1年", days: 365 },
+  { key: "day", label: "1天", minDays: 1, maxDays: 7 },
+  { key: "week", label: "1周", minDays: 7, maxDays: 30 },
+  { key: "month", label: "1月", minDays: 30, maxDays: 90 },
+  { key: "quarter", label: "3月", minDays: 90, maxDays: 180 },
+  { key: "half_year", label: "6月", minDays: 180, maxDays: 365 },
+  { key: "year", label: "1年", minDays: 365, maxDays: null },
 ];
 
 function toIsoString(value: Date | null | undefined) {
@@ -54,6 +55,20 @@ function sortByOldestUpdateFirst(left: SourceMonitorEntry, right: SourceMonitorE
   }
 
   return left.lastItemCreatedAt.localeCompare(right.lastItemCreatedAt);
+}
+
+function isSourceInInactivityBucket(
+  source: SourceMonitorEntry,
+  bucket: (typeof INACTIVITY_BUCKETS)[number],
+) {
+  if (source.inactiveDays === null) {
+    return bucket.maxDays === null;
+  }
+
+  return (
+    source.inactiveDays >= bucket.minDays &&
+    (bucket.maxDays === null || source.inactiveDays < bucket.maxDays)
+  );
 }
 
 export async function getSourceMonitorSnapshot(now = new Date()): Promise<SourceMonitorSnapshot> {
@@ -107,15 +122,13 @@ export async function getSourceMonitorSnapshot(now = new Date()): Promise<Source
       attentionSources: entries.filter((source) => source.healthStatus !== "healthy"),
     },
     inactivityBuckets: INACTIVITY_BUCKETS.map((bucket) => {
-      const cutoff = new Date(now.getTime() - bucket.days * DAY_MS);
-      const bucketSources = entries.filter(
-        (source) =>
-          !source.lastItemCreatedAt ||
-          new Date(source.lastItemCreatedAt).getTime() <= cutoff.getTime(),
-      );
+      const cutoff = new Date(now.getTime() - bucket.minDays * DAY_MS);
+      const bucketSources = entries.filter((source) => isSourceInInactivityBucket(source, bucket));
 
       return {
-        ...bucket,
+        key: bucket.key,
+        label: bucket.label,
+        days: bucket.minDays,
         cutoff: cutoff.toISOString(),
         count: bucketSources.length,
         sources: bucketSources,

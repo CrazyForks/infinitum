@@ -182,10 +182,6 @@ export function SourceMonitorPanel({ initialSnapshot }: SourceMonitorPanelProps)
   const [pageSize, setPageSize] = useState(10);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const dayBucketSources = useMemo(
-    () => snapshot.inactivityBuckets.find((bucket) => bucket.key === "day")?.sources ?? [],
-    [snapshot.inactivityBuckets],
-  );
   const attentionSources = useMemo(() => {
     const sourceById = new Map<string, SourceMonitorEntry>();
 
@@ -193,12 +189,14 @@ export function SourceMonitorPanel({ initialSnapshot }: SourceMonitorPanelProps)
       sourceById.set(source.id, source);
     }
 
-    for (const source of dayBucketSources) {
-      sourceById.set(source.id, source);
+    for (const bucket of snapshot.inactivityBuckets) {
+      for (const source of bucket.sources) {
+        sourceById.set(source.id, source);
+      }
     }
 
     return Array.from(sourceById.values());
-  }, [dayBucketSources, snapshot.health.attentionSources]);
+  }, [snapshot.health.attentionSources, snapshot.inactivityBuckets]);
   const inactivityFilterOptions = useMemo(
     () => [
       { value: "all", label: `全部（${attentionSources.length}）` },
@@ -257,6 +255,10 @@ export function SourceMonitorPanel({ initialSnapshot }: SourceMonitorPanelProps)
   );
   const totalPages = Math.ceil(filteredSources.length / pageSize) || 1;
   const paginatedSources = filteredSources.slice((page - 1) * pageSize, page * pageSize);
+  const hasActiveFilters =
+    inactivityFilter !== "all" ||
+    healthStatusFilter !== "all" ||
+    groupFilter !== "all";
 
   useEffect(() => {
     setPage(1);
@@ -291,6 +293,13 @@ export function SourceMonitorPanel({ initialSnapshot }: SourceMonitorPanelProps)
     }
   };
 
+  const clearFilters = () => {
+    setInactivityFilter("all");
+    setHealthStatusFilter("all");
+    setGroupFilter("all");
+    setPage(1);
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -302,13 +311,22 @@ export function SourceMonitorPanel({ initialSnapshot }: SourceMonitorPanelProps)
             查看 RSS 巡检状态和长时间无更新的信息源
           </p>
         </div>
-        <Button
-          onClick={() => void refreshSnapshot()}
-          variant="secondary"
-          disabled={isRefreshing}
-        >
-          刷新
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            onClick={clearFilters}
+            variant="secondary"
+            disabled={!hasActiveFilters}
+          >
+            清空筛选
+          </Button>
+          <Button
+            onClick={() => void refreshSnapshot()}
+            variant="secondary"
+            disabled={isRefreshing}
+          >
+            刷新
+          </Button>
+        </div>
       </div>
 
       <section className="space-y-3" aria-label="健康度检查">
