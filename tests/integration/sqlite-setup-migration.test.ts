@@ -73,7 +73,50 @@ describe("sqlite setup", () => {
     expect(runSqlite(dbPath, `SELECT COUNT(*) FROM pragma_table_info('items') WHERE "name" = 'summaryStatus'`)).toBe("1");
     expect(runSqlite(dbPath, `SELECT COUNT(*) FROM pragma_table_info('items') WHERE "name" = 'analysisStatus'`)).toBe("1");
     expect(runSqlite(dbPath, `SELECT COUNT(*) FROM pragma_table_info('items') WHERE "name" = 'manualClusterAssignedAt'`)).toBe("1");
+    expect(runSqlite(dbPath, `SELECT COUNT(*) FROM pragma_table_info('sources') WHERE "name" = 'healthStatus'`)).toBe("1");
+    expect(runSqlite(dbPath, `SELECT COUNT(*) FROM "sqlite_master" WHERE "type" = 'index' AND "name" = 'sources_enabled_healthStatus_idx'`)).toBe("1");
     expect(runSqlite(dbPath, `SELECT COUNT(*) FROM "sqlite_master" WHERE "type" = 'index' AND "name" = 'items_status_moderationStatus_updatedAt_idx'`)).toBe("1");
     expect(runSqlite(dbPath, "PRAGMA journal_mode")).toBe("wal");
+  });
+
+  it("adds source health columns before creating the source health index on legacy databases", () => {
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), "infinitum-sqlite-legacy-"));
+    const dbPath = path.join(tempDir, "legacy.db");
+
+    tempDirs.push(tempDir);
+
+    runSqlite(
+      dbPath,
+      `
+      CREATE TABLE "sources" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "groupId" TEXT,
+        "name" TEXT NOT NULL,
+        "rssUrl" TEXT NOT NULL,
+        "siteUrl" TEXT NOT NULL,
+        "enabled" BOOLEAN NOT NULL DEFAULT true,
+        "aiParsingEnabled" BOOLEAN NOT NULL DEFAULT true,
+        "aggregationEnabled" BOOLEAN NOT NULL DEFAULT true,
+        "feedEtag" TEXT,
+        "feedLastModified" TEXT,
+        "feedContentHash" TEXT,
+        "lastFetchedAt" DATETIME,
+        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" DATETIME NOT NULL
+      );
+      CREATE UNIQUE INDEX "sources_rssUrl_key" ON "sources"("rssUrl");
+      `,
+    );
+
+    execFileSync("node", ["scripts/setup-sqlite.mjs", dbPath], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      env: process.env,
+    });
+
+    expect(runSqlite(dbPath, `SELECT COUNT(*) FROM pragma_table_info('sources') WHERE "name" = 'healthStatus'`)).toBe("1");
+    expect(runSqlite(dbPath, `SELECT COUNT(*) FROM pragma_table_info('sources') WHERE "name" = 'healthMessage'`)).toBe("1");
+    expect(runSqlite(dbPath, `SELECT COUNT(*) FROM pragma_table_info('sources') WHERE "name" = 'healthCheckedAt'`)).toBe("1");
+    expect(runSqlite(dbPath, `SELECT COUNT(*) FROM "sqlite_master" WHERE "type" = 'index' AND "name" = 'sources_enabled_healthStatus_idx'`)).toBe("1");
   });
 });

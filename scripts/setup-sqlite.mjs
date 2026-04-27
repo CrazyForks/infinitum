@@ -64,6 +64,7 @@ function makeSqliteSchemaIdempotent(sql) {
     .replace(/^CREATE TABLE /gm, "CREATE TABLE IF NOT EXISTS ")
     .replace(/^CREATE UNIQUE INDEX /gm, "CREATE UNIQUE INDEX IF NOT EXISTS ")
     .replace(/^CREATE INDEX /gm, "CREATE INDEX IF NOT EXISTS ")
+    .replace(/^CREATE INDEX IF NOT EXISTS "sources_enabled_healthStatus_idx" ON "sources"\("enabled", "healthStatus"\);\n?/gm, "")
     .replace(/^CREATE INDEX IF NOT EXISTS "source_groups_sortOrder_name_idx" ON "source_groups"\("sortOrder", "name"\);\n?/gm, "");
 }
 
