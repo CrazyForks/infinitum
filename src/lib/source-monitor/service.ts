@@ -83,10 +83,16 @@ export async function getSourceMonitorSnapshot(now = new Date()): Promise<Source
       _max: {
         createdAt: true,
       },
+      _count: {
+        id: true,
+      },
     }),
   ]);
   const latestItemCreatedAtBySourceId = new Map(
     latestItemsBySource.map((entry) => [entry.sourceId, entry._max.createdAt]),
+  );
+  const itemCountBySourceId = new Map(
+    latestItemsBySource.map((entry) => [entry.sourceId, entry._count.id]),
   );
   const entries = sources
     .map((source): SourceMonitorEntry => {
@@ -104,6 +110,7 @@ export async function getSourceMonitorSnapshot(now = new Date()): Promise<Source
         lastFetchedAt: toIsoString(source.lastFetchedAt),
         lastItemCreatedAt: toIsoString(lastItemCreatedAt),
         inactiveDays: getInactiveDays(lastItemCreatedAt, now),
+        itemCount: itemCountBySourceId.get(source.id) ?? 0,
       };
     })
     .sort(sortByOldestUpdateFirst);

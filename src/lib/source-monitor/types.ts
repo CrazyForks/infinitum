@@ -20,6 +20,7 @@ export type SourceMonitorEntry = {
   lastFetchedAt: string | null;
   lastItemCreatedAt: string | null;
   inactiveDays: number | null;
+  itemCount: number;
 };
 
 export type SourceInactivityBucketSnapshot = {

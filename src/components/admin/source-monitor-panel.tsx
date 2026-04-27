@@ -121,6 +121,7 @@ function SourceTable({
             <th className="w-[140px] whitespace-nowrap text-left px-3 py-3">最后巡检</th>
             <th className="w-[140px] whitespace-nowrap text-left px-3 py-3">最后入库</th>
             <th className="w-[92px] whitespace-nowrap text-left px-3 py-3">无更新</th>
+            <th className="w-[64px] whitespace-nowrap text-left px-3 py-3">文章数</th>
             <th className="text-left px-3 py-3">问题</th>
           </tr>
         </thead>
@@ -160,6 +161,9 @@ function SourceTable({
               </td>
               <td className="px-3 py-3 whitespace-nowrap text-xs text-[var(--text-2)]">
                 {formatInactiveDays(source.inactiveDays)}
+              </td>
+              <td className="px-3 py-3 whitespace-nowrap text-xs text-[var(--text-2)]">
+                {source.itemCount}
               </td>
               <td className="break-words px-3 py-3 text-xs leading-5 text-[var(--danger-ink)]">
                 {source.healthMessage ?? (source.healthStatus === "unknown" ? "尚未完成首次巡检" : "-")}

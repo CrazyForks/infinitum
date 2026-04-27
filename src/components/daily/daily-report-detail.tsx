@@ -9,9 +9,8 @@ import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { IconArrowDown, IconEye, IconEyeOff, IconList, IconNote, IconRefresh, IconTrash } from "@/components/ui/icons";
 import { ModalShell } from "@/components/ui/modal-shell";
-import { DAILY_REPORT_AI_NOTICE } from "@/lib/daily-report/renderer";
+import { buildDailyReportDetailMarkdown } from "@/lib/daily-report/export";
 import type { DailyReportDetailDTO } from "@/lib/daily-report/types";
-import { DAILY_REPORT_SECTION_NAMES } from "@/lib/daily-report/types";
 import { renderSafeMarkdown } from "@/lib/markdown/safe-html";
 import { cx } from "@/lib/ui/cx";
 
@@ -34,62 +33,6 @@ function statusLabel(status: DailyReportDetailDTO["status"]) {
 
 function truncateNavTitle(title: string) {
   return title.length > 24 ? `${title.slice(0, 24)}...` : title;
-}
-
-function buildFallbackMarkdown(report: DailyReportDetailDTO) {
-  const lines: string[] = [`> ${DAILY_REPORT_AI_NOTICE}`, "", "## 摘要", "", report.content.openingSummary, ""];
-
-  for (const sectionName of DAILY_REPORT_SECTION_NAMES) {
-    const items = report.content.sections[sectionName];
-    if (items.length === 0) continue;
-
-    lines.push(`## ${sectionName}`, "");
-    for (const item of items) {
-      lines.push(`### ${item.topic}`);
-      if ("summary" in item) {
-        lines.push(item.summary);
-      } else if ("affected" in item) {
-        if (item.affected) lines.push(item.affected);
-        if (item.action) lines.push(item.action);
-      } else if ("keyNumbers" in item) {
-        lines.push(`${item.reason}${item.keyNumbers ? `（${item.keyNumbers}）` : ""}`);
-      } else if ("action" in item) {
-        lines.push(item.action);
-      } else {
-        lines.push(item.reason);
-      }
-      if ("whyImportant" in item && item.whyImportant) {
-        lines.push("", `**重点：** ${item.whyImportant}`);
-      }
-      lines.push("");
-    }
-  }
-
-  lines.push("## 今日观察", "", report.content.closingThought);
-  return lines.join("\n").replace(/\n{3,}/g, "\n\n");
-}
-
-function buildDetailMarkdown(report: DailyReportDetailDTO) {
-  const markdown = report.renderedMarkdown.trim();
-  if (!markdown) {
-    return buildFallbackMarkdown(report);
-  }
-
-  const withoutTitle = markdown.replace(/^#\s+.*(?:\n|$)/, "").trimStart();
-  const normalizedHeadings = withoutTitle
-    .replace(/^##\s+开场摘要\s*$/m, "## 摘要")
-    .replace(/^##\s+收尾观察\s*$/m, "## 今日观察")
-    .replace(/^(\s*)风险级别：[^；\n]*(?:；\s*)?/gm, "$1")
-    .replace(/^(\s*)(?:\*\*)?(?:摘要|开场摘要|今日观察|收尾观察|受影响|影响对象|建议|建议动作|行动建议)\s*[：:]\s*(?:\*\*)?\s*/gm, "$1")
-    .replace(/^重点：\s*/gm, "**重点：** ")
-    .replace(/^来源：\s*$/gm, "**来源：**");
-  const withNotice = /^>\s*声明：完全使用AI生成，可能存在错误，需谨慎甄别。/m.test(normalizedHeadings)
-    ? normalizedHeadings
-    : `> ${DAILY_REPORT_AI_NOTICE}\n\n${normalizedHeadings}`;
-  if (/^##\s+摘要/m.test(normalizedHeadings)) {
-    return withNotice;
-  }
-  return `> ${DAILY_REPORT_AI_NOTICE}\n\n## 摘要\n\n${normalizedHeadings}`;
 }
 
 function TableOfContents({ items, activeId, onSelect }: {
@@ -141,7 +84,7 @@ export function DailyReportDetail({ report, isAdmin }: DailyReportDetailProps) {
       .map(([name, count]) => ({ name, count }))
       .sort((left, right) => right.count - left.count || left.name.localeCompare(right.name));
   }, [report.sources]);
-  const detailMarkdown = useMemo(() => buildDetailMarkdown(report), [report]);
+  const detailMarkdown = useMemo(() => buildDailyReportDetailMarkdown(report), [report]);
   const contentHtml = useMemo(() => renderSafeMarkdown(detailMarkdown, { headingIdPrefix: "daily-heading" }), [detailMarkdown]);
 
   useEffect(() => {
