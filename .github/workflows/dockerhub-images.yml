@@ -226,3 +226,20 @@ jobs:
           cache-to: |
             type=gha,mode=max,scope=${{ matrix.cache_scope }}
             type=registry,ref=docker.io/${{ steps.dockerhub.outputs.namespace }}/${{ matrix.image }}:buildcache,mode=max
+
+  github-release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    needs:
+      - prepare
+      - publish-images
+    permissions:
+      contents: write
+    steps:
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          prerelease: ${{ needs.prepare.outputs.is_prerelease == 'true' }}
+          body: |
+            Docker images for this tag were published by the `dockerhub-images` workflow with image tag `${{ needs.prepare.outputs.image_tag }}`.
