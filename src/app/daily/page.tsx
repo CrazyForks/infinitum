@@ -98,6 +98,7 @@ export default async function DailyPage({ searchParams }: DailyPageProps) {
         rssHref: "/api/daily/rss",
       }}
       contentPaddingClassName="px-4 pt-3 pb-6 sm:px-6 sm:pt-4 sm:pb-8 lg:px-8 lg:pt-4 lg:pb-10"
+      footerPath="/daily"
     >
       <DailyReportList
         reports={reports}

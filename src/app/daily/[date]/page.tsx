@@ -130,6 +130,7 @@ export default async function DailyReportPage({ params }: DailyReportPageProps) 
       }}
       contentClassName="max-w-none gap-0"
       contentPaddingClassName="px-0 pt-0 pb-6 sm:pb-8 lg:pb-10"
+      footerPath={`/daily/${date}`}
     >
       <DailyReportDetail report={report} isAdmin={session.isAdmin} />
       <script

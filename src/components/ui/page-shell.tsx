@@ -2,6 +2,7 @@ import type { ComponentPropsWithoutRef, ReactNode } from "react";
 
 import { AppFooter } from "@/components/ui/app-footer";
 import { GlobalHeader } from "@/components/ui/global-header";
+import { PageViewTracker } from "@/components/ui/page-view-tracker";
 import { cx } from "@/lib/ui/cx";
 
 type PageShellNav = "home" | "daily" | "admin" | null;
@@ -23,6 +24,7 @@ type PageShellProps = ComponentPropsWithoutRef<"main"> & {
   sidebar?: ReactNode;
   sidebarContainerClassName?: string;
   sidebarVisibility?: "always" | "lg" | "xl";
+  footerPath?: string;
 };
 
 export function PageShell({
@@ -36,6 +38,7 @@ export function PageShell({
   sidebar,
   sidebarContainerClassName,
   sidebarVisibility = "always",
+  footerPath,
   ...props
 }: PageShellProps) {
   return (
@@ -99,7 +102,9 @@ export function PageShell({
             children
           )}
         </div>
-        <AppFooter />
+        <AppFooter>
+          {footerPath ? <PageViewTracker path={footerPath} /> : null}
+        </AppFooter>
       </div>
     </main>
   );
