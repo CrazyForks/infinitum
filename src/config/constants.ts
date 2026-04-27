@@ -110,5 +110,5 @@ export const TOAST_DEDUPE_MS = 1200;
 /** Feed 状态轮询间隔: 30 秒 */
 export const STATUS_POLL_INTERVAL_MS = 30 * 1000;
 
-/** 标题搜索防抖延迟: 320ms */
-export const TITLE_SEARCH_DEBOUNCE_MS = 320;
+/** 全文搜索防抖延迟: 320ms */
+export const FEED_SEARCH_DEBOUNCE_MS = 320;

@@ -424,8 +424,16 @@ function buildItemWhere(
   };
 }
 
-function normalizeTitleSearch(value: string | null) {
-  return value?.trim().toLocaleLowerCase() ?? "";
+function sanitizeFts5Query(input: string | null) {
+  const trimmed = input?.trim().toLocaleLowerCase() ?? "";
+  if (!trimmed) {
+    return null;
+  }
+  // Escape double quotes by doubling them (FTS5 convention)
+  // Wrap in double quotes so FTS5 treats the whole input as a literal phrase
+  // (prevents AND/OR/NOT from being interpreted as operators)
+  const escaped = trimmed.replace(/"/g, '""');
+  return `"${escaped}"`;
 }
 
 function toNumber(value: number | bigint) {
@@ -484,6 +492,7 @@ function buildFeedEntryCandidatesCte(
     publishedRangeStart: Date | null;
     publishedRangeEnd: Date | null;
   },
+  searchTerm: string | null = null,
 ) {
   const whereClauses: Prisma.Sql[] = [
     Prisma.sql`i.status = ${"processed"}`,
@@ -525,6 +534,9 @@ function buildFeedEntryCandidatesCte(
   const clusterDownvotes = Prisma.sql`COALESCE(MIN(cc.downvotes), 0)`;
   const singleUpvotes = Prisma.sql`COALESCE(cg.upvotes, 0)`;
   const singleDownvotes = Prisma.sql`COALESCE(cg.downvotes, 0)`;
+  const ftsJoin = searchTerm
+    ? Prisma.sql`INNER JOIN items_fts ON items_fts.rowid = i.rowid AND items_fts MATCH ${searchTerm}`
+    : Prisma.empty;
 
   return Prisma.sql`
     WITH filtered_items AS (
@@ -542,6 +554,7 @@ function buildFeedEntryCandidatesCte(
       FROM "items" i
       INNER JOIN "sources" s ON s.id = i."sourceId"
       LEFT JOIN "content_clusters" c ON c.id = i."clusterId"
+      ${ftsJoin}
       WHERE ${Prisma.join(whereClauses, " AND ")}
     ),
     cluster_groups AS (
@@ -623,16 +636,6 @@ function buildFeedEntryCandidatesCte(
   `;
 }
 
-function buildFeedEntryTitleFilter(title: string | null) {
-  const normalizedTitle = normalizeTitleSearch(title);
-
-  if (!normalizedTitle) {
-    return Prisma.empty;
-  }
-
-  return Prisma.sql`WHERE LOWER(title) LIKE ${`%${normalizedTitle}%`}`;
-}
-
 function buildFeedEntryOrderBy(sort: FeedFilters["sort"]) {
   if (sort === "score_desc") {
     // 按综合推荐评分降序（AI评分 + 访客投票微调）
@@ -694,7 +697,7 @@ async function listFeedGroupCounts(
     ...filters,
     groupId: null,
   };
-  const filteredItemsCte = buildFeedEntryCandidatesCte(effectiveFilters);
+  const filteredItemsCte = buildFeedEntryCandidatesCte(effectiveFilters, null);
   const [groupRows, totalRows] = await Promise.all([
     prisma.$queryRaw<FeedGroupCountRow[]>(Prisma.sql`
       ${filteredItemsCte}
@@ -740,13 +743,12 @@ export async function listFeedItems(
   },
   visitorId?: string | undefined,
 ) {
-  const entryCandidatesCte = buildFeedEntryCandidatesCte(filters);
-  const titleFilter = buildFeedEntryTitleFilter(filters.title);
+  const searchTerm = sanitizeFts5Query(filters.title);
+  const entryCandidatesCte = buildFeedEntryCandidatesCte(filters, searchTerm);
   const countRows = await prisma.$queryRaw<CountRow[]>(Prisma.sql`
     ${entryCandidatesCte}
     SELECT COUNT(*) AS total
     FROM entry_candidates
-    ${titleFilter}
   `);
   const totalRaw = countRows[0]?.total ?? BigInt(0);
   const total = Number(totalRaw);
@@ -770,7 +772,6 @@ export async function listFeedItems(
       downvotes,
       "recommendScore"
     FROM entry_candidates
-    ${titleFilter}
     ${buildFeedEntryOrderBy(filters.sort)}
     LIMIT ${pagination.size}
     OFFSET ${offset}

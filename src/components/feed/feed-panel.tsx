@@ -13,7 +13,7 @@ import {
   type ReactNode,
 } from "react";
 
-import { STATUS_POLL_INTERVAL_MS, TITLE_SEARCH_DEBOUNCE_MS } from "@/config/constants";
+import { STATUS_POLL_INTERVAL_MS, FEED_SEARCH_DEBOUNCE_MS } from "@/config/constants";
 import {
   deleteItem,
   filterItem,
@@ -477,7 +477,7 @@ export function FeedPanel({
     }
 
     if (titleFilter) {
-      filters.push(`标题：${titleFilter}`);
+      filters.push(`搜索：${titleFilter}`);
     }
 
     if (groupId) {
@@ -1343,7 +1343,7 @@ export function FeedPanel({
         ...latestQueryRef.current,
         title: normalizedTitle,
       }, 1, pageSize, { scrollToTop: true });
-    }, TITLE_SEARCH_DEBOUNCE_MS);
+    }, FEED_SEARCH_DEBOUNCE_MS);
 
     return () => {
       window.clearTimeout(timer);
@@ -1626,10 +1626,10 @@ export function FeedPanel({
                   <div className="grid gap-4 sm:grid-cols-2">
                     <FilterInput
                       id="feed-title-filter"
-                      label="标题模糊搜索"
+                      label="全文搜索"
                       value={titleInput}
                       onChange={setTitleInput}
-                      placeholder="输入标题关键词"
+                      placeholder="输入搜索关键词"
                     />
 
                     <FilterSelect

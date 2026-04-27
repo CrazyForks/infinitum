@@ -683,23 +683,95 @@ describe("/api/feed", () => {
     }
   });
 
-  it("filters the feed by fuzzy title match", async () => {
+  it("filters the feed by full-text search on item content", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-10T12:00:00.000Z"));
 
     try {
       const { GET } = await import("@/app/api/feed/route");
-      const response = await GET(new Request("http://localhost/api/feed?range=7d&title=OpenAI"));
+      // "Story" appears in originalTitle of items a1, a2, b1, c1
+      const response = await GET(new Request("http://localhost/api/feed?range=7d&title=Story"));
 
       const json = await response.json();
 
-      expect(json.items).toHaveLength(1);
-      expect(json.items[0]).toMatchObject({
-        type: "cluster",
-        id: "cluster-a",
-        title: "OpenAI Agent 发布",
-      });
-      expect(json.title).toBe("OpenAI");
+      expect(json.items.length).toBeGreaterThan(0);
+      // Should include cluster-a (2 items with "Story A" / "Story A 2" in originalTitle)
+      expect(json.items.some((item: { type: string }) => item.type === "cluster")).toBe(true);
+      expect(json.title).toBe("Story");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("finds items by searching summary body text", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-10T12:00:00.000Z"));
+
+    try {
+      const { GET } = await import("@/app/api/feed/route");
+      // timezone-item has summaryText="创建时间落在东八区当天", search for "东八区" (3 chars)
+      const response = await GET(new Request("http://localhost/api/feed?range=7d&title=东八区"));
+
+      const json = await response.json();
+
+      expect(json.items.length).toBeGreaterThan(0);
+      // timezone-item has translatedTitle "按创建时间归档", should appear as single entry
+      expect(json.items.some((item: { title: string }) => item.title === "按创建时间归档")).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("matches CJK text with trigram tokenizer", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-10T12:00:00.000Z"));
+
+    try {
+      const { GET } = await import("@/app/api/feed/route");
+      // timezone-item has translatedTitle="按创建时间归档", search for substring "创建时间"
+      const response = await GET(new Request("http://localhost/api/feed?range=7d&title=创建时间"));
+
+      const json = await response.json();
+      expect(json.items.length).toBeGreaterThan(0);
+      expect(json.items.some((item: { title: string }) => item.title === "按创建时间归档")).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("returns unfiltered results when search term is empty", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-10T12:00:00.000Z"));
+
+    try {
+      const { GET } = await import("@/app/api/feed/route");
+      const withSearch = await GET(new Request("http://localhost/api/feed?range=7d&title=Story"));
+      const withoutSearch = await GET(new Request("http://localhost/api/feed?range=7d&title="));
+
+      const filtered = await withSearch.json();
+      const unfiltered = await withoutSearch.json();
+
+      // Empty search should return more (or equal) results than filtered search
+      expect(unfiltered.items.length).toBeGreaterThanOrEqual(filtered.items.length);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("treats FTS5 operators as literal search text", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-10T12:00:00.000Z"));
+
+    try {
+      const { GET } = await import("@/app/api/feed/route");
+      // "AND" is an FTS5 operator; should be treated as literal text, not cause errors
+      const response = await GET(new Request("http://localhost/api/feed?range=7d&title=AND"));
+
+      const json = await response.json();
+      // Should return a valid response without FTS5 syntax errors
+      expect(json.items).toBeDefined();
+      expect(json.pagination).toBeDefined();
+      // "AND" likely doesn't match any test data, but shouldn't error
     } finally {
       vi.useRealTimers();
     }

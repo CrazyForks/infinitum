@@ -274,7 +274,7 @@ describe("FeedPanel", () => {
     expect(within(filterRegion).queryByText("时间范围、排序、来源和抓取状态都压在同一块工具区里。")).not.toBeInTheDocument();
     expect(getSelectRoot("创建时间")).toHaveTextContent("7天");
     expect(within(filterRegion).getByRole("button", { name: "高级筛选" })).toHaveAttribute("aria-expanded", "false");
-    expect(within(filterRegion).queryByLabelText("标题模糊搜索")).not.toBeInTheDocument();
+    expect(within(filterRegion).queryByLabelText("全文搜索")).not.toBeInTheDocument();
     expect(within(filterRegion).getByText("创建时间：7天")).toBeInTheDocument();
     expect(within(filterRegion).getByText("排序：按时间倒序")).toBeInTheDocument();
     expect(within(filterRegion).queryByText("最近抓取：尚未执行")).not.toBeInTheDocument();
@@ -624,7 +624,7 @@ describe("FeedPanel", () => {
     expect(screen.getAllByPlaceholderText("结束日期")).toHaveLength(2);
     expect(screen.queryByRole("combobox", { name: "分组" })).not.toBeInTheDocument();
 
-    await user.type(screen.getByLabelText("标题模糊搜索"), "Agent");
+    await user.type(screen.getByLabelText("全文搜索"), "Agent");
     await selectFilterOption(user, "排序方式", "按评分倒序");
 
     await waitFor(() => {
@@ -632,7 +632,7 @@ describe("FeedPanel", () => {
     });
 
     expect(await screen.findByText("评分最高内容")).toBeInTheDocument();
-    expect(screen.getByText("标题：Agent")).toBeInTheDocument();
+    expect(screen.getByText("搜索：Agent")).toBeInTheDocument();
     expect(screen.getByText("排序：按评分倒序")).toBeInTheDocument();
   });
 
@@ -684,10 +684,10 @@ describe("FeedPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "高级筛选" }));
     expect(screen.getByRole("button", { name: "高级筛选" })).toHaveAttribute("aria-expanded", "true");
 
-    fireEvent.change(screen.getByLabelText("标题模糊搜索"), { target: { value: "Agent" } });
+    fireEvent.change(screen.getByLabelText("全文搜索"), { target: { value: "Agent" } });
 
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(screen.queryByText("标题：Agent")).not.toBeInTheDocument();
+    expect(screen.queryByText("搜索：Agent")).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByRole("combobox", { name: "排序方式" }), { target: { value: "score_desc" } });
 
@@ -696,7 +696,7 @@ describe("FeedPanel", () => {
     });
     expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=7d&sort=score_desc&tzOffsetMinutes=-480");
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(screen.queryByText("标题：Agent")).not.toBeInTheDocument();
+    expect(screen.queryByText("搜索：Agent")).not.toBeInTheDocument();
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(319);
@@ -710,7 +710,7 @@ describe("FeedPanel", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=7d&sort=score_desc&title=Agent&tzOffsetMinutes=-480");
-    expect(screen.getByText("标题：Agent")).toBeInTheDocument();
+    expect(screen.getByText("搜索：Agent")).toBeInTheDocument();
   });
 
   it("renders only the latest ingestion time for visitors", () => {
@@ -2161,7 +2161,7 @@ describe("FeedPanel", () => {
     expect(getSelectRoot("创建时间")).toHaveTextContent("当天");
     expect(screen.getByText("创建时间：当天")).toBeInTheDocument();
     expect(screen.getByText("排序：按时间倒序")).toBeInTheDocument();
-    expect(screen.queryByText("标题：Agent")).not.toBeInTheDocument();
+    expect(screen.queryByText("搜索：Agent")).not.toBeInTheDocument();
   });
 
   it("renders Lumina-like pagination controls when the feed has another page", () => {

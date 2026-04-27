@@ -87,6 +87,18 @@ function columnExists(tableName, columnName) {
   return result === "1";
 }
 
+function ftsTableExists(tableName) {
+  const result = execFileSync(
+    "sqlite3",
+    [dbPath, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='${tableName}'`],
+    {
+      encoding: "utf8",
+    },
+  ).trim();
+
+  return result === "1";
+}
+
 function applyIncrementalMigrations() {
   runSqlite([dbPath], {
     input: `CREATE INDEX IF NOT EXISTS "items_status_moderationStatus_updatedAt_idx" ON "items"("status", "moderationStatus", "updatedAt");\n`,
@@ -153,6 +165,46 @@ function applyIncrementalMigrations() {
   if (!columnExists("items", "manualClusterAssignedAt")) {
     runSqlite([dbPath], {
       input: `ALTER TABLE "items" ADD COLUMN "manualClusterAssignedAt" DATETIME;\n`,
+    });
+  }
+
+  if (!ftsTableExists("items_fts")) {
+    runSqlite([dbPath], {
+      input: [
+        `CREATE VIRTUAL TABLE IF NOT EXISTS items_fts USING fts5(
+          originalTitle,
+          translatedTitle,
+          author,
+          rssExcerpt,
+          rssContent,
+          fullText,
+          summaryText,
+          tokenize='trigram'
+        );`,
+        `INSERT INTO items_fts(rowid, originalTitle, translatedTitle, author, rssExcerpt, rssContent, fullText, summaryText)
+         SELECT rowid, originalTitle, COALESCE(translatedTitle, ''), COALESCE(author, ''), COALESCE(rssExcerpt, ''),
+                COALESCE(rssContent, ''), COALESCE(fullText, ''), COALESCE(summaryText, '')
+         FROM items;`,
+        `CREATE TRIGGER IF NOT EXISTS items_fts_ai AFTER INSERT ON items BEGIN
+          INSERT INTO items_fts(rowid, originalTitle, translatedTitle, author, rssExcerpt, rssContent, fullText, summaryText)
+          VALUES (new.rowid, COALESCE(new.originalTitle, ''), COALESCE(new.translatedTitle, ''), COALESCE(new.author, ''),
+                  COALESCE(new.rssExcerpt, ''), COALESCE(new.rssContent, ''), COALESCE(new.fullText, ''), COALESCE(new.summaryText, ''));
+        END;`,
+        `CREATE TRIGGER IF NOT EXISTS items_fts_au AFTER UPDATE ON items BEGIN
+          UPDATE items_fts SET
+            originalTitle = COALESCE(new.originalTitle, ''),
+            translatedTitle = COALESCE(new.translatedTitle, ''),
+            author = COALESCE(new.author, ''),
+            rssExcerpt = COALESCE(new.rssExcerpt, ''),
+            rssContent = COALESCE(new.rssContent, ''),
+            fullText = COALESCE(new.fullText, ''),
+            summaryText = COALESCE(new.summaryText, '')
+          WHERE rowid = old.rowid;
+        END;`,
+        `CREATE TRIGGER IF NOT EXISTS items_fts_ad AFTER DELETE ON items BEGIN
+          DELETE FROM items_fts WHERE rowid = old.rowid;
+        END;`,
+      ].join("\n"),
     });
   }
 }
