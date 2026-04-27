@@ -213,6 +213,14 @@ export async function reorderSourceGroups(groupIds: string[]) {
 }
 
 export async function createSource(input: SourceInput) {
+  const existing = await prisma.source.findUnique({
+    where: { rssUrl: input.rssUrl },
+  });
+
+  if (existing) {
+    throw new Error("该 RSS 地址已存在。");
+  }
+
   return prisma.source.create({
     data: {
       name: input.name,
@@ -227,6 +235,14 @@ export async function createSource(input: SourceInput) {
 }
 
 export async function updateSource(id: string, input: SourceInput) {
+  const existing = await prisma.source.findUnique({
+    where: { rssUrl: input.rssUrl },
+  });
+
+  if (existing && existing.id !== id) {
+    throw new Error("该 RSS 地址已被其他源使用。");
+  }
+
   return prisma.source.update({
     where: { id },
     data: {
