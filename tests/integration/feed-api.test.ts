@@ -548,6 +548,12 @@ describe("/api/feed", () => {
     }
   });
 
+  it("uses 100 entries as the default rss page size", async () => {
+    const { DEFAULT_RSS_FEED_PAGE_SIZE } = await import("@/lib/feed/rss");
+
+    expect(DEFAULT_RSS_FEED_PAGE_SIZE).toBe(100);
+  });
+
   it("sorts the mixed feed by score when requested", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-10T12:00:00.000Z"));

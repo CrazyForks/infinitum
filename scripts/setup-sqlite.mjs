@@ -127,6 +127,28 @@ function applyIncrementalMigrations() {
     });
   }
 
+  if (!columnExists("sources", "healthStatus")) {
+    runSqlite([dbPath], {
+      input: `ALTER TABLE "sources" ADD COLUMN "healthStatus" TEXT NOT NULL DEFAULT 'unknown';\nCREATE INDEX IF NOT EXISTS "sources_enabled_healthStatus_idx" ON "sources"("enabled", "healthStatus");\n`,
+    });
+  }
+
+  runSqlite([dbPath], {
+    input: `UPDATE "sources" SET "healthStatus" = 'unknown' WHERE "healthStatus" NOT IN ('unknown', 'healthy', 'failed');\nDROP INDEX IF EXISTS "sources_enabled_healthStatus_idx";\nCREATE INDEX "sources_enabled_healthStatus_idx" ON "sources"("enabled", "healthStatus");\n`,
+  });
+
+  if (!columnExists("sources", "healthMessage")) {
+    runSqlite([dbPath], {
+      input: `ALTER TABLE "sources" ADD COLUMN "healthMessage" TEXT;\n`,
+    });
+  }
+
+  if (!columnExists("sources", "healthCheckedAt")) {
+    runSqlite([dbPath], {
+      input: `ALTER TABLE "sources" ADD COLUMN "healthCheckedAt" DATETIME;\n`,
+    });
+  }
+
   if (!columnExists("items", "manualClusterAssignedAt")) {
     runSqlite([dbPath], {
       input: `ALTER TABLE "items" ADD COLUMN "manualClusterAssignedAt" DATETIME;\n`,

@@ -1,5 +1,7 @@
 import type { FeedClusterPreviewItemDTO, FeedEntryDTO } from "@/lib/feed/types";
 
+export const DEFAULT_RSS_FEED_PAGE_SIZE = 100;
+
 type RssItem = {
   title: string;
   description: string;
@@ -35,9 +37,8 @@ function buildClusterDescription(
 ): string {
   const parts: string[] = [];
 
-  // 聚合摘要
   if (clusterSummary) {
-    parts.push(`<p><strong>聚合摘要：</strong>${escapeXml(clusterSummary)}</p>`);
+    parts.push(`<p>${escapeXml(clusterSummary)}</p>`);
   }
 
   // 相关文章列表

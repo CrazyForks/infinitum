@@ -108,12 +108,16 @@ model Source {
   feedLastModified String?
   feedContentHash  String?
   lastFetchedAt    DateTime?
+  healthStatus     String   @default("unknown")
+  healthMessage    String?
+  healthCheckedAt  DateTime?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
   items            Item[]
   group            SourceGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
 
   @@index([groupId, name])
+  @@index([enabled, healthStatus])
   @@map("sources")
 }
 

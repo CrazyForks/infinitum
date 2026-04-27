@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AdminSettingsSnapshot } from "@/lib/settings/types";
+import type { SourceMonitorSnapshot } from "@/lib/source-monitor/types";
 import type { BackgroundTaskMonitorSnapshot } from "@/lib/tasks/types";
 
 const {
@@ -51,6 +52,10 @@ vi.mock("@/components/admin/task-monitor-panel", () => ({
   }: {
     initialFocusTaskId?: string | null;
   }) => <div>{`任务监控面板:${initialFocusTaskId ?? "none"}`}</div>,
+}));
+
+vi.mock("@/components/admin/source-monitor-panel", () => ({
+  SourceMonitorPanel: () => <div>信息源监控面板</div>,
 }));
 
 vi.mock("@/components/admin/admin-settings-panel", () => ({
@@ -132,6 +137,39 @@ function buildInitialSnapshot(): BackgroundTaskMonitorSnapshot {
   };
 }
 
+function buildInitialSourceMonitorSnapshot(): SourceMonitorSnapshot {
+  return {
+    generatedAt: "2026-04-21T00:00:00.000Z",
+    totalEnabledSourceCount: 0,
+    health: {
+      healthyCount: 0,
+      failedCount: 0,
+      unknownCount: 0,
+      attentionSources: [],
+    },
+    inactivityBuckets: [
+      {
+        key: "day",
+        label: "1天",
+        days: 1,
+        cutoff: "2026-04-20T00:00:00.000Z",
+        count: 0,
+        sources: [],
+      },
+    ],
+  };
+}
+
+function renderAdminPageClient() {
+  return render(
+    <AdminPageClient
+      initialSettings={buildInitialSettings()}
+      initialSnapshot={buildInitialSnapshot()}
+      initialSourceMonitorSnapshot={buildInitialSourceMonitorSnapshot()}
+    />,
+  );
+}
+
 afterEach(() => {
   openMock.mockReset();
   pushMock.mockReset();
@@ -143,12 +181,7 @@ describe("AdminPageClient", () => {
   it("restores the current settings tab from the url query", () => {
     searchParamsState.value = "tab=settings&section=tasks";
 
-    render(
-      <AdminPageClient
-        initialSettings={buildInitialSettings()}
-        initialSnapshot={buildInitialSnapshot()}
-      />,
-    );
+    renderAdminPageClient();
 
     expect(screen.getByText("设置模块")).toBeInTheDocument();
     expect(screen.getByText("设置面板:tasks")).toBeInTheDocument();
@@ -157,12 +190,7 @@ describe("AdminPageClient", () => {
   it("restores the current monitoring sub tab from the url query", () => {
     searchParamsState.value = "tab=monitoring&section=content&view=clusters";
 
-    render(
-      <AdminPageClient
-        initialSettings={buildInitialSettings()}
-        initialSnapshot={buildInitialSnapshot()}
-      />,
-    );
+    renderAdminPageClient();
 
     expect(screen.getByText("内容审核:clusters:none:none")).toBeInTheDocument();
   });
@@ -170,12 +198,7 @@ describe("AdminPageClient", () => {
   it("passes content pagination from the url into the content review panel", () => {
     searchParamsState.value = "tab=monitoring&section=content&view=clusters&contentPage=3&contentPageSize=20";
 
-    render(
-      <AdminPageClient
-        initialSettings={buildInitialSettings()}
-        initialSnapshot={buildInitialSnapshot()}
-      />,
-    );
+    renderAdminPageClient();
 
     expect(screen.getByText("内容审核:clusters:3:20")).toBeInTheDocument();
   });
@@ -183,12 +206,7 @@ describe("AdminPageClient", () => {
   it("passes the task id from the url query into the task monitor panel", () => {
     searchParamsState.value = "tab=monitoring&section=tasks&task=task-123";
 
-    render(
-      <AdminPageClient
-        initialSettings={buildInitialSettings()}
-        initialSnapshot={buildInitialSnapshot()}
-      />,
-    );
+    renderAdminPageClient();
 
     expect(screen.getByText("任务监控面板:task-123")).toBeInTheDocument();
   });
@@ -197,12 +215,7 @@ describe("AdminPageClient", () => {
     const user = userEvent.setup();
     searchParamsState.value = "tab=settings&section=ai&view=model-api";
 
-    render(
-      <AdminPageClient
-        initialSettings={buildInitialSettings()}
-        initialSnapshot={buildInitialSnapshot()}
-      />,
-    );
+    renderAdminPageClient();
 
     await user.click(screen.getByRole("button", { name: "任务配置" }));
 
@@ -214,17 +227,20 @@ describe("AdminPageClient", () => {
   it("pushes the selected monitoring sub tab into the url", async () => {
     const user = userEvent.setup();
 
-    render(
-      <AdminPageClient
-        initialSettings={buildInitialSettings()}
-        initialSnapshot={buildInitialSnapshot()}
-      />,
-    );
+    renderAdminPageClient();
 
     await user.click(screen.getByRole("button", { name: "聚合管理" }));
 
     expect(pushMock).toHaveBeenLastCalledWith("/admin?tab=monitoring&section=content&view=clusters", {
       scroll: false,
     });
+  });
+
+  it("restores the source monitor tab from the url query", () => {
+    searchParamsState.value = "tab=monitoring&section=sources";
+
+    renderAdminPageClient();
+
+    expect(screen.getByText("信息源监控面板")).toBeInTheDocument();
   });
 });

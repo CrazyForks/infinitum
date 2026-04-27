@@ -8,6 +8,7 @@ import { AppFooter } from "@/components/ui/app-footer";
 import { ContentReviewPanel } from "@/components/admin/content-review-panel";
 import { AdminSettingsPanel } from "@/components/admin/admin-settings-panel";
 import { TaskMonitorPanel } from "@/components/admin/task-monitor-panel";
+import { SourceMonitorPanel } from "@/components/admin/source-monitor-panel";
 import { SelectableButton } from "@/components/ui/selectable-button";
 import { SectionToggleButton } from "@/components/ui/section-toggle-button";
 import {
@@ -22,11 +23,12 @@ import {
   IconArrowUp,
   IconArrowDown,
   IconFilter,
+  IconRss,
 } from "@/components/ui/icons";
 import type { PromptConfigType } from "@/lib/settings/types";
 
 type PrimaryTab = "monitoring" | "settings";
-type MonitorSubSection = "content" | "tasks";
+type MonitorSubSection = "content" | "sources" | "tasks";
 type ContentSubSection = "filtered" | "clusters";
 type SettingsSection = "blacklist" | "groups" | "sources" | "tasks" | "ai";
 type AISubSection = "model-api" | "prompt";
@@ -34,6 +36,7 @@ type AISubSection = "model-api" | "prompt";
 type AdminPageProps = {
   initialSettings: import("@/lib/settings/types").AdminSettingsSnapshot;
   initialSnapshot: import("@/lib/tasks/types").BackgroundTaskMonitorSnapshot;
+  initialSourceMonitorSnapshot: import("@/lib/source-monitor/types").SourceMonitorSnapshot;
 };
 
 type AdminRouteState = {
@@ -53,6 +56,10 @@ function normalizePrimaryTab(value: string | null): PrimaryTab {
 }
 
 function normalizeMonitorSubSection(value: string | null): MonitorSubSection {
+  if (value === "sources") {
+    return "sources";
+  }
+
   return value === "tasks" ? "tasks" : "content";
 }
 
@@ -127,6 +134,7 @@ function resolveRouteState(searchParams: AdminSearchParams): AdminRouteState {
 export function AdminPageClient({
   initialSettings,
   initialSnapshot,
+  initialSourceMonitorSnapshot,
 }: AdminPageProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -155,7 +163,7 @@ export function AdminPageClient({
   const isAISectionCollapsed =
     primaryTab === "settings" && settingsSection === "ai" ? false : collapsedSections.ai;
   const isContentSectionCollapsed =
-    primaryTab === "monitoring" && monitoringSubSection === "content" ? false : collapsedSections.content;
+    !(primaryTab === "monitoring" && monitoringSubSection === "content");
 
   const navigateAdmin = useCallback((nextState: Partial<AdminRouteState>) => {
     const resolvedPrimaryTab = nextState.primaryTab ?? primaryTab;
@@ -282,6 +290,14 @@ export function AdminPageClient({
           initialPage={taskPage}
           initialPageSize={taskPageSize}
           onDetailRouteChange={navigateTaskDetail}
+        />
+      );
+    }
+
+    if (primaryTab === "monitoring" && monitoringSubSection === "sources") {
+      return (
+        <SourceMonitorPanel
+          initialSnapshot={initialSourceMonitorSnapshot}
         />
       );
     }
@@ -429,6 +445,22 @@ export function AdminPageClient({
                           </SelectableButton>
                         </>
                       )}
+
+                      <SelectableButton
+                        onClick={() => {
+                          navigateAdmin({
+                            primaryTab: "monitoring",
+                            monitoringSubSection: "sources",
+                          });
+                        }}
+                        active={monitoringSubSection === "sources"}
+                        variant="menu"
+                      >
+                        <span className="inline-flex items-center gap-2">
+                          <IconRss className="h-4 w-4" />
+                          <span>信息源监控</span>
+                        </span>
+                      </SelectableButton>
 
                       <SelectableButton
                         onClick={() => {

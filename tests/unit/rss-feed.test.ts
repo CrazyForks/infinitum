@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { buildRssFeed } from "@/lib/feed/rss";
+import { buildRssFeed, mapFeedEntriesToRssItems } from "@/lib/feed/rss";
 import { resolvePublicOrigin, resolvePublicRequestUrl } from "@/lib/http/public-origin";
 
 describe("rss feed renderer", () => {
@@ -20,6 +20,44 @@ describe("rss feed renderer", () => {
 
     expect(rss).toContain("<link>https://example.com/daily</link>");
     expect(rss).toContain('<atom:link href="https://example.com/api/daily/rss" rel="self" type="application/rss+xml" />');
+  });
+
+  it("renders cluster rss descriptions without a cluster summary prefix", () => {
+    const [item] = mapFeedEntriesToRssItems(
+      [
+        {
+          id: "cluster-1",
+          type: "cluster",
+          title: "OpenAI 发布新工具",
+          summary: "OpenAI 发布面向开发者的新工具。",
+          publishedAt: "2026-04-25T10:00:00.000Z",
+          createdAt: "2026-04-25T10:00:00.000Z",
+          latestPublishedAt: "2026-04-25T10:00:00.000Z",
+          score: 90,
+          sourceCount: 2,
+          itemCount: 2,
+          upvotes: 0,
+          downvotes: 0,
+          userVote: null,
+          hasMoreItems: false,
+          itemsPreview: [
+            {
+              id: "item-1",
+              title: "首篇报道",
+              originalUrl: "https://example.com/1",
+              publishedAt: "2026-04-25T10:00:00.000Z",
+              sourceName: "Example",
+              summary: "报道摘要",
+              score: 80,
+            },
+          ],
+        },
+      ],
+      "https://example.com",
+    );
+
+    expect(item?.description).toContain("<p>OpenAI 发布面向开发者的新工具。</p>");
+    expect(item?.description).not.toContain("聚合摘要：");
   });
 
   it("resolves the public origin from forwarded proxy headers", () => {

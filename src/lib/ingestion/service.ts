@@ -17,6 +17,7 @@ import {
   findExistingItemsForDedupeKeys,
   syncSources,
   updateSourceFetchMetadata,
+  updateSourceHealthStatus,
   updateFetchRunProgress,
 } from "@/lib/feed/repository";
 import { invalidateFeedCache } from "@/lib/feed/cache";
@@ -79,6 +80,9 @@ type SourceFetchMetadataUpdate = {
   feedLastModified?: string | null;
   feedContentHash?: string | null;
   lastFetchedAt: Date;
+  healthStatus?: "unknown" | "healthy" | "failed";
+  healthMessage?: string | null;
+  healthCheckedAt?: Date | null;
 };
 
 class TaskRunCancellationError extends Error {
@@ -224,6 +228,17 @@ async function updateSourceMetadataIfChanged(sourceId: string, data: SourceFetch
   await updateSourceFetchMetadata(sourceId, data);
 }
 
+async function markSourceHealth(
+  sourceId: string,
+  data: {
+    healthStatus: "unknown" | "healthy" | "failed";
+    healthMessage: string | null;
+    healthCheckedAt: Date;
+  },
+) {
+  await updateSourceHealthStatus(sourceId, data);
+}
+
 function getExistingItemForLookup(
   lookup: PreparedFeedItemLookup | null,
   existingByUrlHash: Map<string, Item>,
@@ -356,6 +371,9 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
               feedEtag: feed.etag ?? source.feedEtag,
               feedLastModified: feed.lastModified ?? source.feedLastModified,
               lastFetchedAt: now,
+              healthStatus: "healthy",
+              healthMessage: null,
+              healthCheckedAt: now,
             });
             return;
           }
@@ -369,6 +387,9 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
               feedLastModified: feed.lastModified ?? source.feedLastModified,
               feedContentHash,
               lastFetchedAt: now,
+              healthStatus: "healthy",
+              healthMessage: null,
+              healthCheckedAt: now,
             });
             return;
           }
@@ -378,6 +399,14 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
             feedLastModified: feed.lastModified ?? source.feedLastModified,
             feedContentHash,
             lastFetchedAt: now,
+            healthStatus: "healthy",
+            healthMessage: null,
+            healthCheckedAt: now,
+          });
+          await markSourceHealth(source.id, {
+            healthStatus: "healthy",
+            healthMessage: null,
+            healthCheckedAt: now,
           });
 
           for (const item of items) {
@@ -390,7 +419,13 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
             });
           }
         } catch (error) {
-          errors.push(`${source.name}: ${error instanceof Error ? error.message : "Unknown feed error"}`);
+          const message = error instanceof Error ? error.message : "Unknown feed error";
+          await markSourceHealth(source.id, {
+            healthStatus: "failed",
+            healthMessage: message,
+            healthCheckedAt: now,
+          });
+          errors.push(`${source.name}: ${message}`);
           failureCount += 1;
         }
       }),

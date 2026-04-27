@@ -1,4 +1,8 @@
-import { buildRssFeed, mapFeedEntriesToRssItems } from "@/lib/feed/rss";
+import {
+  buildRssFeed,
+  DEFAULT_RSS_FEED_PAGE_SIZE,
+  mapFeedEntriesToRssItems,
+} from "@/lib/feed/rss";
 import { resolveFeedRequest } from "@/lib/feed/request";
 import { getCachedFeedItems } from "@/lib/feed/service";
 import { resolvePublicOrigin, resolvePublicRequestUrl } from "@/lib/http/public-origin";
@@ -23,10 +27,10 @@ export async function GET(request: Request) {
   const baseUrl = resolvePublicOrigin(request);
   const selfLink = resolvePublicRequestUrl(request);
 
-  // RSS feed 默认获取较多条目（50条）
+  // RSS feed 默认获取较多条目（100条）
   const rssPagination = {
     page: 1,
-    size: 50,
+    size: DEFAULT_RSS_FEED_PAGE_SIZE,
   };
 
   const result = await getCachedFeedItems(filters, rssPagination);

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const requireAdmin = vi.fn();
 const getBackgroundTaskMonitorSnapshot = vi.fn();
+const getSourceMonitorSnapshot = vi.fn();
 const updateDefaultIngestionSchedule = vi.fn();
 const requestTaskRunCancellation = vi.fn();
 
@@ -22,6 +23,15 @@ vi.mock("@/lib/tasks/service", async (importOriginal) => {
     getBackgroundTaskMonitorSnapshot,
     updateDefaultIngestionSchedule,
     requestTaskRunCancellation,
+  };
+});
+
+vi.mock("@/lib/source-monitor/service", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/source-monitor/service")>();
+
+  return {
+    ...actual,
+    getSourceMonitorSnapshot,
   };
 });
 
@@ -60,6 +70,44 @@ describe("/api/admin/monitor", () => {
     expect(json.schedule.key).toBe("ingestion_default");
     expect(Array.isArray(json.runningTasks)).toBe(true);
     expect(Array.isArray(json.recentTasks)).toBe(true);
+  });
+
+  it("returns source monitor health and inactivity snapshot", async () => {
+    requireAdmin.mockResolvedValue(undefined);
+    getSourceMonitorSnapshot.mockResolvedValue({
+      generatedAt: "2026-04-21T00:00:00.000Z",
+      totalEnabledSourceCount: 1,
+      health: {
+        healthyCount: 0,
+        failedCount: 1,
+        unknownCount: 0,
+        attentionSources: [
+          {
+            id: "source-1",
+            name: "异常源",
+            rssUrl: "https://example.com/feed.xml",
+            siteUrl: "https://example.com",
+            groupName: null,
+            healthStatus: "failed",
+            healthMessage: "RSS fetch failed with status 500",
+            healthCheckedAt: "2026-04-21T00:00:00.000Z",
+            lastFetchedAt: null,
+            lastItemCreatedAt: null,
+            inactiveDays: null,
+          },
+        ],
+      },
+      inactivityBuckets: [],
+    });
+
+    const { GET } = await import("@/app/api/admin/monitor/sources/route");
+    const response = await GET();
+    const json = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(getSourceMonitorSnapshot).toHaveBeenCalled();
+    expect(json.health.failedCount).toBe(1);
+    expect(json.health.attentionSources[0].name).toBe("异常源");
   });
 
   it("updates enabled and cronExpression", async () => {

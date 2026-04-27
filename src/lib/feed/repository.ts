@@ -118,6 +118,23 @@ export async function updateSourceFetchMetadata(
     feedLastModified?: string | null;
     feedContentHash?: string | null;
     lastFetchedAt: Date;
+    healthStatus?: "unknown" | "healthy" | "failed";
+    healthMessage?: string | null;
+    healthCheckedAt?: Date | null;
+  },
+) {
+  return prisma.source.update({
+    where: { id: sourceId },
+    data,
+  });
+}
+
+export async function updateSourceHealthStatus(
+  sourceId: string,
+  data: {
+    healthStatus: "unknown" | "healthy" | "failed";
+    healthMessage: string | null;
+    healthCheckedAt: Date;
   },
 ) {
   return prisma.source.update({
