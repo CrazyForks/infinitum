@@ -8,7 +8,7 @@ import { AppFooter } from "@/components/ui/app-footer";
 import { ContentReviewPanel } from "@/components/admin/content-review-panel";
 import { AdminSettingsPanel } from "@/components/admin/admin-settings-panel";
 import { TaskMonitorPanel } from "@/components/admin/task-monitor-panel";
-import { SourceMonitorPanel } from "@/components/admin/source-monitor-panel";
+import { IngestionDashboard } from "@/components/admin/ingestion-dashboard";
 import { SelectableButton } from "@/components/ui/selectable-button";
 import { SectionToggleButton } from "@/components/ui/section-toggle-button";
 import {
@@ -23,12 +23,12 @@ import {
   IconArrowUp,
   IconArrowDown,
   IconFilter,
-  IconRss,
+  IconMonitor,
 } from "@/components/ui/icons";
 import type { PromptConfigType } from "@/lib/settings/types";
 
 type PrimaryTab = "monitoring" | "settings";
-type MonitorSubSection = "content" | "sources" | "tasks";
+type MonitorSubSection = "dashboard" | "content" | "tasks";
 type ContentSubSection = "filtered" | "clusters";
 type SettingsSection = "blacklist" | "groups" | "sources" | "tasks" | "ai";
 type AISubSection = "model-api" | "prompt";
@@ -56,11 +56,11 @@ function normalizePrimaryTab(value: string | null): PrimaryTab {
 }
 
 function normalizeMonitorSubSection(value: string | null): MonitorSubSection {
-  if (value === "sources") {
-    return "sources";
+  if (value === "content") {
+    return "content";
   }
 
-  return value === "tasks" ? "tasks" : "content";
+  return value === "tasks" ? "tasks" : "dashboard";
 }
 
 function normalizeContentSubSection(value: string | null): ContentSubSection {
@@ -124,7 +124,7 @@ function resolveRouteState(searchParams: AdminSearchParams): AdminRouteState {
   const settingsSection = normalizeSettingsSection(searchParams.get("section"));
   return {
     primaryTab,
-    monitoringSubSection: "content",
+    monitoringSubSection: "dashboard",
     contentSubSection: "filtered",
     settingsSection,
     aiSubSection: normalizeAISubSection(searchParams.get("view")),
@@ -266,6 +266,15 @@ export function AdminPageClient({
   }, [isContentSectionCollapsed, navigateAdmin]);
 
   const renderMainContent = () => {
+    // Monitoring - Dashboard
+    if (primaryTab === "monitoring" && monitoringSubSection === "dashboard") {
+      return (
+        <IngestionDashboard
+          initialSourceMonitorSnapshot={initialSourceMonitorSnapshot}
+        />
+      );
+    }
+
     // Monitoring - Content Review
     if (primaryTab === "monitoring" && monitoringSubSection === "content") {
       return (
@@ -290,14 +299,6 @@ export function AdminPageClient({
           initialPage={taskPage}
           initialPageSize={taskPageSize}
           onDetailRouteChange={navigateTaskDetail}
-        />
-      );
-    }
-
-    if (primaryTab === "monitoring" && monitoringSubSection === "sources") {
-      return (
-        <SourceMonitorPanel
-          initialSnapshot={initialSourceMonitorSnapshot}
         />
       );
     }
@@ -357,7 +358,7 @@ export function AdminPageClient({
               onClick={() => {
                 navigateAdmin({
                   primaryTab: "monitoring",
-                  monitoringSubSection: "content",
+                  monitoringSubSection: "dashboard",
                 });
               }}
               active={primaryTab === "monitoring"}
@@ -391,6 +392,22 @@ export function AdminPageClient({
                 <div className="space-y-2">
                   {primaryTab === "monitoring" ? (
                     <>
+                      <SelectableButton
+                        onClick={() => {
+                          navigateAdmin({
+                            primaryTab: "monitoring",
+                            monitoringSubSection: "dashboard",
+                          });
+                        }}
+                        active={monitoringSubSection === "dashboard"}
+                        variant="menu"
+                      >
+                        <span className="inline-flex items-center gap-2">
+                          <IconMonitor className="h-4 w-4" />
+                          <span>数据监控</span>
+                        </span>
+                      </SelectableButton>
+
                       <SectionToggleButton
                         label="内容审核"
                         active={monitoringSubSection === "content"}
@@ -445,22 +462,6 @@ export function AdminPageClient({
                           </SelectableButton>
                         </>
                       )}
-
-                      <SelectableButton
-                        onClick={() => {
-                          navigateAdmin({
-                            primaryTab: "monitoring",
-                            monitoringSubSection: "sources",
-                          });
-                        }}
-                        active={monitoringSubSection === "sources"}
-                        variant="menu"
-                      >
-                        <span className="inline-flex items-center gap-2">
-                          <IconRss className="h-4 w-4" />
-                          <span>信息源监控</span>
-                        </span>
-                      </SelectableButton>
 
                       <SelectableButton
                         onClick={() => {

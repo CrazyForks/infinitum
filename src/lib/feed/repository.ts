@@ -137,10 +137,34 @@ export async function updateSourceHealthStatus(
     healthCheckedAt: Date;
   },
 ) {
-  return prisma.source.update({
+  const current = await prisma.source.findUnique({
+    where: { id: sourceId },
+    select: { healthStatus: true, name: true },
+  });
+
+  const previousStatus = current?.healthStatus ?? "unknown";
+  const sourceName = current?.name ?? sourceId;
+
+  const updated = await prisma.source.update({
     where: { id: sourceId },
     data,
   });
+
+  // Log health status changes
+  if (previousStatus !== data.healthStatus) {
+    await prisma.sourceHealthLog.create({
+      data: {
+        sourceId,
+        sourceName,
+        fromStatus: previousStatus,
+        toStatus: data.healthStatus,
+        message: data.healthMessage,
+        changedAt: data.healthCheckedAt,
+      },
+    });
+  }
+
+  return updated;
 }
 
 export async function upsertItem(

@@ -393,6 +393,20 @@ model PromptConfig {
   @@map("prompt_configs")
 }
 
+model SourceHealthLog {
+  id          String   @id @default(cuid())
+  sourceId    String
+  sourceName  String
+  fromStatus  String
+  toStatus    String
+  message     String?
+  changedAt   DateTime @default(now())
+
+  @@index([sourceId, changedAt])
+  @@index([changedAt])
+  @@map("source_health_logs")
+}
+
 model BlacklistKeyword {
   id        String   @id @default(cuid())
   keyword   String   @unique

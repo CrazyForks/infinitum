@@ -54,8 +54,8 @@ vi.mock("@/components/admin/task-monitor-panel", () => ({
   }) => <div>{`任务监控面板:${initialFocusTaskId ?? "none"}`}</div>,
 }));
 
-vi.mock("@/components/admin/source-monitor-panel", () => ({
-  SourceMonitorPanel: () => <div>信息源监控面板</div>,
+vi.mock("@/components/admin/ingestion-dashboard", () => ({
+  IngestionDashboard: () => <div>数据监控面板</div>,
 }));
 
 vi.mock("@/components/admin/admin-settings-panel", () => ({
@@ -226,6 +226,7 @@ describe("AdminPageClient", () => {
 
   it("pushes the selected monitoring sub tab into the url", async () => {
     const user = userEvent.setup();
+    searchParamsState.value = "tab=monitoring&section=content";
 
     renderAdminPageClient();
 
@@ -236,11 +237,11 @@ describe("AdminPageClient", () => {
     });
   });
 
-  it("restores the source monitor tab from the url query", () => {
+  it("defaults to the dashboard when an unknown monitoring section is in the url", () => {
     searchParamsState.value = "tab=monitoring&section=sources";
 
     renderAdminPageClient();
 
-    expect(screen.getByText("信息源监控面板")).toBeInTheDocument();
+    expect(screen.getByText("数据监控面板")).toBeInTheDocument();
   });
 });

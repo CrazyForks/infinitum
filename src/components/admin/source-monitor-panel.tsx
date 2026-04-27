@@ -18,6 +18,7 @@ import { cx } from "@/lib/ui/cx";
 
 type SourceMonitorPanelProps = {
   initialSnapshot: SourceMonitorSnapshot;
+  hideStats?: boolean;
 };
 
 type InactivityFilter = "all" | SourceInactivityBucketKey;
@@ -176,7 +177,7 @@ function SourceTable({
   );
 }
 
-export function SourceMonitorPanel({ initialSnapshot }: SourceMonitorPanelProps) {
+export function SourceMonitorPanel({ initialSnapshot, hideStats = false }: SourceMonitorPanelProps) {
   const { showToast } = useToast();
   const [snapshot, setSnapshot] = useState(initialSnapshot);
   const [inactivityFilter, setInactivityFilter] = useState<InactivityFilter>("all");
@@ -309,11 +310,8 @@ export function SourceMonitorPanel({ initialSnapshot }: SourceMonitorPanelProps)
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1">
           <h2 className="text-lg font-semibold text-[var(--foreground)]">
-            信息源监控
+            信息源详情
           </h2>
-          <p className="text-sm text-[var(--muted)]">
-            查看 RSS 巡检状态和长时间无更新的信息源
-          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button
@@ -333,14 +331,16 @@ export function SourceMonitorPanel({ initialSnapshot }: SourceMonitorPanelProps)
         </div>
       </div>
 
-      <section className="space-y-3" aria-label="健康度检查">
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <StatCard label="启用源" value={snapshot.totalEnabledSourceCount} />
-          <StatCard label="正常" value={snapshot.health.healthyCount} tone="success" />
-          <StatCard label="异常" value={snapshot.health.failedCount} tone="danger" />
-          <StatCard label="未巡检" value={snapshot.health.unknownCount} tone="warning" />
-        </div>
-      </section>
+      {!hideStats ? (
+        <section className="space-y-3" aria-label="健康度检查">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <StatCard label="启用源" value={snapshot.totalEnabledSourceCount} />
+            <StatCard label="正常" value={snapshot.health.healthyCount} tone="success" />
+            <StatCard label="异常" value={snapshot.health.failedCount} tone="danger" />
+            <StatCard label="未巡检" value={snapshot.health.unknownCount} tone="warning" />
+          </div>
+        </section>
+      ) : null}
 
       <section className="space-y-4" aria-label="信息源列表">
         <div className="grid gap-4 md:grid-cols-3">
