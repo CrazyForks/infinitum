@@ -1472,7 +1472,7 @@ export function FeedPanel({
     "inline-flex items-center rounded-sm border border-[color:var(--line)] bg-[var(--surface-muted)] px-2 py-1 text-xs text-[var(--muted)]";
   const denseCardClassName =
     "w-full rounded-lg border border-[color:var(--line)] bg-[var(--surface)] px-4 py-4 shadow-[var(--shadow-sm)] transition hover:border-[color:var(--line-strong)] hover:shadow-md sm:px-6 sm:py-5";
-  const cardMetaRowClassName = "flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-[var(--muted)]";
+  const cardMetaRowClassName = "flex items-center gap-x-3 overflow-hidden text-sm text-[var(--muted)]";
   const cardSummaryClassName = "line-clamp-5 text-sm leading-6 text-[var(--muted)]";
   const clickableCardSummaryClassName =
     "line-clamp-5 w-full cursor-pointer bg-transparent p-0 text-left text-sm leading-6 text-[var(--muted)] transition hover:text-[var(--foreground)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]/35 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)]";
@@ -1851,7 +1851,7 @@ export function FeedPanel({
                         <span className={neutralBadgeClassName}>{formatScore(entry.score)}</span>
                         <span className={metaTextClassName}>{formatMetaLabel("来源", formatClusterSourceLabel(entry))}</span>
                         {getVisibleAuthorLabel(formatClusterAuthorLabel(entry)) ? (
-                          <span className={metaTextClassName}>
+                          <span className={`${metaTextClassName} min-w-0 truncate`}>
                             {formatMetaLabel("作者", getVisibleAuthorLabel(formatClusterAuthorLabel(entry)) ?? "")}
                           </span>
                         ) : null}
@@ -1961,7 +1961,7 @@ export function FeedPanel({
                                 <span className={neutralBadgeClassName}>{formatScore(clusterItem.score)}</span>
                                 <span className={metaTextClassName}>{formatMetaLabel("来源", clusterItem.sourceName)}</span>
                                 {getVisibleAuthorLabel(clusterItem.author) ? (
-                                  <span className={metaTextClassName}>
+                                  <span className={`${metaTextClassName} min-w-0 truncate`}>
                                     {formatMetaLabel("作者", getVisibleAuthorLabel(clusterItem.author) ?? "")}
                                   </span>
                                 ) : null}
@@ -2087,7 +2087,7 @@ export function FeedPanel({
                       <span className={neutralBadgeClassName}>{formatScore(entry.score)}</span>
                       <span className={metaTextClassName}>{formatMetaLabel("来源", entry.sourceName)}</span>
                       {getVisibleAuthorLabel(entry.author) ? (
-                        <span className={metaTextClassName}>
+                        <span className={`${metaTextClassName} min-w-0 truncate`}>
                           {formatMetaLabel("作者", getVisibleAuthorLabel(entry.author) ?? "")}
                         </span>
                       ) : null}
