@@ -50,6 +50,7 @@ describe("AdminMonitorPanel", () => {
       lastRunFinishedAt: null,
       lastRunStatus: null,
       nextRunAt: "2026-04-12T01:00:00.000Z",
+      cleanupRetentionDays: 365,
       isHeartbeatStale: false,
     },
     runningTasks: [

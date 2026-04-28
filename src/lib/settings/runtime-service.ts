@@ -12,7 +12,7 @@ import {
   toSourceConfig,
 } from "@/lib/settings/core";
 import type { AdminSettingsSnapshot } from "@/lib/settings/types";
-import { ensureDefaultDailyReportSchedule, ensureDefaultIngestionSchedule, toTaskScheduleSnapshot } from "@/lib/tasks/service";
+import { ensureDefaultDailyReportSchedule, ensureDefaultIngestionSchedule, ensureDefaultItemCleanupSchedule, toTaskScheduleSnapshot } from "@/lib/tasks/service";
 
 export async function getIngestionRuntimeConfig(): Promise<RuntimeConfig> {
   await ensureRuntimeConfigSeeded();
@@ -89,7 +89,7 @@ export async function getIngestionRuntimeConfig(): Promise<RuntimeConfig> {
 export async function getAdminSettings(): Promise<AdminSettingsSnapshot> {
   await ensureRuntimeConfigSeeded();
 
-  const [modelApiConfigs, promptConfigs, blacklist, groups, sources, taskSchedule, dailyReportSchedule] = await Promise.all([
+  const [modelApiConfigs, promptConfigs, blacklist, groups, sources, taskSchedule, dailyReportSchedule, cleanupSchedule] = await Promise.all([
     prisma.modelApiConfig.findMany({
       orderBy: [{ isDefault: "desc" }, { createdAt: "desc" }],
     }),
@@ -115,6 +115,7 @@ export async function getAdminSettings(): Promise<AdminSettingsSnapshot> {
     }),
     ensureDefaultIngestionSchedule(),
     ensureDefaultDailyReportSchedule(),
+    ensureDefaultItemCleanupSchedule(),
   ]);
   const latestItemsBySource = await prisma.item.groupBy({
     by: ["sourceId"],
@@ -134,6 +135,7 @@ export async function getAdminSettings(): Promise<AdminSettingsSnapshot> {
     blacklistKeywords: blacklist.map((entry) => entry.keyword),
     taskSchedule: toTaskScheduleSnapshot(taskSchedule) as AdminSettingsSnapshot["taskSchedule"],
     dailyReportSchedule: toTaskScheduleSnapshot(dailyReportSchedule) as AdminSettingsSnapshot["dailyReportSchedule"],
+    itemCleanupSchedule: toTaskScheduleSnapshot(cleanupSchedule) as AdminSettingsSnapshot["itemCleanupSchedule"],
     groups: groups.map((group) => ({
       id: group.id,
       name: group.name,

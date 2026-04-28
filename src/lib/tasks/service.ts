@@ -5,16 +5,20 @@ import {
   findRecentTaskRuns,
   upsertDefaultDailyReportSchedule,
   upsertDefaultIngestionSchedule,
+  upsertDefaultItemCleanupSchedule,
 } from "@/lib/tasks/repository";
 import {
   computeNextRunAt,
+  DEFAULT_CLEANUP_RETENTION_DAYS,
   DEFAULT_DAILY_REPORT_CANDIDATE_LIMIT,
   DEFAULT_DAILY_REPORT_MAX_RETRIES,
   DEFAULT_DAILY_REPORT_OFFSET_DAYS,
   isSchedulerHeartbeatStale,
+  MAX_CLEANUP_RETENTION_DAYS,
   MAX_DAILY_REPORT_CANDIDATE_LIMIT,
   MAX_DAILY_REPORT_MAX_RETRIES,
   MAX_DAILY_REPORT_OFFSET_DAYS,
+  MIN_CLEANUP_RETENTION_DAYS,
   MIN_DAILY_REPORT_CANDIDATE_LIMIT,
   MIN_DAILY_REPORT_MAX_RETRIES,
   MIN_DAILY_REPORT_OFFSET_DAYS,
@@ -23,6 +27,7 @@ import {
 import {
   DEFAULT_INGESTION_SCHEDULE_KEY,
   DEFAULT_DAILY_REPORT_SCHEDULE_KEY,
+  DEFAULT_ITEM_CLEANUP_SCHEDULE_KEY,
   type TaskAiCallBreakdownKey,
   type TaskAiCallBreakdownSnapshot,
   type BackgroundTaskMonitorSnapshot,
@@ -307,9 +312,15 @@ function serializeTaskTimeline(taskTimeline: TaskTimelineNodeSnapshot[] | null) 
 }
 
 function getHeartbeatScheduleKeyForTaskKind(kind: BackgroundTaskRunKind) {
-  return kind === "daily_report_generate"
-    ? DEFAULT_DAILY_REPORT_SCHEDULE_KEY
-    : DEFAULT_INGESTION_SCHEDULE_KEY;
+  if (kind === "daily_report_generate") {
+    return DEFAULT_DAILY_REPORT_SCHEDULE_KEY;
+  }
+
+  if (kind === "item_cleanup") {
+    return DEFAULT_ITEM_CLEANUP_SCHEDULE_KEY;
+  }
+
+  return DEFAULT_INGESTION_SCHEDULE_KEY;
 }
 
 export async function ensureDefaultIngestionSchedule() {
@@ -318,6 +329,10 @@ export async function ensureDefaultIngestionSchedule() {
 
 export async function ensureDefaultDailyReportSchedule() {
   return upsertDefaultDailyReportSchedule();
+}
+
+export async function ensureDefaultItemCleanupSchedule() {
+  return upsertDefaultItemCleanupSchedule();
 }
 
 export async function enqueueTaskRun(input: EnqueueTaskRunInput) {
@@ -444,6 +459,7 @@ export function toTaskScheduleSnapshot(schedule: {
   dailyReportOffsetDays: number | null;
   dailyReportAutoPublish: boolean | null;
   dailyReportMaxRetries: number | null;
+  cleanupRetentionDays: number | null;
   processingStartAt: Date | null;
   timezone: string;
   lastHeartbeatAt: Date | null;
@@ -463,6 +479,7 @@ export function toTaskScheduleSnapshot(schedule: {
     dailyReportOffsetDays: schedule.dailyReportOffsetDays ?? DEFAULT_DAILY_REPORT_OFFSET_DAYS,
     dailyReportAutoPublish: schedule.dailyReportAutoPublish ?? false,
     dailyReportMaxRetries: schedule.dailyReportMaxRetries ?? DEFAULT_DAILY_REPORT_MAX_RETRIES,
+    cleanupRetentionDays: schedule.cleanupRetentionDays ?? DEFAULT_CLEANUP_RETENTION_DAYS,
     processingStartAt: schedule.processingStartAt?.toISOString() ?? null,
     timezone: schedule.timezone,
     lastHeartbeatAt: schedule.lastHeartbeatAt?.toISOString() ?? null,
@@ -578,6 +595,53 @@ export async function updateDefaultDailyReportSchedule(input: {
       dailyReportOffsetDays: input.dailyReportOffsetDays,
       dailyReportAutoPublish: input.dailyReportAutoPublish,
       dailyReportMaxRetries: input.dailyReportMaxRetries,
+      nextRunAt,
+    },
+  });
+}
+
+export async function updateDefaultItemCleanupSchedule(input: {
+  enabled: boolean;
+  cronExpression: string;
+  cleanupRetentionDays: number;
+}) {
+  const cronExpression = input.cronExpression.trim();
+
+  if (!cronExpression) {
+    throw new Error("Cron expression is required.");
+  }
+
+  computeNextRunAt({
+    cronExpression,
+    now: new Date(),
+    timezone: "Asia/Shanghai",
+  });
+
+  if (
+    !Number.isInteger(input.cleanupRetentionDays) ||
+    input.cleanupRetentionDays < MIN_CLEANUP_RETENTION_DAYS ||
+    input.cleanupRetentionDays > MAX_CLEANUP_RETENTION_DAYS
+  ) {
+    throw new Error(
+      `Cleanup retention days must be an integer between ${MIN_CLEANUP_RETENTION_DAYS} and ${MAX_CLEANUP_RETENTION_DAYS}.`,
+    );
+  }
+
+  const currentSchedule = await ensureDefaultItemCleanupSchedule();
+  const now = new Date();
+  const nextRunAt = computeNextRunAt({
+    cronExpression,
+    now,
+    anchor: currentSchedule.lastRunFinishedAt ?? now,
+    timezone: currentSchedule.timezone,
+  });
+
+  return prisma.taskSchedule.update({
+    where: { id: currentSchedule.id },
+    data: {
+      enabled: input.enabled,
+      cronExpression,
+      cleanupRetentionDays: input.cleanupRetentionDays,
       nextRunAt,
     },
   });

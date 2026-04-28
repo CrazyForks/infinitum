@@ -174,6 +174,12 @@ function applyIncrementalMigrations() {
     });
   }
 
+  if (!columnExists("task_schedules", "cleanupRetentionDays")) {
+    runSqlite([dbPath], {
+      input: `ALTER TABLE "task_schedules" ADD COLUMN "cleanupRetentionDays" INTEGER NOT NULL DEFAULT 365;\n`,
+    });
+  }
+
   if (!ftsTableExists("items_fts")) {
     runSqlite([dbPath], {
       input: [

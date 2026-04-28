@@ -30,6 +30,7 @@ function buildMonitorSnapshot(): BackgroundTaskMonitorSnapshot {
       lastRunFinishedAt: null,
       lastRunStatus: "running",
       nextRunAt: "2026-04-21T01:00:00.000Z",
+      cleanupRetentionDays: 365,
       isHeartbeatStale: false,
     },
     runningTasks: [

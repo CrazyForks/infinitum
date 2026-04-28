@@ -58,6 +58,7 @@ export type AdminSettingsSnapshot = {
     dailyReportAutoPublish: boolean;
     dailyReportMaxRetries: number;
     processingStartAt?: string | null;
+    cleanupRetentionDays: number;
     timezone: string;
     lastHeartbeatAt: string | null;
     lastRunStartedAt: string | null;
@@ -78,6 +79,20 @@ export type AdminSettingsSnapshot = {
     dailyReportAutoPublish: boolean;
     dailyReportMaxRetries: number;
     processingStartAt?: string | null;
+    cleanupRetentionDays: number;
+    timezone: string;
+    lastHeartbeatAt: string | null;
+    lastRunStartedAt: string | null;
+    lastRunFinishedAt: string | null;
+    lastRunStatus: "queued" | "running" | "succeeded" | "failed" | "partial" | "cancelled" | null;
+    nextRunAt: string;
+    isHeartbeatStale: boolean;
+  };
+  itemCleanupSchedule: {
+    key: "item_cleanup_default";
+    enabled: boolean;
+    cronExpression: string;
+    cleanupRetentionDays: number;
     timezone: string;
     lastHeartbeatAt: string | null;
     lastRunStartedAt: string | null;

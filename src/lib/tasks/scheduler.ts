@@ -22,6 +22,9 @@ export const MAX_DAILY_REPORT_OFFSET_DAYS = 365;
 export const DEFAULT_DAILY_REPORT_MAX_RETRIES = 0;
 export const MIN_DAILY_REPORT_MAX_RETRIES = 0;
 export const MAX_DAILY_REPORT_MAX_RETRIES = 5;
+export const DEFAULT_CLEANUP_RETENTION_DAYS = 365;
+export const MIN_CLEANUP_RETENTION_DAYS = 30;
+export const MAX_CLEANUP_RETENTION_DAYS = 730;
 
 function normalizeProcessingStartAt(value: string | null): string | null {
   const normalized = value?.trim();

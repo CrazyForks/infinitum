@@ -1,4 +1,4 @@
-import type { Item } from "@prisma/client";
+import type { BackgroundTaskRun, Item } from "@prisma/client";
 
 import { createAiProvider, type AiProvider } from "@/lib/ai/provider";
 import { assignItemToCluster, recomputeCluster } from "@/lib/clusters/service";
@@ -7,7 +7,14 @@ import { invalidateFeedCache } from "@/lib/feed/cache";
 import { shouldTranslateTitle, stripHtmlTags } from "@/lib/feed/presentation";
 import { getIngestionRuntimeConfig } from "@/lib/settings/service";
 import { createTaskAiUsageTracker } from "@/lib/tasks/ai-usage";
-import { enqueueTaskRun, updateTaskRun } from "@/lib/tasks/service";
+import {
+  enqueueTaskRun,
+  ensureDefaultItemCleanupSchedule,
+  isTaskRunCancellationRequested,
+  TASK_RUN_CANCELLED_LABEL,
+  TASK_RUN_CANCELLED_MESSAGE,
+  updateTaskRun,
+} from "@/lib/tasks/service";
 
 type RegenerationTarget = "translation" | "summary";
 
@@ -493,4 +500,106 @@ export async function executeItemReanalyzeTask(
     });
     throw error;
   }
+}
+
+const CLEANUP_BATCH_SIZE = 5000;
+
+export async function executeItemCleanupTask(taskRun: BackgroundTaskRun) {
+  const schedule = await ensureDefaultItemCleanupSchedule();
+  const retentionDays = schedule.cleanupRetentionDays;
+  const now = new Date();
+  const cutoff = new Date(now.getTime() - retentionDays * 24 * 60 * 60 * 1000);
+
+  // Cooperative cancellation check before starting
+  if (await isTaskRunCancellationRequested(taskRun.id)) {
+    await updateTaskRun(taskRun.id, {
+      status: "cancelled",
+      progressLabel: TASK_RUN_CANCELLED_LABEL,
+      errorSummary: TASK_RUN_CANCELLED_MESSAGE,
+      finishedAt: now,
+    });
+    return;
+  }
+
+  await updateTaskRun(taskRun.id, {
+    status: "running",
+    progressLabel: "正在查找过期文章...",
+  });
+
+  // Find affected cluster IDs before deleting
+  const itemsToClean = await prisma.item.findMany({
+    where: { createdAt: { lt: cutoff } },
+    select: { clusterId: true },
+  });
+  const affectedClusterIds = [...new Set(itemsToClean.map((i) => i.clusterId).filter(Boolean))] as string[];
+
+  // Estimate total count for progress tracking (snapshot before deletion)
+  const estimatedTotal = itemsToClean.length;
+  let totalDeleted = 0;
+
+  // Batch delete old items to avoid long SQLite write locks.
+  // Prisma's deleteMany doesn't support LIMIT, so we batch by IDs.
+  while (true) {
+    if (await isTaskRunCancellationRequested(taskRun.id)) {
+      await updateTaskRun(taskRun.id, {
+        status: "cancelled",
+        progressCurrent: totalDeleted,
+        progressTotal: estimatedTotal,
+        progressLabel: TASK_RUN_CANCELLED_LABEL,
+        errorSummary: TASK_RUN_CANCELLED_MESSAGE,
+        finishedAt: new Date(),
+      });
+      invalidateFeedCache();
+      return;
+    }
+
+    const batchIds = await prisma.item.findMany({
+      where: { createdAt: { lt: cutoff } },
+      select: { id: true },
+      take: CLEANUP_BATCH_SIZE,
+    });
+
+    if (batchIds.length === 0) {
+      break;
+    }
+
+    const deleted = await prisma.item.deleteMany({
+      where: { id: { in: batchIds.map((i) => i.id) } },
+    });
+
+    totalDeleted += deleted.count;
+
+    await updateTaskRun(taskRun.id, {
+      progressCurrent: totalDeleted,
+      progressTotal: estimatedTotal,
+      progressLabel: `已清理 ${totalDeleted}/${estimatedTotal} 篇文章...`,
+    });
+  }
+
+  // Recompute affected clusters (empty ones will be auto-deleted)
+  for (const clusterId of affectedClusterIds) {
+    if (await isTaskRunCancellationRequested(taskRun.id)) {
+      await updateTaskRun(taskRun.id, {
+        status: "cancelled",
+        progressCurrent: totalDeleted,
+        progressTotal: totalDeleted,
+        progressLabel: TASK_RUN_CANCELLED_LABEL,
+        errorSummary: TASK_RUN_CANCELLED_MESSAGE,
+        finishedAt: new Date(),
+      });
+      return;
+    }
+
+    await recomputeCluster(clusterId);
+  }
+
+  invalidateFeedCache();
+
+  await updateTaskRun(taskRun.id, {
+    status: "succeeded",
+    progressCurrent: totalDeleted,
+    progressTotal: totalDeleted,
+    progressLabel: `已清理 ${totalDeleted} 篇文章，涉及 ${affectedClusterIds.length} 个聚合`,
+    finishedAt: new Date(),
+  });
 }

@@ -4,11 +4,16 @@ import { DEFAULT_POLL_INTERVAL_MS, DEFAULT_TASK_STALE_MS } from "@/config/consta
 import { prisma } from "@/lib/db";
 import { executeTaskRun as defaultExecuteTaskRun } from "@/lib/tasks/handlers";
 import { computeNextRunAt } from "@/lib/tasks/scheduler";
-import { DEFAULT_DAILY_REPORT_TASK_LABEL, DEFAULT_INGESTION_TASK_LABEL } from "@/lib/tasks/types";
+import {
+  DEFAULT_DAILY_REPORT_TASK_LABEL,
+  DEFAULT_INGESTION_TASK_LABEL,
+  DEFAULT_ITEM_CLEANUP_TASK_LABEL,
+} from "@/lib/tasks/types";
 import {
   claimNextQueuedTaskRun,
   ensureDefaultDailyReportSchedule,
   ensureDefaultIngestionSchedule,
+  ensureDefaultItemCleanupSchedule,
   enqueueTaskRun,
   TASK_RUN_CANCELLED_LABEL,
   TASK_RUN_CANCELLED_MESSAGE,
@@ -23,11 +28,12 @@ function sleep(ms: number) {
 async function touchScheduleHeartbeat(now: Date) {
   await ensureDefaultIngestionSchedule();
   await ensureDefaultDailyReportSchedule();
+  await ensureDefaultItemCleanupSchedule();
 
   return prisma.taskSchedule.updateMany({
     where: {
       key: {
-        in: ["ingestion_default", "daily_report_default"],
+        in: ["ingestion_default", "daily_report_default", "item_cleanup_default"],
       },
     },
     data: {
@@ -108,6 +114,47 @@ async function enqueueScheduledDailyReportIfDue(now: Date) {
     triggerType: "scheduled",
     label: `${DEFAULT_DAILY_REPORT_TASK_LABEL} ${date}`,
     entityId: date,
+  });
+
+  await prisma.taskSchedule.update({
+    where: { id: schedule.id },
+    data: {
+      nextRunAt: computeNextRunAt({
+        cronExpression: schedule.cronExpression,
+        now,
+        anchor: schedule.nextRunAt,
+        timezone: schedule.timezone,
+      }),
+    },
+  });
+
+  return true;
+}
+
+async function enqueueScheduledItemCleanupIfDue(now: Date) {
+  const schedule = await ensureDefaultItemCleanupSchedule();
+
+  if (!schedule.enabled || schedule.nextRunAt.getTime() > now.getTime()) {
+    return false;
+  }
+
+  const activeCleanupCount = await prisma.backgroundTaskRun.count({
+    where: {
+      kind: "item_cleanup",
+      status: {
+        in: ["queued", "running"],
+      },
+    },
+  });
+
+  if (activeCleanupCount > 0) {
+    return false;
+  }
+
+  await enqueueTaskRun({
+    kind: "item_cleanup",
+    triggerType: "scheduled",
+    label: DEFAULT_ITEM_CLEANUP_TASK_LABEL,
   });
 
   await prisma.taskSchedule.update({
@@ -250,9 +297,11 @@ export async function runWorkerCycle(options?: {
 
   await ensureDefaultIngestionSchedule();
   await ensureDefaultDailyReportSchedule();
+  await ensureDefaultItemCleanupSchedule();
   await touchScheduleHeartbeat(now);
   const enqueuedScheduledRun = await enqueueScheduledIngestionIfDue(now);
   const enqueuedScheduledDailyReport = await enqueueScheduledDailyReportIfDue(now);
+  const enqueuedScheduledCleanup = await enqueueScheduledItemCleanupIfDue(now);
   const claimedTaskRun = await claimNextQueuedTaskRun();
 
   if (claimedTaskRun) {
@@ -262,6 +311,7 @@ export async function runWorkerCycle(options?: {
   return {
     enqueuedScheduledRun,
     enqueuedScheduledDailyReport,
+    enqueuedScheduledCleanup,
     claimedTaskRunId: claimedTaskRun?.id ?? null,
   };
 }

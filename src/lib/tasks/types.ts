@@ -1,10 +1,13 @@
 export const DEFAULT_INGESTION_SCHEDULE_KEY = "ingestion_default" as const;
 export const DEFAULT_DAILY_REPORT_SCHEDULE_KEY = "daily_report_default" as const;
+export const DEFAULT_ITEM_CLEANUP_SCHEDULE_KEY = "item_cleanup_default" as const;
 export const DEFAULT_INGESTION_TASK_LABEL = "默认抓取任务";
 export const DEFAULT_DAILY_REPORT_TASK_LABEL = "AI 日报生成";
+export const DEFAULT_ITEM_CLEANUP_TASK_LABEL = "文章自动清理";
 
 export type DefaultIngestionScheduleKey = typeof DEFAULT_INGESTION_SCHEDULE_KEY;
 export type DefaultDailyReportScheduleKey = typeof DEFAULT_DAILY_REPORT_SCHEDULE_KEY;
+export type DefaultItemCleanupScheduleKey = typeof DEFAULT_ITEM_CLEANUP_SCHEDULE_KEY;
 
 export type BackgroundTaskRunKind =
   | "ingestion"
@@ -12,7 +15,8 @@ export type BackgroundTaskRunKind =
   | "item_regenerate_summary"
   | "item_reanalyze"
   | "cluster_regenerate_summary"
-  | "daily_report_generate";
+  | "daily_report_generate"
+  | "item_cleanup";
 
 export type BackgroundTaskRunTrigger = "scheduled" | "manual" | "admin_action";
 
@@ -117,7 +121,7 @@ export type TaskRunSnapshot = {
 };
 
 export type TaskScheduleSnapshot = {
-  key: DefaultIngestionScheduleKey | DefaultDailyReportScheduleKey;
+  key: DefaultIngestionScheduleKey | DefaultDailyReportScheduleKey | DefaultItemCleanupScheduleKey;
   enabled: boolean;
   cronExpression: string;
   sourceConcurrency: number;
@@ -127,6 +131,7 @@ export type TaskScheduleSnapshot = {
   dailyReportOffsetDays: number;
   dailyReportAutoPublish: boolean;
   dailyReportMaxRetries: number;
+  cleanupRetentionDays: number;
   processingStartAt?: string | null;
   timezone: string;
   lastHeartbeatAt: string | null;

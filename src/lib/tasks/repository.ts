@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import {
   computeNextRunAt,
+  DEFAULT_CLEANUP_RETENTION_DAYS,
   DEFAULT_SCHEDULE_CRON_EXPRESSION,
   DEFAULT_FULL_TEXT_FETCH_THRESHOLD,
   DEFAULT_DAILY_REPORT_CANDIDATE_LIMIT,
@@ -13,6 +14,7 @@ import {
 import {
   DEFAULT_DAILY_REPORT_SCHEDULE_KEY,
   DEFAULT_INGESTION_SCHEDULE_KEY,
+  DEFAULT_ITEM_CLEANUP_SCHEDULE_KEY,
   type EnqueueTaskRunInput,
 } from "@/lib/tasks/types";
 
@@ -63,6 +65,34 @@ export async function upsertDefaultDailyReportSchedule() {
       timezone: DEFAULT_SCHEDULE_TIMEZONE,
       nextRunAt: computeNextRunAt({
         cronExpression: "30 8 * * *",
+        now,
+        timezone: DEFAULT_SCHEDULE_TIMEZONE,
+      }),
+    },
+  });
+}
+
+export async function upsertDefaultItemCleanupSchedule() {
+  const now = new Date();
+
+  return prisma.taskSchedule.upsert({
+    where: { key: DEFAULT_ITEM_CLEANUP_SCHEDULE_KEY },
+    update: {},
+    create: {
+      key: DEFAULT_ITEM_CLEANUP_SCHEDULE_KEY,
+      enabled: false,
+      cronExpression: "0 3 * * *",
+      sourceConcurrency: DEFAULT_SOURCE_CONCURRENCY,
+      fullTextFetchThreshold: DEFAULT_FULL_TEXT_FETCH_THRESHOLD,
+      perSourceItemLimit: DEFAULT_PER_SOURCE_ITEM_LIMIT,
+      dailyReportCandidateLimit: DEFAULT_DAILY_REPORT_CANDIDATE_LIMIT,
+      dailyReportOffsetDays: DEFAULT_DAILY_REPORT_OFFSET_DAYS,
+      dailyReportAutoPublish: false,
+      dailyReportMaxRetries: DEFAULT_DAILY_REPORT_MAX_RETRIES,
+      cleanupRetentionDays: DEFAULT_CLEANUP_RETENTION_DAYS,
+      timezone: DEFAULT_SCHEDULE_TIMEZONE,
+      nextRunAt: computeNextRunAt({
+        cronExpression: "0 3 * * *",
         now,
         timezone: DEFAULT_SCHEDULE_TIMEZONE,
       }),

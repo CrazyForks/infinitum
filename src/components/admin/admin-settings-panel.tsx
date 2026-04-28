@@ -24,6 +24,7 @@ import {
   resolveSourceFromRssUrl,
   saveDefaultDailyReportSchedule,
   saveDefaultIngestionSchedule,
+  saveDefaultItemCleanupSchedule,
   submitAdminSettingsAction,
 } from "@/components/admin/admin-settings-panel.api";
 import { AiSettingsPanel } from "@/components/admin/ai-settings-panel";
@@ -43,9 +44,11 @@ import { useToast } from "@/components/ui/toast";
 import type { AdminSettingsSnapshot, PromptConfigType } from "@/lib/settings/types";
 import {
   DEFAULT_SCHEDULE_TIMEZONE,
+  MAX_CLEANUP_RETENTION_DAYS,
   MAX_DAILY_REPORT_OFFSET_DAYS,
   MAX_FULL_TEXT_FETCH_THRESHOLD,
   MAX_SOURCE_CONCURRENCY,
+  MIN_CLEANUP_RETENTION_DAYS,
   MIN_DAILY_REPORT_OFFSET_DAYS,
   MIN_FULL_TEXT_FETCH_THRESHOLD,
   MIN_SOURCE_CONCURRENCY,
@@ -261,6 +264,18 @@ export function AdminSettingsPanel({
   );
   const [dailyReportScheduleSnapshot, setDailyReportScheduleSnapshot] = useState(
     initialSettings.dailyReportSchedule,
+  );
+  const [cleanupScheduleEnabled, setCleanupScheduleEnabled] = useState(
+    initialSettings.itemCleanupSchedule.enabled,
+  );
+  const [cleanupScheduleCronExpression, setCleanupScheduleCronExpression] = useState(
+    initialSettings.itemCleanupSchedule.cronExpression,
+  );
+  const [cleanupScheduleRetentionDays, setCleanupScheduleRetentionDays] = useState(
+    String(initialSettings.itemCleanupSchedule.cleanupRetentionDays),
+  );
+  const [cleanupScheduleSnapshot, setCleanupScheduleSnapshot] = useState(
+    initialSettings.itemCleanupSchedule,
   );
   const normalizedBlacklistKeywords = blacklistText
     .split("\n")
@@ -803,6 +818,39 @@ export function AdminSettingsPanel({
       }
     });
   };
+  const saveItemCleanupSchedule = () => {
+    const parsedRetentionDays = Number.parseInt(cleanupScheduleRetentionDays.trim(), 10);
+
+    if (
+      !Number.isInteger(parsedRetentionDays) ||
+      parsedRetentionDays < MIN_CLEANUP_RETENTION_DAYS ||
+      parsedRetentionDays > MAX_CLEANUP_RETENTION_DAYS
+    ) {
+      showToast(
+        `保留天数需为 ${MIN_CLEANUP_RETENTION_DAYS}-${MAX_CLEANUP_RETENTION_DAYS} 的整数。`,
+        "error",
+      );
+      return;
+    }
+
+    startTransition(async () => {
+      try {
+        const schedule = await saveDefaultItemCleanupSchedule({
+          enabled: cleanupScheduleEnabled,
+          cronExpression: cleanupScheduleCronExpression,
+          cleanupRetentionDays: parsedRetentionDays,
+        });
+
+        setCleanupScheduleSnapshot(schedule);
+        setCleanupScheduleEnabled(schedule.enabled);
+        setCleanupScheduleCronExpression(schedule.cronExpression);
+        setCleanupScheduleRetentionDays(String(schedule.cleanupRetentionDays));
+        showToast("清理任务配置已保存。", "success");
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : "清理任务配置保存失败。", "error");
+      }
+    });
+  };
   const taskScheduleIsDirty =
     taskScheduleEnabled !== taskScheduleSnapshot.enabled ||
     taskScheduleCronExpression.trim() !== taskScheduleSnapshot.cronExpression ||
@@ -817,6 +865,10 @@ export function AdminSettingsPanel({
     dailyReportOffsetDays.trim() !== String(dailyReportScheduleSnapshot.dailyReportOffsetDays) ||
     dailyReportMaxRetries.trim() !== String(dailyReportScheduleSnapshot.dailyReportMaxRetries) ||
     dailyReportAutoPublish !== dailyReportScheduleSnapshot.dailyReportAutoPublish;
+  const cleanupScheduleIsDirty =
+    cleanupScheduleEnabled !== cleanupScheduleSnapshot.enabled ||
+    cleanupScheduleCronExpression.trim() !== cleanupScheduleSnapshot.cronExpression ||
+    cleanupScheduleRetentionDays.trim() !== String(cleanupScheduleSnapshot.cleanupRetentionDays);
 
   const content = (
     <section aria-label="后台设置工作台" className="space-y-4">
@@ -1736,6 +1788,68 @@ export function AdminSettingsPanel({
                     max={MAX_DAILY_REPORT_CANDIDATE_LIMIT}
                     value={dailyReportCandidateLimit}
                     onChange={(event) => setDailyReportCandidateLimit(event.target.value)}
+                  />
+                </FormField>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {activeSection === "tasks" ? (
+          <div className="border-t border-[color:var(--line)] pt-6">
+            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+              <div className="space-y-1">
+                <h2 className="text-lg font-semibold text-[var(--text-1)]">
+                  清理任务
+                </h2>
+                <p className="text-sm text-[var(--text-3)]">
+                  自动清理超过保留天数的文章，已删除文章关联的聚合将自动重算
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  onClick={() =>
+                    saveItemCleanupSchedule()
+                  }
+                  variant="primary"
+                  disabled={!cleanupScheduleIsDirty}
+                >
+                  保存配置
+                </Button>
+              </div>
+            </div>
+
+            <div className="min-w-0 space-y-4">
+              <div className="grid gap-4 md:grid-cols-3">
+                <FormField label="启用" htmlFor="cleanup-schedule-enabled">
+                  <label className="flex min-h-10 items-center gap-2 rounded-sm border border-[color:var(--line)] bg-[var(--surface)] px-3 text-sm text-[var(--text-2)]">
+                    <input
+                      id="cleanup-schedule-enabled"
+                      checked={cleanupScheduleEnabled}
+                      className={checkboxInputClassName}
+                      type="checkbox"
+                      onChange={(event) => setCleanupScheduleEnabled(event.target.checked)}
+                    />
+                    <span>启用自动清理</span>
+                  </label>
+                </FormField>
+
+                <FormField label="Cron 表达式" htmlFor="cleanup-cron-expression">
+                  <TextInput
+                    id="cleanup-cron-expression"
+                    value={cleanupScheduleCronExpression}
+                    onChange={(event) => setCleanupScheduleCronExpression(event.target.value)}
+                  />
+                </FormField>
+
+                <FormField label="保留天数" htmlFor="cleanup-retention-days">
+                  <TextInput
+                    id="cleanup-retention-days"
+                    type="number"
+                    min={MIN_CLEANUP_RETENTION_DAYS}
+                    max={MAX_CLEANUP_RETENTION_DAYS}
+                    value={cleanupScheduleRetentionDays}
+                    onChange={(event) => setCleanupScheduleRetentionDays(event.target.value)}
                   />
                 </FormField>
               </div>

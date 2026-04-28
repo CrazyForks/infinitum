@@ -64,6 +64,7 @@ const kindLabels: Record<TaskRunSnapshot["kind"], string> = {
   item_regenerate_translation: "译文重生成",
   cluster_regenerate_summary: "聚合摘要重生成",
   daily_report_generate: "AI 日报生成",
+  item_cleanup: "文章自动清理",
 };
 
 const triggerLabels: Record<TaskRunSnapshot["triggerType"], string> = {

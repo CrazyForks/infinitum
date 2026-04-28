@@ -29,6 +29,11 @@ type DailyReportSchedulePayload = {
   schedule?: AdminSettingsSnapshot["dailyReportSchedule"];
 };
 
+type ItemCleanupSchedulePayload = {
+  error?: string;
+  schedule?: AdminSettingsSnapshot["itemCleanupSchedule"];
+};
+
 type GroupReorderPayload = {
   error?: string;
   groups?: AdminSettingsSnapshot["groups"];
@@ -129,6 +134,25 @@ export async function saveDefaultDailyReportSchedule(input: {
 
   if (!payload.schedule) {
     throw new Error("日报任务配置保存失败。");
+  }
+
+  return payload.schedule;
+}
+
+export async function saveDefaultItemCleanupSchedule(input: {
+  enabled: boolean;
+  cronExpression: string;
+  cleanupRetentionDays: number;
+}) {
+  const payload = await requestAdminSettingsJson<ItemCleanupSchedulePayload>(
+    "/api/admin/monitor/schedule/item-cleanup-default",
+    "PATCH",
+    input,
+    "清理任务配置保存失败。",
+  );
+
+  if (!payload.schedule) {
+    throw new Error("清理任务配置保存失败。");
   }
 
   return payload.schedule;

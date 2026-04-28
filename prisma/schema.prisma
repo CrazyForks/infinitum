@@ -55,6 +55,7 @@ enum BackgroundTaskKind {
   item_reanalyze
   cluster_regenerate_summary
   daily_report_generate
+  item_cleanup
 }
 
 enum BackgroundTaskTrigger {
@@ -254,6 +255,7 @@ model TaskSchedule {
   dailyReportOffsetDays Int                @default(0)
   dailyReportAutoPublish Boolean          @default(false)
   dailyReportMaxRetries Int              @default(0)
+  cleanupRetentionDays Int               @default(365)
   processingStartAt DateTime?
   timezone          String
   lastHeartbeatAt   DateTime?
