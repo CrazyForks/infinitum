@@ -6,6 +6,7 @@ import { INGESTION_PROGRESS_FLUSH_INTERVAL_MS } from "@/config/constants";
 import type { RuntimeConfig } from "@/config/runtime";
 import { createAiProvider } from "@/lib/ai/provider";
 import {
+  executeClusterMerge,
   recomputeCluster,
   type ClusterRecomputeResult,
 } from "@/lib/clusters/service";
@@ -73,7 +74,8 @@ type RuntimePromptConfig =
   | RuntimePromptConfigs["itemSummary"]
   | RuntimePromptConfigs["itemAnalysis"]
   | RuntimePromptConfigs["clusterSummary"]
-  | RuntimePromptConfigs["clusterMatch"];
+  | RuntimePromptConfigs["clusterMatch"]
+  | RuntimePromptConfigs["clusterMerge"];
 
 type SourceFetchMetadataUpdate = {
   feedEtag?: string | null;
@@ -143,6 +145,7 @@ async function resolveRunOptions(options?: Partial<RunIngestionOptions>): Promis
               itemAnalysis: runtimeConfig.selectedPromptConfigs.itemAnalysis,
               clusterSummary: runtimeConfig.selectedPromptConfigs.clusterSummary,
               clusterMatch: runtimeConfig.selectedPromptConfigs.clusterMatch,
+              clusterMerge: runtimeConfig.selectedPromptConfigs.clusterMerge,
             }
           : undefined,
       ),
@@ -168,6 +171,7 @@ async function resolveRunOptions(options?: Partial<RunIngestionOptions>): Promis
           itemAnalysis: resolvePromptModelName(runtimeConfig.selectedPromptConfigs.itemAnalysis, defaultModelName),
           clusterSummary: resolvePromptModelName(runtimeConfig.selectedPromptConfigs.clusterSummary, defaultModelName),
           clusterMatch: resolvePromptModelName(runtimeConfig.selectedPromptConfigs.clusterMatch, defaultModelName),
+          clusterMerge: resolvePromptModelName(runtimeConfig.selectedPromptConfigs.clusterMerge, defaultModelName),
         }
       : createIngestionTimelineModelNames(),
   };
@@ -645,6 +649,22 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
     stageTracker.finishStage(itemProcessingStage);
   }
   await throwIfCancellationRequested();
+
+  // Cluster merge pass: AI检查7天内聚合组，合并事件一致但未归入同一组的聚合组
+  const mergeResult = await executeClusterMerge(
+    trackedAiProvider,
+    options.now,
+  );
+  timelineCounters.clusterMerge = {
+    candidates: mergeResult.candidates,
+    skipped: mergeResult.skipped,
+    merged: mergeResult.mergedCount,
+  };
+  if (mergeResult.affectedClusterIds.length > 0) {
+    for (const clusterId of mergeResult.affectedClusterIds) {
+      affectedClusterIds.add(clusterId);
+    }
+  }
 
   const clusterFinalizeStage = stageTracker.startStage("cluster_finalize", "聚合收尾");
   taskStages.clusterFinalize = clusterFinalizeStage;

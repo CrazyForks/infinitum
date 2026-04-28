@@ -8,6 +8,8 @@ import {
 import {
   DEFAULT_CLUSTER_MATCH_PROMPT,
   DEFAULT_CLUSTER_MATCH_USER_PROMPT_TEMPLATE,
+  DEFAULT_CLUSTER_MERGE_PROMPT,
+  DEFAULT_CLUSTER_MERGE_USER_PROMPT_TEMPLATE,
   DEFAULT_CLUSTER_SUMMARY_PROMPT,
   DEFAULT_CLUSTER_SUMMARY_USER_PROMPT_TEMPLATE,
   DEFAULT_DAILY_REPORT_PROMPT,
@@ -60,6 +62,8 @@ type ParsedEnrichmentResult =
       reason: string;
     };
 
+export type MergeGroup = string[];
+
 export type AiProvider = {
   summarizeItem(inputText: string, metadata: { title: string; sourceName?: string }): Promise<string>;
   enrichContent(
@@ -71,6 +75,7 @@ export type AiProvider = {
     inputText: string,
     metadata: { title: string; candidates: Array<{ id: string; title: string; summary: string }> },
   ): Promise<string | null>;
+  mergeClusters(clustersJson: string): Promise<MergeGroup[]>;
   generateDailyReport(
     input: { date: string; timezone: string; articles: unknown[] },
   ): Promise<string | null>;
@@ -105,6 +110,7 @@ type PromptOverrides = {
   itemAnalysis?: PromptRuntimeConfig;
   clusterSummary?: PromptRuntimeConfig;
   clusterMatch?: PromptRuntimeConfig;
+  clusterMerge?: PromptRuntimeConfig;
   dailyReport?: PromptRuntimeConfig;
 };
 
@@ -415,6 +421,41 @@ function buildEnrichmentFromParsed(
   };
 }
 
+function parseMergeGroups(rawContent: string, validClusterIds: string[]): string[][] {
+  const normalized = stripCodeFence(rawContent);
+  const validSet = new Set(validClusterIds);
+
+  try {
+    const parsed = JSON.parse(normalized) as { mergeGroups?: unknown };
+    if (!Array.isArray(parsed.mergeGroups)) {
+      return [];
+    }
+
+    const groups: string[][] = [];
+    const seenIds = new Set<string>();
+
+    for (const group of parsed.mergeGroups) {
+      if (!Array.isArray(group) || group.length < 2) {
+        continue;
+      }
+      const validGroup: string[] = [];
+      for (const id of group) {
+        if (typeof id === "string" && validSet.has(id) && !seenIds.has(id)) {
+          validGroup.push(id);
+          seenIds.add(id);
+        }
+      }
+      if (validGroup.length >= 2) {
+        groups.push(validGroup);
+      }
+    }
+
+    return groups;
+  } catch {
+    return [];
+  }
+}
+
 function parseClusterMatchCandidateId(rawContent: string, candidateIds: string[]): string | null {
   const normalized = stripCodeFence(rawContent);
 
@@ -513,6 +554,11 @@ export function createAiProvider(
     DEFAULT_CLUSTER_MATCH_PROMPT,
     DEFAULT_CLUSTER_MATCH_USER_PROMPT_TEMPLATE,
     promptOverrides?.clusterMatch,
+  );
+  const clusterMergeConfig = resolvePromptConfig(
+    DEFAULT_CLUSTER_MERGE_PROMPT,
+    DEFAULT_CLUSTER_MERGE_USER_PROMPT_TEMPLATE,
+    promptOverrides?.clusterMerge,
   );
   const dailyReportConfig = resolvePromptConfig(
     DEFAULT_DAILY_REPORT_PROMPT,
@@ -693,6 +739,25 @@ export function createAiProvider(
         output,
         metadata.candidates.map((candidate) => candidate.id),
       );
+    },
+    async mergeClusters(clustersJson) {
+      const parsed = JSON.parse(clustersJson) as Array<{ id: string }>;
+      const validIds = parsed.map((c) => c.id);
+      const output = await completeTextWithCircuitBreaker(
+        clusterMergeConfig,
+        renderPromptTemplate(clusterMergeConfig.promptTemplate, {
+          clustersJson,
+        }),
+        {
+          responseFormat: { type: "json_object" },
+        },
+      );
+
+      if (output == null) {
+        return [];
+      }
+
+      return parseMergeGroups(output, validIds);
     },
     async generateDailyReport(input) {
       return completeTextWithCircuitBreaker(

@@ -366,13 +366,38 @@ export async function validatePromptConfigInput(
   }
 }
 
+const ALL_PROMPT_TYPES = [
+  PromptConfigType.item_summary,
+  PromptConfigType.item_analysis,
+  PromptConfigType.cluster_summary,
+  PromptConfigType.cluster_match,
+  PromptConfigType.cluster_merge,
+  PromptConfigType.daily_report,
+] as const;
+
+function resolveSystemPromptByType(type: PromptConfigType, fileConfig: RuntimeConfig): string {
+  switch (type) {
+    case PromptConfigType.item_summary:
+      return fileConfig.prompts.itemSummary;
+    case PromptConfigType.item_analysis:
+      return fileConfig.prompts.itemAnalysis;
+    case PromptConfigType.cluster_summary:
+      return fileConfig.prompts.clusterSummary;
+    case PromptConfigType.cluster_match:
+      return fileConfig.prompts.clusterMatch;
+    case PromptConfigType.cluster_merge:
+      return fileConfig.prompts.clusterMerge;
+    case PromptConfigType.daily_report:
+      return fileConfig.prompts.dailyReport;
+  }
+}
+
 async function ensureModelAndPromptConfigsSeeded() {
   const fileConfig = getRuntimeConfig();
 
-  const [modelConfigCount, promptConfigCount, dailyReportPromptCount, sourceCount, blacklistCount] = await Promise.all([
+  const [modelConfigCount, promptConfigCount, sourceCount, blacklistCount] = await Promise.all([
     prisma.modelApiConfig.count(),
     prisma.promptConfig.count(),
-    prisma.promptConfig.count({ where: { type: PromptConfigType.daily_report } }),
     prisma.source.count(),
     prisma.blacklistKeyword.count(),
   ]);
@@ -380,11 +405,17 @@ async function ensureModelAndPromptConfigsSeeded() {
   if (
     modelConfigCount > 0 &&
     promptConfigCount > 0 &&
-    dailyReportPromptCount > 0 &&
     (sourceCount > 0 || fileConfig.rssSources.length === 0) &&
     (blacklistCount > 0 || fileConfig.blacklistKeywords.length === 0)
   ) {
-    return;
+    // Verify all expected prompt config types exist; missing ones will be backfilled
+    const existingTypes = await prisma.promptConfig.findMany({
+      where: { type: { in: ALL_PROMPT_TYPES as unknown as PromptConfigType[] } },
+      select: { type: true },
+    });
+    if (ALL_PROMPT_TYPES.every((type) => existingTypes.some((row) => row.type === type))) {
+      return;
+    }
   }
 
   await prisma.$transaction(async (tx) => {
@@ -406,29 +437,13 @@ async function ensureModelAndPromptConfigsSeeded() {
 
     if (promptConfigCount === 0) {
       await tx.promptConfig.createMany({
-        data: [
-          PromptConfigType.item_summary,
-          PromptConfigType.item_analysis,
-          PromptConfigType.cluster_summary,
-          PromptConfigType.cluster_match,
-          PromptConfigType.daily_report,
-        ].map((type) => {
+        data: ALL_PROMPT_TYPES.map((type) => {
           const sampling = getDefaultPromptSampling(type);
-
           return {
             name: getDefaultPromptConfigName(type),
             type,
             prompt: getDefaultPromptTemplate(type),
-            systemPrompt:
-              type === PromptConfigType.item_summary
-                ? fileConfig.prompts.itemSummary
-                : type === PromptConfigType.item_analysis
-                  ? fileConfig.prompts.itemAnalysis
-                  : type === PromptConfigType.cluster_summary
-                    ? fileConfig.prompts.clusterSummary
-                    : type === PromptConfigType.cluster_match
-                      ? fileConfig.prompts.clusterMatch
-                      : fileConfig.prompts.dailyReport,
+            systemPrompt: resolveSystemPromptByType(type, fileConfig),
             temperature: sampling.temperature,
             maxTokens: sampling.maxTokens,
             topP: sampling.topP,
@@ -440,27 +455,31 @@ async function ensureModelAndPromptConfigsSeeded() {
       });
     }
 
-    if (promptConfigCount > 0) {
-      const dailyReportPromptCount = await tx.promptConfig.count({
-        where: { type: PromptConfigType.daily_report },
+    // Backfill any missing prompt config types (e.g. added in a newer version)
+    const existingTypes = (
+      await tx.promptConfig.findMany({
+        where: { type: { in: ALL_PROMPT_TYPES as unknown as PromptConfigType[] } },
+        select: { type: true },
+      })
+    ).map((row) => row.type);
+    const missingTypes = ALL_PROMPT_TYPES.filter((type) => !existingTypes.includes(type));
+
+    for (const type of missingTypes) {
+      const sampling = getDefaultPromptSampling(type);
+      await tx.promptConfig.create({
+        data: {
+          name: getDefaultPromptConfigName(type),
+          type,
+          prompt: getDefaultPromptTemplate(type),
+          systemPrompt: resolveSystemPromptByType(type, fileConfig),
+          temperature: sampling.temperature,
+          maxTokens: sampling.maxTokens,
+          topP: sampling.topP,
+          modelApiConfigId: null,
+          isEnabled: true,
+          isDefault: true,
+        },
       });
-      if (dailyReportPromptCount === 0) {
-        const sampling = getDefaultPromptSampling(PromptConfigType.daily_report);
-        await tx.promptConfig.create({
-          data: {
-            name: getDefaultPromptConfigName(PromptConfigType.daily_report),
-            type: PromptConfigType.daily_report,
-            prompt: getDefaultPromptTemplate(PromptConfigType.daily_report),
-            systemPrompt: fileConfig.prompts.dailyReport,
-            temperature: sampling.temperature,
-            maxTokens: sampling.maxTokens,
-            topP: sampling.topP,
-            modelApiConfigId: null,
-            isEnabled: true,
-            isDefault: true,
-          },
-        });
-      }
     }
 
     if (shouldSeedDefaultSources && fileConfig.rssSources.length > 0) {

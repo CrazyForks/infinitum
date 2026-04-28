@@ -425,6 +425,12 @@ describe("background task persistence", () => {
         estimated: 2,
       },
       {
+        key: "cluster_merge",
+        label: "聚合合并",
+        actual: 0,
+        estimated: 0,
+      },
+      {
         key: "daily_report",
         label: "AI 日报",
         actual: 0,

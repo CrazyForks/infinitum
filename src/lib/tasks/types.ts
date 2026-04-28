@@ -50,6 +50,7 @@ export type TaskTimelineNodeKey =
   | "item_summary"
   | "item_analysis"
   | "cluster_assignment"
+  | "cluster_merge"
   | "cluster_finalize";
 
 export type TaskTimelineNodeStatus =
@@ -81,6 +82,7 @@ export type TaskAiCallBreakdownKey =
   | "item_analysis"
   | "cluster_match"
   | "cluster_summary"
+  | "cluster_merge"
   | "daily_report";
 
 export type TaskAiCallBreakdownSnapshot = {

@@ -167,6 +167,7 @@ describe("runIngestion", () => {
       { key: "item_analysis", label: "内容分析", actual: 2, estimated: 2 },
       { key: "cluster_match", label: "聚合匹配", actual: 0, estimated: 0 },
       { key: "cluster_summary", label: "聚合摘要", actual: 1, estimated: 1 },
+      { key: "cluster_merge", label: "聚合合并", actual: 0, estimated: 0 },
       { key: "daily_report", label: "AI 日报", actual: 0, estimated: 0 },
     ]);
     expect(taskTimeline.map((node) => node.key)).toEqual([
@@ -175,6 +176,7 @@ describe("runIngestion", () => {
       "item_summary",
       "item_analysis",
       "cluster_assignment",
+      "cluster_merge",
       "cluster_finalize",
     ]);
     expect(taskTimeline[0]?.metrics).toEqual([
@@ -193,7 +195,7 @@ describe("runIngestion", () => {
       { label: "跳过", value: 0 },
       { label: "新建", value: 1 },
     ]);
-    expect(taskTimeline[5]?.metrics).toEqual([
+    expect(taskTimeline[6]?.metrics).toEqual([
       { label: "参与重算", value: 1 },
       { label: "完成更新", value: 1 },
       { label: "摘要完成", value: 1 },

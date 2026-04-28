@@ -15,6 +15,7 @@ const AI_CALL_BREAKDOWN_LABELS: Record<TaskAiCallBreakdownKey, string> = {
   item_analysis: "内容分析",
   cluster_match: "聚合匹配",
   cluster_summary: "聚合摘要",
+  cluster_merge: "聚合合并",
   daily_report: "AI 日报",
 };
 
@@ -26,6 +27,7 @@ function createEmptyBreakdownState(): TaskAiUsageBreakdownState {
     item_analysis: { actual: 0, estimated: 0 },
     cluster_match: { actual: 0, estimated: 0 },
     cluster_summary: { actual: 0, estimated: 0 },
+    cluster_merge: { actual: 0, estimated: 0 },
     daily_report: { actual: 0, estimated: 0 },
   };
 }
@@ -140,6 +142,12 @@ export function createTaskAiUsageTracker(
           }
           syncEstimateFloor();
           return aiProvider.matchClusterCandidate(inputText, metadata);
+        },
+        async mergeClusters(clustersJson) {
+          incrementActual("cluster_merge");
+          incrementEstimated("cluster_merge");
+          syncEstimateFloor();
+          return aiProvider.mergeClusters(clustersJson);
         },
         async generateDailyReport(input) {
           incrementActual("daily_report");

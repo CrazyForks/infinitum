@@ -1,6 +1,7 @@
 import { DEFAULT_BLACKLIST_KEYWORDS } from "@/config/blacklist";
 import {
   DEFAULT_CLUSTER_MATCH_PROMPT,
+  DEFAULT_CLUSTER_MERGE_PROMPT,
   DEFAULT_CLUSTER_SUMMARY_PROMPT,
   DEFAULT_DAILY_REPORT_PROMPT,
   DEFAULT_ITEM_ANALYSIS_PROMPT,
@@ -33,6 +34,7 @@ export type RuntimeConfig = {
     itemAnalysis: string;
     clusterSummary: string;
     clusterMatch: string;
+    clusterMerge: string;
     dailyReport: string;
   };
   selectedPromptConfigs?: {
@@ -64,6 +66,15 @@ export type RuntimeConfig = {
       modelApi?: RuntimeConfig["modelApi"] | null;
     };
     clusterMatch: {
+      name: string;
+      systemPrompt: string;
+      promptTemplate: string;
+      temperature?: number | null;
+      maxTokens?: number | null;
+      topP?: number | null;
+      modelApi?: RuntimeConfig["modelApi"] | null;
+    };
+    clusterMerge: {
       name: string;
       systemPrompt: string;
       promptTemplate: string;
@@ -105,6 +116,7 @@ export function getRuntimeConfig(): RuntimeConfig {
       itemAnalysis: DEFAULT_ITEM_ANALYSIS_PROMPT,
       clusterSummary: DEFAULT_CLUSTER_SUMMARY_PROMPT,
       clusterMatch: DEFAULT_CLUSTER_MATCH_PROMPT,
+      clusterMerge: DEFAULT_CLUSTER_MERGE_PROMPT,
       dailyReport: DEFAULT_DAILY_REPORT_PROMPT,
     },
   };

@@ -53,6 +53,7 @@ export async function getIngestionRuntimeConfig(): Promise<RuntimeConfig> {
   const itemSummaryConfig = pickPromptConfigByType(promptConfigs, PromptConfigType.item_summary);
   const clusterSummaryConfig = pickPromptConfigByType(promptConfigs, PromptConfigType.cluster_summary);
   const clusterMatchConfig = pickPromptConfigByType(promptConfigs, PromptConfigType.cluster_match);
+  const clusterMergeConfig = pickPromptConfigByType(promptConfigs, PromptConfigType.cluster_merge);
   const dailyReportConfig = pickPromptConfigByType(promptConfigs, PromptConfigType.daily_report);
 
   return {
@@ -71,6 +72,7 @@ export async function getIngestionRuntimeConfig(): Promise<RuntimeConfig> {
       itemAnalysis: itemAnalysisConfig.systemPrompt || itemAnalysisConfig.prompt,
       clusterSummary: clusterSummaryConfig.systemPrompt || clusterSummaryConfig.prompt,
       clusterMatch: clusterMatchConfig.systemPrompt || clusterMatchConfig.prompt,
+      clusterMerge: clusterMergeConfig.systemPrompt || clusterMergeConfig.prompt,
       dailyReport: dailyReportConfig.systemPrompt || dailyReportConfig.prompt,
     },
     selectedPromptConfigs: {
@@ -78,6 +80,7 @@ export async function getIngestionRuntimeConfig(): Promise<RuntimeConfig> {
       itemAnalysis: serializeSelectedPromptConfig(itemAnalysisConfig),
       clusterSummary: serializeSelectedPromptConfig(clusterSummaryConfig),
       clusterMatch: serializeSelectedPromptConfig(clusterMatchConfig),
+      clusterMerge: serializeSelectedPromptConfig(clusterMergeConfig),
       dailyReport: serializeSelectedPromptConfig(dailyReportConfig),
     },
   };

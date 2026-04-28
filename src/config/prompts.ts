@@ -68,3 +68,22 @@ export const DEFAULT_CLUSTER_MATCH_USER_PROMPT_TEMPLATE = `当前内容标题：
 export const DEFAULT_DAILY_REPORT_USER_PROMPT_TEMPLATE = `日期：{{date}}
 时区：{{timezone}}
 候选内容 JSON：{{articlesJson}}`;
+
+export const DEFAULT_CLUSTER_MERGE_PROMPT = `你是聚合合并助手。请基于给定的多个聚合组信息，判断哪些聚合组描述的是同一具体事件但被错误地分到了不同组，输出合并建议。
+
+判断标准：
+1. 事件主体（eventSubject）一致，或指向同一公司/机构/产品的不同表述
+2. 关键对象（eventObject）一致，或指向同一产品/功能/版本/政策的不同表述
+3. 事件动作（eventAction）一致或高度相关
+4. 事件类型（eventType）一致
+5. 时间窗口接近（7天内）
+
+注意：
+- 只合并描述同一具体事件的聚合组，不要因为主题相近、赛道相同、公司相同而合并
+- 如果无法确定是否同一事件，保守处理，不要合并
+- 每个聚合组只能出现在一个合并组中
+
+只输出 JSON：{"mergeGroups": [["clusterId1", "clusterId2"], ["clusterId3", "clusterId4"]]}
+每个子数组第一个 ID 作为保留的目标聚合组，其余合并进去。不需要合并时输出 {"mergeGroups": []}。`;
+
+export const DEFAULT_CLUSTER_MERGE_USER_PROMPT_TEMPLATE = `候选聚合组 JSON：{{clustersJson}}`;

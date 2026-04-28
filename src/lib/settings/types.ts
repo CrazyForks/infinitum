@@ -3,6 +3,7 @@ export type PromptConfigType =
   | "item_analysis"
   | "cluster_summary"
   | "cluster_match"
+  | "cluster_merge"
   | "daily_report";
 
 export type AdminModelApiConfig = {

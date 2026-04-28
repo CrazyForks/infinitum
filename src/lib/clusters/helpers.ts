@@ -505,6 +505,51 @@ export async function generateClusterPresentation(
   }
 }
 
+export function buildClusterMergeInputHash(
+  clusters: Array<{ id: string; fingerprint: string; itemCount: number; latestPublishedAt: Date }>,
+): string {
+  const sorted = [...clusters].sort((a, b) => a.id.localeCompare(b.id));
+  const payload = sorted.map((c) => ({
+    id: c.id,
+    fingerprint: c.fingerprint,
+    itemCount: c.itemCount,
+    latestPublishedAt: c.latestPublishedAt.getTime(),
+  }));
+
+  return crypto
+    .createHash("sha256")
+    .update(JSON.stringify(payload))
+    .digest("hex");
+}
+
+export type ClusterMergeCandidate = {
+  id: string;
+  title: string;
+  summary: string;
+  eventType: string | null;
+  eventSubject: string | null;
+  eventAction: string | null;
+  eventObject: string | null;
+  eventDate: string | null;
+  itemCount: number;
+};
+
+export function buildClusterMergeInput(clusters: ClusterMergeCandidate[]): string {
+  return JSON.stringify(
+    clusters.map((c) => ({
+      id: c.id,
+      title: c.title,
+      summary: c.summary,
+      eventType: c.eventType,
+      eventSubject: c.eventSubject,
+      eventAction: c.eventAction,
+      eventObject: c.eventObject,
+      eventDate: c.eventDate,
+      itemCount: c.itemCount,
+    })),
+  );
+}
+
 export function getClusterAssignmentWindowKeys(publishedAt: Date, lookbackMs: number) {
   const currentBucket = Math.floor(publishedAt.getTime() / lookbackMs);
 

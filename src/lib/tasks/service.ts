@@ -46,6 +46,7 @@ const TASK_AI_CALL_BREAKDOWN_LABELS: Record<TaskAiCallBreakdownKey, string> = {
   item_analysis: "内容分析",
   cluster_match: "聚合匹配",
   cluster_summary: "聚合摘要",
+  cluster_merge: "聚合合并",
   daily_report: "AI 日报",
 };
 

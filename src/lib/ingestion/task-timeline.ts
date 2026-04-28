@@ -37,6 +37,11 @@ export type IngestionTimelineCounters = {
     skippedIncompleteSignature: number;
     newCluster: number;
   };
+  clusterMerge: {
+    candidates: number;
+    skipped: boolean;
+    merged: number;
+  };
   clusterFinalize: {
     recomputed: number;
     updated: number;
@@ -56,6 +61,7 @@ export type IngestionTimelineModelNames = {
   itemSummary: string | null;
   itemAnalysis: string | null;
   clusterMatch: string | null;
+  clusterMerge: string | null;
   clusterSummary: string | null;
 };
 
@@ -126,6 +132,11 @@ export function createIngestionTimelineCounters(): IngestionTimelineCounters {
       skippedIncompleteSignature: 0,
       newCluster: 0,
     },
+    clusterMerge: {
+      candidates: 0,
+      skipped: true,
+      merged: 0,
+    },
     clusterFinalize: {
       recomputed: 0,
       updated: 0,
@@ -141,6 +152,7 @@ export function createIngestionTimelineModelNames(): IngestionTimelineModelNames
     itemSummary: null,
     itemAnalysis: null,
     clusterMatch: null,
+    clusterMerge: null,
     clusterSummary: null,
   };
 }
@@ -152,6 +164,7 @@ export function createInitialIngestionTaskTimeline(): TaskTimelineNodeSnapshot[]
     { key: "item_summary", label: "条目摘要", status: "pending", startedAt: null, finishedAt: null, durationMs: null, metrics: [] },
     { key: "item_analysis", label: "内容分析", status: "pending", startedAt: null, finishedAt: null, durationMs: null, metrics: [] },
     { key: "cluster_assignment", label: "归组决策", status: "pending", startedAt: null, finishedAt: null, durationMs: null, metrics: [] },
+    { key: "cluster_merge", label: "聚合合并", status: "pending", startedAt: null, finishedAt: null, durationMs: null, metrics: [] },
     { key: "cluster_finalize", label: "聚合收尾", status: "pending", startedAt: null, finishedAt: null, durationMs: null, metrics: [] },
   ];
 }
@@ -282,6 +295,22 @@ export function buildIngestionTaskTimeline(input: {
         { label: "AI归组", value: counters.clusterAssignment.aiMatch },
         { label: "跳过", value: counters.clusterAssignment.skippedIncompleteSignature },
         { label: "新建", value: counters.clusterAssignment.newCluster },
+      ],
+    },
+    {
+      key: "cluster_merge",
+      label: "聚合合并",
+      status: counters.clusterMerge.candidates > 0
+        ? (counters.clusterMerge.skipped ? "skipped" : "succeeded")
+        : "skipped",
+      startedAt: null,
+      finishedAt: null,
+      durationMs: null,
+      modelName: modelNames.clusterMerge,
+      metrics: [
+        { label: "候选组", value: counters.clusterMerge.candidates },
+        { label: "跳过", value: counters.clusterMerge.skipped ? 1 : 0 },
+        { label: "合并后", value: counters.clusterMerge.candidates - counters.clusterMerge.merged },
       ],
     },
     {
