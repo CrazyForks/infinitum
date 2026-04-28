@@ -38,6 +38,7 @@ type FeedEntryRow = {
   score: number | bigint;
   sourceCount: number | bigint;
   itemCount: number | bigint;
+  totalItemCount?: number | bigint;
   upvotes?: number | bigint;
   downvotes?: number | bigint;
   recommendScore?: number | bigint;
@@ -581,6 +582,17 @@ function buildFeedEntryCandidatesCte(
       ${ftsJoin}
       WHERE ${Prisma.join(whereClauses, " AND ")}
     ),
+    cluster_total_counts AS (
+      SELECT
+        i."clusterId",
+        COUNT(*) AS total_count
+      FROM "items" i
+      INNER JOIN "sources" s ON s.id = i."sourceId" AND s.enabled = true
+      WHERE i.status = 'processed'
+        AND i."moderationStatus" IN ('allowed', 'restored')
+        AND i."clusterId" IS NOT NULL
+      GROUP BY i."clusterId"
+    ),
     cluster_groups AS (
       SELECT
         fi."clusterId" AS id,
@@ -591,6 +603,7 @@ function buildFeedEntryCandidatesCte(
         ${clusterAiScore} AS score,
         ${clusterItemCount} AS "itemCount",
         ${clusterSourceCount} AS "sourceCount",
+        MAX(COALESCE(ctc.total_count, 0)) AS "totalItemCount",
         ${clusterUpvotes} AS upvotes,
         ${clusterDownvotes} AS downvotes,
         -- 综合推荐评分 = AI评分 + 投票微调 + 来源/条目聚合加权
@@ -603,6 +616,7 @@ function buildFeedEntryCandidatesCte(
         })} AS "recommendScore"
       FROM filtered_items fi
       INNER JOIN "content_clusters" cc ON cc.id = fi."clusterId"
+      LEFT JOIN cluster_total_counts ctc ON ctc."clusterId" = fi."clusterId"
       WHERE fi."clusterId" IS NOT NULL
       GROUP BY fi."clusterId"
     ),
@@ -644,6 +658,7 @@ function buildFeedEntryCandidatesCte(
         cg.score AS score,
         cg."sourceCount" AS "sourceCount",
         cg."itemCount" AS "itemCount",
+        cg."totalItemCount" AS "totalItemCount",
         cg.upvotes AS upvotes,
         cg.downvotes AS downvotes,
         cg."recommendScore" AS "recommendScore"
@@ -651,10 +666,10 @@ function buildFeedEntryCandidatesCte(
       WHERE cg."itemCount" > 1
     ),
     entry_candidates AS (
-      SELECT id, type, NULL AS "clusterId", title, summary, "latestPublishedAt", "createdAt", score, "sourceCount", "itemCount", upvotes, downvotes, "recommendScore"
+      SELECT id, type, NULL AS "clusterId", title, summary, "latestPublishedAt", "createdAt", score, "sourceCount", "itemCount", "totalItemCount", upvotes, downvotes, "recommendScore"
       FROM cluster_entries
       UNION ALL
-      SELECT id, type, "clusterId", title, summary, "latestPublishedAt", "createdAt", score, "sourceCount", "itemCount", upvotes, downvotes, "recommendScore"
+      SELECT id, type, "clusterId", title, summary, "latestPublishedAt", "createdAt", score, "sourceCount", "itemCount", CAST(1 AS INTEGER) AS "totalItemCount", upvotes, downvotes, "recommendScore"
       FROM single_entries
     )
   `;
@@ -721,25 +736,58 @@ async function listFeedGroupCounts(
     ...filters,
     groupId: null,
   };
-  const filteredItemsCte = buildFeedEntryCandidatesCte(effectiveFilters, null);
+  const entryCandidatesCte = buildFeedEntryCandidatesCte(effectiveFilters, null);
   const [groupRows, totalRows] = await Promise.all([
     prisma.$queryRaw<FeedGroupCountRow[]>(Prisma.sql`
-      ${filteredItemsCte}
+      ${entryCandidatesCte},
+      single_entry_groups AS (
+        SELECT s."groupId" AS group_id
+        FROM single_entries se
+        INNER JOIN "items" i ON i.id = se.id
+        INNER JOIN "sources" s ON s.id = i."sourceId"
+        WHERE s."groupId" IS NOT NULL
+      ),
+      cluster_items_by_group AS (
+        SELECT
+          ce.id AS cluster_id,
+          s."groupId" AS group_id,
+          COUNT(*) AS cnt
+        FROM cluster_entries ce
+        INNER JOIN "items" i ON i."clusterId" = ce.id
+        INNER JOIN "sources" s ON s.id = i."sourceId"
+        WHERE s."groupId" IS NOT NULL
+        GROUP BY ce.id, s."groupId"
+      ),
+      cluster_dominant_group AS (
+        SELECT cluster_id, group_id
+        FROM (
+          SELECT
+            cluster_id,
+            group_id,
+            ROW_NUMBER() OVER (PARTITION BY cluster_id ORDER BY cnt DESC) AS rn
+          FROM cluster_items_by_group
+        )
+        WHERE rn = 1
+      ),
+      all_entry_groups AS (
+        SELECT group_id FROM single_entry_groups
+        UNION ALL
+        SELECT group_id FROM cluster_dominant_group
+      )
       SELECT
-        s."groupId" AS id,
+        aeg.group_id AS id,
         g.name AS name,
         g."sortOrder" AS "sortOrder",
         COUNT(*) AS count
-      FROM filtered_items fi
-      INNER JOIN "sources" s ON s.id = fi."sourceId"
-      INNER JOIN "source_groups" g ON g.id = s."groupId"
-      GROUP BY s."groupId", g.name, g."sortOrder"
+      FROM all_entry_groups aeg
+      INNER JOIN "source_groups" g ON g.id = aeg.group_id
+      GROUP BY aeg.group_id
       ORDER BY g."sortOrder" ASC, g.name ASC
     `),
     prisma.$queryRaw<CountRow[]>(Prisma.sql`
-      ${filteredItemsCte}
+      ${entryCandidatesCte}
       SELECT COUNT(*) AS total
-      FROM filtered_items
+      FROM entry_candidates
     `),
   ]);
 
@@ -792,6 +840,7 @@ export async function listFeedItems(
       "recommendScore" AS score,
       "sourceCount",
       "itemCount",
+      "totalItemCount",
       upvotes,
       downvotes,
       "recommendScore"
@@ -889,7 +938,7 @@ export async function listFeedItems(
 
     const clusterItemsForEntry = clusterItemMap.get(row.id) ?? [];
     const previewItems = clusterItemsForEntry.slice(0, 3).map(mapItemToClusterPreview);
-    const itemCount = toNumber(row.itemCount);
+    const totalCount = toNumber(row.totalItemCount ?? row.itemCount);
 
     return [
       {
@@ -903,12 +952,12 @@ export async function listFeedItems(
         latestPublishedAt: toIsoString(row.latestPublishedAt),
         score: toNumber(row.recommendScore ?? row.score),
         sourceCount: toNumber(row.sourceCount),
-        itemCount,
+        itemCount: totalCount,
         upvotes: toNumber(row.upvotes ?? 0),
         downvotes: toNumber(row.downvotes ?? 0),
         userVote: userVotes.get(row.id) ?? null,
         itemsPreview: previewItems,
-        hasMoreItems: itemCount > previewItems.length,
+        hasMoreItems: totalCount > previewItems.length,
       },
     ];
   });

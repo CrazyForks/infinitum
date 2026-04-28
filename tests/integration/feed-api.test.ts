@@ -939,7 +939,7 @@ describe("/api/feed", () => {
       const json = await response.json();
 
       expect(json.items).toHaveLength(1);
-      expect(json.groupTotalCount).toBe(7);
+      expect(json.groupTotalCount).toBe(6);
       expect(json.groups).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ id: infra.id, name: "Infra", count: 1 }),
