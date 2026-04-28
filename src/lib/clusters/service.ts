@@ -703,6 +703,23 @@ export async function executeClusterMerge(
 ): Promise<ClusterMergePassResult> {
   const lookbackSince = new Date(now.getTime() - CLUSTER_LOOKBACK_MS);
 
+  // Refresh itemCount for clusters in the lookback window.
+  // Newly created clusters start with itemCount=0 and only get updated
+  // during cluster_finalize — which runs AFTER merge.  Without this,
+  // clusters created/modified in the current task are excluded by the
+  // itemCount >= 2 filter below.
+  await prisma.$executeRaw`
+    UPDATE content_clusters
+    SET itemCount = (
+      SELECT COUNT(*) FROM items
+      WHERE items.clusterId = content_clusters.id
+      AND items.status = 'processed'
+      AND items.moderationStatus IN ('allowed', 'restored')
+    )
+    WHERE status = 'active'
+    AND latestPublishedAt >= ${lookbackSince.getTime()}
+  `;
+
   // Load all active clusters within the 7-day window that have itemCount >= 2
   const allCandidates = await prisma.contentCluster.findMany({
     where: {
