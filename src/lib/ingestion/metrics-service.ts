@@ -11,6 +11,7 @@ export type DailyAiUsageStat = {
   summaries: number;
   analyses: number;
   clusterMatches: number;
+  clusterMerges: number;
   clusterSummaries: number;
 };
 
@@ -54,12 +55,13 @@ type AiBreakdown = {
   summaries: number;
   analyses: number;
   clusterMatches: number;
+  clusterMerges: number;
   clusterSummaries: number;
 };
 
 /** Parse the JSON breakdown stored on a task run into typed counts. */
 function parseAiBreakdown(json: string | null): AiBreakdown {
-  const result: AiBreakdown = { summaries: 0, analyses: 0, clusterMatches: 0, clusterSummaries: 0 };
+  const result: AiBreakdown = { summaries: 0, analyses: 0, clusterMatches: 0, clusterMerges: 0, clusterSummaries: 0 };
   if (!json) return result;
 
   try {
@@ -74,6 +76,9 @@ function parseAiBreakdown(json: string | null): AiBreakdown {
           break;
         case "cluster_match":
           result.clusterMatches += item.actual;
+          break;
+        case "cluster_merge":
+          result.clusterMerges += item.actual;
           break;
         case "cluster_summary":
           result.clusterSummaries += item.actual;
@@ -127,15 +132,17 @@ async function getDailyArticleStats(days: number): Promise<DailyArticleStat[]> {
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - days);
 
-  const rows = await prisma.$queryRaw<{ date: string; count: number }[]>`
-    SELECT date(createdAt) as date, COUNT(*) as count
-    FROM items
-    WHERE createdAt >= ${cutoff.toISOString()}
-    GROUP BY date(createdAt)
-    ORDER BY date ASC
-  `;
+  const rows = await prisma.item.findMany({
+    where: { createdAt: { gte: cutoff } },
+    select: { createdAt: true },
+    orderBy: { createdAt: "asc" },
+  });
 
-  const dateMap = new Map(rows.map((r) => [r.date, Number(r.count)]));
+  const dateMap = new Map<string, number>();
+  for (const row of rows) {
+    const date = row.createdAt.toISOString().slice(0, 10);
+    dateMap.set(date, (dateMap.get(date) ?? 0) + 1);
+  }
 
   return generateDateRange(days).map((date) => ({
     date,
@@ -174,6 +181,7 @@ async function getDailyAiUsageStats(days: number): Promise<DailyAiUsageStat[]> {
       summaries: 0,
       analyses: 0,
       clusterMatches: 0,
+      clusterMerges: 0,
       clusterSummaries: 0,
     };
 
@@ -183,6 +191,7 @@ async function getDailyAiUsageStats(days: number): Promise<DailyAiUsageStat[]> {
     entry.summaries += breakdown.summaries;
     entry.analyses += breakdown.analyses;
     entry.clusterMatches += breakdown.clusterMatches;
+    entry.clusterMerges += breakdown.clusterMerges;
     entry.clusterSummaries += breakdown.clusterSummaries;
 
     dateMap.set(date, entry);
@@ -196,6 +205,7 @@ async function getDailyAiUsageStats(days: number): Promise<DailyAiUsageStat[]> {
       summaries: entry?.summaries ?? 0,
       analyses: entry?.analyses ?? 0,
       clusterMatches: entry?.clusterMatches ?? 0,
+      clusterMerges: entry?.clusterMerges ?? 0,
       clusterSummaries: entry?.clusterSummaries ?? 0,
     };
   });

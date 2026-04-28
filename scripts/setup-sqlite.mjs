@@ -180,6 +180,18 @@ function applyIncrementalMigrations() {
     });
   }
 
+  if (!columnExists("content_clusters", "summaryInputHash")) {
+    runSqlite([dbPath], {
+      input: `ALTER TABLE "content_clusters" ADD COLUMN "summaryInputHash" TEXT;\n`,
+    });
+  }
+
+  if (!columnExists("content_clusters", "mergeInputHash")) {
+    runSqlite([dbPath], {
+      input: `ALTER TABLE "content_clusters" ADD COLUMN "mergeInputHash" TEXT;\n`,
+    });
+  }
+
   if (!ftsTableExists("items_fts")) {
     runSqlite([dbPath], {
       input: [

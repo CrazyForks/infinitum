@@ -228,6 +228,7 @@ function normalizeTaskTimelineNodeSnapshot(value: unknown): TaskTimelineNodeSnap
     "item_summary",
     "item_analysis",
     "cluster_assignment",
+    "cluster_merge",
     "cluster_finalize",
   ]);
   const supportedStatuses = new Set<TaskTimelineNodeStatus>([

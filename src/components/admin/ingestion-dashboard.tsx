@@ -36,6 +36,7 @@ const CHART_COLORS = {
   summaries: "#8884d8",
   analyses: "#82ca9d",
   clusterMatches: "#ffc658",
+  clusterMerges: "#06b6d4",
   clusterSummaries: "#ff7300",
   totalCalls: "var(--accent)",
   grid: "var(--line)",
@@ -106,6 +107,7 @@ function AiUsageChart({ data }: { data: DailyAiUsageStat[] }) {
               summaries: "摘要生成",
               analyses: "内容分析",
               clusterMatches: "聚合匹配",
+              clusterMerges: "聚合合并",
               clusterSummaries: "聚合摘要",
             };
             return labels[String(value)] ?? value;
@@ -142,6 +144,14 @@ function AiUsageChart({ data }: { data: DailyAiUsageStat[] }) {
           strokeWidth={1.5}
           dot={false}
           name="聚合匹配"
+        />
+        <Line
+          type="monotone"
+          dataKey="clusterMerges"
+          stroke={CHART_COLORS.clusterMerges}
+          strokeWidth={1.5}
+          dot={false}
+          name="聚合合并"
         />
         <Line
           type="monotone"
