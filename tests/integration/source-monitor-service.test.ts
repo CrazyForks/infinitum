@@ -82,7 +82,11 @@ describe("source monitor service", () => {
     expect(snapshot.totalEnabledSourceCount).toBe(3);
     expect(snapshot.health.healthyCount).toBe(2);
     expect(snapshot.health.failedCount).toBe(1);
-    expect(snapshot.health.attentionSources.map((source) => source.id)).toEqual([failedSource.id]);
+    expect(snapshot.health.attentionSources.map((source) => source.id)).toEqual([
+      failedSource.id,
+      weekStaleSource.id,
+      staleSource.id,
+    ]);
     expect(dayBucket?.sources.map((source) => source.id)).toEqual([staleSource.id]);
     expect(weekBucket?.sources.map((source) => source.id)).toEqual([weekStaleSource.id]);
     expect(yearBucket?.sources.map((source) => source.id)).toEqual([failedSource.id]);

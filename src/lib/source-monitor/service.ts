@@ -126,7 +126,7 @@ export async function getSourceMonitorSnapshot(now = new Date()): Promise<Source
       healthyCount,
       failedCount,
       unknownCount,
-      attentionSources: entries.filter((source) => source.healthStatus !== "healthy"),
+      attentionSources: entries,
     },
     inactivityBuckets: INACTIVITY_BUCKETS.map((bucket) => {
       const cutoff = new Date(now.getTime() - bucket.minDays * DAY_MS);
