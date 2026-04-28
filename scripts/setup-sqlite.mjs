@@ -134,6 +134,12 @@ function applyIncrementalMigrations() {
     });
   }
 
+  if (!columnExists("task_schedules", "dailyReportMaxRetries")) {
+    runSqlite([dbPath], {
+      input: `ALTER TABLE "task_schedules" ADD COLUMN "dailyReportMaxRetries" INTEGER NOT NULL DEFAULT 0;\n`,
+    });
+  }
+
   if (!columnExists("sources", "aggregationEnabled")) {
     runSqlite([dbPath], {
       input: `ALTER TABLE "sources" ADD COLUMN "aggregationEnabled" BOOLEAN NOT NULL DEFAULT true;\n`,

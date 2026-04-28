@@ -164,7 +164,8 @@ function isInteractiveClickTarget(target: EventTarget | null) {
 
 function getVisibleAuthorLabel(author: string | null | undefined) {
   const normalized = author?.trim();
-  return normalized && normalized !== "未知作者" ? normalized : null;
+  if (!normalized || normalized === "未知作者") return null;
+  return normalized.length > 10 ? `${normalized.slice(0, 10)}...` : normalized;
 }
 
 function GroupBadge({ group }: { group: FeedGroupBadge | null | undefined }) {

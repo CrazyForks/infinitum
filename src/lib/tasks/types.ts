@@ -124,6 +124,7 @@ export type TaskScheduleSnapshot = {
   dailyReportCandidateLimit: number;
   dailyReportOffsetDays: number;
   dailyReportAutoPublish: boolean;
+  dailyReportMaxRetries: number;
   processingStartAt?: string | null;
   timezone: string;
   lastHeartbeatAt: string | null;

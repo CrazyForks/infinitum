@@ -251,6 +251,7 @@ model TaskSchedule {
   dailyReportCandidateLimit Int           @default(120)
   dailyReportOffsetDays Int                @default(0)
   dailyReportAutoPublish Boolean          @default(false)
+  dailyReportMaxRetries Int              @default(0)
   processingStartAt DateTime?
   timezone          String
   lastHeartbeatAt   DateTime?

@@ -86,6 +86,7 @@ function buildInitialSettings(): AdminSettingsSnapshot {
       dailyReportCandidateLimit: 120,
       dailyReportOffsetDays: 0,
       dailyReportAutoPublish: false,
+      dailyReportMaxRetries: 0,
       timezone: "Asia/Shanghai",
       lastHeartbeatAt: "2026-04-20T10:00:00.000Z",
       lastRunStartedAt: "2026-04-20T10:00:00.000Z",
@@ -104,6 +105,7 @@ function buildInitialSettings(): AdminSettingsSnapshot {
       dailyReportCandidateLimit: 120,
       dailyReportOffsetDays: 0,
       dailyReportAutoPublish: false,
+      dailyReportMaxRetries: 0,
       timezone: "Asia/Shanghai",
       lastHeartbeatAt: "2026-04-20T10:00:00.000Z",
       lastRunStartedAt: null,
@@ -978,6 +980,7 @@ describe("AdminSettingsPanel", () => {
           dailyReportCandidateLimit: 80,
           dailyReportOffsetDays: 1,
           dailyReportAutoPublish: true,
+          dailyReportMaxRetries: 0,
         }),
       });
     });

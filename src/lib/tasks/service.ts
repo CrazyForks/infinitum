@@ -9,11 +9,14 @@ import {
 import {
   computeNextRunAt,
   DEFAULT_DAILY_REPORT_CANDIDATE_LIMIT,
+  DEFAULT_DAILY_REPORT_MAX_RETRIES,
   DEFAULT_DAILY_REPORT_OFFSET_DAYS,
   isSchedulerHeartbeatStale,
   MAX_DAILY_REPORT_CANDIDATE_LIMIT,
+  MAX_DAILY_REPORT_MAX_RETRIES,
   MAX_DAILY_REPORT_OFFSET_DAYS,
   MIN_DAILY_REPORT_CANDIDATE_LIMIT,
+  MIN_DAILY_REPORT_MAX_RETRIES,
   MIN_DAILY_REPORT_OFFSET_DAYS,
   normalizeScheduleInput,
 } from "@/lib/tasks/scheduler";
@@ -439,6 +442,7 @@ export function toTaskScheduleSnapshot(schedule: {
   dailyReportCandidateLimit: number | null;
   dailyReportOffsetDays: number | null;
   dailyReportAutoPublish: boolean | null;
+  dailyReportMaxRetries: number | null;
   processingStartAt: Date | null;
   timezone: string;
   lastHeartbeatAt: Date | null;
@@ -457,6 +461,7 @@ export function toTaskScheduleSnapshot(schedule: {
     dailyReportCandidateLimit: schedule.dailyReportCandidateLimit ?? DEFAULT_DAILY_REPORT_CANDIDATE_LIMIT,
     dailyReportOffsetDays: schedule.dailyReportOffsetDays ?? DEFAULT_DAILY_REPORT_OFFSET_DAYS,
     dailyReportAutoPublish: schedule.dailyReportAutoPublish ?? false,
+    dailyReportMaxRetries: schedule.dailyReportMaxRetries ?? DEFAULT_DAILY_REPORT_MAX_RETRIES,
     processingStartAt: schedule.processingStartAt?.toISOString() ?? null,
     timezone: schedule.timezone,
     lastHeartbeatAt: schedule.lastHeartbeatAt?.toISOString() ?? null,
@@ -510,6 +515,7 @@ export async function updateDefaultDailyReportSchedule(input: {
   dailyReportCandidateLimit: number;
   dailyReportOffsetDays: number;
   dailyReportAutoPublish: boolean;
+  dailyReportMaxRetries: number;
 }) {
   const cronExpression = input.cronExpression.trim();
 
@@ -543,6 +549,16 @@ export async function updateDefaultDailyReportSchedule(input: {
     );
   }
 
+  if (
+    !Number.isInteger(input.dailyReportMaxRetries) ||
+    input.dailyReportMaxRetries < MIN_DAILY_REPORT_MAX_RETRIES ||
+    input.dailyReportMaxRetries > MAX_DAILY_REPORT_MAX_RETRIES
+  ) {
+    throw new Error(
+      `Daily report max retries must be an integer between ${MIN_DAILY_REPORT_MAX_RETRIES} and ${MAX_DAILY_REPORT_MAX_RETRIES}.`,
+    );
+  }
+
   const currentSchedule = await ensureDefaultDailyReportSchedule();
   const now = new Date();
   const nextRunAt = computeNextRunAt({
@@ -560,6 +576,7 @@ export async function updateDefaultDailyReportSchedule(input: {
       dailyReportCandidateLimit: input.dailyReportCandidateLimit,
       dailyReportOffsetDays: input.dailyReportOffsetDays,
       dailyReportAutoPublish: input.dailyReportAutoPublish,
+      dailyReportMaxRetries: input.dailyReportMaxRetries,
       nextRunAt,
     },
   });

@@ -19,6 +19,9 @@ export const MIN_DAILY_REPORT_CANDIDATE_LIMIT = 2;
 export const MAX_DAILY_REPORT_CANDIDATE_LIMIT = 500;
 export const MIN_DAILY_REPORT_OFFSET_DAYS = 0;
 export const MAX_DAILY_REPORT_OFFSET_DAYS = 365;
+export const DEFAULT_DAILY_REPORT_MAX_RETRIES = 0;
+export const MIN_DAILY_REPORT_MAX_RETRIES = 0;
+export const MAX_DAILY_REPORT_MAX_RETRIES = 5;
 
 function normalizeProcessingStartAt(value: string | null): string | null {
   const normalized = value?.trim();

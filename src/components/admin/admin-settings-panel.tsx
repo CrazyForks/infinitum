@@ -51,8 +51,10 @@ import {
   MIN_SOURCE_CONCURRENCY,
   MAX_PER_SOURCE_ITEM_LIMIT,
   MAX_DAILY_REPORT_CANDIDATE_LIMIT,
-  MIN_PER_SOURCE_ITEM_LIMIT,
+  MAX_DAILY_REPORT_MAX_RETRIES,
   MIN_DAILY_REPORT_CANDIDATE_LIMIT,
+  MIN_DAILY_REPORT_MAX_RETRIES,
+  MIN_PER_SOURCE_ITEM_LIMIT,
 } from "@/lib/tasks/scheduler";
 import { getStableGroupBadgeColor } from "@/lib/groups/badge";
 import { cx } from "@/lib/ui/cx";
@@ -253,6 +255,9 @@ export function AdminSettingsPanel({
   );
   const [dailyReportAutoPublish, setDailyReportAutoPublish] = useState(
     initialSettings.dailyReportSchedule.dailyReportAutoPublish,
+  );
+  const [dailyReportMaxRetries, setDailyReportMaxRetries] = useState(
+    String(initialSettings.dailyReportSchedule.dailyReportMaxRetries),
   );
   const [dailyReportScheduleSnapshot, setDailyReportScheduleSnapshot] = useState(
     initialSettings.dailyReportSchedule,
@@ -736,6 +741,7 @@ export function AdminSettingsPanel({
   const saveDailyReportSchedule = () => {
     const parsedDailyReportCandidateLimit = Number.parseInt(dailyReportCandidateLimit.trim(), 10);
     const parsedDailyReportOffsetDays = Number.parseInt(dailyReportOffsetDays.trim(), 10);
+    const parsedDailyReportMaxRetries = Number.parseInt(dailyReportMaxRetries.trim(), 10);
 
     if (
       !Number.isInteger(parsedDailyReportCandidateLimit) ||
@@ -761,6 +767,18 @@ export function AdminSettingsPanel({
       return;
     }
 
+    if (
+      !Number.isInteger(parsedDailyReportMaxRetries) ||
+      parsedDailyReportMaxRetries < MIN_DAILY_REPORT_MAX_RETRIES ||
+      parsedDailyReportMaxRetries > MAX_DAILY_REPORT_MAX_RETRIES
+    ) {
+      showToast(
+        `最大重试次数需为 ${MIN_DAILY_REPORT_MAX_RETRIES}-${MAX_DAILY_REPORT_MAX_RETRIES} 的整数。`,
+        "error",
+      );
+      return;
+    }
+
     startTransition(async () => {
       try {
         const schedule = await saveDefaultDailyReportSchedule({
@@ -769,6 +787,7 @@ export function AdminSettingsPanel({
           dailyReportCandidateLimit: parsedDailyReportCandidateLimit,
           dailyReportOffsetDays: parsedDailyReportOffsetDays,
           dailyReportAutoPublish,
+          dailyReportMaxRetries: parsedDailyReportMaxRetries,
         });
 
         setDailyReportScheduleSnapshot(schedule);
@@ -777,6 +796,7 @@ export function AdminSettingsPanel({
         setDailyReportCandidateLimit(String(schedule.dailyReportCandidateLimit));
         setDailyReportOffsetDays(String(schedule.dailyReportOffsetDays));
         setDailyReportAutoPublish(schedule.dailyReportAutoPublish);
+        setDailyReportMaxRetries(String(schedule.dailyReportMaxRetries));
         showToast("日报任务配置已保存。", "success");
       } catch (error) {
         showToast(error instanceof Error ? error.message : "日报任务配置保存失败。", "error");
@@ -795,6 +815,7 @@ export function AdminSettingsPanel({
     dailyReportScheduleCronExpression.trim() !== dailyReportScheduleSnapshot.cronExpression ||
     dailyReportCandidateLimit.trim() !== String(dailyReportScheduleSnapshot.dailyReportCandidateLimit) ||
     dailyReportOffsetDays.trim() !== String(dailyReportScheduleSnapshot.dailyReportOffsetDays) ||
+    dailyReportMaxRetries.trim() !== String(dailyReportScheduleSnapshot.dailyReportMaxRetries) ||
     dailyReportAutoPublish !== dailyReportScheduleSnapshot.dailyReportAutoPublish;
 
   const content = (
@@ -1639,7 +1660,7 @@ export function AdminSettingsPanel({
                   保存配置
                 </Button>
               </div>
-              <div className="grid w-full grid-cols-1 gap-4 md:grid-cols-2">
+              <div className="grid w-full grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
                 <div className="space-y-1.5">
                   <div className="block text-sm text-[var(--muted)]">任务开关</div>
                   <label className="flex min-h-10 w-full items-center gap-2 rounded-sm border border-[color:var(--line)] bg-[var(--surface)] px-3 text-sm text-[var(--text-2)]">
@@ -1667,9 +1688,7 @@ export function AdminSettingsPanel({
                     <span>生成后自动发布</span>
                   </label>
                 </div>
-              </div>
 
-              <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
                 <div className="space-y-1.5">
                   <label
                     htmlFor="daily-report-schedule-cron"
@@ -1684,6 +1703,19 @@ export function AdminSettingsPanel({
                     placeholder="例如 30 8 * * *"
                   />
                 </div>
+              </div>
+
+              <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+                <FormField label="最大重试次数" htmlFor="daily-report-max-retries">
+                  <TextInput
+                    id="daily-report-max-retries"
+                    type="number"
+                    min={MIN_DAILY_REPORT_MAX_RETRIES}
+                    max={MAX_DAILY_REPORT_MAX_RETRIES}
+                    value={dailyReportMaxRetries}
+                    onChange={(event) => setDailyReportMaxRetries(event.target.value)}
+                  />
+                </FormField>
 
                 <FormField label="T-" htmlFor="daily-report-offset-days">
                   <TextInput

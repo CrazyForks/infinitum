@@ -55,6 +55,7 @@ export type AdminSettingsSnapshot = {
     dailyReportCandidateLimit: number;
     dailyReportOffsetDays: number;
     dailyReportAutoPublish: boolean;
+    dailyReportMaxRetries: number;
     processingStartAt?: string | null;
     timezone: string;
     lastHeartbeatAt: string | null;
@@ -74,6 +75,7 @@ export type AdminSettingsSnapshot = {
     dailyReportCandidateLimit: number;
     dailyReportOffsetDays: number;
     dailyReportAutoPublish: boolean;
+    dailyReportMaxRetries: number;
     processingStartAt?: string | null;
     timezone: string;
     lastHeartbeatAt: string | null;

@@ -5,6 +5,7 @@ import {
   DEFAULT_FULL_TEXT_FETCH_THRESHOLD,
   DEFAULT_DAILY_REPORT_CANDIDATE_LIMIT,
   DEFAULT_DAILY_REPORT_OFFSET_DAYS,
+  DEFAULT_DAILY_REPORT_MAX_RETRIES,
   DEFAULT_SCHEDULE_TIMEZONE,
   DEFAULT_SOURCE_CONCURRENCY,
   DEFAULT_PER_SOURCE_ITEM_LIMIT,
@@ -31,6 +32,7 @@ export async function upsertDefaultIngestionSchedule() {
       dailyReportCandidateLimit: DEFAULT_DAILY_REPORT_CANDIDATE_LIMIT,
       dailyReportOffsetDays: DEFAULT_DAILY_REPORT_OFFSET_DAYS,
       dailyReportAutoPublish: false,
+      dailyReportMaxRetries: DEFAULT_DAILY_REPORT_MAX_RETRIES,
       timezone: DEFAULT_SCHEDULE_TIMEZONE,
       nextRunAt: computeNextRunAt({
         cronExpression: DEFAULT_SCHEDULE_CRON_EXPRESSION,
@@ -57,6 +59,7 @@ export async function upsertDefaultDailyReportSchedule() {
       dailyReportCandidateLimit: DEFAULT_DAILY_REPORT_CANDIDATE_LIMIT,
       dailyReportOffsetDays: DEFAULT_DAILY_REPORT_OFFSET_DAYS,
       dailyReportAutoPublish: false,
+      dailyReportMaxRetries: DEFAULT_DAILY_REPORT_MAX_RETRIES,
       timezone: DEFAULT_SCHEDULE_TIMEZONE,
       nextRunAt: computeNextRunAt({
         cronExpression: "30 8 * * *",

@@ -409,6 +409,26 @@ export async function executeDailyReportTask(taskRun: BackgroundTaskRun) {
       finishedAt,
     });
     await markDailyScheduleRunFinished(taskRun, "failed");
+
+    // 自动重试：检查重试次数是否未达上限
+    const schedule = await ensureDefaultDailyReportSchedule();
+    const maxRetries = schedule.dailyReportMaxRetries ?? 0;
+    if (maxRetries > 0) {
+      const existingAttempts = await prisma.backgroundTaskRun.count({
+        where: {
+          kind: "daily_report_generate",
+          entityId: date,
+        },
+      });
+      if (existingAttempts <= maxRetries) {
+        await enqueueTaskRun({
+          kind: "daily_report_generate",
+          triggerType: taskRun.triggerType,
+          label: `${DEFAULT_DAILY_REPORT_TASK_LABEL} ${date} (自动重试)`,
+          entityId: date,
+        });
+      }
+    }
   }
 }
 
