@@ -35,6 +35,9 @@ export type SourceInactivityBucketSnapshot = {
 export type SourceMonitorSnapshot = {
   generatedAt: string;
   totalEnabledSourceCount: number;
+  filteredSourceCount?: number;
+  page?: number;
+  pageSize?: number;
   health: {
     healthyCount: number;
     failedCount: number;

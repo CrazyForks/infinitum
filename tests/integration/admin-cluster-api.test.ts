@@ -107,11 +107,12 @@ describe("/api/admin/clusters", () => {
     requireAdmin.mockResolvedValue(undefined);
 
     const { GET } = await import("@/app/api/admin/clusters/route");
-    const response = await GET();
+    const response = await GET(new Request("http://localhost/api/admin/clusters"));
     const json = await response.json();
 
     expect(response.status).toBe(200);
     expect(json.clusters).toHaveLength(1);
+    expect(json.total).toBe(1);
     expect(json.clusters[0]).toMatchObject({
       id: "cluster-1",
       itemCount: 2,

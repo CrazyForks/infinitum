@@ -16,12 +16,14 @@ function stripInlineMarkdown(value: string) {
 export async function GET(request: Request) {
   const baseUrl = resolvePublicOrigin(request);
   const selfLink = resolvePublicRequestUrl(request);
-  const reports = await listDailyReports({
+  const { reports } = await listDailyReports({
     isAdmin: false,
     status: "published",
+    page: 1,
+    pageSize: 50,
   });
 
-  const items = reports.slice(0, 50).map((report) => ({
+  const items = reports.map((report) => ({
     title: report.title,
     description: escapeXml(stripInlineMarkdown(report.openingSummary)),
     link: `${baseUrl}/daily/${report.date}`,

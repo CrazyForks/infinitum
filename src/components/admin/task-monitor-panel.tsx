@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -464,6 +464,7 @@ export function TaskMonitorPanel({
   const [timeRangeFilter, setTimeRangeFilter] = useState<TimeRangeFilter>("");
   const [page, setPage] = useState(initialPage ?? 1);
   const [pageSize, setPageSize] = useState(initialPageSize ?? 10);
+  const [recentTotal, setRecentTotal] = useState(0);
   const [isRefreshingSnapshot, setIsRefreshingSnapshot] = useState(false);
   const [selectedTask, setSelectedTask] = useState<TaskRunSnapshot | null>(
     null
@@ -532,6 +533,11 @@ export function TaskMonitorPanel({
     }
 
     if (selectedTask?.id !== initialTask.id || !isDetailOpen) {
+      // Don't re-open if the user just manually closed the modal
+      if (closedByUserRef.current) {
+        closedByUserRef.current = false;
+        return;
+      }
       setSelectedTask(initialTask);
       setIsDetailOpen(true);
     }
@@ -542,19 +548,23 @@ export function TaskMonitorPanel({
     [allTasks, statusFilter, kindFilter, timeRangeFilter]
   );
 
-  const totalPages = Math.ceil(filteredTasks.length / pageSize) || 1;
-  const paginatedTasks = filteredTasks.slice(
-    (page - 1) * pageSize,
-    page * pageSize
-  );
+  // Total includes running tasks (always shown) + total recent tasks from API
+  const mergedTotal = taskLists.runningTasks.length + recentTotal;
+  const totalPages = Math.ceil(mergedTotal / pageSize) || 1;
+  // Server-paginated recent + all running; no client-side slice needed
+  const paginatedTasks = filteredTasks;
 
   const hasFilters = statusFilter || kindFilter || timeRangeFilter;
 
-  const refreshSnapshot = async () => {
+  const refreshSnapshot = useCallback(async () => {
     setIsRefreshingSnapshot(true);
 
     try {
-      const response = await fetch("/api/admin/monitor");
+      const params = new URLSearchParams();
+      params.set("page", String(page));
+      params.set("pageSize", String(pageSize));
+
+      const response = await fetch(`/api/admin/monitor?${params.toString()}`);
       const payload = (await response.json()) as BackgroundTaskMonitorSnapshot | { error?: string };
 
       if (!response.ok || !isTaskMonitorSnapshot(payload)) {
@@ -569,12 +579,22 @@ export function TaskMonitorPanel({
         runningTasks: payload.runningTasks,
         recentTasks: payload.recentTasks,
       });
+      setRecentTotal(payload.recentTotal ?? 0);
     } catch {
       showToast("刷新任务监控失败", "error");
     } finally {
       setIsRefreshingSnapshot(false);
     }
-  };
+  }, [page, pageSize, showToast]);
+
+  // Re-fetch when pagination changes. Skip mount which uses SSR data.
+  // Use mount count so React dev-mode double-invocation doesn't trigger early fetch.
+  const mountCount = useRef(0);
+  useEffect(() => {
+    mountCount.current += 1;
+    if (mountCount.current <= 1) return;
+    void refreshSnapshot();
+  }, [refreshSnapshot]);
 
   const handleRefresh = async () => {
     setIsRefreshingSnapshot(true);
@@ -620,12 +640,23 @@ export function TaskMonitorPanel({
     onDetailRouteChange?.(task.id, { page, pageSize });
   };
 
+  const closedByUserRef = useRef(false);
+
   const handleCloseDetail = () => {
+    closedByUserRef.current = true;
     pendingRouteTaskIdRef.current = null;
     setIsDetailOpen(false);
-    setSelectedTask(null);
     onDetailRouteChange?.(null, { page, pageSize });
   };
+
+  // Defer clearing the selected task until the modal has fully unmounted.
+  // Clearing it simultaneously with isOpen causes the scrollable body content
+  // to vanish before the overlay, producing a visible jump/flash.
+  useEffect(() => {
+    if (!isDetailOpen) {
+      setSelectedTask(null);
+    }
+  }, [isDetailOpen]);
 
   const handleRetrigger = async (taskId: string) => {
     setRetriggeringTaskId(taskId);

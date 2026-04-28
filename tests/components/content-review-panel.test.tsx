@@ -109,7 +109,7 @@ describe("ContentReviewPanel", () => {
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
       const url = getFetchUrl(input);
 
-      if (url === "/api/admin/items?moderationStatus=filtered") {
+      if (url === "/api/admin/items?moderationStatus=filtered&page=1&pageSize=10") {
         return new Response(
           JSON.stringify({
             items: [createFilteredItem()],
@@ -117,7 +117,7 @@ describe("ContentReviewPanel", () => {
         );
       }
 
-      if (url === "/api/admin/clusters") {
+      if (url === "/api/admin/clusters?page=1&pageSize=10") {
         return new Response(
           JSON.stringify({
             clusters: [],
@@ -177,12 +177,12 @@ describe("ContentReviewPanel", () => {
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input) => {
       const url = getFetchUrl(input);
 
-      if (url === "/api/admin/items?moderationStatus=filtered") {
-        return new Response(JSON.stringify({ items: [createFilteredItem()] }));
+      if (url === "/api/admin/items?moderationStatus=filtered&page=1&pageSize=10") {
+        return new Response(JSON.stringify({ items: [createFilteredItem()], total: 1 }));
       }
 
-      if (url === "/api/admin/clusters") {
-        return new Response(JSON.stringify({ clusters: [] }));
+      if (url === "/api/admin/clusters?page=1&pageSize=10") {
+        return new Response(JSON.stringify({ clusters: [], total: 0 }));
       }
 
       throw new Error(`Unexpected fetch URL: ${url}`);
@@ -209,7 +209,7 @@ describe("ContentReviewPanel", () => {
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
       const url = getFetchUrl(input);
 
-      if (url === "/api/admin/items?moderationStatus=filtered") {
+      if (url === "/api/admin/items?moderationStatus=filtered&page=1&pageSize=10") {
         return new Response(
           JSON.stringify({
             items: [createFilteredItem()],
@@ -217,8 +217,8 @@ describe("ContentReviewPanel", () => {
         );
       }
 
-      if (url === "/api/admin/clusters") {
-        return new Response(JSON.stringify({ clusters: [] }));
+      if (url === "/api/admin/clusters?page=1&pageSize=10") {
+        return new Response(JSON.stringify({ clusters: [], total: 0 }));
       }
 
       if (url === "/api/admin/items/item-1/reanalyze") {
@@ -268,12 +268,12 @@ describe("ContentReviewPanel", () => {
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
       const url = getFetchUrl(input);
 
-      if (url === "/api/admin/items?moderationStatus=filtered") {
-        return new Response(JSON.stringify({ items: [createFilteredItem()] }));
+      if (url === "/api/admin/items?moderationStatus=filtered&page=1&pageSize=10") {
+        return new Response(JSON.stringify({ items: [createFilteredItem()], total: 1 }));
       }
 
-      if (url === "/api/admin/clusters") {
-        return new Response(JSON.stringify({ clusters: [] }));
+      if (url === "/api/admin/clusters?page=1&pageSize=10") {
+        return new Response(JSON.stringify({ clusters: [], total: 0 }));
       }
 
       if (url === "/api/admin/items/item-1/reanalyze") {
@@ -313,11 +313,11 @@ describe("ContentReviewPanel", () => {
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
       const url = getFetchUrl(input);
 
-      if (url === "/api/admin/items?moderationStatus=filtered") {
-        return new Response(JSON.stringify({ items: [] }));
+      if (url === "/api/admin/items?moderationStatus=filtered&page=1&pageSize=10") {
+        return new Response(JSON.stringify({ items: [], total: 0 }));
       }
 
-      if (url === "/api/admin/clusters") {
+      if (url === "/api/admin/clusters?page=1&pageSize=10") {
         return new Response(
           JSON.stringify({
             clusters: [
@@ -376,11 +376,11 @@ describe("ContentReviewPanel", () => {
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
       const url = getFetchUrl(input);
 
-      if (url === "/api/admin/items?moderationStatus=filtered") {
-        return new Response(JSON.stringify({ items: [] }));
+      if (url === "/api/admin/items?moderationStatus=filtered&page=1&pageSize=10") {
+        return new Response(JSON.stringify({ items: [], total: 0 }));
       }
 
-      if (url === "/api/admin/clusters") {
+      if (url === "/api/admin/clusters?page=1&pageSize=10") {
         return new Response(
           JSON.stringify({
             clusters: [
@@ -427,11 +427,11 @@ describe("ContentReviewPanel", () => {
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
       const url = getFetchUrl(input);
 
-      if (url === "/api/admin/items?moderationStatus=filtered") {
-        return new Response(JSON.stringify({ items: [] }));
+      if (url === "/api/admin/items?moderationStatus=filtered&page=1&pageSize=10") {
+        return new Response(JSON.stringify({ items: [], total: 0 }));
       }
 
-      if (url === "/api/admin/clusters") {
+      if (url === "/api/admin/clusters?page=1&pageSize=10") {
         return new Response(
           JSON.stringify({
             clusters: [
@@ -494,12 +494,12 @@ describe("ContentReviewPanel", () => {
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
       const url = getFetchUrl(input);
 
-      if (url === "/api/admin/items?moderationStatus=filtered") {
-        return new Response(JSON.stringify({ items: [] }));
+      if (url === "/api/admin/items?moderationStatus=filtered&page=1&pageSize=10") {
+        return new Response(JSON.stringify({ items: [], total: 0 }));
       }
 
-      if (url === "/api/admin/clusters") {
-        return new Response(JSON.stringify({ clusters: [cluster] }));
+      if (url === "/api/admin/clusters?page=1&pageSize=10") {
+        return new Response(JSON.stringify({ clusters: [cluster], total: 1 }));
       }
 
       if (url === requestUrl) {
@@ -536,16 +536,16 @@ describe("ContentReviewPanel", () => {
   it.each([
     {
       name: "filtered request returns a non-2xx response",
-      failingUrl: "/api/admin/items?moderationStatus=filtered",
-      okUrl: "/api/admin/clusters",
-      okBody: { clusters: [] },
+      failingUrl: "/api/admin/items?moderationStatus=filtered&page=1&pageSize=10",
+      okUrl: "/api/admin/clusters?page=1&pageSize=10",
+      okBody: { clusters: [], total: 0 },
       activeTab: "filtered" as const,
     },
     {
       name: "cluster request returns a non-2xx response",
-      failingUrl: "/api/admin/clusters",
-      okUrl: "/api/admin/items?moderationStatus=filtered",
-      okBody: { items: [] },
+      failingUrl: "/api/admin/clusters?page=1&pageSize=10",
+      okUrl: "/api/admin/items?moderationStatus=filtered&page=1&pageSize=10",
+      okBody: { items: [], total: 0 },
       activeTab: "clusters" as const,
     },
   ])("shows a load failure when $name", async ({ failingUrl, okUrl, okBody, activeTab }) => {

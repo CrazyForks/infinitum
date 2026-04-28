@@ -146,4 +146,7 @@ export type BackgroundTaskMonitorSnapshot = {
   schedule: TaskScheduleSnapshot;
   runningTasks: TaskRunSnapshot[];
   recentTasks: TaskRunSnapshot[];
+  recentTotal?: number;
+  page?: number;
+  pageSize?: number;
 };

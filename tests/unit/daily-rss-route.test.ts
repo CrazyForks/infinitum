@@ -8,20 +8,23 @@ describe("/api/daily/rss", () => {
 
   it("uses the public request url as the atom self link", async () => {
     vi.doMock("@/lib/daily-report/repository", () => ({
-      listDailyReports: vi.fn(async () => [
-        {
-          id: "daily-2026-04-26",
-          date: "2026-04-26",
-          timezone: "Asia/Shanghai",
-          status: "published",
-          title: "2026-04-26 AI 日报",
-          openingSummary: "今日摘要",
-          sourceCount: 3,
-          generatedAt: "2026-04-26T00:30:00.000Z",
-          publishedAt: "2026-04-26T01:00:00.000Z",
-          errorMessage: null,
-        },
-      ]),
+      listDailyReports: vi.fn(async () => ({
+        reports: [
+          {
+            id: "daily-2026-04-26",
+            date: "2026-04-26",
+            timezone: "Asia/Shanghai",
+            status: "published",
+            title: "2026-04-26 AI 日报",
+            openingSummary: "今日摘要",
+            sourceCount: 3,
+            generatedAt: "2026-04-26T00:30:00.000Z",
+            publishedAt: "2026-04-26T01:00:00.000Z",
+            errorMessage: null,
+          },
+        ],
+        total: 1,
+      })),
     }));
 
     const { GET } = await import("@/app/api/daily/rss/route");

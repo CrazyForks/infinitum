@@ -15,8 +15,8 @@ export default async function AdminPage() {
   }
 
   const settings = await getAdminSettings();
-  const monitorSnapshot = await getBackgroundTaskMonitorSnapshot();
-  const sourceMonitorSnapshot = await getSourceMonitorSnapshot();
+  const monitorSnapshot = await getBackgroundTaskMonitorSnapshot(new Date(), { page: 1, pageSize: 10 });
+  const sourceMonitorSnapshot = await getSourceMonitorSnapshot(new Date(), { page: 1, pageSize: 10 });
 
   return (
     <AdminPageClient

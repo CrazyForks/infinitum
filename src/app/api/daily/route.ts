@@ -7,11 +7,15 @@ export async function GET(request: Request) {
   const status = searchParams.get("status") ?? undefined;
   const selectedStatus = status === "draft" || status === "published" || status === "all" ? status : undefined;
   const week = searchParams.get("week");
+  const page = Math.max(1, Number(searchParams.get("page")) || 1);
+  const pageSize = Math.min(100, Math.max(1, Number(searchParams.get("pageSize")) || 20));
 
-  const reports = await listDailyReports({
+  const { reports, total } = await listDailyReports({
     isAdmin: session.isAdmin,
     status: selectedStatus,
     week,
+    page,
+    pageSize,
   });
   const weeks = await listDailyReportArchiveWeeks({
     isAdmin: session.isAdmin,
@@ -20,6 +24,9 @@ export async function GET(request: Request) {
 
   return Response.json({
     reports,
+    total,
+    page,
+    pageSize,
     weeks,
   });
 }

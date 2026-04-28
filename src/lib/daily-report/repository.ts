@@ -145,12 +145,14 @@ export async function listDailyReports(input: {
   isAdmin: boolean;
   status?: "draft" | "published" | "all";
   week?: string | null;
+  page?: number;
+  pageSize?: number;
 }) {
   if (!input.isAdmin) {
     const cacheVersion = await getDailyReportCacheVersion(false);
 
     return withDailyReportCache(
-      `daily:list:${cacheVersion}:${input.status ?? "published"}:${input.week ?? "all"}`,
+      `daily:list:${cacheVersion}:${input.status ?? "published"}:${input.week ?? "all"}:${input.page ?? ""}:${input.pageSize ?? ""}`,
       () => listDailyReportsUncached(input),
     );
   }
@@ -162,6 +164,8 @@ async function listDailyReportsUncached(input: {
   isAdmin: boolean;
   status?: "draft" | "published" | "all";
   week?: string | null;
+  page?: number;
+  pageSize?: number;
 }) {
   const where = buildDailyReportVisibilityWhere(input);
 
@@ -173,17 +177,29 @@ async function listDailyReportsUncached(input: {
     };
   }
 
-  const reports = await prisma.dailyReport.findMany({
-    where,
-    include: {
-      _count: {
-        select: { sources: true },
-      },
-    },
-    orderBy: [{ date: "desc" }, { generatedAt: "desc" }],
-  });
+  const take = input.pageSize;
+  const skip = input.page != null && take != null ? (input.page - 1) * take : undefined;
 
-  return reports.map(toListItem);
+  const [reports, total] = await Promise.all([
+    prisma.dailyReport.findMany({
+      where,
+      include: {
+        _count: {
+          select: { sources: true },
+        },
+      },
+      orderBy: [{ date: "desc" }, { generatedAt: "desc" }],
+      ...(take != null ? { take } : {}),
+      ...(skip != null ? { skip } : {}),
+    }),
+    prisma.dailyReport.count({ where }),
+  ]);
+
+  return {
+    reports: reports.map(toListItem),
+    total,
+    ...(input.page != null ? { page: input.page, pageSize: input.pageSize! } : {}),
+  };
 }
 
 function buildDailyReportVisibilityWhere(input: {

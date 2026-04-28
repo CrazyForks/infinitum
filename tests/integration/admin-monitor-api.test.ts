@@ -63,7 +63,7 @@ describe("/api/admin/monitor", () => {
     });
 
     const { GET } = await import("@/app/api/admin/monitor/route");
-    const response = await GET();
+    const response = await GET(new Request("http://localhost/api/admin/monitor"));
     const json = await response.json();
 
     expect(response.status).toBe(200);
@@ -101,7 +101,7 @@ describe("/api/admin/monitor", () => {
     });
 
     const { GET } = await import("@/app/api/admin/monitor/sources/route");
-    const response = await GET();
+    const response = await GET(new Request("http://localhost/api/admin/monitor/sources"));
     const json = await response.json();
 
     expect(response.status).toBe(200);

@@ -701,28 +701,36 @@ export async function requestTaskRunCancellation(id: string) {
   });
 }
 
-export async function getBackgroundTaskMonitorSnapshot(now = new Date()): Promise<BackgroundTaskMonitorSnapshot> {
+export async function getBackgroundTaskMonitorSnapshot(
+  now = new Date(),
+  opts?: { page?: number; pageSize?: number },
+): Promise<BackgroundTaskMonitorSnapshot> {
   const schedule = await ensureDefaultIngestionSchedule();
   await ensureDefaultDailyReportSchedule();
-  const [runningTasks, recentTasks] = await Promise.all([
+  const page = opts?.page ?? 1;
+  const pageSize = opts?.pageSize ?? 20;
+  const skip = (page - 1) * pageSize;
+
+  const [runningTasks, recentTasks, recentTotal] = await Promise.all([
     prisma.backgroundTaskRun.findMany({
-      where: {
-        status: {
-          in: ["queued", "running"],
-        },
-      },
+      where: { status: { in: ["queued", "running"] } },
       orderBy: { createdAt: "desc" },
     }),
     prisma.backgroundTaskRun.findMany({
-      take: 20,
+      take: pageSize,
+      skip,
       orderBy: { createdAt: "desc" },
     }),
+    prisma.backgroundTaskRun.count(),
   ]);
 
   return {
     schedule: toTaskScheduleSnapshot(schedule, now),
     runningTasks: await attachTaskEntityTitles(runningTasks.map(toTaskRunSnapshot)),
     recentTasks: await attachTaskEntityTitles(recentTasks.map(toTaskRunSnapshot)),
+    recentTotal,
+    page,
+    pageSize,
   };
 }
 

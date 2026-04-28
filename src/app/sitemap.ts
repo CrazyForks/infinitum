@@ -8,7 +8,7 @@ export const revalidate = 300;
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const origin = getSiteOrigin();
-  const reports = await listDailyReports({
+  const { reports } = await listDailyReports({
     isAdmin: false,
     status: "published",
   });

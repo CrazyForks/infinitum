@@ -211,11 +211,13 @@ export function AdminPageClient({
 
     if (taskId) {
       params.set("task", taskId);
+      router.push(`${pathname}?${params.toString()}`, { scroll: false });
     } else {
+      // When closing, just update the URL without triggering navigation
+      // to avoid a full server re-render that would flash the list.
       params.delete("task");
+      window.history.replaceState(null, "", `${pathname}?${params.toString()}`);
     }
-
-    router.push(`${pathname}?${params.toString()}`, { scroll: false });
   }, [pathname, router, searchParams]);
 
   const replaceContentPageState = useCallback((state: { page: number; pageSize: number }) => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -187,34 +187,55 @@ export function SourceMonitorPanel({ initialSnapshot, hideStats = false }: Sourc
   const [pageSize, setPageSize] = useState(10);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const attentionSources = useMemo(() => {
+  // Build the full source list from inactivity buckets (which always contain
+  // every enabled source distributed across inactivity tiers).  Also merge
+  // attentionSources to cover sources that are active (inactiveDays < 1) and
+  // therefore fall into no bucket.
+  const allSources = useMemo(() => {
     const sourceById = new Map<string, SourceMonitorEntry>();
-
     for (const source of snapshot.health.attentionSources) {
       sourceById.set(source.id, source);
     }
-
     for (const bucket of snapshot.inactivityBuckets) {
       for (const source of bucket.sources) {
         sourceById.set(source.id, source);
       }
     }
-
     return Array.from(sourceById.values());
   }, [snapshot.health.attentionSources, snapshot.inactivityBuckets]);
+
+  // Client-side filtering across all sources.
+  // When the user selects an inactivity bucket, narrow to that bucket's sources;
+  // otherwise filter by health status and group against the full list.
+  const displaySources = useMemo(() => {
+    const selected =
+      inactivityFilter === "all"
+        ? allSources
+        : snapshot.inactivityBuckets.find((e) => e.key === inactivityFilter)?.sources ?? [];
+    return selected.filter((source) => {
+      if (healthStatusFilter !== "all" && source.healthStatus !== healthStatusFilter) return false;
+      if (groupFilter !== "all" && (source.groupName ?? "未分组") !== groupFilter) return false;
+      return true;
+    });
+  }, [allSources, inactivityFilter, healthStatusFilter, groupFilter, snapshot.inactivityBuckets]);
+
+  const totalItems = displaySources.length;
+  const totalPages = Math.ceil(totalItems / pageSize) || 1;
+  const paginatedSources = displaySources.slice((page - 1) * pageSize, page * pageSize);
+
   const inactivityFilterOptions = useMemo(
     () => [
-      { value: "all", label: `全部（${attentionSources.length}）` },
+      { value: "all", label: `全部（${snapshot.totalEnabledSourceCount}）` },
       ...snapshot.inactivityBuckets.map((bucket) => ({
         value: bucket.key,
         label: `${bucket.label}无更新（${bucket.count}）`,
       })),
     ],
-    [attentionSources.length, snapshot.inactivityBuckets],
+    [snapshot.totalEnabledSourceCount, snapshot.inactivityBuckets],
   );
   const groupFilterOptions = useMemo(() => {
     const groupNames = Array.from(
-      new Set(attentionSources.map((source) => source.groupName ?? "未分组")),
+      new Set(allSources.map((source) => source.groupName ?? "未分组")),
     ).sort((left, right) => left.localeCompare(right, "zh-CN"));
 
     return [
@@ -224,7 +245,7 @@ export function SourceMonitorPanel({ initialSnapshot, hideStats = false }: Sourc
         label: groupName,
       })),
     ];
-  }, [attentionSources]);
+  }, [allSources]);
   const healthStatusFilterOptions = useMemo(
     () => [
       { value: "all", label: "全部" },
@@ -234,32 +255,6 @@ export function SourceMonitorPanel({ initialSnapshot, hideStats = false }: Sourc
     ],
     [],
   );
-  const selectedSources = useMemo(() => {
-    if (inactivityFilter === "all") {
-      return attentionSources;
-    }
-
-    return (
-      snapshot.inactivityBuckets.find((entry) => entry.key === inactivityFilter)?.sources ?? []
-    );
-  }, [attentionSources, inactivityFilter, snapshot.inactivityBuckets]);
-  const filteredSources = useMemo(
-    () =>
-      selectedSources.filter((source) => {
-        if (healthStatusFilter !== "all" && source.healthStatus !== healthStatusFilter) {
-          return false;
-        }
-
-        if (groupFilter !== "all" && (source.groupName ?? "未分组") !== groupFilter) {
-          return false;
-        }
-
-        return true;
-      }),
-    [groupFilter, healthStatusFilter, selectedSources],
-  );
-  const totalPages = Math.ceil(filteredSources.length / pageSize) || 1;
-  const paginatedSources = filteredSources.slice((page - 1) * pageSize, page * pageSize);
   const hasActiveFilters =
     inactivityFilter !== "all" ||
     healthStatusFilter !== "all" ||
@@ -275,11 +270,12 @@ export function SourceMonitorPanel({ initialSnapshot, hideStats = false }: Sourc
     }
   }, [page, totalPages]);
 
-  const refreshSnapshot = async () => {
+  // Fetch full source list for client-side filtering + pagination.
+  // No server-side filters — all filtering is done in the displaySources memo.
+  const fetchSources = useCallback(async () => {
     setIsRefreshing(true);
-
     try {
-      const response = await fetch("/api/admin/monitor/sources");
+      const response = await fetch("/api/admin/monitor/sources?page=1&pageSize=200");
       const payload = (await response.json()) as SourceMonitorSnapshot | { error?: string };
 
       if (!response.ok || !isSourceMonitorSnapshot(payload)) {
@@ -296,6 +292,17 @@ export function SourceMonitorPanel({ initialSnapshot, hideStats = false }: Sourc
     } finally {
       setIsRefreshing(false);
     }
+  }, [showToast]);
+
+  const mountCount = useRef(0);
+  useEffect(() => {
+    mountCount.current += 1;
+    if (mountCount.current <= 1) return;
+    void fetchSources();
+  }, [fetchSources]);
+
+  const refreshSnapshot = () => {
+    void fetchSources();
   };
 
   const clearFilters = () => {
@@ -374,9 +381,9 @@ export function SourceMonitorPanel({ initialSnapshot, hideStats = false }: Sourc
           />
         </div>
 
-        {filteredSources.length > 0 ? (
+        {displaySources.length > 0 ? (
           <PaginationControls
-            totalItems={filteredSources.length}
+            totalItems={totalItems}
             page={page}
             totalPages={totalPages}
             pageSize={pageSize}

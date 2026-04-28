@@ -20,6 +20,9 @@ type CollectionPayload = {
   clusters?: ClusterDTO[];
   error?: string;
   items?: ReviewItemDTO[];
+  total?: number;
+  page?: number;
+  pageSize?: number;
 };
 
 type MergeClustersPayload = {
@@ -55,16 +58,16 @@ async function parseJsonResponse<T extends { error?: string }>(
   return payload;
 }
 
-export async function fetchFilteredReviewItems() {
-  const response = await fetch("/api/admin/items?moderationStatus=filtered");
+export async function fetchFilteredReviewItems(page = 1, pageSize = 10) {
+  const response = await fetch(`/api/admin/items?moderationStatus=filtered&page=${page}&pageSize=${pageSize}`);
   const payload = await parseJsonResponse<CollectionPayload>(response, "审核数据加载失败。");
-  return payload.items ?? [];
+  return { items: payload.items ?? [], total: payload.total ?? 0 };
 }
 
-export async function fetchReviewClusters() {
-  const response = await fetch("/api/admin/clusters");
+export async function fetchReviewClusters(page = 1, pageSize = 10) {
+  const response = await fetch(`/api/admin/clusters?page=${page}&pageSize=${pageSize}`);
   const payload = await parseJsonResponse<CollectionPayload>(response, "审核数据加载失败。");
-  return payload.clusters ?? [];
+  return { clusters: payload.clusters ?? [], total: payload.total ?? 0 };
 }
 
 export async function fetchAdminCluster(clusterId: string) {

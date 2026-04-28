@@ -71,7 +71,47 @@ function isSourceInInactivityBucket(
   );
 }
 
-export async function getSourceMonitorSnapshot(now = new Date()): Promise<SourceMonitorSnapshot> {
+export type SourceMonitorFilter = {
+  healthStatus?: string;
+  inactivity?: string;
+  groupName?: string;
+};
+
+function applyFilters(entries: SourceMonitorEntry[], filter: SourceMonitorFilter) {
+  return entries.filter((source) => {
+    if (filter.healthStatus && filter.healthStatus !== "all" && source.healthStatus !== filter.healthStatus) {
+      return false;
+    }
+
+    if (filter.groupName && filter.groupName !== "all" && (source.groupName ?? "未分组") !== filter.groupName) {
+      return false;
+    }
+
+    if (filter.inactivity && filter.inactivity !== "all") {
+      const bucket = INACTIVITY_BUCKETS.find((b) => b.key === filter.inactivity);
+      if (bucket && !isSourceInInactivityBucket(source, bucket)) {
+        return false;
+      }
+    }
+
+    return true;
+  });
+}
+
+export async function getSourceMonitorSnapshot(
+  now = new Date(),
+  opts?: {
+    page?: number;
+    pageSize?: number;
+    healthStatus?: string;
+    inactivity?: string;
+    groupName?: string;
+  },
+): Promise<SourceMonitorSnapshot> {
+  // NOTE: All enabled sources are loaded for health/inactivity statistics.
+  // If source count grows beyond ~500, consider pushing health counts to
+  // prisma.source.groupBy({ by: ["healthStatus"] }) and computing inactivity
+  // buckets from a batched last-item-created-at query.
   const [sources, latestItemsBySource] = await Promise.all([
     prisma.source.findMany({
       where: { enabled: true },
@@ -119,14 +159,27 @@ export async function getSourceMonitorSnapshot(now = new Date()): Promise<Source
   const failedCount = entries.filter((source) => source.healthStatus === "failed").length;
   const unknownCount = entries.filter((source) => source.healthStatus === "unknown").length;
 
+  const hasFilter =
+    opts && (opts.healthStatus || opts.inactivity || opts.groupName);
+  const filteredEntries = hasFilter ? applyFilters(entries, opts!) : entries;
+  const page = opts?.page;
+  const pageSize = opts?.pageSize;
+
+  const pagedEntries =
+    page != null && pageSize != null
+      ? filteredEntries.slice((page - 1) * pageSize, page * pageSize)
+      : filteredEntries;
+
   return {
     generatedAt: now.toISOString(),
     totalEnabledSourceCount: entries.length,
+    filteredSourceCount: hasFilter ? filteredEntries.length : undefined,
+    ...(page != null ? { page, pageSize: pageSize! } : {}),
     health: {
       healthyCount,
       failedCount,
       unknownCount,
-      attentionSources: entries,
+      attentionSources: pagedEntries,
     },
     inactivityBuckets: INACTIVITY_BUCKETS.map((bucket) => {
       const cutoff = new Date(now.getTime() - bucket.minDays * DAY_MS);

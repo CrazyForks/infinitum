@@ -447,6 +447,8 @@ function ContentReviewContent({
   const [isPending, startTransition] = useTransition();
   const [page, setPage] = useState(initialPage ?? 1);
   const [pageSize, setPageSize] = useState(initialPageSize ?? 10);
+  const [filteredTotal, setFilteredTotal] = useState(0);
+  const [clusterTotal, setClusterTotal] = useState(0);
 
   // Detail modal states
   const [selectedFilteredItem, setSelectedFilteredItem] = useState<ReviewItemDTO | null>(null);
@@ -488,21 +490,17 @@ function ContentReviewContent({
     startTransition(async () => {
       try {
         if (activeTab === "filtered") {
-          const nextItems = await fetchFilteredReviewItems();
+          const result = await fetchFilteredReviewItems(page, pageSize);
 
-          if (cancelled) {
-            return;
-          }
-
-          setFilteredItems(nextItems);
+          if (cancelled) return;
+          setFilteredItems(result.items);
+          setFilteredTotal(result.total);
         } else {
-          const nextClusters = await fetchReviewClusters();
+          const result = await fetchReviewClusters(page, pageSize);
 
-          if (cancelled) {
-            return;
-          }
-
-          setClusters(nextClusters);
+          if (cancelled) return;
+          setClusters(result.clusters);
+          setClusterTotal(result.total);
         }
       } catch (error) {
         if (!cancelled) {
@@ -514,7 +512,7 @@ function ContentReviewContent({
     return () => {
       cancelled = true;
     };
-  }, [activeTab, showToast]);
+  }, [activeTab, page, pageSize, showToast]);
 
   useEffect(() => {
     const cleanup = fetchData();
@@ -638,14 +636,14 @@ function ContentReviewContent({
     return clusters.find((c) => c.id === mergeTargetId) ?? null;
   }, [clusters, mergeTargetId]);
 
-  // Pagination
+  // Pagination — total comes from API, items are already paginated by the server
   const { currentItems, totalPages, paginatedItems, currentPage } = useMemo(() => {
-    const currentItems = activeTab === "filtered" ? visibleFilteredItems : visibleClusters;
-    const totalPages = Math.ceil(currentItems.length / pageSize) || 1;
+    const items = activeTab === "filtered" ? visibleFilteredItems : visibleClusters;
+    const total = activeTab === "filtered" ? filteredTotal : clusterTotal;
+    const totalPages = Math.ceil(total / pageSize) || 1;
     const currentPage = Math.min(page, totalPages);
-    const paginatedItems = currentItems.slice((currentPage - 1) * pageSize, currentPage * pageSize);
-    return { currentItems, totalPages, paginatedItems, currentPage };
-  }, [activeTab, visibleFilteredItems, visibleClusters, page, pageSize]);
+    return { currentItems: items, totalPages, paginatedItems: items, currentPage };
+  }, [activeTab, visibleFilteredItems, visibleClusters, filteredTotal, clusterTotal, page, pageSize]);
 
   const hasFilters =
     activeTab === "filtered"

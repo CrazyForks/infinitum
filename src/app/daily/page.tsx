@@ -47,7 +47,7 @@ export const metadata: Metadata = {
   },
 };
 
-function buildDailyListJsonLd(reports: Awaited<ReturnType<typeof listDailyReports>>) {
+function buildDailyListJsonLd(reports: Awaited<ReturnType<typeof listDailyReports>>["reports"]) {
   const origin = getSiteOrigin();
 
   return {
@@ -77,11 +77,18 @@ export default async function DailyPage({ searchParams }: DailyPageProps) {
   const selectedWeek = typeof resolvedSearchParams.week === "string" ? resolvedSearchParams.week : null;
   const rawStatus = typeof resolvedSearchParams.status === "string" ? resolvedSearchParams.status : "all";
   const selectedStatus = rawStatus === "draft" || rawStatus === "published" || rawStatus === "all" ? rawStatus : "all";
-  const [reports, weeks] = await Promise.all([
+  const rawPage = typeof resolvedSearchParams.page === "string" ? Number(resolvedSearchParams.page) : 1;
+  const rawPageSize = typeof resolvedSearchParams.pageSize === "string" ? Number(resolvedSearchParams.pageSize) : 20;
+  const page = Number.isFinite(rawPage) && rawPage >= 1 ? rawPage : 1;
+  const pageSize = Number.isFinite(rawPageSize) && rawPageSize >= 1 && rawPageSize <= 100 ? rawPageSize : 20;
+
+  const [{ reports, total }, weeks] = await Promise.all([
     listDailyReports({
       isAdmin: session.isAdmin,
       status: selectedStatus,
       week: selectedWeek,
+      page,
+      pageSize,
     }),
     listDailyReportArchiveWeeks({
       isAdmin: session.isAdmin,
@@ -106,6 +113,9 @@ export default async function DailyPage({ searchParams }: DailyPageProps) {
         isAdmin={session.isAdmin}
         selectedWeek={selectedWeek}
         selectedStatus={selectedStatus}
+        total={total}
+        page={page}
+        pageSize={pageSize}
       />
       <script
         type="application/ld+json"

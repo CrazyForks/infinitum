@@ -953,63 +953,82 @@ export async function listClusterItems(
   return items.map(mapItemToClusterPreview);
 }
 
-export async function listFilteredItems() {
-  const items = await prisma.item.findMany({
-    where: { moderationStatus: "filtered" },
-    include: { source: true },
-    orderBy: [{ publishedAt: "desc" }, { createdAt: "desc" }],
-  });
+export async function listFilteredItems(page = 1, pageSize = 20) {
+  const skip = (page - 1) * pageSize;
+  const [items, total] = await Promise.all([
+    prisma.item.findMany({
+      where: { moderationStatus: "filtered" },
+      include: { source: true },
+      orderBy: [{ publishedAt: "desc" }, { createdAt: "desc" }],
+      take: pageSize,
+      skip,
+    }),
+    prisma.item.count({ where: { moderationStatus: "filtered" } }),
+  ]);
 
-  return items.map(mapItemToReviewItem);
+  return { items: items.map(mapItemToReviewItem), total, page, pageSize };
 }
 
-export async function listAdminClusters() {
-  const clusters = await prisma.contentCluster.findMany({
-    include: {
-      items: {
-        where: {
-          status: "processed",
-          moderationStatus: {
-            in: [...DISPLAYABLE_MODERATION_STATUSES],
-          },
-        },
-        include: {
-          source: {
-            include: {
-              group: true,
+export async function listAdminClusters(page = 1, pageSize = 20) {
+  const skip = (page - 1) * pageSize;
+  const [clusters, total] = await Promise.all([
+    prisma.contentCluster.findMany({
+      include: {
+        items: {
+          where: {
+            status: "processed",
+            moderationStatus: {
+              in: [...DISPLAYABLE_MODERATION_STATUSES],
             },
           },
+          include: {
+            source: {
+              include: {
+                group: true,
+              },
+            },
+          },
+          orderBy: [{ publishedAt: "desc" }, { createdAt: "desc" }],
+          take: 5,
         },
-        orderBy: [{ publishedAt: "desc" }, { createdAt: "desc" }],
-        take: 5,
       },
-    },
-    orderBy: [{ latestPublishedAt: "desc" }, { createdAt: "desc" }],
-  });
+      orderBy: [{ latestPublishedAt: "desc" }, { createdAt: "desc" }],
+      take: pageSize,
+      skip,
+    }),
+    // Keep in sync with the findMany where above. Currently both count
+    // all clusters; if a where filter is added to findMany, mirror it here.
+    prisma.contentCluster.count(),
+  ]);
 
-  return clusters.map((cluster) => {
-    // 计算综合推荐评分（AI评分 + 投票微调 + 来源/条目聚合加权）
-    const clusterWithVotes = cluster as typeof cluster & { upvotes: number; downvotes: number };
-    const sourceCount = new Set(cluster.items.map((item) => item.sourceId)).size;
-    const recommendScore = calculateRecommendScore(
-      cluster.score,
-      clusterWithVotes.upvotes ?? 0,
-      clusterWithVotes.downvotes ?? 0,
-      sourceCount,
-      cluster.items.length,
-    );
+  return {
+    clusters: clusters.map((cluster) => {
+      // 计算综合推荐评分（AI评分 + 投票微调 + 来源/条目聚合加权）
+      const clusterWithVotes = cluster as typeof cluster & { upvotes: number; downvotes: number };
+      const sourceCount = new Set(cluster.items.map((item) => item.sourceId)).size;
+      const recommendScore = calculateRecommendScore(
+        cluster.score,
+        clusterWithVotes.upvotes ?? 0,
+        clusterWithVotes.downvotes ?? 0,
+        sourceCount,
+        cluster.items.length,
+      );
 
-    return {
-      id: cluster.id,
-      title: cluster.title,
-      summary: cluster.summary,
-      score: recommendScore,
-      itemCount: cluster.items.length, // 使用实际查询到的条目数，而不是数据库中的 itemCount 字段
-      latestPublishedAt: cluster.latestPublishedAt.toISOString(),
-      status: cluster.status,
-      items: cluster.items.map(mapItemToClusterPreview),
-    } satisfies ClusterDTO;
-  });
+      return {
+        id: cluster.id,
+        title: cluster.title,
+        summary: cluster.summary,
+        score: recommendScore,
+        itemCount: cluster.items.length, // 使用实际查询到的条目数，而不是数据库中的 itemCount 字段
+        latestPublishedAt: cluster.latestPublishedAt.toISOString(),
+        status: cluster.status,
+        items: cluster.items.map(mapItemToClusterPreview),
+      } satisfies ClusterDTO;
+    }),
+    total,
+    page,
+    pageSize,
+  };
 }
 
 export async function getAdminCluster(clusterId: string) {

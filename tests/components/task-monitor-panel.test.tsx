@@ -334,7 +334,7 @@ describe("TaskMonitorPanel", () => {
     await user.click(screen.getByTitle("刷新进度"));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("/api/admin/monitor");
+      expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/api/admin/monitor?page="));
     });
 
     const dialog = await screen.findByRole("dialog", { name: "任务详情" });

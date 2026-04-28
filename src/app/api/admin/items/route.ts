@@ -9,12 +9,15 @@ export async function GET(request: Request) {
     const moderationStatus = searchParams.get("moderationStatus");
 
     if (moderationStatus && moderationStatus !== "filtered") {
-      return Response.json({ items: [] });
+      return Response.json({ items: [], total: 0, page: 1, pageSize: 20 });
     }
 
-    const items = await listFilteredItems();
+    const page = Math.max(1, Number(searchParams.get("page")) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number(searchParams.get("pageSize")) || 20));
 
-    return Response.json({ items });
+    const result = await listFilteredItems(page, pageSize);
+
+    return Response.json(result);
   } catch (error) {
     return adminErrorResponse(error);
   }

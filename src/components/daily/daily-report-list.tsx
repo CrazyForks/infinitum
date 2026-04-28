@@ -17,6 +17,7 @@ import { IconButton } from "@/components/ui/icon-button";
 import { IconEye, IconEyeOff, IconRefresh, IconTrash } from "@/components/ui/icons";
 import { renderInlineMarkdown } from "@/components/ui/inline-markdown";
 import { ModalShell } from "@/components/ui/modal-shell";
+import { PaginationControls } from "@/components/ui/pagination-controls";
 import type { DailyReportArchiveWeekDTO, DailyReportListItemDTO } from "@/lib/daily-report/types";
 import { cx } from "@/lib/ui/cx";
 
@@ -26,6 +27,9 @@ type DailyReportListProps = {
   isAdmin: boolean;
   selectedWeek: string | null;
   selectedStatus: string;
+  total: number;
+  page: number;
+  pageSize: number;
 };
 
 function getTodayValue() {
@@ -50,6 +54,9 @@ export function DailyReportList({
   isAdmin,
   selectedWeek,
   selectedStatus,
+  total,
+  page,
+  pageSize,
 }: DailyReportListProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -59,8 +66,24 @@ export function DailyReportList({
   const [generateDate, setGenerateDate] = useState(getTodayValue);
   const [isPending, startTransition] = useTransition();
   const totalWeekCount = weeks.reduce((sum, week) => sum + week.count, 0);
+  const totalPages = Math.ceil(total / pageSize) || 1;
+  const [jumpToPage, setJumpToPage] = useState(String(page));
 
-  const updateQuery = (next: { week?: string | null; status?: string | null }) => {
+  const handleJumpToPage = () => {
+    const nextPage = Number.parseInt(jumpToPage, 10);
+    if (!Number.isFinite(nextPage)) {
+      setJumpToPage(String(page));
+      return;
+    }
+    const normalizedPage = Math.min(Math.max(1, nextPage), totalPages);
+    if (normalizedPage === page) {
+      setJumpToPage(String(normalizedPage));
+      return;
+    }
+    updateQuery({ page: normalizedPage });
+  };
+
+  const updateQuery = (next: { week?: string | null; status?: string | null; page?: number; pageSize?: number }) => {
     const params = new URLSearchParams(searchParams.toString());
     if (next.week !== undefined) {
       if (next.week) params.set("week", next.week);
@@ -69,6 +92,14 @@ export function DailyReportList({
     if (next.status !== undefined) {
       if (next.status && next.status !== "all") params.set("status", next.status);
       else params.delete("status");
+    }
+    if (next.page !== undefined) {
+      if (next.page > 1) params.set("page", String(next.page));
+      else params.delete("page");
+    }
+    if (next.pageSize !== undefined) {
+      if (next.pageSize !== 20) params.set("pageSize", String(next.pageSize));
+      else params.delete("pageSize");
     }
     router.push(`/daily${params.toString() ? `?${params.toString()}` : ""}`);
   };
@@ -239,76 +270,89 @@ export function DailyReportList({
               当前时间范围内还没有可展示日报，请稍后再回来看看。
             </div>
           ) : (
-            <div className="space-y-3">
-              {reports.map((report) => (
-                <article
-                  key={report.id}
-                  className="relative w-full rounded-lg border border-[color:var(--line)] bg-[var(--surface)] px-4 py-4 shadow-[var(--shadow-sm)] transition hover:border-[color:var(--line-strong)] hover:shadow-md sm:px-6 sm:py-5"
-                >
-                  {isAdmin ? (
-                    <div className="absolute right-4 top-4 flex items-center gap-1 sm:right-5 sm:top-5">
-                      <IconButton
-                        size="sm"
-                        title={report.status === "published" ? "撤回为草稿" : "发布日报"}
-                        aria-label={report.status === "published" ? "撤回为草稿" : "发布日报"}
-                        disabled={isPending}
-                        onClick={(event) => runCardAction(event, report, "togglePublish")}
-                        className={report.status === "published" ? "text-[var(--accent-strong)]" : ""}
-                      >
-                        {report.status === "published" ? (
-                          <IconEyeOff className="h-4 w-4" />
-                        ) : (
-                          <IconEye className="h-4 w-4" />
-                        )}
-                      </IconButton>
-                      <IconButton
-                        size="sm"
-                        title="重新生成"
-                        aria-label="重新生成"
-                        disabled={isPending}
-                        onClick={(event) => runCardAction(event, report, "regenerate")}
-                      >
-                        <IconRefresh className="h-4 w-4" />
-                      </IconButton>
-                      <IconButton
-                        size="sm"
-                        title="删除日报"
-                        aria-label="删除日报"
-                        disabled={isPending}
-                        onClick={(event) => openDeleteDialog(event, report)}
-                        className="hover:text-[var(--danger-ink)]"
-                      >
-                        <IconTrash className="h-4 w-4" />
-                      </IconButton>
-                    </div>
-                  ) : null}
-                  <div className="min-w-0">
-                    <div className={cx("min-w-0", isAdmin ? "pr-28 sm:pr-32" : "")}>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h2 className="text-lg font-semibold text-[var(--foreground)]">
-                          <Link
-                            href={`/daily/${report.date}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="transition hover:text-[var(--accent-strong)] hover:underline"
-                          >
-                            {report.title}
-                          </Link>
-                        </h2>
-                        {isAdmin ? (
-                          <span className={cx("rounded-sm px-2 py-0.5 text-xs", statusClass(report.status))}>
-                            {statusLabel(report.status)}
-                          </span>
-                        ) : null}
+            <>
+              <div className="space-y-3">
+                {reports.map((report) => (
+                  <article
+                    key={report.id}
+                    className="relative w-full rounded-lg border border-[color:var(--line)] bg-[var(--surface)] px-4 py-4 shadow-[var(--shadow-sm)] transition hover:border-[color:var(--line-strong)] hover:shadow-md sm:px-6 sm:py-5"
+                  >
+                    {isAdmin ? (
+                      <div className="absolute right-4 top-4 flex items-center gap-1 sm:right-5 sm:top-5">
+                        <IconButton
+                          size="sm"
+                          title={report.status === "published" ? "撤回为草稿" : "发布日报"}
+                          aria-label={report.status === "published" ? "撤回为草稿" : "发布日报"}
+                          disabled={isPending}
+                          onClick={(event) => runCardAction(event, report, "togglePublish")}
+                          className={report.status === "published" ? "text-[var(--accent-strong)]" : ""}
+                        >
+                          {report.status === "published" ? (
+                            <IconEyeOff className="h-4 w-4" />
+                          ) : (
+                            <IconEye className="h-4 w-4" />
+                          )}
+                        </IconButton>
+                        <IconButton
+                          size="sm"
+                          title="重新生成"
+                          aria-label="重新生成"
+                          disabled={isPending}
+                          onClick={(event) => runCardAction(event, report, "regenerate")}
+                        >
+                          <IconRefresh className="h-4 w-4" />
+                        </IconButton>
+                        <IconButton
+                          size="sm"
+                          title="删除日报"
+                          aria-label="删除日报"
+                          disabled={isPending}
+                          onClick={(event) => openDeleteDialog(event, report)}
+                          className="hover:text-[var(--danger-ink)]"
+                        >
+                          <IconTrash className="h-4 w-4" />
+                        </IconButton>
                       </div>
+                    ) : null}
+                    <div className="min-w-0">
+                      <div className={cx("min-w-0", isAdmin ? "pr-28 sm:pr-32" : "")}>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h2 className="text-lg font-semibold text-[var(--foreground)]">
+                            <Link
+                              href={`/daily/${report.date}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="transition hover:text-[var(--accent-strong)] hover:underline"
+                            >
+                              {report.title}
+                            </Link>
+                          </h2>
+                          {isAdmin ? (
+                            <span className={cx("rounded-sm px-2 py-0.5 text-xs", statusClass(report.status))}>
+                              {statusLabel(report.status)}
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+                      <p className="mt-3 line-clamp-5 text-sm leading-6 text-[var(--text-2)]">
+                        {renderInlineMarkdown(report.openingSummary || report.errorMessage || "")}
+                      </p>
                     </div>
-                    <p className="mt-3 line-clamp-5 text-sm leading-6 text-[var(--text-2)]">
-                      {renderInlineMarkdown(report.openingSummary || report.errorMessage || "")}
-                    </p>
-                  </div>
-                </article>
-              ))}
-            </div>
+                  </article>
+                ))}
+              </div>
+              <PaginationControls
+                totalItems={total}
+                page={page}
+                totalPages={totalPages}
+                pageSize={pageSize}
+                onPageChange={(nextPage) => updateQuery({ page: nextPage })}
+                onPageSizeChange={(nextPageSize) => updateQuery({ page: 1, pageSize: nextPageSize })}
+                jumpValue={jumpToPage}
+                onJumpValueChange={setJumpToPage}
+                onJump={handleJumpToPage}
+              />
+            </>
           )}
         </section>
       </div>
