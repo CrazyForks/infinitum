@@ -110,6 +110,12 @@ function applyIncrementalMigrations() {
     });
   }
 
+  if (!columnExists("source_groups", "color")) {
+    runSqlite([dbPath], {
+      input: `ALTER TABLE "source_groups" ADD COLUMN "color" TEXT NOT NULL DEFAULT '';\n`,
+    });
+  }
+
   if (!columnExists("task_schedules", "processingStartAt")) {
     runSqlite([dbPath], {
       input: `ALTER TABLE "task_schedules" ADD COLUMN "processingStartAt" DATETIME;\n`,

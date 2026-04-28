@@ -129,7 +129,7 @@ function buildInitialSettings(): AdminSettingsSnapshot {
       nextRunAt: "2026-04-22T03:00:00.000Z",
       isHeartbeatStale: false,
     },
-    groups: [{ id: "group-1", name: "Core", sortOrder: 0 }],
+    groups: [{ id: "group-1", name: "Core", color: "#3b82f6", sortOrder: 0 }],
     sources: [
       {
         id: "source-1",

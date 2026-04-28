@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { generateUniqueGroupColor } from "@/lib/groups/badge";
 import { createRssParser } from "@/lib/ingestion/parser";
 import {
   buildSiteUrlFromRssUrl,
@@ -54,6 +55,7 @@ export async function importSourcesFromOpml(
       }));
   const existingGroups = await prisma.sourceGroup.findMany();
   const groupIdByName = new Map(existingGroups.map((group) => [group.name, group.id]));
+  const usedColors = new Set(existingGroups.map((g) => g.color).filter(Boolean));
   let createdCount = 0;
   let updatedCount = 0;
   const failures: OpmlImportSummary["failures"] = [];
@@ -70,9 +72,12 @@ export async function importSourcesFromOpml(
         if (existingGroupId) {
           groupId = existingGroupId;
         } else {
+          const color = generateUniqueGroupColor(usedColors);
+          usedColors.add(color);
           const group = await prisma.sourceGroup.create({
             data: {
               name: groupName,
+              color,
             },
           });
           groupIdByName.set(groupName, group.id);
@@ -146,10 +151,16 @@ export async function replaceBlacklistKeywords(keywords: string[]) {
 
 export async function createSourceGroup(name: string) {
   const nextSortOrder = await getNextSourceGroupSortOrder();
+  const existingColors = new Set(
+    (await prisma.sourceGroup.findMany({ select: { color: true } }))
+      .map((g) => g.color)
+      .filter(Boolean),
+  );
 
   return prisma.sourceGroup.create({
     data: {
       name: name.trim(),
+      color: generateUniqueGroupColor(existingColors),
       sortOrder: nextSortOrder,
     },
   });

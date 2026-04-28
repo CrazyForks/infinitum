@@ -1948,7 +1948,7 @@ function GroupRow({
   const [name, setName] = useState(group.name);
   const [isEditing, setIsEditing] = useState(false);
   const initial = group.name.charAt(0).toUpperCase();
-  const badgeColor = getStableGroupBadgeColor(group.name);
+  const badgeColor = group.color || getStableGroupBadgeColor(group.name);
   const {
     attributes,
     listeners,

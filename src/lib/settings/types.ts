@@ -104,6 +104,7 @@ export type AdminSettingsSnapshot = {
   groups: Array<{
     id: string;
     name: string;
+    color: string;
     sortOrder: number;
   }>;
   sources: Array<{

@@ -139,6 +139,7 @@ export async function getAdminSettings(): Promise<AdminSettingsSnapshot> {
     groups: groups.map((group) => ({
       id: group.id,
       name: group.name,
+      color: group.color,
       sortOrder: group.sortOrder,
     })),
     sources: sources.map((source) => ({

@@ -30,7 +30,32 @@ export function getStableGroupBadgeColor(groupName: string) {
   return groupBadgePalette[hash % groupBadgePalette.length];
 }
 
-export function toGroupBadge(group: { id: string; name: string } | null | undefined): GroupBadge | null {
+export function generateUniqueGroupColor(existingColors: Set<string>): string {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const hue = Math.floor(Math.random() * 360);
+    const saturation = 55 + Math.floor(Math.random() * 16); // 55-70%
+    const lightness = 45 + Math.floor(Math.random() * 11); // 45-55%
+    const color = `hsl(${hue},${saturation}%,${lightness}%)`;
+
+    if (!existingColors.has(color)) {
+      return color;
+    }
+  }
+
+  // Fallback: try palette colors not yet used
+  for (const paletteColor of groupBadgePalette) {
+    if (!existingColors.has(paletteColor)) {
+      return paletteColor;
+    }
+  }
+
+  // Last resort: return a palette color even if duplicate
+  return groupBadgePalette[0];
+}
+
+export function toGroupBadge(
+  group: { id: string; name: string; color?: string } | null | undefined,
+): GroupBadge | null {
   if (!group) {
     return null;
   }
@@ -38,6 +63,6 @@ export function toGroupBadge(group: { id: string; name: string } | null | undefi
   return {
     id: group.id,
     name: group.name,
-    color: getStableGroupBadgeColor(group.name),
+    color: group.color || getStableGroupBadgeColor(group.name),
   };
 }
