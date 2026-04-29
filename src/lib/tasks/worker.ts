@@ -172,9 +172,13 @@ async function enqueueScheduledItemCleanupIfDue(now: Date) {
   return true;
 }
 
-export async function recoverStaleTaskRuns(now = new Date()) {
+export async function recoverStaleTaskRuns(
+  now = new Date(),
+  options?: { recoverInterruptedRuns?: boolean },
+) {
   const staleBefore = new Date(now.getTime() - DEFAULT_TASK_STALE_MS);
   const staleReason = "Worker exited before completing the task.";
+  const recoverInterruptedRuns = options?.recoverInterruptedRuns ?? false;
   const cancellationRequestedRuns = await prisma.backgroundTaskRun.findMany({
     where: {
       status: "running",
@@ -191,9 +195,13 @@ export async function recoverStaleTaskRuns(now = new Date()) {
     where: {
       status: "running",
       cancelRequestedAt: null,
-      startedAt: {
-        lt: staleBefore,
-      },
+      ...(recoverInterruptedRuns
+        ? {}
+        : {
+            startedAt: {
+              lt: staleBefore,
+            },
+          }),
       finishedAt: null,
     },
     select: {
@@ -295,6 +303,7 @@ export async function runWorkerCycle(options?: {
 }) {
   const now = options?.now ?? new Date();
 
+  await recoverStaleTaskRuns(now);
   await ensureDefaultIngestionSchedule();
   await ensureDefaultDailyReportSchedule();
   await ensureDefaultItemCleanupSchedule();
@@ -320,7 +329,8 @@ export async function startWorkerLoop(options?: {
   pollIntervalMs?: number;
   executeTaskRun?: (taskRun: BackgroundTaskRun) => Promise<void>;
 }) {
-  await recoverStaleTaskRuns();
+  // On worker startup, any persisted running task belongs to a process that no longer exists.
+  await recoverStaleTaskRuns(new Date(), { recoverInterruptedRuns: true });
 
   while (true) {
     await runWorkerCycle({

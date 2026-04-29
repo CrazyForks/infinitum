@@ -145,6 +145,44 @@ describe("background task persistence", () => {
     expect(updatedFetchRun.finishedAt).not.toBeNull();
   });
 
+  it("marks interrupted running tasks as failed during worker startup recovery", async () => {
+    const taskRun = await prisma.backgroundTaskRun.create({
+      data: {
+        kind: "ingestion",
+        triggerType: "manual",
+        status: "running",
+        label: "默认抓取任务",
+        startedAt: new Date("2026-04-12T00:10:00.000Z"),
+      },
+    });
+    const fetchRun = await prisma.fetchRun.create({
+      data: {
+        taskRunId: taskRun.id,
+        triggerType: "manual",
+        status: "running",
+        startedAt: new Date("2026-04-12T00:10:00.000Z"),
+      },
+    });
+
+    const recovered = await recoverStaleTaskRuns(new Date("2026-04-12T00:12:00.000Z"), {
+      recoverInterruptedRuns: true,
+    });
+    const updatedTaskRun = await prisma.backgroundTaskRun.findUniqueOrThrow({
+      where: { id: taskRun.id },
+    });
+    const updatedFetchRun = await prisma.fetchRun.findUniqueOrThrow({
+      where: { id: fetchRun.id },
+    });
+
+    expect(recovered).toBe(1);
+    expect(updatedTaskRun.status).toBe("failed");
+    expect(updatedTaskRun.finishedAt).not.toBeNull();
+    expect(updatedTaskRun.errorSummary).toContain("Worker exited");
+    expect(updatedFetchRun.status).toBe("failed");
+    expect(updatedFetchRun.finishedAt).not.toBeNull();
+    expect(updatedFetchRun.errorSummary).toContain("Worker exited");
+  });
+
   it("reconciles cancellation-requested running tasks as cancelled during recovery", async () => {
     const taskRun = await prisma.backgroundTaskRun.create({
       data: {
