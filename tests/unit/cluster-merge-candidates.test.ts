@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { buildClusterMergeCandidates, type ClusterMergeCandidate } from "@/lib/clusters/helpers";
+import { CLUSTER_MERGE_CANDIDATE_LIMIT } from "@/config/constants";
+import {
+  buildClusterMergeCandidateInputHash,
+  buildClusterMergeCandidates,
+  type ClusterMergeCandidate,
+} from "@/lib/clusters/helpers";
 
 function createCandidate(overrides: Partial<ClusterMergeCandidate>): ClusterMergeCandidate {
   return {
@@ -21,7 +26,7 @@ function createCandidate(overrides: Partial<ClusterMergeCandidate>): ClusterMerg
 }
 
 describe("buildClusterMergeCandidates", () => {
-  it("keeps existing multi-item clusters even when pair score is weak", () => {
+  it("does not keep existing multi-item clusters when no merge anchor is found", () => {
     const candidates = buildClusterMergeCandidates([
       createCandidate({
         id: "multi-product-a",
@@ -50,7 +55,7 @@ describe("buildClusterMergeCandidates", () => {
       }),
     ]);
 
-    expect(candidates.map((candidate) => candidate.id)).toEqual(["multi-funding-b", "multi-product-a"]);
+    expect(candidates).toEqual([]);
   });
 
   it("keeps multi-subject singleton events when object, action, date, and text anchors align", () => {
@@ -83,6 +88,86 @@ describe("buildClusterMergeCandidates", () => {
     expect(candidates.map((candidate) => candidate.id).sort()).toEqual(["microsoft-contract", "openai-contract"]);
   });
 
+  it("skips already evaluated merge pairs when neither side changed", () => {
+    const openaiContract = createCandidate({
+      id: "openai-contract",
+      title: "OpenAI 与微软调整合作合同",
+      summary: "OpenAI 和微软调整云服务合作合同条款。",
+      fingerprint: "openai-contract",
+      eventType: "partnership",
+      eventSubject: "OpenAI",
+      eventAction: "变更",
+      eventObject: "微软合同",
+      eventDate: "2026-04-20",
+      itemCount: 10,
+    });
+    const microsoftContract = createCandidate({
+      id: "microsoft-contract",
+      title: "微软和 OpenAI 调整合作协议",
+      summary: "微软与 OpenAI 对合作合同进行变更。",
+      fingerprint: "microsoft-contract",
+      eventType: "partnership",
+      eventSubject: "微软",
+      eventAction: "变更",
+      eventObject: "OpenAI 合同",
+      eventDate: "2026-04-20",
+      itemCount: 1,
+      latestPublishedAt: new Date("2026-04-20T10:00:00.000Z"),
+    });
+
+    const candidates = buildClusterMergeCandidates([
+      {
+        ...openaiContract,
+        mergeInputHash: buildClusterMergeCandidateInputHash(openaiContract),
+      },
+      {
+        ...microsoftContract,
+        mergeInputHash: buildClusterMergeCandidateInputHash(microsoftContract),
+      },
+    ]);
+
+    expect(candidates).toEqual([]);
+  });
+
+  it("keeps evaluated neighbors when a related candidate is new or changed", () => {
+    const evaluatedContract = createCandidate({
+      id: "openai-contract",
+      title: "OpenAI 与微软调整合作合同",
+      summary: "OpenAI 和微软调整云服务合作合同条款。",
+      fingerprint: "openai-contract",
+      eventType: "partnership",
+      eventSubject: "OpenAI",
+      eventAction: "变更",
+      eventObject: "微软合同",
+      eventDate: "2026-04-20",
+    });
+    const changedContract = createCandidate({
+      id: "microsoft-contract",
+      title: "微软和 OpenAI 调整合作协议",
+      summary: "微软与 OpenAI 对合作合同进行变更。",
+      fingerprint: "microsoft-contract",
+      eventType: "partnership",
+      eventSubject: "微软",
+      eventAction: "变更",
+      eventObject: "OpenAI 合同",
+      eventDate: "2026-04-20",
+      latestPublishedAt: new Date("2026-04-20T10:00:00.000Z"),
+    });
+
+    const candidates = buildClusterMergeCandidates([
+      {
+        ...evaluatedContract,
+        mergeInputHash: buildClusterMergeCandidateInputHash(evaluatedContract),
+      },
+      {
+        ...changedContract,
+        mergeInputHash: "stale-hash",
+      },
+    ]);
+
+    expect(candidates.map((candidate) => candidate.id)).toEqual(["microsoft-contract", "openai-contract"]);
+  });
+
   it("rejects pairs that only share subject, action, and date but conflict on object", () => {
     const candidates = buildClusterMergeCandidates([
       createCandidate({
@@ -111,5 +196,26 @@ describe("buildClusterMergeCandidates", () => {
     ]);
 
     expect(candidates).toEqual([]);
+  });
+
+  it("caps large merge candidate pools before sending them to AI", () => {
+    const candidates = buildClusterMergeCandidates(
+      Array.from({ length: CLUSTER_MERGE_CANDIDATE_LIMIT + 20 }, (_, index) =>
+        createCandidate({
+          id: `openai-contract-${index}`,
+          title: `OpenAI 与微软调整合作合同 ${index}`,
+          summary: "OpenAI 和微软调整云服务合作合同条款。",
+          fingerprint: `openai-contract-${index}`,
+          eventType: "partnership",
+          eventSubject: index % 2 === 0 ? "OpenAI" : "微软",
+          eventAction: "变更",
+          eventObject: index % 2 === 0 ? "微软合同" : "OpenAI 合同",
+          eventDate: "2026-04-20",
+          latestPublishedAt: new Date(`2026-04-20T${String(index % 24).padStart(2, "0")}:00:00.000Z`),
+        }),
+      ),
+    );
+
+    expect(candidates).toHaveLength(CLUSTER_MERGE_CANDIDATE_LIMIT);
   });
 });

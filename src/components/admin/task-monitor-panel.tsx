@@ -122,7 +122,7 @@ function formatTaskTimelineDetail(task: TaskRunSnapshot, node: NonNullable<TaskR
     case "cluster_assignment":
       return `指纹命中 ${getValue("指纹命中")} · 本地直连 ${getValue("本地直连")} · AI归组 ${getValue("AI归组")} · 跳过 ${getValue("跳过")} · 新建 ${getValue("新建")}`;
     case "cluster_merge":
-      return `候选 ${getValue("候选组")} 组 · ${getValue("跳过") ? "已跳过" : "已合并"} · 合并后 ${getValue("合并后")} 组`;
+      return `基础池 ${getValue("基础池")} · 候选 ${getValue("候选组")}/${getValue("裁剪前")} · Dirty ${getValue("Dirty候选")} · Hash跳过 ${getValue("Hash跳过")} · AI返回 ${getValue("AI返回组")} · 移动 ${getValue("移动条目")} · 失败 ${getValue("失败组")} · ${getValue("跳过") ? "已跳过" : "已合并"} · 合并后 ${getValue("合并后")} 组`;
     case "cluster_finalize":
       return `参与重算 ${getValue("参与重算")} · 完成更新 ${getValue("完成更新")} · 摘要完成 ${getValue("摘要完成")} · 摘要失败 ${getValue("摘要失败")} · 已删除 ${getValue("已删除")}`;
     default:
@@ -289,7 +289,7 @@ function TaskDetailModal({
       isOpen={isOpen}
       onClose={onClose}
       title="任务详情"
-      widthClassName="max-w-2xl"
+      widthClassName="max-w-5xl"
       panelClassName="flex max-h-[calc(100vh-2rem)] flex-col"
       headerClassName="border-b border-[color:var(--line)] p-6"
       bodyClassName="overflow-y-auto p-6"

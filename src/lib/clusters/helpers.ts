@@ -6,6 +6,8 @@ import {
   CLUSTER_MERGE_AI_PAIR_GRAY_SCORE,
   CLUSTER_MERGE_AI_PAIR_MIN_SCORE,
   CLUSTER_MERGE_AI_PAIR_STRONG_SCORE,
+  CLUSTER_MERGE_CANDIDATE_LIMIT,
+  CLUSTER_MERGE_RELATED_PAIR_LIMIT,
 } from "@/config/constants";
 import { type AiEventSignature, type AiProvider } from "@/lib/ai/provider";
 import { shouldRegenerateChineseSummary } from "@/lib/ai/summary-language";
@@ -555,23 +557,22 @@ export async function generateClusterPresentation(
   }
 }
 
-export function buildClusterMergeInputHash(
-  clusters: Array<{
-    id: string;
-    fingerprint: string;
-    title?: string | null;
-    summary?: string | null;
-    eventType?: string | null;
-    eventSubject?: string | null;
-    eventAction?: string | null;
-    eventObject?: string | null;
-    eventDate?: string | null;
-    itemCount: number;
-    latestPublishedAt: Date;
-  }>,
-): string {
-  const sorted = [...clusters].sort((a, b) => a.id.localeCompare(b.id));
-  const payload = sorted.map((c) => ({
+type ClusterMergeInputHashSeed = {
+  id: string;
+  fingerprint: string;
+  title?: string | null;
+  summary?: string | null;
+  eventType?: string | null;
+  eventSubject?: string | null;
+  eventAction?: string | null;
+  eventObject?: string | null;
+  eventDate?: string | null;
+  itemCount: number;
+  latestPublishedAt: Date;
+};
+
+function buildClusterMergeInputHashPayload(c: ClusterMergeInputHashSeed) {
+  return {
     id: c.id,
     fingerprint: c.fingerprint,
     title: c.title ?? null,
@@ -583,7 +584,19 @@ export function buildClusterMergeInputHash(
     eventDate: c.eventDate ?? null,
     itemCount: c.itemCount,
     latestPublishedAt: c.latestPublishedAt.getTime(),
-  }));
+  };
+}
+
+export function buildClusterMergeCandidateInputHash(cluster: ClusterMergeInputHashSeed): string {
+  return crypto
+    .createHash("sha256")
+    .update(JSON.stringify(buildClusterMergeInputHashPayload(cluster)))
+    .digest("hex");
+}
+
+export function buildClusterMergeInputHash(clusters: ClusterMergeInputHashSeed[]): string {
+  const sorted = [...clusters].sort((a, b) => a.id.localeCompare(b.id));
+  const payload = sorted.map(buildClusterMergeInputHashPayload);
 
   return crypto
     .createHash("sha256")
@@ -767,7 +780,47 @@ function hasDistinctiveTextOverlap(
   return false;
 }
 
-function scoreClusterMergePair(left: ClusterMergeCandidate, right: ClusterMergeCandidate) {
+type ClusterMergePairRejectionReason = "object_conflict" | "date_conflict" | "no_event_anchor";
+
+type ClusterMergePairScore = {
+  rejected: boolean;
+  rejectedReason: ClusterMergePairRejectionReason | null;
+  score: number;
+};
+
+export type ClusterMergeCandidateDiagnostics = {
+  totalPairs: number;
+  rejectedObjectConflict: number;
+  rejectedDateConflict: number;
+  rejectedNoEventAnchor: number;
+  belowGrayScore: number;
+  relatedPairs: number;
+  aiEligiblePairs: number;
+  cleanPairsSkipped: number;
+  dirtyPairs: number;
+  preLimitCandidates: number;
+  postLimitCandidates: number;
+  dirtyCandidateCount: number;
+};
+
+function createClusterMergeCandidateDiagnostics(): ClusterMergeCandidateDiagnostics {
+  return {
+    totalPairs: 0,
+    rejectedObjectConflict: 0,
+    rejectedDateConflict: 0,
+    rejectedNoEventAnchor: 0,
+    belowGrayScore: 0,
+    relatedPairs: 0,
+    aiEligiblePairs: 0,
+    cleanPairsSkipped: 0,
+    dirtyPairs: 0,
+    preLimitCandidates: 0,
+    postLimitCandidates: 0,
+    dirtyCandidateCount: 0,
+  };
+}
+
+function scoreClusterMergePair(left: ClusterMergeCandidate, right: ClusterMergeCandidate): ClusterMergePairScore {
   const leftSubject = normalizeEventSubjectForStorage(left.eventSubject);
   const rightSubject = normalizeEventSubjectForStorage(right.eventSubject);
   const leftAction = normalizeEventActionForStorage(left.eventAction) ?? normalizeStoredEventType(left.eventType);
@@ -787,6 +840,7 @@ function scoreClusterMergePair(left: ClusterMergeCandidate, right: ClusterMergeC
   if (leftObject && rightObject && !objectSimilarity.strong && !relationalObjectOverlap) {
     return {
       rejected: true,
+      rejectedReason: "object_conflict",
       score: 0,
     };
   }
@@ -794,6 +848,7 @@ function scoreClusterMergePair(left: ClusterMergeCandidate, right: ClusterMergeC
   if (left.eventDate && right.eventDate && left.eventDate !== right.eventDate) {
     return {
       rejected: true,
+      rejectedReason: "date_conflict",
       score: 0,
     };
   }
@@ -835,12 +890,14 @@ function scoreClusterMergePair(left: ClusterMergeCandidate, right: ClusterMergeC
   if (!hasEventAnchor) {
     return {
       rejected: true,
+      rejectedReason: "no_event_anchor",
       score,
     };
   }
 
   return {
     rejected: false,
+    rejectedReason: null,
     score,
   };
 }
@@ -857,9 +914,37 @@ function shouldSendMergePairToAi(score: number, relatedPairCount: number) {
   return score >= CLUSTER_MERGE_AI_PAIR_GRAY_SCORE && relatedPairCount <= 2;
 }
 
-export function buildClusterMergeCandidates(clusters: ClusterMergeCandidate[]) {
-  const selectedIds = new Set(clusters.filter((cluster) => cluster.itemCount >= 2).map((cluster) => cluster.id));
+function incrementClusterMergeRejection(
+  diagnostics: ClusterMergeCandidateDiagnostics,
+  reason: ClusterMergePairRejectionReason | null,
+) {
+  switch (reason) {
+    case "object_conflict":
+      diagnostics.rejectedObjectConflict += 1;
+      break;
+    case "date_conflict":
+      diagnostics.rejectedDateConflict += 1;
+      break;
+    case "no_event_anchor":
+      diagnostics.rejectedNoEventAnchor += 1;
+      break;
+    default:
+      break;
+  }
+}
+
+export function buildClusterMergeCandidateSelection(clusters: ClusterMergeCandidate[]) {
+  const selectedIds = new Set<string>();
   const bestScores = new Map<string, number>();
+  const currentInputHashes = new Map(
+    clusters.map((cluster) => [cluster.id, buildClusterMergeCandidateInputHash(cluster)]),
+  );
+  const dirtyIds = new Set(
+    clusters
+      .filter((cluster) => cluster.mergeInputHash !== currentInputHashes.get(cluster.id))
+      .map((cluster) => cluster.id),
+  );
+  const diagnostics = createClusterMergeCandidateDiagnostics();
 
   for (let leftIndex = 0; leftIndex < clusters.length; leftIndex += 1) {
     const left = clusters[leftIndex]!;
@@ -872,17 +957,44 @@ export function buildClusterMergeCandidates(clusters: ClusterMergeCandidate[]) {
 
       const right = clusters[rightIndex]!;
       const result = scoreClusterMergePair(left, right);
+      diagnostics.totalPairs += 1;
 
-      if (!result.rejected && result.score >= CLUSTER_MERGE_AI_PAIR_GRAY_SCORE) {
+      if (result.rejected) {
+        incrementClusterMergeRejection(diagnostics, result.rejectedReason);
+        continue;
+      }
+
+      if (result.score < CLUSTER_MERGE_AI_PAIR_GRAY_SCORE) {
+        diagnostics.belowGrayScore += 1;
+        continue;
+      }
+
+      if (result.score >= CLUSTER_MERGE_AI_PAIR_GRAY_SCORE) {
+        diagnostics.relatedPairs += 1;
         relatedPairs.push({ right, score: result.score });
       }
     }
 
-    for (const pair of relatedPairs) {
-      if (!shouldSendMergePairToAi(pair.score, relatedPairs.length)) {
+    for (const pair of relatedPairs
+      .sort((left, right) => {
+        if (right.score !== left.score) {
+          return right.score - left.score;
+        }
+
+        return right.right.latestPublishedAt.getTime() - left.right.latestPublishedAt.getTime();
+      })
+      .filter((pair) => shouldSendMergePairToAi(pair.score, relatedPairs.length))
+      .slice(0, CLUSTER_MERGE_RELATED_PAIR_LIMIT)) {
+      const leftChanged = left.mergeInputHash !== currentInputHashes.get(left.id);
+      const rightChanged = pair.right.mergeInputHash !== currentInputHashes.get(pair.right.id);
+      diagnostics.aiEligiblePairs += 1;
+
+      if (!leftChanged && !rightChanged) {
+        diagnostics.cleanPairsSkipped += 1;
         continue;
       }
 
+      diagnostics.dirtyPairs += 1;
       selectedIds.add(left.id);
       selectedIds.add(pair.right.id);
       bestScores.set(left.id, Math.max(bestScores.get(left.id) ?? 0, pair.score));
@@ -890,22 +1002,42 @@ export function buildClusterMergeCandidates(clusters: ClusterMergeCandidate[]) {
     }
   }
 
-  return clusters
+  const candidates = clusters
     .filter((cluster) => selectedIds.has(cluster.id))
     .sort((left, right) => {
-      if (right.itemCount !== left.itemCount) {
-        return right.itemCount - left.itemCount;
-      }
-
+      const leftDirty = dirtyIds.has(left.id) ? 1 : 0;
+      const rightDirty = dirtyIds.has(right.id) ? 1 : 0;
       const leftBestScore = bestScores.get(left.id) ?? 0;
       const rightBestScore = bestScores.get(right.id) ?? 0;
+
+      if (rightDirty !== leftDirty) {
+        return rightDirty - leftDirty;
+      }
 
       if (rightBestScore !== leftBestScore) {
         return rightBestScore - leftBestScore;
       }
 
+      if (right.itemCount !== left.itemCount) {
+        return right.itemCount - left.itemCount;
+      }
+
       return right.latestPublishedAt.getTime() - left.latestPublishedAt.getTime();
     });
+  diagnostics.preLimitCandidates = candidates.length;
+  diagnostics.dirtyCandidateCount = candidates.filter((candidate) => dirtyIds.has(candidate.id)).length;
+
+  const limitedCandidates = candidates.slice(0, CLUSTER_MERGE_CANDIDATE_LIMIT);
+  diagnostics.postLimitCandidates = limitedCandidates.length;
+
+  return {
+    candidates: limitedCandidates,
+    diagnostics,
+  };
+}
+
+export function buildClusterMergeCandidates(clusters: ClusterMergeCandidate[]) {
+  return buildClusterMergeCandidateSelection(clusters).candidates;
 }
 
 export function buildClusterMergeInput(clusters: ClusterMergeCandidate[]): string {

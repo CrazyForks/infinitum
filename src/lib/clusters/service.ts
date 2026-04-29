@@ -13,9 +13,9 @@ import {
   buildClusterEventSignature,
   buildClusterFingerprintSeed,
   buildClusterMatchInput,
+  buildClusterMergeCandidateInputHash,
+  buildClusterMergeCandidateSelection,
   buildClusterMergeInput,
-  buildClusterMergeCandidates,
-  buildClusterMergeInputHash,
   buildClusterSummaryInputHash,
   buildEventDisplayTitle,
   buildItemSummary,
@@ -692,11 +692,44 @@ async function mergeClustersInternal(
 }
 
 export type ClusterMergePassResult = {
+  baseClusters: number;
   candidates: number;
+  totalPairs: number;
+  rejectedObjectConflict: number;
+  rejectedDateConflict: number;
+  rejectedNoEventAnchor: number;
+  belowGrayScore: number;
+  relatedPairs: number;
+  aiEligiblePairs: number;
+  cleanPairsSkipped: number;
+  dirtyPairs: number;
+  preLimitCandidates: number;
+  postLimitCandidates: number;
+  dirtyCandidates: number;
+  aiMergeGroups: number;
   skipped: boolean;
   mergedCount: number;
+  itemsMoved: number;
+  failedGroups: number;
   affectedClusterIds: string[];
 };
+
+type EvaluatedClusterMergeCandidate = Parameters<typeof buildClusterMergeCandidateInputHash>[0] & { id: string };
+
+async function markClusterMergeCandidatesEvaluated(candidates: EvaluatedClusterMergeCandidate[]) {
+  if (candidates.length === 0) {
+    return;
+  }
+
+  await prisma.$transaction(
+    candidates.map((candidate) =>
+      prisma.contentCluster.updateMany({
+        where: { id: candidate.id },
+        data: { mergeInputHash: buildClusterMergeCandidateInputHash(candidate) },
+      }),
+    ),
+  );
+}
 
 export async function executeClusterMerge(
   aiProvider: AiProvider | undefined,
@@ -739,43 +772,66 @@ export async function executeClusterMerge(
     },
     orderBy: { id: "asc" },
   });
-  const allCandidates = buildClusterMergeCandidates(recentClusters);
+  const { candidates: allCandidates, diagnostics } = buildClusterMergeCandidateSelection(recentClusters);
+
+  const baseResult = {
+    baseClusters: recentClusters.length,
+    candidates: allCandidates.length,
+    totalPairs: diagnostics.totalPairs,
+    rejectedObjectConflict: diagnostics.rejectedObjectConflict,
+    rejectedDateConflict: diagnostics.rejectedDateConflict,
+    rejectedNoEventAnchor: diagnostics.rejectedNoEventAnchor,
+    belowGrayScore: diagnostics.belowGrayScore,
+    relatedPairs: diagnostics.relatedPairs,
+    aiEligiblePairs: diagnostics.aiEligiblePairs,
+    cleanPairsSkipped: diagnostics.cleanPairsSkipped,
+    dirtyPairs: diagnostics.dirtyPairs,
+    preLimitCandidates: diagnostics.preLimitCandidates,
+    postLimitCandidates: diagnostics.postLimitCandidates,
+    dirtyCandidates: diagnostics.dirtyCandidateCount,
+  };
 
   if (allCandidates.length < 2) {
     return {
-      candidates: allCandidates.length,
+      ...baseResult,
+      aiMergeGroups: 0,
       skipped: true,
       mergedCount: 0,
+      itemsMoved: 0,
+      failedGroups: 0,
       affectedClusterIds: [],
     };
   }
 
-  // Compute hash of the candidate set
-  const currentHash = buildClusterMergeInputHash(allCandidates);
-
-  // Check if all candidates already have the matching hash
-  const allHashesMatch = allCandidates.every((c) => c.mergeInputHash === currentHash);
+  // `mergeInputHash` is per-cluster input state. This lets a new or changed
+  // cluster pull in stable neighbors without repeatedly sending old clean pairs.
+  const allHashesMatch = allCandidates.every(
+    (candidate) => candidate.mergeInputHash === buildClusterMergeCandidateInputHash(candidate),
+  );
 
   if (allHashesMatch) {
     return {
-      candidates: allCandidates.length,
+      ...baseResult,
+      aiMergeGroups: 0,
       skipped: true,
       mergedCount: 0,
+      itemsMoved: 0,
+      failedGroups: 0,
       affectedClusterIds: [],
     };
   }
 
   // If no AI provider, just update hashes and skip
   if (!aiProvider) {
-    await prisma.contentCluster.updateMany({
-      where: { id: { in: allCandidates.map((c) => c.id) } },
-      data: { mergeInputHash: currentHash },
-    });
+    await markClusterMergeCandidatesEvaluated(allCandidates);
 
     return {
-      candidates: allCandidates.length,
+      ...baseResult,
+      aiMergeGroups: 0,
       skipped: true,
       mergedCount: 0,
+      itemsMoved: 0,
+      failedGroups: 0,
       affectedClusterIds: [],
     };
   }
@@ -788,15 +844,15 @@ export async function executeClusterMerge(
     mergeGroups = await aiProvider.mergeClusters(clustersJson);
   } catch {
     // On AI failure, update hashes and return without merging
-    await prisma.contentCluster.updateMany({
-      where: { id: { in: allCandidates.map((c) => c.id) } },
-      data: { mergeInputHash: currentHash },
-    });
+    await markClusterMergeCandidatesEvaluated(allCandidates);
 
     return {
-      candidates: allCandidates.length,
+      ...baseResult,
+      aiMergeGroups: 0,
       skipped: true,
       mergedCount: 0,
+      itemsMoved: 0,
+      failedGroups: 0,
       affectedClusterIds: [],
     };
   }
@@ -804,6 +860,8 @@ export async function executeClusterMerge(
   // Execute merges
   const affectedClusterIds = new Set<string>();
   let mergedCount = 0;
+  let itemsMoved = 0;
+  let failedGroups = 0;
 
   for (const group of mergeGroups) {
     if (group.length < 2) continue;
@@ -820,24 +878,27 @@ export async function executeClusterMerge(
     const sources = groupWithCounts.slice(1).map((c) => c.id);
 
     try {
-      await mergeClustersInternal(target.id, sources);
+      const mergeResult = await mergeClustersInternal(target.id, sources);
       affectedClusterIds.add(target.id);
       mergedCount += sources.length;
+      itemsMoved += mergeResult.itemsMoved;
     } catch {
       // Continue with other groups on individual merge failure
+      failedGroups += 1;
     }
   }
 
-  // Update mergeInputHash on all candidates after merge
-  await prisma.contentCluster.updateMany({
-    where: { id: { in: allCandidates.map((c) => c.id) } },
-    data: { mergeInputHash: currentHash },
-  });
+  // Update mergeInputHash on evaluated candidates after merge. Deleted source
+  // clusters are ignored by updateMany.
+  await markClusterMergeCandidatesEvaluated(allCandidates);
 
   return {
-    candidates: allCandidates.length,
+    ...baseResult,
+    aiMergeGroups: mergeGroups.filter((group) => group.length >= 2).length,
     skipped: false,
     mergedCount,
+    itemsMoved,
+    failedGroups,
     affectedClusterIds: [...affectedClusterIds],
   };
 }

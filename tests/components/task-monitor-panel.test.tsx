@@ -163,6 +163,35 @@ function buildMonitorSnapshot(): BackgroundTaskMonitorSnapshot {
             ],
           },
           {
+            key: "cluster_merge",
+            label: "聚合合并",
+            status: "succeeded",
+            startedAt: null,
+            finishedAt: null,
+            durationMs: null,
+            modelName: "gpt-4.1-mini-merge",
+            metrics: [
+              { label: "基础池", value: 120 },
+              { label: "本地Pair", value: 240 },
+              { label: "对象冲突", value: 30 },
+              { label: "日期冲突", value: 10 },
+              { label: "无锚点", value: 80 },
+              { label: "低分", value: 60 },
+              { label: "相关Pair", value: 60 },
+              { label: "AI候选Pair", value: 12 },
+              { label: "Hash跳过", value: 4 },
+              { label: "Dirty Pair", value: 8 },
+              { label: "裁剪前", value: 18 },
+              { label: "候选组", value: 12 },
+              { label: "Dirty候选", value: 5 },
+              { label: "AI返回组", value: 2 },
+              { label: "跳过", value: 0 },
+              { label: "合并后", value: 9 },
+              { label: "移动条目", value: 6 },
+              { label: "失败组", value: 1 },
+            ],
+          },
+          {
             key: "cluster_finalize",
             label: "聚合收尾",
             status: "running",
@@ -210,6 +239,7 @@ describe("TaskMonitorPanel", () => {
     expect(within(dialog).getByText("条目摘要 · 模型 gpt-4.1-mini-summary")).toBeInTheDocument();
     expect(within(dialog).getByText("内容分析 · 模型 gpt-4.1-mini-analysis")).toBeInTheDocument();
     expect(within(dialog).getByText("归组决策 · 模型 gpt-4.1-mini-match")).toBeInTheDocument();
+    expect(within(dialog).getByText("聚合合并 · 模型 gpt-4.1-mini-merge")).toBeInTheDocument();
     expect(within(dialog).getByText("聚合收尾 · 模型 gpt-4.1-mini-cluster")).toBeInTheDocument();
     expect(within(dialog).queryByText("进度")).not.toBeInTheDocument();
     expect(within(dialog).getByText("抓取 1 个源 · 10 篇内容 · 正文补抓 2 篇")).toBeInTheDocument();
@@ -217,6 +247,7 @@ describe("TaskMonitorPanel", () => {
     expect(within(dialog).getByText("完成 5 · 失败 1")).toBeInTheDocument();
     expect(within(dialog).getByText("完成 4 · 过滤 2")).toBeInTheDocument();
     expect(within(dialog).getByText("指纹命中 1 · 本地直连 2 · AI归组 1 · 跳过 0 · 新建 1")).toBeInTheDocument();
+    expect(within(dialog).getByText("基础池 120 · 候选 12/18 · Dirty 5 · Hash跳过 4 · AI返回 2 · 移动 6 · 失败 1 · 已合并 · 合并后 9 组")).toBeInTheDocument();
     expect(within(dialog).getByText("参与重算 2 · 完成更新 2 · 摘要完成 1 · 摘要失败 0 · 已删除 0")).toBeInTheDocument();
   });
 
@@ -249,24 +280,38 @@ describe("TaskMonitorPanel", () => {
   it("keeps current pagination when opening a task detail route", async () => {
     const user = userEvent.setup();
     const onDetailRouteChange = vi.fn();
+    const recentTasks = Array.from({ length: 12 }, (_, index) => ({
+      ...buildMonitorSnapshot().runningTasks[0],
+      id: `task-${index + 1}`,
+      status: "succeeded" as const,
+      startedAt: "2026-04-21T00:00:00.000Z",
+      finishedAt: "2026-04-21T00:00:10.000Z",
+    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            ...buildMonitorSnapshot(),
+            runningTasks: [],
+            recentTasks,
+            recentTotal: recentTasks.length,
+          }),
+        ),
+      ),
+    );
 
     renderWithProviders(
       <TaskMonitorPanel
         runningTasks={[]}
-        recentTasks={Array.from({ length: 12 }, (_, index) => ({
-          ...buildMonitorSnapshot().runningTasks[0],
-          id: `task-${index + 1}`,
-          status: "succeeded",
-          startedAt: "2026-04-21T00:00:00.000Z",
-          finishedAt: "2026-04-21T00:00:10.000Z",
-        }))}
+        recentTasks={recentTasks}
         initialPage={2}
         initialPageSize={10}
         onDetailRouteChange={onDetailRouteChange}
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: /默认抓取任务\s+#task-11/ }));
+    await user.click(await screen.findByRole("button", { name: /默认抓取任务\s+#task-11/ }));
 
     expect(onDetailRouteChange).toHaveBeenLastCalledWith("task-11", {
       page: 2,

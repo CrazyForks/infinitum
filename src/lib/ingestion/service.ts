@@ -656,9 +656,25 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
     options.now,
   );
   timelineCounters.clusterMerge = {
+    baseClusters: mergeResult.baseClusters,
     candidates: mergeResult.candidates,
+    totalPairs: mergeResult.totalPairs,
+    rejectedObjectConflict: mergeResult.rejectedObjectConflict,
+    rejectedDateConflict: mergeResult.rejectedDateConflict,
+    rejectedNoEventAnchor: mergeResult.rejectedNoEventAnchor,
+    belowGrayScore: mergeResult.belowGrayScore,
+    relatedPairs: mergeResult.relatedPairs,
+    aiEligiblePairs: mergeResult.aiEligiblePairs,
+    cleanPairsSkipped: mergeResult.cleanPairsSkipped,
+    dirtyPairs: mergeResult.dirtyPairs,
+    preLimitCandidates: mergeResult.preLimitCandidates,
+    postLimitCandidates: mergeResult.postLimitCandidates,
+    dirtyCandidates: mergeResult.dirtyCandidates,
+    aiMergeGroups: mergeResult.aiMergeGroups,
     skipped: mergeResult.skipped,
     merged: mergeResult.mergedCount,
+    itemsMoved: mergeResult.itemsMoved,
+    failedGroups: mergeResult.failedGroups,
   };
   if (mergeResult.affectedClusterIds.length > 0) {
     for (const clusterId of mergeResult.affectedClusterIds) {

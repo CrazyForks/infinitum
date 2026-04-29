@@ -73,6 +73,12 @@ export const CLUSTER_MERGE_AI_PAIR_GRAY_SCORE = 55;
 /** 聚合合并高置信候选分数 */
 export const CLUSTER_MERGE_AI_PAIR_STRONG_SCORE = 95;
 
+/** 单个聚合组最多带入 AI 的相似合并候选对 */
+export const CLUSTER_MERGE_RELATED_PAIR_LIMIT = 3;
+
+/** 单次聚合合并最多发送给 AI 的候选组数 */
+export const CLUSTER_MERGE_CANDIDATE_LIMIT = 80;
+
 // =============================================================================
 // Tasks / Worker
 // =============================================================================

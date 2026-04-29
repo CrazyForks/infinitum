@@ -12,6 +12,8 @@ failed_tests_unexplained: false
 
 # Review Report: cluster-merge-candidate-optimization
 
+This nested report mirrors `tasks/results/review-report.md` for the H4 gate structure.
+
 | Field | Value |
 | --- | --- |
 | Status | done |
@@ -59,7 +61,6 @@ failed_tests_unexplained: false
 - No Must Fix findings.
 - Candidate diagnostics are deterministic and covered by unit/component tests.
 - Dirty-first ordering affects candidate input priority only; it does not change actual merge target selection.
-- The admin summary is denser, but the task detail modal width was widened to reduce wrapping on desktop.
 
 ## Commit Readiness
 
@@ -67,7 +68,7 @@ failed_tests_unexplained: false
 | --- | --- | --- |
 | Obvious Bugs | pass | Reviewed hash comparison, skip paths, AI failure paths, merge result counters, and modal width scope. |
 | API / Data Breakage | pass | No schema, route, auth, or serialized external contract changes. |
-| Deployability | pass | No migration or dependency change; existing clusters may be re-evaluated as hashes differ after candidate input changes. |
+| Deployability | pass | No migration or dependency change. |
 | Observability | pass | Merge pass now records detailed pruning, dirty, AI, success, and failure counters. |
 | Error Handling UX | pass | AI failure and no-provider paths still mark evaluated candidates and return skipped metrics. |
 | Idempotency / Retry | pass | Per-cluster hash gating keeps repeated tasks from resending unchanged pairs, while changed clusters remain eligible. |
@@ -88,16 +89,16 @@ failed_tests_unexplained: false
 | Signal | Value | Notes |
 | --- | --- | --- |
 | Route | quick | Work was handled through Quick Lane artifacts. |
-| Gate Friction | low | Multiple quick tasks were created because the user asked iterative follow-ups. |
+| Gate Friction | low | H4 gate required nested reports; lightweight reports were added. |
 | Verification Freshness | fresh | Targeted tests, integration test, typecheck, lint, workflow validation, and diff check were run this turn. |
 | Rework Signal | low | Follow-up widened the task detail modal for the new summary density. |
-| Template Noise | low | Review report required by project pre-commit rule. |
+| Template Noise | medium | Quick Lane plus H4 gate expects both quick artifacts and nested result reports. |
 
 ## Follow-ups
 
 | Type | Item | Target | Notes |
 | --- | --- | --- | --- |
-| tuning | Watch real `基础池 / AI候选Pair / Hash跳过 / Dirty候选 / AI返回组 / 移动条目` values | runtime task timeline | Use live distribution to decide whether to tune score thresholds or candidate caps. |
+| tuning | Watch real merge timeline values | runtime task timeline | Use live distribution to decide whether to tune score thresholds or candidate caps. |
 
 ## Security Review
 
@@ -105,7 +106,7 @@ failed_tests_unexplained: false
 
 ## Performance Review
 
-- Pass with advisory. Pair scoring remains quadratic over recent active clusters, but AI candidate submission is now bounded by per-anchor and global caps; diagnostics will make future tuning easier.
+- Pass with advisory. Pair scoring remains quadratic over recent active clusters, but AI candidate submission is now bounded by per-anchor and global caps.
 
 ## Test Coverage
 
@@ -117,12 +118,6 @@ failed_tests_unexplained: false
 - `npx @shawnxie666/forge-loop validate` passed for all four quick task slugs.
 - `git diff --check` passed.
 
-## Must Fix
-
-| Finding | Impact | Owner |
-| --- | --- | --- |
-| N/A | N/A | N/A |
-
 ## Should Fix
 
 - N/A
@@ -133,7 +128,7 @@ failed_tests_unexplained: false
 
 ## Final Recommendation
 
-Approve with Follow-ups. The diff reduces repeated and oversized cluster merge candidate pools, improves operator-visible metrics, preserves final merge semantics, and has targeted test coverage. No Must Fix, security high-risk issue, or unexplained test failure was found.
+Approve with Follow-ups. No Must Fix, security high-risk issue, or unexplained test failure was found.
 
 ## Open Questions
 
@@ -144,13 +139,11 @@ Approve with Follow-ups. The diff reduces repeated and oversized cluster merge c
 ## Assumptions
 
 - The existing 7-day merge lookback remains acceptable.
-- `max-w-5xl` is acceptable for the desktop task detail modal while `w-full` and overlay padding protect smaller viewports.
 - Live task timeline metrics are sufficient for the next round of threshold tuning.
 
 ## Risks
 
 - Merge candidate thresholds and caps may need tuning after observing live data.
-- Existing clusters may get a one-time re-evaluation because merge hash semantics now include richer candidate input.
 
 ## Validation
 
@@ -158,4 +151,5 @@ Approve with Follow-ups. The diff reduces repeated and oversized cluster merge c
 - No Security High Risk before merge.
 - No unexplained test failure before merge.
 - Review Depth classified and adversarial pass recorded.
-- Architecture follow-ups are typed follow-ups and do not block this commit.
+
+## Must Fix

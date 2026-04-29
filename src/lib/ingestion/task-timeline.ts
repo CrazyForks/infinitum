@@ -38,9 +38,25 @@ export type IngestionTimelineCounters = {
     newCluster: number;
   };
   clusterMerge: {
+    baseClusters: number;
     candidates: number;
+    totalPairs: number;
+    rejectedObjectConflict: number;
+    rejectedDateConflict: number;
+    rejectedNoEventAnchor: number;
+    belowGrayScore: number;
+    relatedPairs: number;
+    aiEligiblePairs: number;
+    cleanPairsSkipped: number;
+    dirtyPairs: number;
+    preLimitCandidates: number;
+    postLimitCandidates: number;
+    dirtyCandidates: number;
+    aiMergeGroups: number;
     skipped: boolean;
     merged: number;
+    itemsMoved: number;
+    failedGroups: number;
   };
   clusterFinalize: {
     recomputed: number;
@@ -133,9 +149,25 @@ export function createIngestionTimelineCounters(): IngestionTimelineCounters {
       newCluster: 0,
     },
     clusterMerge: {
+      baseClusters: 0,
       candidates: 0,
+      totalPairs: 0,
+      rejectedObjectConflict: 0,
+      rejectedDateConflict: 0,
+      rejectedNoEventAnchor: 0,
+      belowGrayScore: 0,
+      relatedPairs: 0,
+      aiEligiblePairs: 0,
+      cleanPairsSkipped: 0,
+      dirtyPairs: 0,
+      preLimitCandidates: 0,
+      postLimitCandidates: 0,
+      dirtyCandidates: 0,
+      aiMergeGroups: 0,
       skipped: true,
       merged: 0,
+      itemsMoved: 0,
+      failedGroups: 0,
     },
     clusterFinalize: {
       recomputed: 0,
@@ -308,9 +340,24 @@ export function buildIngestionTaskTimeline(input: {
       durationMs: null,
       modelName: modelNames.clusterMerge,
       metrics: [
+        { label: "基础池", value: counters.clusterMerge.baseClusters },
+        { label: "本地Pair", value: counters.clusterMerge.totalPairs },
+        { label: "对象冲突", value: counters.clusterMerge.rejectedObjectConflict },
+        { label: "日期冲突", value: counters.clusterMerge.rejectedDateConflict },
+        { label: "无锚点", value: counters.clusterMerge.rejectedNoEventAnchor },
+        { label: "低分", value: counters.clusterMerge.belowGrayScore },
+        { label: "相关Pair", value: counters.clusterMerge.relatedPairs },
+        { label: "AI候选Pair", value: counters.clusterMerge.aiEligiblePairs },
+        { label: "Hash跳过", value: counters.clusterMerge.cleanPairsSkipped },
+        { label: "Dirty Pair", value: counters.clusterMerge.dirtyPairs },
+        { label: "裁剪前", value: counters.clusterMerge.preLimitCandidates },
         { label: "候选组", value: counters.clusterMerge.candidates },
+        { label: "Dirty候选", value: counters.clusterMerge.dirtyCandidates },
+        { label: "AI返回组", value: counters.clusterMerge.aiMergeGroups },
         { label: "跳过", value: counters.clusterMerge.skipped ? 1 : 0 },
         { label: "合并后", value: counters.clusterMerge.candidates - counters.clusterMerge.merged },
+        { label: "移动条目", value: counters.clusterMerge.itemsMoved },
+        { label: "失败组", value: counters.clusterMerge.failedGroups },
       ],
     },
     {
