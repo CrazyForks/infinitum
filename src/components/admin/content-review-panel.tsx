@@ -165,6 +165,17 @@ interface FilteredItemDetailModalProps {
   isReanalyzing?: boolean;
 }
 
+function getSafeUrl(value: string) {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:"
+      ? parsed.toString()
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 function FilteredItemDetailModal({
   isOpen,
   onClose,
@@ -247,15 +258,18 @@ function FilteredItemDetailModal({
         {/* External Link */}
         <div className="space-y-2">
           <h4 className="text-sm font-semibold text-[var(--text-1)]">原文链接</h4>
-          <a
-            href={item.originalUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1 text-sm text-[var(--accent)] hover:underline"
-          >
-            {item.originalUrl}
-            <IconExternalLink className="h-3.5 w-3.5" />
-          </a>
+          {getSafeUrl(item.originalUrl) ? (
+            <button
+              type="button"
+              onClick={() => window.open(item.originalUrl, "_blank", "noopener,noreferrer")}
+              className="inline-flex items-center gap-1 text-sm text-[var(--accent)] hover:underline cursor-pointer"
+            >
+              {item.originalUrl}
+              <IconExternalLink className="h-3.5 w-3.5" />
+            </button>
+          ) : (
+            <span className="text-sm text-[var(--text-2)]">{item.originalUrl}</span>
+          )}
         </div>
       </div>
     </ModalShell>
@@ -594,8 +608,6 @@ function ContentReviewContent({
   const visibleClusters = useMemo(() => {
     const keyword = clusterSearch.trim().toLowerCase();
     return clusters.filter((cluster) => {
-      // Only show clusters with more than 1 item
-      if (cluster.itemCount <= 1) return false;
       const matchesKeyword =
         !keyword ||
         cluster.title.toLowerCase().includes(keyword) ||
@@ -637,12 +649,12 @@ function ContentReviewContent({
   }, [clusters, mergeTargetId]);
 
   // Pagination — total comes from API, items are already paginated by the server
-  const { currentItems, totalPages, paginatedItems, currentPage } = useMemo(() => {
+  const { totalPages, paginatedItems, currentPage } = useMemo(() => {
     const items = activeTab === "filtered" ? visibleFilteredItems : visibleClusters;
     const total = activeTab === "filtered" ? filteredTotal : clusterTotal;
     const totalPages = Math.ceil(total / pageSize) || 1;
     const currentPage = Math.min(page, totalPages);
-    return { currentItems: items, totalPages, paginatedItems: items, currentPage };
+    return { totalPages, paginatedItems: items, currentPage };
   }, [activeTab, visibleFilteredItems, visibleClusters, filteredTotal, clusterTotal, page, pageSize]);
 
   const hasFilters =
@@ -1162,9 +1174,9 @@ function ContentReviewContent({
       )}
 
       {/* Pagination */}
-      {currentItems.length > 0 && (
+      {(activeTab === "filtered" ? filteredTotal : clusterTotal) > 0 && (
         <PaginationControls
-          totalItems={currentItems.length}
+          totalItems={activeTab === "filtered" ? filteredTotal : clusterTotal}
           page={currentPage}
           totalPages={totalPages}
           pageSize={pageSize}

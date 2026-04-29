@@ -64,3 +64,8 @@ next-env.d.ts
 /Library/
 /.playwright-mcp/
 /daily-detail*.png
+
+# Forge Loop local workflow cache
+.agent-workflow/
+.forge-loop/
+.claude/skills/

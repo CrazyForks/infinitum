@@ -1,9 +1,6 @@
 import { redirect } from "next/navigation";
 import { AdminPageClient } from "@/components/admin/admin-page-client";
 import { getAdminSession } from "@/lib/admin/session";
-import { getSourceMonitorSnapshot } from "@/lib/source-monitor/service";
-import { getAdminSettings } from "@/lib/settings/service";
-import { getBackgroundTaskMonitorSnapshot } from "@/lib/tasks/service";
 
 export const dynamic = "force-dynamic";
 
@@ -14,15 +11,5 @@ export default async function AdminPage() {
     redirect("/login?redirect=/admin");
   }
 
-  const settings = await getAdminSettings();
-  const monitorSnapshot = await getBackgroundTaskMonitorSnapshot(new Date(), { page: 1, pageSize: 10 });
-  const sourceMonitorSnapshot = await getSourceMonitorSnapshot(new Date(), { page: 1, pageSize: 10 });
-
-  return (
-    <AdminPageClient
-      initialSettings={settings}
-      initialSnapshot={monitorSnapshot}
-      initialSourceMonitorSnapshot={sourceMonitorSnapshot}
-    />
-  );
+  return <AdminPageClient />;
 }

@@ -430,8 +430,8 @@ function TaskDetailModal({
 }
 
 interface TaskMonitorPanelProps {
-  runningTasks: TaskRunSnapshot[];
-  recentTasks: TaskRunSnapshot[];
+  runningTasks?: TaskRunSnapshot[];
+  recentTasks?: TaskRunSnapshot[];
   initialFocusTaskId?: string | null;
   initialPage?: number | null;
   initialPageSize?: number | null;
@@ -447,8 +447,8 @@ function isTaskMonitorSnapshot(value: unknown): value is BackgroundTaskMonitorSn
 }
 
 export function TaskMonitorPanel({
-  runningTasks,
-  recentTasks,
+  runningTasks = [],
+  recentTasks = [],
   initialFocusTaskId = null,
   initialPage = null,
   initialPageSize = null,
@@ -465,7 +465,9 @@ export function TaskMonitorPanel({
   const [page, setPage] = useState(initialPage ?? 1);
   const [pageSize, setPageSize] = useState(initialPageSize ?? 10);
   const [recentTotal, setRecentTotal] = useState(0);
-  const [isRefreshingSnapshot, setIsRefreshingSnapshot] = useState(false);
+  const [isRefreshingSnapshot, setIsRefreshingSnapshot] = useState(
+    runningTasks.length === 0 && recentTasks.length === 0,
+  );
   const [selectedTask, setSelectedTask] = useState<TaskRunSnapshot | null>(
     null
   );
@@ -492,13 +494,6 @@ export function TaskMonitorPanel({
     }
     return Array.from(taskMap.values());
   }, [taskLists]);
-
-  useEffect(() => {
-    setTaskLists({
-      runningTasks,
-      recentTasks,
-    });
-  }, [recentTasks, runningTasks]);
 
   useEffect(() => {
     if (!selectedTask) {
@@ -548,8 +543,8 @@ export function TaskMonitorPanel({
     [allTasks, statusFilter, kindFilter, timeRangeFilter]
   );
 
-  // Total includes running tasks (always shown) + total recent tasks from API
-  const mergedTotal = taskLists.runningTasks.length + recentTotal;
+  // recentTotal from the API already counts all tasks (including running).
+  const mergedTotal = recentTotal;
   const totalPages = Math.ceil(mergedTotal / pageSize) || 1;
   // Server-paginated recent + all running; no client-side slice needed
   const paginatedTasks = filteredTasks;
@@ -587,12 +582,8 @@ export function TaskMonitorPanel({
     }
   }, [page, pageSize, showToast]);
 
-  // Re-fetch when pagination changes. Skip mount which uses SSR data.
-  // Use mount count so React dev-mode double-invocation doesn't trigger early fetch.
-  const mountCount = useRef(0);
+  // Fetch on mount and whenever page/filter state changes
   useEffect(() => {
-    mountCount.current += 1;
-    if (mountCount.current <= 1) return;
     void refreshSnapshot();
   }, [refreshSnapshot]);
 
@@ -870,9 +861,9 @@ export function TaskMonitorPanel({
       )}
 
       {/* Pagination */}
-      {filteredTasks.length > 0 && (
+      {mergedTotal > 0 && (
         <PaginationControls
-          totalItems={filteredTasks.length}
+          totalItems={mergedTotal}
           page={page}
           totalPages={totalPages}
           pageSize={pageSize}

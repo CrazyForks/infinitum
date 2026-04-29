@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import type {
   SourceInactivityBucketKey,
   SourceMonitorEntry,
+  SourceMonitorGroupOption,
   SourceMonitorSnapshot,
 } from "@/lib/source-monitor/types";
 
@@ -77,6 +78,11 @@ export type SourceMonitorFilter = {
   groupName?: string;
 };
 
+export type SourceMonitorQuery = SourceMonitorFilter & {
+  page?: number;
+  pageSize?: number;
+};
+
 function applyFilters(entries: SourceMonitorEntry[], filter: SourceMonitorFilter) {
   return entries.filter((source) => {
     if (filter.healthStatus && filter.healthStatus !== "all" && source.healthStatus !== filter.healthStatus) {
@@ -98,15 +104,47 @@ function applyFilters(entries: SourceMonitorEntry[], filter: SourceMonitorFilter
   });
 }
 
+function normalizePage(value: number | undefined) {
+  return Number.isFinite(value) && value != null && value > 0
+    ? Math.floor(value)
+    : 1;
+}
+
+function normalizePageSize(value: number | undefined) {
+  if (!Number.isFinite(value) || value == null) {
+    return 10;
+  }
+
+  return Math.min(100, Math.max(1, Math.floor(value)));
+}
+
+function buildGroupOptions(entries: SourceMonitorEntry[]): SourceMonitorGroupOption[] {
+  const countByGroupName = new Map<string, number>();
+
+  for (const source of entries) {
+    const groupName = source.groupName ?? "未分组";
+    countByGroupName.set(groupName, (countByGroupName.get(groupName) ?? 0) + 1);
+  }
+
+  return [
+    {
+      value: "all",
+      label: "全部",
+      count: entries.length,
+    },
+    ...Array.from(countByGroupName.entries())
+      .sort(([left], [right]) => left.localeCompare(right, "zh-CN"))
+      .map(([groupName, count]) => ({
+        value: groupName,
+        label: groupName,
+        count,
+      })),
+  ];
+}
+
 export async function getSourceMonitorSnapshot(
   now = new Date(),
-  opts?: {
-    page?: number;
-    pageSize?: number;
-    healthStatus?: string;
-    inactivity?: string;
-    groupName?: string;
-  },
+  opts?: SourceMonitorQuery,
 ): Promise<SourceMonitorSnapshot> {
   // NOTE: All enabled sources are loaded for health/inactivity statistics.
   // If source count grows beyond ~500, consider pushing health counts to
@@ -159,27 +197,29 @@ export async function getSourceMonitorSnapshot(
   const failedCount = entries.filter((source) => source.healthStatus === "failed").length;
   const unknownCount = entries.filter((source) => source.healthStatus === "unknown").length;
 
-  const hasFilter =
-    opts && (opts.healthStatus || opts.inactivity || opts.groupName);
-  const filteredEntries = hasFilter ? applyFilters(entries, opts!) : entries;
-  const page = opts?.page;
-  const pageSize = opts?.pageSize;
-
-  const pagedEntries =
-    page != null && pageSize != null
-      ? filteredEntries.slice((page - 1) * pageSize, page * pageSize)
-      : filteredEntries;
+  const filteredEntries = opts ? applyFilters(entries, opts) : entries;
+  const pageSize = normalizePageSize(opts?.pageSize);
+  const totalItems = filteredEntries.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const page = Math.min(normalizePage(opts?.page), totalPages);
+  const pagedEntries = filteredEntries.slice((page - 1) * pageSize, page * pageSize);
 
   return {
     generatedAt: now.toISOString(),
     totalEnabledSourceCount: entries.length,
-    filteredSourceCount: hasFilter ? filteredEntries.length : undefined,
-    ...(page != null ? { page, pageSize: pageSize! } : {}),
+    filteredSourceCount: totalItems,
+    pagination: {
+      page,
+      pageSize,
+      totalItems,
+      totalPages,
+    },
+    sources: pagedEntries,
     health: {
       healthyCount,
       failedCount,
       unknownCount,
-      attentionSources: pagedEntries,
+      attentionSources: [],
     },
     inactivityBuckets: INACTIVITY_BUCKETS.map((bucket) => {
       const cutoff = new Date(now.getTime() - bucket.minDays * DAY_MS);
@@ -191,8 +231,8 @@ export async function getSourceMonitorSnapshot(
         days: bucket.minDays,
         cutoff: cutoff.toISOString(),
         count: bucketSources.length,
-        sources: bucketSources,
       };
     }),
+    groups: buildGroupOptions(entries),
   };
 }

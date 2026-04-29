@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
+import { usePathname, useSearchParams } from "next/navigation";
 
 import { GlobalHeader } from "@/components/ui/global-header";
 import { AppFooter } from "@/components/ui/app-footer";
@@ -25,7 +25,7 @@ import {
   IconFilter,
   IconMonitor,
 } from "@/components/ui/icons";
-import type { PromptConfigType } from "@/lib/settings/types";
+import type { AdminSettingsSnapshot, PromptConfigType } from "@/lib/settings/types";
 
 type PrimaryTab = "monitoring" | "settings";
 type MonitorSubSection = "dashboard" | "content" | "tasks";
@@ -33,11 +33,7 @@ type ContentSubSection = "filtered" | "clusters";
 type SettingsSection = "blacklist" | "groups" | "sources" | "tasks" | "ai";
 type AISubSection = "model-api" | "prompt";
 
-type AdminPageProps = {
-  initialSettings: import("@/lib/settings/types").AdminSettingsSnapshot;
-  initialSnapshot: import("@/lib/tasks/types").BackgroundTaskMonitorSnapshot;
-  initialSourceMonitorSnapshot: import("@/lib/source-monitor/types").SourceMonitorSnapshot;
-};
+type AdminPageProps = Record<string, never>;
 
 type AdminRouteState = {
   primaryTab: PrimaryTab;
@@ -131,15 +127,14 @@ function resolveRouteState(searchParams: AdminSearchParams): AdminRouteState {
   };
 }
 
-export function AdminPageClient({
-  initialSettings,
-  initialSnapshot,
-  initialSourceMonitorSnapshot,
-}: AdminPageProps) {
-  const router = useRouter();
+export function AdminPageClient(_props: AdminPageProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const routeState = useMemo(() => resolveRouteState(searchParams), [searchParams]);
+
+  // Use local state for route so tab navigation doesn't trigger RSC fetch.
+  const [routeState, setRouteState] = useState<AdminRouteState>(() =>
+    resolveRouteState(searchParams),
+  );
   const {
     primaryTab,
     monitoringSubSection,
@@ -147,6 +142,32 @@ export function AdminPageClient({
     settingsSection,
     aiSubSection,
   } = routeState;
+
+  // Fetch settings eagerly so all settings sections have data.
+  const [settings, setSettings] = useState<AdminSettingsSnapshot | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/admin/settings")
+      .then((r) => r.json())
+      .then((data: AdminSettingsSnapshot) => {
+        if (!cancelled) setSettings(data);
+      })
+      .catch(() => { /* settings load failed */ });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Sync route state on browser back/forward (popstate). We listen to
+  // popstate directly rather than depending on useSearchParams to avoid
+  // reference-churn re-render loops.
+  useEffect(() => {
+    const handlePopState = () => {
+      const nextSearchParams = new URLSearchParams(window.location.search);
+      setRouteState(resolveRouteState(nextSearchParams));
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
   const focusedTaskId = normalizeTaskId(searchParams.get("task"));
   const taskPage = normalizePositiveInteger(searchParams.get("taskPage"));
   const taskPageSize = normalizePositiveInteger(searchParams.get("taskPageSize"));
@@ -166,37 +187,36 @@ export function AdminPageClient({
     !(primaryTab === "monitoring" && monitoringSubSection === "content");
 
   const navigateAdmin = useCallback((nextState: Partial<AdminRouteState>) => {
-    const resolvedPrimaryTab = nextState.primaryTab ?? primaryTab;
+    setRouteState((prev) => ({
+      primaryTab: nextState.primaryTab ?? prev.primaryTab,
+      monitoringSubSection: nextState.monitoringSubSection ?? prev.monitoringSubSection,
+      contentSubSection: nextState.contentSubSection ?? prev.contentSubSection,
+      settingsSection: nextState.settingsSection ?? prev.settingsSection,
+      aiSubSection: nextState.aiSubSection ?? prev.aiSubSection,
+    }));
+  }, []);
+
+  // Sync URL to reflect current route state — runs after render, not during
+  // the event handler, so Next.js's patched history.replaceState won't
+  // trigger a second re-render that causes child re-mounts / double-fetches.
+  useEffect(() => {
     const params = new URLSearchParams();
+    params.set("tab", routeState.primaryTab);
 
-    params.set("tab", resolvedPrimaryTab);
-
-    if (resolvedPrimaryTab === "monitoring") {
-      const resolvedSection = nextState.monitoringSubSection ?? monitoringSubSection;
-      params.set("section", resolvedSection);
-
-      if (resolvedSection === "content") {
-        params.set("view", nextState.contentSubSection ?? contentSubSection);
+    if (routeState.primaryTab === "monitoring") {
+      params.set("section", routeState.monitoringSubSection);
+      if (routeState.monitoringSubSection === "content") {
+        params.set("view", routeState.contentSubSection);
       }
     } else {
-      const resolvedSection = nextState.settingsSection ?? settingsSection;
-      params.set("section", resolvedSection);
-
-      if (resolvedSection === "ai") {
-        params.set("view", nextState.aiSubSection ?? aiSubSection);
+      params.set("section", routeState.settingsSection);
+      if (routeState.settingsSection === "ai") {
+        params.set("view", routeState.aiSubSection);
       }
     }
 
-    router.push(`${pathname}?${params.toString()}`, { scroll: false });
-  }, [
-    aiSubSection,
-    contentSubSection,
-    monitoringSubSection,
-    pathname,
-    primaryTab,
-    router,
-    settingsSection,
-  ]);
+    window.history.replaceState(null, "", `${pathname}?${params.toString()}`);
+  }, [routeState, pathname]);
 
   const navigateTaskDetail = useCallback((taskId: string | null, state?: { page: number; pageSize: number }) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -211,14 +231,11 @@ export function AdminPageClient({
 
     if (taskId) {
       params.set("task", taskId);
-      router.push(`${pathname}?${params.toString()}`, { scroll: false });
     } else {
-      // When closing, just update the URL without triggering navigation
-      // to avoid a full server re-render that would flash the list.
       params.delete("task");
-      window.history.replaceState(null, "", `${pathname}?${params.toString()}`);
     }
-  }, [pathname, router, searchParams]);
+    window.history.replaceState(null, "", `${pathname}?${params.toString()}`);
+  }, [pathname, searchParams]);
 
   const replaceContentPageState = useCallback((state: { page: number; pageSize: number }) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -227,8 +244,8 @@ export function AdminPageClient({
     params.set("view", contentSubSection);
     params.set("contentPage", String(state.page));
     params.set("contentPageSize", String(state.pageSize));
-    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
-  }, [contentSubSection, pathname, router, searchParams]);
+    window.history.replaceState(null, "", `${pathname}?${params.toString()}`);
+  }, [contentSubSection, pathname, searchParams]);
 
   const navigateTaskFromContent = useCallback((taskId: string, state: { page: number; pageSize: number }) => {
     replaceContentPageState(state);
@@ -270,11 +287,7 @@ export function AdminPageClient({
   const renderMainContent = () => {
     // Monitoring - Dashboard
     if (primaryTab === "monitoring" && monitoringSubSection === "dashboard") {
-      return (
-        <IngestionDashboard
-          initialSourceMonitorSnapshot={initialSourceMonitorSnapshot}
-        />
-      );
+      return <IngestionDashboard />;
     }
 
     // Monitoring - Content Review
@@ -295,8 +308,6 @@ export function AdminPageClient({
     if (primaryTab === "monitoring" && monitoringSubSection === "tasks") {
       return (
         <TaskMonitorPanel
-          runningTasks={initialSnapshot.runningTasks}
-          recentTasks={initialSnapshot.recentTasks}
           initialFocusTaskId={focusedTaskId}
           initialPage={taskPage}
           initialPageSize={taskPageSize}
@@ -305,12 +316,26 @@ export function AdminPageClient({
       );
     }
 
+    // Settings tabs need loaded data; show skeleton while fetching.
+    if (primaryTab === "settings" && !settings) {
+      return (
+        <div className="space-y-6 animate-pulse">
+          <div className="h-8 w-48 rounded bg-[var(--bg-muted)]" />
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="h-[88px] rounded-sm bg-[var(--bg-muted)]" />
+            ))}
+          </div>
+        </div>
+      );
+    }
+
     // Settings - AI Section
     if (primaryTab === "settings" && settingsSection === "ai") {
       if (aiSubSection === "model-api") {
         return (
           <AdminSettingsPanel
-            initialSettings={initialSettings}
+            initialSettings={settings!}
             activeSection="ai-model-api"
             embedMode
           />
@@ -319,7 +344,7 @@ export function AdminPageClient({
       if (aiSubSection === "prompt") {
         return (
           <AdminSettingsPanel
-            initialSettings={initialSettings}
+            initialSettings={settings!}
             activeSection="ai-prompt"
             initialPromptType={selectedPromptType}
             embedMode
@@ -330,21 +355,21 @@ export function AdminPageClient({
 
     // Settings - Blacklist
     if (primaryTab === "settings" && settingsSection === "blacklist") {
-      return <AdminSettingsPanel initialSettings={initialSettings} activeSection="blacklist" embedMode />;
+      return <AdminSettingsPanel initialSettings={settings!} activeSection="blacklist" embedMode />;
     }
 
     // Settings - Groups
     if (primaryTab === "settings" && settingsSection === "groups") {
-      return <AdminSettingsPanel initialSettings={initialSettings} activeSection="groups" embedMode />;
+      return <AdminSettingsPanel initialSettings={settings!} activeSection="groups" embedMode />;
     }
 
     // Settings - Sources
     if (primaryTab === "settings" && settingsSection === "sources") {
-      return <AdminSettingsPanel initialSettings={initialSettings} activeSection="sources" embedMode />;
+      return <AdminSettingsPanel initialSettings={settings!} activeSection="sources" embedMode />;
     }
 
     if (primaryTab === "settings" && settingsSection === "tasks") {
-      return <AdminSettingsPanel initialSettings={initialSettings} activeSection="tasks" embedMode />;
+      return <AdminSettingsPanel initialSettings={settings!} activeSection="tasks" embedMode />;
     }
 
     return null;

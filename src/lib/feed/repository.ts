@@ -1020,8 +1020,11 @@ export async function listFilteredItems(page = 1, pageSize = 20) {
 
 export async function listAdminClusters(page = 1, pageSize = 20) {
   const skip = (page - 1) * pageSize;
+  const where = { itemCount: { gt: 1 } };
+
   const [clusters, total] = await Promise.all([
     prisma.contentCluster.findMany({
+      where,
       include: {
         items: {
           where: {
@@ -1045,9 +1048,7 @@ export async function listAdminClusters(page = 1, pageSize = 20) {
       take: pageSize,
       skip,
     }),
-    // Keep in sync with the findMany where above. Currently both count
-    // all clusters; if a where filter is added to findMany, mirror it here.
-    prisma.contentCluster.count(),
+    prisma.contentCluster.count({ where }),
   ]);
 
   return {
@@ -1068,7 +1069,7 @@ export async function listAdminClusters(page = 1, pageSize = 20) {
         title: cluster.title,
         summary: cluster.summary,
         score: recommendScore,
-        itemCount: cluster.items.length, // 使用实际查询到的条目数，而不是数据库中的 itemCount 字段
+        itemCount: cluster.itemCount,
         latestPublishedAt: cluster.latestPublishedAt.toISOString(),
         status: cluster.status,
         items: cluster.items.map(mapItemToClusterPreview),

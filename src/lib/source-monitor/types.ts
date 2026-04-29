@@ -29,20 +29,35 @@ export type SourceInactivityBucketSnapshot = {
   days: number;
   cutoff: string;
   count: number;
-  sources: SourceMonitorEntry[];
+};
+
+export type SourceMonitorPagination = {
+  page: number;
+  pageSize: number;
+  totalItems: number;
+  totalPages: number;
+};
+
+export type SourceMonitorGroupOption = {
+  value: string;
+  label: string;
+  count: number;
+};
+
+export type SourceMonitorHealthSummary = {
+  healthyCount: number;
+  failedCount: number;
+  unknownCount: number;
+  attentionSources?: SourceMonitorEntry[];
 };
 
 export type SourceMonitorSnapshot = {
   generatedAt: string;
   totalEnabledSourceCount: number;
-  filteredSourceCount?: number;
-  page?: number;
-  pageSize?: number;
-  health: {
-    healthyCount: number;
-    failedCount: number;
-    unknownCount: number;
-    attentionSources: SourceMonitorEntry[];
-  };
+  filteredSourceCount: number;
+  pagination: SourceMonitorPagination;
+  sources: SourceMonitorEntry[];
+  health: SourceMonitorHealthSummary;
   inactivityBuckets: SourceInactivityBucketSnapshot[];
+  groups: SourceMonitorGroupOption[];
 };

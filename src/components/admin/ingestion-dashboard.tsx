@@ -18,7 +18,6 @@ import { SourceMonitorPanel } from "@/components/admin/source-monitor-panel";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
-import type { SourceMonitorSnapshot } from "@/lib/source-monitor/types";
 import type {
   DailyArticleStat,
   DailyAiUsageStat,
@@ -26,10 +25,6 @@ import type {
   QualityScoreBucket,
   IngestionMetrics,
 } from "@/lib/ingestion/metrics-service";
-
-type DashboardProps = {
-  initialSourceMonitorSnapshot: SourceMonitorSnapshot;
-};
 
 const CHART_COLORS = {
   articles: "var(--accent)",
@@ -265,7 +260,7 @@ function isValidMetrics(value: unknown): value is IngestionMetrics {
   );
 }
 
-export function IngestionDashboard({ initialSourceMonitorSnapshot }: DashboardProps) {
+export function IngestionDashboard() {
   const { showToast } = useToast();
   const [metrics, setMetrics] = useState<IngestionMetrics | null>(null);
   const [loading, setLoading] = useState(true);
@@ -385,7 +380,7 @@ export function IngestionDashboard({ initialSourceMonitorSnapshot }: DashboardPr
 
       {/* Source Monitor Panel */}
       <section className="space-y-3 border-t border-[color:var(--line)] pt-6" aria-label="信息源监控">
-        <SourceMonitorPanel initialSnapshot={initialSourceMonitorSnapshot} hideStats />
+        <SourceMonitorPanel hideStats />
       </section>
     </div>
   );

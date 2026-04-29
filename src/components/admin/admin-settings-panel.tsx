@@ -16,7 +16,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 
 import {
   importSourcesFromOpmlText,
@@ -281,60 +281,65 @@ export function AdminSettingsPanel({
     .split("\n")
     .map((keyword) => keyword.trim())
     .filter(Boolean);
-  const sources = useMemo(
-    () =>
-      initialSettings.sources.map((source) => ({
-        ...source,
-        ...(sourceGroupOverrides[source.id] ?? {}),
-      })),
-    [initialSettings.sources, sourceGroupOverrides],
-  );
-  const filteredSources = useMemo(() => {
-    const keyword = sourceNameFilter.trim().toLowerCase();
 
-    return sources.filter((source) => {
-      const matchesName =
-        !keyword ||
-        source.name.toLowerCase().includes(keyword) ||
-        source.rssUrl.toLowerCase().includes(keyword);
-      const matchesGroup =
-        !sourceGroupFilter ||
-        (sourceGroupFilter === "__ungrouped__"
-          ? !source.groupId
-          : (source.groupId ?? "") === sourceGroupFilter);
-      const matchesEnabled =
-        !sourceEnabledFilter ||
-        (sourceEnabledFilter === "enabled" ? source.enabled : !source.enabled);
+  // Paginated source list fetched from the dedicated sources API.
+  const [paginatedSourceList, setPaginatedSourceList] = useState<AdminSource[]>([]);
+  const [sourceTotal, setSourceTotal] = useState(0);
+  const [sourceTotalPages, setSourceTotalPages] = useState(1);
+  const sourceFetchIdRef = useRef(0);
 
-      return matchesName && matchesGroup && matchesEnabled;
+  useEffect(() => {
+    if (activeSection !== "sources") return;
+
+    const fetchId = ++sourceFetchIdRef.current;
+    const params = new URLSearchParams({
+      page: String(sourcePage),
+      pageSize: String(sourcePageSize),
     });
-  }, [sourceEnabledFilter, sourceGroupFilter, sourceNameFilter, sources]);
-  const sourceTotalPages = Math.max(1, Math.ceil(filteredSources.length / sourcePageSize));
+    if (sourceNameFilter) params.set("search", sourceNameFilter);
+    if (sourceGroupFilter) params.set("groupId", sourceGroupFilter);
+    if (sourceEnabledFilter) params.set("enabled", sourceEnabledFilter);
+
+    fetch(`/api/admin/settings/sources?${params.toString()}`)
+      .then((r) => r.json())
+      .then((data: { sources: AdminSource[]; total: number; totalPages: number; page: number }) => {
+        if (fetchId !== sourceFetchIdRef.current) return;
+        const merged = data.sources.map((source) => ({
+          ...source,
+          ...(sourceGroupOverrides[source.id] ?? {}),
+        }));
+        setPaginatedSourceList(merged);
+        setSourceTotal(data.total);
+        setSourceTotalPages(data.totalPages);
+        if (data.page !== sourcePage) setSourcePage(data.page);
+      })
+      .catch(() => { /* ignore */ });
+  }, [activeSection, sourcePage, sourcePageSize, sourceNameFilter, sourceGroupFilter, sourceEnabledFilter, sourceGroupOverrides]);
+
+  // Lighter-weight search for the group-linking modal — fetches with a larger
+  // page size since the modal needs instant client-side filtering.
+  const [groupLinkSourceList, setGroupLinkSourceList] = useState<AdminSource[]>([]);
+  const groupLinkFetchIdRef = useRef(0);
+  useEffect(() => {
+    if (!sourceGroupLinkTarget) {
+      // Reset list after a tick to avoid sync setState in effect.
+      const id = window.setTimeout(() => setGroupLinkSourceList([]), 0);
+      return () => window.clearTimeout(id);
+    }
+    const fetchId = ++groupLinkFetchIdRef.current;
+    const params = new URLSearchParams({ page: "1", pageSize: "100" });
+    if (sourceGroupLinkSearch) params.set("search", sourceGroupLinkSearch);
+
+    fetch(`/api/admin/settings/sources?${params.toString()}`)
+      .then((r) => r.json())
+      .then((data: { sources: AdminSource[] }) => {
+        if (fetchId !== groupLinkFetchIdRef.current) return;
+        setGroupLinkSourceList(data.sources);
+      })
+      .catch(() => { /* ignore */ });
+  }, [sourceGroupLinkTarget, sourceGroupLinkSearch]);
+
   const safeSourcePage = Math.min(sourcePage, sourceTotalPages);
-  const paginatedSources = useMemo(
-    () =>
-      filteredSources.slice(
-        (safeSourcePage - 1) * sourcePageSize,
-        safeSourcePage * sourcePageSize,
-      ),
-    [filteredSources, safeSourcePage, sourcePageSize],
-  );
-  const sourceGroupLinkSources = useMemo(() => {
-    const keyword = sourceGroupLinkSearch.trim().toLowerCase();
-
-    return sources.filter((source) => {
-      if (!keyword) {
-        return true;
-      }
-
-      return (
-        source.name.toLowerCase().includes(keyword) ||
-        source.rssUrl.toLowerCase().includes(keyword) ||
-        source.siteUrl.toLowerCase().includes(keyword) ||
-        (source.groupName ?? "未分组").toLowerCase().includes(keyword)
-      );
-    });
-  }, [sourceGroupLinkSearch, sources]);
 
   const updateSourceFilterUrl = (next: {
     name?: string;
@@ -545,12 +550,20 @@ export function AdminSettingsPanel({
     });
   };
 
-  const exportOpml = () => {
+  const exportOpml = async () => {
+    // Fetch all sources for OPML export (up to 1000).
+    let allSources: AdminSource[] = [];
+    try {
+      const res = await fetch("/api/admin/settings/sources?page=1&pageSize=1000");
+      const data = await res.json() as { sources: AdminSource[] };
+      allSources = data.sources ?? [];
+    } catch { /* use empty list if fetch fails */ }
+
     const groupsById = new Map(orderedGroups.map((group) => [group.id, group.name]));
     const groupedSources = new Map<string, AdminSource[]>();
     const ungroupedSources: AdminSource[] = [];
 
-    for (const source of sources) {
+    for (const source of allSources) {
       if (source.groupId) {
         groupedSources.set(source.groupId, [...(groupedSources.get(source.groupId) ?? []), source]);
       } else {
@@ -1096,8 +1109,8 @@ export function AdminSettingsPanel({
               />
 
               <div className="max-h-96 space-y-2 overflow-y-auto rounded-sm border border-[color:var(--line)] p-2">
-                {sourceGroupLinkSources.length ? (
-                  sourceGroupLinkSources.map((source) => {
+                {groupLinkSourceList.length ? (
+                  groupLinkSourceList.map((source) => {
                     const isLinked = source.groupId === sourceGroupLinkTarget?.id;
 
                     return (
@@ -1196,7 +1209,7 @@ export function AdminSettingsPanel({
                   variant="secondary"
                   size="md"
                   onClick={exportOpml}
-                  disabled={sources.length === 0}
+                  disabled={sourceTotal === 0}
                 >
                   导出 OPML
                 </Button>
@@ -1258,9 +1271,9 @@ export function AdminSettingsPanel({
               />
             </div>
 
-            {paginatedSources.length === 0 ? (
+            {paginatedSourceList.length === 0 ? (
               <EmptyState>
-                {filteredSources.length === 0 && sources.length > 0
+                {sourceTotal > 0
                   ? "暂无匹配信息源"
                   : "暂无信息源"}
               </EmptyState>
@@ -1286,7 +1299,7 @@ export function AdminSettingsPanel({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[color:var(--line)]">
-                    {paginatedSources.map((source) => (
+                    {paginatedSourceList.map((source) => (
                       <tr
                         key={source.id}
                         className="transition-colors hover:bg-[var(--bg-muted)]"
@@ -1312,14 +1325,23 @@ export function AdminSettingsPanel({
                         </td>
                         <td className="px-4 py-3 text-xs text-[var(--text-3)]">
                           <div className="max-w-[18rem] truncate" title={source.siteUrl}>
-                            <a
-                              href={source.siteUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="hover:text-[var(--accent)] hover:underline"
-                            >
-                              {source.siteUrl}
-                            </a>
+                            {(() => {
+                              try {
+                                const parsed = new URL(source.siteUrl);
+                                if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+                                  return (
+                                    <button
+                                      type="button"
+                                      onClick={() => window.open(source.siteUrl, "_blank", "noopener,noreferrer")}
+                                      className="hover:text-[var(--accent)] hover:underline cursor-pointer"
+                                    >
+                                      {source.siteUrl}
+                                    </button>
+                                  );
+                                }
+                              } catch { /* invalid URL — render as plain text */ }
+                              return <span>{source.siteUrl}</span>;
+                            })()}
                           </div>
                         </td>
                         <td className="px-4 py-3 text-right">
@@ -1350,9 +1372,9 @@ export function AdminSettingsPanel({
               </div>
             )}
 
-            {filteredSources.length > 0 ? (
+            {sourceTotal > 0 ? (
               <PaginationControls
-                totalItems={filteredSources.length}
+                totalItems={sourceTotal}
                 page={safeSourcePage}
                 totalPages={sourceTotalPages}
                 pageSize={sourcePageSize}

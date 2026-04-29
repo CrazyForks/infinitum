@@ -17,7 +17,7 @@ import type {
 import { cx } from "@/lib/ui/cx";
 
 type SourceMonitorPanelProps = {
-  initialSnapshot: SourceMonitorSnapshot;
+  initialSnapshot?: SourceMonitorSnapshot;
   hideStats?: boolean;
 };
 
@@ -42,7 +42,25 @@ function isSourceMonitorSnapshot(value: unknown): value is SourceMonitorSnapshot
     return false;
   }
 
-  return "generatedAt" in value && "health" in value && "inactivityBuckets" in value;
+  return (
+    "generatedAt" in value &&
+    "health" in value &&
+    "inactivityBuckets" in value &&
+    "sources" in value &&
+    "pagination" in value &&
+    "groups" in value
+  );
+}
+
+function getSafeRssHref(value: string) {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:"
+      ? parsed.toString()
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 function formatDateTime(value: string | null) {
@@ -128,48 +146,59 @@ function SourceTable({
         </thead>
         <tbody className="divide-y divide-[color:var(--line)]">
           {sources.map((source) => (
-            <tr key={source.id} className="hover:bg-[var(--bg-muted)] transition-colors">
-              <td className="min-w-0 px-3 py-3">
-                <div className="truncate font-medium text-[var(--foreground)]">
-                  {source.name}
-                </div>
-                <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[var(--muted)]">
-                  <span className="max-w-full truncate">{source.groupName ?? "未分组"}</span>
-                  <a
-                    href={source.rssUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex shrink-0 items-center gap-1 text-[var(--accent)] hover:underline"
-                  >
-                    RSS
-                    <IconExternalLink className="h-3 w-3" />
-                  </a>
-                </div>
-              </td>
-              <td className="px-3 py-3 whitespace-nowrap">
-                <StatusTag
-                  className="whitespace-nowrap"
-                  tone={healthTone[source.healthStatus]}
-                >
-                  {healthLabels[source.healthStatus]}
-                </StatusTag>
-              </td>
-              <td className="px-3 py-3 whitespace-nowrap text-xs text-[var(--text-3)]">
-                {formatDateTime(source.healthCheckedAt)}
-              </td>
-              <td className="px-3 py-3 whitespace-nowrap text-xs text-[var(--text-3)]">
-                {formatDateTime(source.lastItemCreatedAt)}
-              </td>
-              <td className="px-3 py-3 whitespace-nowrap text-xs text-[var(--text-2)]">
-                {formatInactiveDays(source.inactiveDays)}
-              </td>
-              <td className="px-3 py-3 whitespace-nowrap text-xs text-[var(--text-2)]">
-                {source.itemCount}
-              </td>
-              <td className="break-words px-3 py-3 text-xs leading-5 text-[var(--danger-ink)]">
-                {source.healthMessage ?? (source.healthStatus === "unknown" ? "尚未完成首次巡检" : "-")}
-              </td>
-            </tr>
+            (() => {
+              const safeRssHref = getSafeRssHref(source.rssUrl);
+
+              return (
+                <tr key={source.id} className="hover:bg-[var(--bg-muted)] transition-colors">
+                  <td className="min-w-0 px-3 py-3">
+                    <div className="truncate font-medium text-[var(--foreground)]">
+                      {source.name}
+                    </div>
+                    <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[var(--muted)]">
+                      <span className="max-w-full truncate">{source.groupName ?? "未分组"}</span>
+                      {safeRssHref ? (
+                        <button
+                          type="button"
+                          onClick={() => window.open(safeRssHref, "_blank", "noopener,noreferrer")}
+                          className="inline-flex shrink-0 items-center gap-1 text-[var(--accent)] hover:underline cursor-pointer"
+                        >
+                          RSS
+                          <IconExternalLink className="h-3 w-3" />
+                        </button>
+                      ) : (
+                        <span className="inline-flex shrink-0 items-center text-[var(--text-3)]">
+                          RSS
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-3 py-3 whitespace-nowrap">
+                    <StatusTag
+                      className="whitespace-nowrap"
+                      tone={healthTone[source.healthStatus]}
+                    >
+                      {healthLabels[source.healthStatus]}
+                    </StatusTag>
+                  </td>
+                  <td className="px-3 py-3 whitespace-nowrap text-xs text-[var(--text-3)]">
+                    {formatDateTime(source.healthCheckedAt)}
+                  </td>
+                  <td className="px-3 py-3 whitespace-nowrap text-xs text-[var(--text-3)]">
+                    {formatDateTime(source.lastItemCreatedAt)}
+                  </td>
+                  <td className="px-3 py-3 whitespace-nowrap text-xs text-[var(--text-2)]">
+                    {formatInactiveDays(source.inactiveDays)}
+                  </td>
+                  <td className="px-3 py-3 whitespace-nowrap text-xs text-[var(--text-2)]">
+                    {source.itemCount}
+                  </td>
+                  <td className="break-words px-3 py-3 text-xs leading-5 text-[var(--danger-ink)]">
+                    {source.healthMessage ?? (source.healthStatus === "unknown" ? "尚未完成首次巡检" : "-")}
+                  </td>
+                </tr>
+              );
+            })()
           ))}
         </tbody>
       </table>
@@ -179,73 +208,31 @@ function SourceTable({
 
 export function SourceMonitorPanel({ initialSnapshot, hideStats = false }: SourceMonitorPanelProps) {
   const { showToast } = useToast();
-  const [snapshot, setSnapshot] = useState(initialSnapshot);
+  const [snapshot, setSnapshot] = useState<SourceMonitorSnapshot | null>(initialSnapshot ?? null);
   const [inactivityFilter, setInactivityFilter] = useState<InactivityFilter>("all");
   const [healthStatusFilter, setHealthStatusFilter] = useState<HealthStatusFilter>("all");
   const [groupFilter, setGroupFilter] = useState<GroupFilter>("all");
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-
-  // Build the full source list from inactivity buckets (which always contain
-  // every enabled source distributed across inactivity tiers).  Also merge
-  // attentionSources to cover sources that are active (inactiveDays < 1) and
-  // therefore fall into no bucket.
-  const allSources = useMemo(() => {
-    const sourceById = new Map<string, SourceMonitorEntry>();
-    for (const source of snapshot.health.attentionSources) {
-      sourceById.set(source.id, source);
-    }
-    for (const bucket of snapshot.inactivityBuckets) {
-      for (const source of bucket.sources) {
-        sourceById.set(source.id, source);
-      }
-    }
-    return Array.from(sourceById.values());
-  }, [snapshot.health.attentionSources, snapshot.inactivityBuckets]);
-
-  // Client-side filtering across all sources.
-  // When the user selects an inactivity bucket, narrow to that bucket's sources;
-  // otherwise filter by health status and group against the full list.
-  const displaySources = useMemo(() => {
-    const selected =
-      inactivityFilter === "all"
-        ? allSources
-        : snapshot.inactivityBuckets.find((e) => e.key === inactivityFilter)?.sources ?? [];
-    return selected.filter((source) => {
-      if (healthStatusFilter !== "all" && source.healthStatus !== healthStatusFilter) return false;
-      if (groupFilter !== "all" && (source.groupName ?? "未分组") !== groupFilter) return false;
-      return true;
-    });
-  }, [allSources, inactivityFilter, healthStatusFilter, groupFilter, snapshot.inactivityBuckets]);
-
-  const totalItems = displaySources.length;
-  const totalPages = Math.ceil(totalItems / pageSize) || 1;
-  const paginatedSources = displaySources.slice((page - 1) * pageSize, page * pageSize);
+  const [page, setPage] = useState(initialSnapshot?.pagination.page ?? 1);
+  const [pageSize, setPageSize] = useState(initialSnapshot?.pagination.pageSize ?? 10);
+  const [isRefreshing, setIsRefreshing] = useState(!initialSnapshot);
 
   const inactivityFilterOptions = useMemo(
     () => [
-      { value: "all", label: `全部（${snapshot.totalEnabledSourceCount}）` },
-      ...snapshot.inactivityBuckets.map((bucket) => ({
+      { value: "all", label: `全部（${snapshot?.totalEnabledSourceCount ?? 0}）` },
+      ...(snapshot?.inactivityBuckets ?? []).map((bucket) => ({
         value: bucket.key,
         label: `${bucket.label}无更新（${bucket.count}）`,
       })),
     ],
-    [snapshot.totalEnabledSourceCount, snapshot.inactivityBuckets],
+    [snapshot?.totalEnabledSourceCount, snapshot?.inactivityBuckets],
   );
-  const groupFilterOptions = useMemo(() => {
-    const groupNames = Array.from(
-      new Set(allSources.map((source) => source.groupName ?? "未分组")),
-    ).sort((left, right) => left.localeCompare(right, "zh-CN"));
-
-    return [
-      { value: "all", label: "全部" },
-      ...groupNames.map((groupName) => ({
-        value: groupName,
-        label: groupName,
-      })),
-    ];
-  }, [allSources]);
+  const groupFilterOptions = useMemo(
+    () => (snapshot?.groups ?? []).map((group) => ({
+      value: group.value,
+      label: `${group.label}（${group.count}）`,
+    })),
+    [snapshot?.groups],
+  );
   const healthStatusFilterOptions = useMemo(
     () => [
       { value: "all", label: "全部" },
@@ -260,22 +247,25 @@ export function SourceMonitorPanel({ initialSnapshot, hideStats = false }: Sourc
     healthStatusFilter !== "all" ||
     groupFilter !== "all";
 
-  useEffect(() => {
-    setPage(1);
-  }, [groupFilter, healthStatusFilter, inactivityFilter]);
-
-  useEffect(() => {
-    if (page > totalPages) {
-      setPage(totalPages);
-    }
-  }, [page, totalPages]);
-
-  // Fetch full source list for client-side filtering + pagination.
-  // No server-side filters — all filtering is done in the displaySources memo.
   const fetchSources = useCallback(async () => {
     setIsRefreshing(true);
     try {
-      const response = await fetch("/api/admin/monitor/sources?page=1&pageSize=200");
+      const params = new URLSearchParams({
+        page: String(page),
+        pageSize: String(pageSize),
+      });
+
+      if (healthStatusFilter !== "all") {
+        params.set("healthStatus", healthStatusFilter);
+      }
+      if (inactivityFilter !== "all") {
+        params.set("inactivity", inactivityFilter);
+      }
+      if (groupFilter !== "all") {
+        params.set("groupName", groupFilter);
+      }
+
+      const response = await fetch(`/api/admin/monitor/sources?${params.toString()}`);
       const payload = (await response.json()) as SourceMonitorSnapshot | { error?: string };
 
       if (!response.ok || !isSourceMonitorSnapshot(payload)) {
@@ -287,19 +277,45 @@ export function SourceMonitorPanel({ initialSnapshot, hideStats = false }: Sourc
       }
 
       setSnapshot(payload);
+      if (payload.pagination.page !== page) {
+        setPage(payload.pagination.page);
+      }
+      if (payload.pagination.pageSize !== pageSize) {
+        setPageSize(payload.pagination.pageSize);
+      }
     } catch {
       showToast("刷新信息源监控失败", "error");
     } finally {
       setIsRefreshing(false);
     }
-  }, [showToast]);
+  }, [groupFilter, healthStatusFilter, inactivityFilter, page, pageSize, showToast]);
 
-  const mountCount = useRef(0);
+  const initialParams = useRef(
+    initialSnapshot
+      ? { page: initialSnapshot.pagination.page, pageSize: initialSnapshot.pagination.pageSize }
+      : { page: 1, pageSize: 10 },
+  );
+
+  // Fetch on mount when no initial data was provided via SSR
+  const didInitialFetch = useRef(!!initialSnapshot);
   useEffect(() => {
-    mountCount.current += 1;
-    if (mountCount.current <= 1) return;
+    if (!didInitialFetch.current) {
+      didInitialFetch.current = true;
+      void fetchSources();
+      return;
+    }
+    // Skip if params haven't changed from initial values
+    if (
+      page === initialParams.current.page &&
+      pageSize === initialParams.current.pageSize &&
+      inactivityFilter === "all" &&
+      healthStatusFilter === "all" &&
+      groupFilter === "all"
+    ) {
+      return;
+    }
     void fetchSources();
-  }, [fetchSources]);
+  }, [fetchSources, page, pageSize, inactivityFilter, healthStatusFilter, groupFilter]);
 
   const refreshSnapshot = () => {
     void fetchSources();
@@ -311,6 +327,42 @@ export function SourceMonitorPanel({ initialSnapshot, hideStats = false }: Sourc
     setGroupFilter("all");
     setPage(1);
   };
+
+  const handleInactivityFilterChange = (value: string) => {
+    setInactivityFilter(value as InactivityFilter);
+    setPage(1);
+  };
+
+  const handleHealthStatusFilterChange = (value: string) => {
+    setHealthStatusFilter(value as HealthStatusFilter);
+    setPage(1);
+  };
+
+  const handleGroupFilterChange = (value: string) => {
+    setGroupFilter(value);
+    setPage(1);
+  };
+
+  const handlePageSizeChange = (nextPageSize: number) => {
+    setPageSize(nextPageSize);
+    setPage(1);
+  };
+
+  if (!snapshot) {
+    return (
+      <div className="space-y-6 animate-pulse">
+        <div className="h-8 w-48 rounded bg-[var(--bg-muted)]" />
+        {!hideStats ? (
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="h-[88px] rounded-sm bg-[var(--bg-muted)]" />
+            ))}
+          </div>
+        ) : null}
+        <div className="h-64 rounded-sm bg-[var(--bg-muted)]" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -354,21 +406,21 @@ export function SourceMonitorPanel({ initialSnapshot, hideStats = false }: Sourc
           <FilterSelect
             label="无更新周期"
             value={inactivityFilter}
-            onChange={(value) => setInactivityFilter(value as InactivityFilter)}
+            onChange={handleInactivityFilterChange}
             options={inactivityFilterOptions}
             showSearch={false}
           />
           <FilterSelect
             label="健康状态"
             value={healthStatusFilter}
-            onChange={(value) => setHealthStatusFilter(value as HealthStatusFilter)}
+            onChange={handleHealthStatusFilterChange}
             options={healthStatusFilterOptions}
             showSearch={false}
           />
           <FilterSelect
             label="分组"
             value={groupFilter}
-            onChange={(value) => setGroupFilter(value)}
+            onChange={handleGroupFilterChange}
             options={groupFilterOptions}
             showSearch={false}
           />
@@ -377,21 +429,19 @@ export function SourceMonitorPanel({ initialSnapshot, hideStats = false }: Sourc
         <div>
           <SourceTable
             emptyText="暂无匹配信息源"
-            sources={paginatedSources}
+            sources={snapshot.sources}
           />
         </div>
 
-        {displaySources.length > 0 ? (
+        {snapshot.pagination.totalItems > 0 ? (
           <PaginationControls
-            totalItems={totalItems}
-            page={page}
-            totalPages={totalPages}
-            pageSize={pageSize}
+            totalItems={snapshot.pagination.totalItems}
+            page={snapshot.pagination.page}
+            totalPages={snapshot.pagination.totalPages}
+            pageSize={snapshot.pagination.pageSize}
             onPageChange={setPage}
-            onPageSizeChange={(nextPageSize) => {
-              setPageSize(nextPageSize);
-              setPage(1);
-            }}
+            onPageSizeChange={handlePageSizeChange}
+            disabled={isRefreshing}
           />
         ) : null}
       </section>

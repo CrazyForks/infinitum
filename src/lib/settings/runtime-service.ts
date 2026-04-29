@@ -89,7 +89,7 @@ export async function getIngestionRuntimeConfig(): Promise<RuntimeConfig> {
 export async function getAdminSettings(): Promise<AdminSettingsSnapshot> {
   await ensureRuntimeConfigSeeded();
 
-  const [modelApiConfigs, promptConfigs, blacklist, groups, sources, taskSchedule, dailyReportSchedule, cleanupSchedule] = await Promise.all([
+  const [modelApiConfigs, promptConfigs, blacklist, groups, taskSchedule, dailyReportSchedule, cleanupSchedule] = await Promise.all([
     prisma.modelApiConfig.findMany({
       orderBy: [{ isDefault: "desc" }, { createdAt: "desc" }],
     }),
@@ -109,23 +109,10 @@ export async function getAdminSettings(): Promise<AdminSettingsSnapshot> {
     prisma.sourceGroup.findMany({
       orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
     }),
-    prisma.source.findMany({
-      include: { group: true },
-      orderBy: [{ name: "asc" }],
-    }),
     ensureDefaultIngestionSchedule(),
     ensureDefaultDailyReportSchedule(),
     ensureDefaultItemCleanupSchedule(),
   ]);
-  const latestItemsBySource = await prisma.item.groupBy({
-    by: ["sourceId"],
-    _max: {
-      createdAt: true,
-    },
-  });
-  const latestItemCreatedAtBySourceId = new Map(
-    latestItemsBySource.map((entry) => [entry.sourceId, entry._max.createdAt]),
-  );
 
   const defaultModelConfig = modelApiConfigs.find((config) => config.isDefault);
 
@@ -142,17 +129,6 @@ export async function getAdminSettings(): Promise<AdminSettingsSnapshot> {
       color: group.color,
       sortOrder: group.sortOrder,
     })),
-    sources: sources.map((source) => ({
-      id: source.id,
-      name: source.name,
-      rssUrl: source.rssUrl,
-      siteUrl: source.siteUrl,
-      enabled: source.enabled,
-      aiParsingEnabled: source.aiParsingEnabled,
-      aggregationEnabled: source.aggregationEnabled,
-      groupId: source.groupId,
-      groupName: source.group?.name ?? null,
-      lastItemCreatedAt: latestItemCreatedAtBySourceId.get(source.id)?.toISOString() ?? null,
-    })),
+    sources: [],
   };
 }

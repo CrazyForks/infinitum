@@ -77,37 +77,91 @@ describe("/api/admin/monitor", () => {
     getSourceMonitorSnapshot.mockResolvedValue({
       generatedAt: "2026-04-21T00:00:00.000Z",
       totalEnabledSourceCount: 1,
+      filteredSourceCount: 1,
+      pagination: {
+        page: 1,
+        pageSize: 10,
+        totalItems: 1,
+        totalPages: 1,
+      },
+      sources: [
+        {
+          id: "source-1",
+          name: "异常源",
+          rssUrl: "https://example.com/feed.xml",
+          siteUrl: "https://example.com",
+          groupName: null,
+          healthStatus: "failed",
+          healthMessage: "RSS fetch failed with status 500",
+          healthCheckedAt: "2026-04-21T00:00:00.000Z",
+          lastFetchedAt: null,
+          lastItemCreatedAt: null,
+          inactiveDays: null,
+          itemCount: 0,
+        },
+      ],
       health: {
         healthyCount: 0,
         failedCount: 1,
         unknownCount: 0,
-        attentionSources: [
-          {
-            id: "source-1",
-            name: "异常源",
-            rssUrl: "https://example.com/feed.xml",
-            siteUrl: "https://example.com",
-            groupName: null,
-            healthStatus: "failed",
-            healthMessage: "RSS fetch failed with status 500",
-            healthCheckedAt: "2026-04-21T00:00:00.000Z",
-            lastFetchedAt: null,
-            lastItemCreatedAt: null,
-            inactiveDays: null,
-          },
-        ],
+        attentionSources: [],
       },
       inactivityBuckets: [],
+      groups: [{ value: "all", label: "全部", count: 1 }],
     });
 
     const { GET } = await import("@/app/api/admin/monitor/sources/route");
-    const response = await GET(new Request("http://localhost/api/admin/monitor/sources"));
+    const response = await GET(new Request("http://localhost/api/admin/monitor/sources?page=2&pageSize=20&healthStatus=failed&inactivity=year&groupName=%E6%9C%AA%E5%88%86%E7%BB%84"));
     const json = await response.json();
 
     expect(response.status).toBe(200);
-    expect(getSourceMonitorSnapshot).toHaveBeenCalled();
+    expect(getSourceMonitorSnapshot).toHaveBeenCalledWith(expect.any(Date), {
+      page: 2,
+      pageSize: 20,
+      healthStatus: "failed",
+      inactivity: "year",
+      groupName: "未分组",
+    });
     expect(json.health.failedCount).toBe(1);
-    expect(json.health.attentionSources[0].name).toBe("异常源");
+    expect(json.sources[0].name).toBe("异常源");
+  });
+
+  it("normalizes invalid source monitor query params", async () => {
+    requireAdmin.mockResolvedValue(undefined);
+    getSourceMonitorSnapshot.mockResolvedValue({
+      generatedAt: "2026-04-21T00:00:00.000Z",
+      totalEnabledSourceCount: 0,
+      filteredSourceCount: 0,
+      pagination: {
+        page: 1,
+        pageSize: 10,
+        totalItems: 0,
+        totalPages: 1,
+      },
+      sources: [],
+      health: {
+        healthyCount: 0,
+        failedCount: 0,
+        unknownCount: 0,
+        attentionSources: [],
+      },
+      inactivityBuckets: [],
+      groups: [{ value: "all", label: "全部", count: 0 }],
+    });
+
+    const { GET } = await import("@/app/api/admin/monitor/sources/route");
+    const response = await GET(
+      new Request("http://localhost/api/admin/monitor/sources?page=-1&pageSize=999&healthStatus=bad&inactivity=nope&groupName=all"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(getSourceMonitorSnapshot).toHaveBeenCalledWith(expect.any(Date), {
+      page: 1,
+      pageSize: 100,
+      healthStatus: "all",
+      inactivity: "all",
+      groupName: "all",
+    });
   });
 
   it("updates enabled and cronExpression", async () => {

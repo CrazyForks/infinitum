@@ -1,19 +1,15 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AdminSettingsSnapshot } from "@/lib/settings/types";
-import type { SourceMonitorSnapshot } from "@/lib/source-monitor/types";
-import type { BackgroundTaskMonitorSnapshot } from "@/lib/tasks/types";
 
 const {
   openMock,
-  pushMock,
   pathnameMock,
   searchParamsState,
 } = vi.hoisted(() => ({
   openMock: vi.fn(),
-  pushMock: vi.fn(),
   pathnameMock: "/admin",
   searchParamsState: {
     value: "",
@@ -21,9 +17,6 @@ const {
 }));
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({
-    push: pushMock,
-  }),
   usePathname: () => pathnameMock,
   useSearchParams: () => new URLSearchParams(searchParamsState.value),
 }));
@@ -129,80 +122,40 @@ function buildInitialSettings(): AdminSettingsSnapshot {
   };
 }
 
-function buildInitialSnapshot(): BackgroundTaskMonitorSnapshot {
-  return {
-    schedule: {
-      key: "ingestion_default",
-      enabled: true,
-      cronExpression: "0 * * * *",
-      sourceConcurrency: 2,
-      fullTextFetchThreshold: 80,
-      perSourceItemLimit: 20,
-      dailyReportCandidateLimit: 120,
-      dailyReportOffsetDays: 0,
-      dailyReportAutoPublish: false,
-      dailyReportMaxRetries: 0,
-      timezone: "Asia/Shanghai",
-      lastHeartbeatAt: null,
-      lastRunStartedAt: null,
-      lastRunFinishedAt: null,
-      lastRunStatus: null,
-      nextRunAt: "2026-04-21T00:00:00.000Z",
-      cleanupRetentionDays: 365,
-      isHeartbeatStale: false,
-    },
-    runningTasks: [],
-    recentTasks: [],
-  };
-}
-
-function buildInitialSourceMonitorSnapshot(): SourceMonitorSnapshot {
-  return {
-    generatedAt: "2026-04-21T00:00:00.000Z",
-    totalEnabledSourceCount: 0,
-    health: {
-      healthyCount: 0,
-      failedCount: 0,
-      unknownCount: 0,
-      attentionSources: [],
-    },
-    inactivityBuckets: [
-      {
-        key: "day",
-        label: "1天",
-        days: 1,
-        cutoff: "2026-04-20T00:00:00.000Z",
-        count: 0,
-        sources: [],
-      },
-    ],
-  };
-}
-
 function renderAdminPageClient() {
-  return render(
-    <AdminPageClient
-      initialSettings={buildInitialSettings()}
-      initialSnapshot={buildInitialSnapshot()}
-      initialSourceMonitorSnapshot={buildInitialSourceMonitorSnapshot()}
-    />,
-  );
+  // Stub the settings API fetch that AdminPageClient calls on mount.
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+    new Response(JSON.stringify(buildInitialSettings())),
+  ));
+
+  return render(<AdminPageClient />);
 }
+
+let replaceStateSpy: ReturnType<typeof vi.fn>;
+
+beforeEach(() => {
+  replaceStateSpy = vi.fn();
+  vi.stubGlobal("history", {
+    ...window.history,
+    replaceState: replaceStateSpy,
+  });
+});
 
 afterEach(() => {
   openMock.mockReset();
-  pushMock.mockReset();
   searchParamsState.value = "";
   vi.unstubAllGlobals();
 });
 
 describe("AdminPageClient", () => {
-  it("restores the current settings tab from the url query", () => {
+  it("restores the current settings tab from the url query", async () => {
     searchParamsState.value = "tab=settings&section=tasks";
 
     renderAdminPageClient();
 
-    expect(screen.getByText("设置模块")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("设置模块")).toBeInTheDocument();
+    });
     expect(screen.getByText("设置面板:tasks")).toBeInTheDocument();
   });
 
@@ -236,14 +189,20 @@ describe("AdminPageClient", () => {
 
     renderAdminPageClient();
 
+    await waitFor(() => {
+      expect(screen.getByText("设置面板:ai-model-api")).toBeInTheDocument();
+    });
+
     await user.click(screen.getByRole("button", { name: "任务配置" }));
 
-    expect(pushMock).toHaveBeenLastCalledWith("/admin?tab=settings&section=tasks", {
-      scroll: false,
-    });
+    expect(replaceStateSpy).toHaveBeenLastCalledWith(
+      null,
+      "",
+      "/admin?tab=settings&section=tasks",
+    );
   });
 
-  it("pushes the selected monitoring sub tab into the url", async () => {
+  it("updates the url when selecting a monitoring sub tab", async () => {
     const user = userEvent.setup();
     searchParamsState.value = "tab=monitoring&section=content";
 
@@ -251,9 +210,11 @@ describe("AdminPageClient", () => {
 
     await user.click(screen.getByRole("button", { name: "聚合管理" }));
 
-    expect(pushMock).toHaveBeenLastCalledWith("/admin?tab=monitoring&section=content&view=clusters", {
-      scroll: false,
-    });
+    expect(replaceStateSpy).toHaveBeenLastCalledWith(
+      null,
+      "",
+      "/admin?tab=monitoring&section=content&view=clusters",
+    );
   });
 
   it("defaults to the dashboard when an unknown monitoring section is in the url", () => {
