@@ -35,6 +35,17 @@ const RANGE_LABELS: Record<FeedRange, string> = {
   all: "全部",
 };
 
+const HOME_CREATED_TIME_FILTER_KEYS = ["range", "start", "end"] as const;
+
+function getSearchParamValue(searchParams: Record<string, string | string[] | undefined>, key: string) {
+  const value = searchParams[key];
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function hasExplicitHomeCreatedTimeFilter(searchParams: Record<string, string | string[] | undefined>) {
+  return HOME_CREATED_TIME_FILTER_KEYS.some((key) => Boolean(getSearchParamValue(searchParams, key)?.trim()));
+}
+
 function hasNonDefaultFeedFilter(filters: FeedFilters, page: number) {
   return Boolean(
     page > 1 ||
@@ -160,6 +171,7 @@ export async function generateMetadata({ searchParams }: PageProps): Promise<Met
 export default async function Home({ searchParams }: PageProps) {
   const resolvedSearchParams = (await searchParams) ?? {};
   const { filters, pagination } = resolveFeedRequest(resolvedSearchParams);
+  const initialCreatedRangeExplicit = hasExplicitHomeCreatedTimeFilter(resolvedSearchParams);
   const visitorId = await getVisitorIdCookie();
   const [feed, latestRunSnapshot, adminSession, feedFilterOptions] = await Promise.all([
     getCachedFeedItems(filters, pagination, visitorId),
@@ -180,6 +192,7 @@ export default async function Home({ searchParams }: PageProps) {
       <FeedPanel
         initialItems={feed.items}
         initialRange={filters.range}
+        initialCreatedRangeExplicit={initialCreatedRangeExplicit}
         initialSort={filters.sort}
         initialStartDate={filters.start}
         initialEndDate={filters.end}

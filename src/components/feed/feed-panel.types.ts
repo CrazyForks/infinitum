@@ -14,6 +14,7 @@ import type {
 export type FeedPanelProps = {
   initialItems: FeedEntryDTO[];
   initialRange: FeedRange;
+  initialCreatedRangeExplicit?: boolean;
   initialSort: FeedSort;
   initialStartDate: string | null;
   initialEndDate: string | null;
@@ -41,6 +42,7 @@ export type FeedQueryState = {
   groupId: string | null;
   sourceId: string | null;
   title: string | null;
+  createdRangeExplicit?: boolean;
 };
 
 export type FeedbackTone = "info" | "success" | "error";

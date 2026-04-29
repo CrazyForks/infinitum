@@ -214,6 +214,20 @@ function buildReadingProgressFilterKey(query: FeedQueryState) {
   });
 }
 
+function hasAdvancedQueryFilter(query: FeedQueryState) {
+  return Boolean(query.sourceId || query.title || query.publishedStartDate || query.publishedEndDate);
+}
+
+function normalizeImplicitCreatedRange(query: FeedQueryState): FeedQueryState {
+  if (query.createdRangeExplicit || query.startDate || query.endDate) {
+    return query;
+  }
+
+  const nextRange = hasAdvancedQueryFilter(query) ? "all" : "today";
+
+  return query.range === nextRange ? query : { ...query, range: nextRange };
+}
+
 function readStoredReadingProgress(filterKey: string): ReadingProgress | null {
   try {
     const rawValue = window.localStorage.getItem(READING_PROGRESS_STORAGE_KEY);
@@ -359,6 +373,7 @@ function SummaryText({ title, summary, className, clickableClassName, onOpen }: 
 export function FeedPanel({
   initialItems,
   initialRange,
+  initialCreatedRangeExplicit = true,
   initialSort,
   initialStartDate,
   initialEndDate,
@@ -381,6 +396,7 @@ export function FeedPanel({
   const [pagination, setPagination] = useState<FeedPagination>(fallbackInitialPagination);
   const [jumpToPage, setJumpToPage] = useState(String(fallbackInitialPagination.page));
   const [range, setRange] = useState<FeedRange>(initialRange);
+  const [createdRangeExplicit, setCreatedRangeExplicit] = useState(initialCreatedRangeExplicit);
   const [sort, setSort] = useState<FeedSort>(initialSort);
   const [startDate, setStartDate] = useState<string | null>(initialStartDate);
   const [endDate, setEndDate] = useState<string | null>(initialEndDate);
@@ -434,6 +450,7 @@ export function FeedPanel({
     groupId: normalizeOptionalId(initialGroupId),
     sourceId: normalizeOptionalId(initialSourceId),
     title: normalizeSearchText(initialTitle),
+    createdRangeExplicit: initialCreatedRangeExplicit,
   });
   const visibleSources = useMemo(
     () => availableSources.filter((source) => (!groupId ? true : source.groupId === groupId)),
@@ -534,14 +551,21 @@ export function FeedPanel({
       scrollToTop?: boolean;
     },
   ) => {
+    const normalizedQuery = normalizeImplicitCreatedRange(query);
+
     if (options?.scrollToTop) {
       pendingScrollToTopRef.current = true;
       setPendingRestoreEntryId(null);
     }
 
-    syncUrlWithQuery(query, page, size);
+    if (normalizedQuery.range !== query.range) {
+      setRange(normalizedQuery.range);
+    }
+
+    latestQueryRef.current = normalizedQuery;
+    syncUrlWithQuery(normalizedQuery, page, size);
     startTransition(async () => {
-      const payload = await requestFeed(query, { page, size });
+      const payload = await requestFeed(normalizedQuery, { page, size });
       replaceFeedData(payload.items, payload.pagination);
       setGroups(payload.groups ?? availableGroups);
       setGroupTotalCount(payload.groupTotalCount ?? payload.pagination.total);
@@ -564,17 +588,20 @@ export function FeedPanel({
     groupId,
     sourceId,
     title: titleFilter,
+    createdRangeExplicit,
     ...overrides,
   });
 
   const updateRange = (nextRange: FeedRange) => {
     setRange(nextRange);
+    setCreatedRangeExplicit(true);
     setStartDate(null);
     setEndDate(null);
     const query = buildQuery({
       range: nextRange,
       startDate: null,
       endDate: null,
+      createdRangeExplicit: true,
     });
     loadFeed(query, 1, pageSize, { scrollToTop: true });
   };
@@ -610,9 +637,11 @@ export function FeedPanel({
 
     setStartDate(normalizedStartDate);
     setEndDate(normalizedEndDate);
+    setCreatedRangeExplicit(true);
     loadFeed(buildQuery({
       startDate: normalizedStartDate,
       endDate: normalizedEndDate,
+      createdRangeExplicit: true,
     }), 1, pageSize, { scrollToTop: true });
   };
 
@@ -629,6 +658,7 @@ export function FeedPanel({
 
   const clearFilters = () => {
     setRange("today");
+    setCreatedRangeExplicit(false);
     setSort("time_desc");
     setStartDate(null);
     setEndDate(null);
@@ -642,6 +672,7 @@ export function FeedPanel({
     loadFeed({
       range: "today" as FeedRange,
       sort: "time_desc" as FeedSort,
+      createdRangeExplicit: false,
       startDate: null,
       endDate: null,
       publishedStartDate: null,
@@ -1170,8 +1201,9 @@ export function FeedPanel({
       groupId,
       sourceId,
       title: titleFilter,
+      createdRangeExplicit,
     };
-  }, [endDate, groupId, publishedEndDate, publishedStartDate, range, sort, sourceId, startDate, titleFilter]);
+  }, [createdRangeExplicit, endDate, groupId, publishedEndDate, publishedStartDate, range, sort, sourceId, startDate, titleFilter]);
 
   useEffect(() => {
     const progress = readStoredReadingProgress(readingProgressFilterKey);

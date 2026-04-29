@@ -609,6 +609,134 @@ describe("FeedPanel", () => {
     expect(screen.getByText("排序：按评分倒序")).toBeInTheDocument();
   });
 
+  it("omits the implicit today range when applying advanced filters", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () =>
+      new Response(
+        JSON.stringify({
+          items: initialEntries,
+          nextCursor: null,
+          range: "all" satisfies FeedRange,
+          sort: "time_desc" satisfies FeedSort,
+          start: null,
+          end: null,
+          sourceId: "source-ai",
+        }),
+      ),
+    );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <FeedPanel
+        initialItems={initialEntries}
+        initialRange="today"
+        initialCreatedRangeExplicit={false}
+        initialSort="time_desc"
+        initialStartDate={null}
+        initialEndDate={null}
+        initialNextCursor={null}
+        initialStatus={null}
+        isAdmin={false}
+        availableSources={availableSources}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "高级筛选" }));
+    await selectFilterOption(user, "信息源", "AI Source");
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/feed?sort=time_desc&sourceId=source-ai");
+    });
+    expect(getSelectRoot("创建时间")).toHaveTextContent("不限");
+  });
+
+  it("keeps the created time range when the user changes it before applying advanced filters", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () =>
+      new Response(
+        JSON.stringify({
+          items: initialEntries,
+          nextCursor: null,
+          range: "3d" satisfies FeedRange,
+          sort: "time_desc" satisfies FeedSort,
+          start: null,
+          end: null,
+          sourceId: "source-ai",
+        }),
+      ),
+    );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <FeedPanel
+        initialItems={initialEntries}
+        initialRange="today"
+        initialCreatedRangeExplicit={false}
+        initialSort="time_desc"
+        initialStartDate={null}
+        initialEndDate={null}
+        initialNextCursor={null}
+        initialStatus={null}
+        isAdmin={false}
+        availableSources={availableSources}
+      />,
+    );
+
+    await selectFilterOption(user, "创建时间", "3天");
+    await user.click(screen.getByRole("button", { name: "高级筛选" }));
+    await selectFilterOption(user, "信息源", "AI Source");
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=3d&sort=time_desc&sourceId=source-ai");
+    });
+  });
+
+  it("returns to the implicit today range after removing the last advanced filter", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () =>
+      new Response(
+        JSON.stringify({
+          items: initialEntries,
+          nextCursor: null,
+          range: "today" satisfies FeedRange,
+          sort: "time_desc" satisfies FeedSort,
+          start: null,
+          end: null,
+          title: null,
+        }),
+      ),
+    );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <FeedPanel
+        initialItems={initialEntries}
+        initialRange="all"
+        initialCreatedRangeExplicit={false}
+        initialSort="time_desc"
+        initialStartDate={null}
+        initialEndDate={null}
+        initialNextCursor={null}
+        initialStatus={null}
+        isAdmin={false}
+        initialTitle="Agent"
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("全文搜索"), { target: { value: "" } });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(320);
+      await Promise.resolve();
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=today&sort=time_desc");
+    expect(getSelectRoot("创建时间")).toHaveTextContent("当天");
+  });
+
   it("debounces title search before applying it to subsequent filter requests", async () => {
     vi.useFakeTimers();
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () =>

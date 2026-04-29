@@ -130,21 +130,37 @@ export function toDayjsRange(startDate: string | null, endDate: string | null): 
 }
 
 export function buildFeedSearch(
-  { range, sort, startDate, endDate, publishedStartDate, publishedEndDate, groupId, sourceId, title }: FeedQueryState,
+  {
+    range,
+    sort,
+    startDate,
+    endDate,
+    publishedStartDate,
+    publishedEndDate,
+    groupId,
+    sourceId,
+    title,
+    createdRangeExplicit = true,
+  }: FeedQueryState,
   pagination?: {
     page?: number;
     size?: number;
   },
 ): string {
-  const search = new URLSearchParams({
-    range,
-    sort,
-  });
+  const search = new URLSearchParams();
   const normalizedGroupId = normalizeOptionalId(groupId);
   const normalizedSourceId = normalizeOptionalId(sourceId);
   const normalizedTitle = normalizeSearchText(title);
   const page = pagination?.page ?? 1;
   const size = pagination?.size ?? DEFAULT_FEED_PAGE_SIZE;
+  const hasAdvancedFilter = Boolean(normalizedSourceId || normalizedTitle || publishedStartDate || publishedEndDate);
+  const hasCreatedDateRange = Boolean(startDate || endDate);
+
+  if (createdRangeExplicit || hasCreatedDateRange || (!hasAdvancedFilter && range !== "all")) {
+    search.set("range", range);
+  }
+
+  search.set("sort", sort);
 
   if (startDate) {
     search.set("start", startDate);

@@ -1,4 +1,4 @@
-import { DEFAULT_FEED_PAGE_SIZE, type FeedFilters } from "@/lib/feed/types";
+import { DEFAULT_FEED_PAGE_SIZE, type FeedFilters, type FeedRange } from "@/lib/feed/types";
 import {
   isFeedRange,
   isFeedSort,
@@ -17,6 +17,9 @@ type ResolvedFeedRequest = {
     size: number;
   };
 };
+
+const ADVANCED_FILTER_KEYS = ["sourceId", "title", "publishedStart", "publishedEnd"] as const;
+const CREATED_TIME_FILTER_KEYS = ["range", "start", "end"] as const;
 
 function getSearchParamValue(searchParams: SearchParamSource, key: keyof FeedFilters | "page" | "size") {
   if (searchParams instanceof URLSearchParams) {
@@ -37,6 +40,17 @@ function parsePageSize(value: string | undefined): number {
   return Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, 200) : DEFAULT_FEED_PAGE_SIZE;
 }
 
+function hasParamValue(searchParams: SearchParamSource, key: keyof FeedFilters): boolean {
+  return Boolean(getSearchParamValue(searchParams, key)?.trim());
+}
+
+function resolveDefaultRange(searchParams: SearchParamSource): FeedRange {
+  const hasAdvancedFilter = ADVANCED_FILTER_KEYS.some((key) => hasParamValue(searchParams, key));
+  const hasCreatedTimeFilter = CREATED_TIME_FILTER_KEYS.some((key) => hasParamValue(searchParams, key));
+
+  return hasAdvancedFilter && !hasCreatedTimeFilter ? "all" : "today";
+}
+
 export function resolveFeedRequest(searchParams: SearchParamSource, now = new Date()): ResolvedFeedRequest {
   const rangeParam = getSearchParamValue(searchParams, "range");
   const sortParam = getSearchParamValue(searchParams, "sort");
@@ -47,10 +61,11 @@ export function resolveFeedRequest(searchParams: SearchParamSource, now = new Da
   const groupIdParam = getSearchParamValue(searchParams, "groupId");
   const sourceIdParam = getSearchParamValue(searchParams, "sourceId");
   const titleParam = getSearchParamValue(searchParams, "title");
+  const defaultRange = resolveDefaultRange(searchParams);
   return {
     filters: resolveFeedFilters(
       {
-        range: rangeParam && isFeedRange(rangeParam) ? rangeParam : "today",
+        range: rangeParam && isFeedRange(rangeParam) ? rangeParam : defaultRange,
         sort: sortParam && isFeedSort(sortParam) ? sortParam : "time_desc",
         start: normalizeFeedDateInput(startParam),
         end: normalizeFeedDateInput(endParam),
