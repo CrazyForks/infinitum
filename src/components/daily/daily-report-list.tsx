@@ -17,6 +17,7 @@ import { IconButton } from "@/components/ui/icon-button";
 import { IconEye, IconEyeOff, IconRefresh, IconTrash } from "@/components/ui/icons";
 import { renderInlineMarkdown } from "@/components/ui/inline-markdown";
 import { ModalShell } from "@/components/ui/modal-shell";
+import { getTodayDailyReportDate } from "@/lib/daily-report/date";
 import { PaginationControls } from "@/components/ui/pagination-controls";
 import type { DailyReportArchiveWeekDTO, DailyReportListItemDTO } from "@/lib/daily-report/types";
 import { cx } from "@/lib/ui/cx";
@@ -33,9 +34,7 @@ type DailyReportListProps = {
 };
 
 function getTodayValue() {
-  const now = new Date();
-  const shanghai = new Date(now.getTime() + 8 * 60 * 60 * 1000);
-  return shanghai.toISOString().slice(0, 10);
+  return getTodayDailyReportDate();
 }
 
 function statusLabel(status: DailyReportListItemDTO["status"]) {

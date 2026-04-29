@@ -129,10 +129,6 @@ export function toDayjsRange(startDate: string | null, endDate: string | null): 
   return [startDate ? dayjs(startDate, "YYYY-MM-DD") : null, endDate ? dayjs(endDate, "YYYY-MM-DD") : null];
 }
 
-export function getBrowserTimeZoneOffsetMinutes(): number {
-  return new Date().getTimezoneOffset();
-}
-
 export function buildFeedSearch(
   { range, sort, startDate, endDate, publishedStartDate, publishedEndDate, groupId, sourceId, title }: FeedQueryState,
   pagination?: {
@@ -184,11 +180,6 @@ export function buildFeedSearch(
 
   if (size !== DEFAULT_FEED_PAGE_SIZE) {
     search.set("size", String(size));
-  }
-
-  const timeZoneOffsetMinutes = getBrowserTimeZoneOffsetMinutes();
-  if (timeZoneOffsetMinutes !== 0) {
-    search.set("tzOffsetMinutes", String(timeZoneOffsetMinutes));
   }
 
   return search.toString();

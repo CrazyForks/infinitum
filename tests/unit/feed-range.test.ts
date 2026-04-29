@@ -21,11 +21,11 @@ describe("feed range helpers", () => {
     expect(isFeedRange("unknown")).toBe(false);
   });
 
-  it("returns the start of the current day for today range", () => {
+  it("returns the start of the current Shanghai day for today range", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-10T16:45:00.000Z"));
 
-    expect(getRangeStart("today")?.toISOString()).toBe("2026-04-10T00:00:00.000Z");
+    expect(getRangeStart("today")?.toISOString()).toBe("2026-04-10T16:00:00.000Z");
 
     vi.useRealTimers();
   });
@@ -43,26 +43,18 @@ describe("feed range helpers", () => {
     vi.useRealTimers();
   });
 
-  it("resolves current and custom ranges against the user's timezone offset", () => {
+  it("resolves current and custom ranges against the fixed Shanghai timezone", () => {
     const now = new Date("2026-04-10T16:45:00.000Z");
-    const currentFilters = resolveFeedFilters(
-      {
-        range: "today",
-        sort: "time_desc",
-      },
-      now,
-      -480,
-    );
-    const customFilters = resolveFeedFilters(
-      {
-        range: "7d",
-        sort: "time_desc",
-        start: "2026-04-10",
-        end: "2026-04-10",
-      },
-      now,
-      -480,
-    );
+    const currentFilters = resolveFeedFilters({
+      range: "today",
+      sort: "time_desc",
+    }, now);
+    const customFilters = resolveFeedFilters({
+      range: "7d",
+      sort: "time_desc",
+      start: "2026-04-10",
+      end: "2026-04-10",
+    }, now);
 
     expect(currentFilters.rangeStart?.toISOString()).toBe("2026-04-10T16:00:00.000Z");
     expect(customFilters.rangeStart?.toISOString()).toBe("2026-04-09T16:00:00.000Z");

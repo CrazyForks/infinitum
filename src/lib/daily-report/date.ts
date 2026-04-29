@@ -1,6 +1,14 @@
 import { DAILY_REPORT_TIMEZONE } from "@/lib/daily-report/types";
 
 const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1000;
+const DAILY_REPORT_DATE_TIME_FORMATTER = new Intl.DateTimeFormat("zh-CN", {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  timeZone: DAILY_REPORT_TIMEZONE,
+});
 
 export function normalizeDailyReportDate(value: string) {
   const normalized = value.trim();
@@ -45,4 +53,9 @@ export function getDailyReportDateRange(date: string, timezone = DAILY_REPORT_TI
 
 export function getTodayDailyReportDate(now = new Date()) {
   return new Date(now.getTime() + SHANGHAI_OFFSET_MS).toISOString().slice(0, 10);
+}
+
+export function formatDailyReportDateTime(value: string | Date) {
+  const date = value instanceof Date ? value : new Date(value);
+  return DAILY_REPORT_DATE_TIME_FORMATTER.format(date);
 }

@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { IconArrowDown, IconEye, IconEyeOff, IconList, IconNote, IconRefresh, IconTrash } from "@/components/ui/icons";
 import { ModalShell } from "@/components/ui/modal-shell";
+import { formatDailyReportDateTime } from "@/lib/daily-report/date";
 import { buildDailyReportDetailMarkdown } from "@/lib/daily-report/export";
 import type { DailyReportDetailDTO } from "@/lib/daily-report/types";
 import { renderSafeMarkdown } from "@/lib/markdown/safe-html";
@@ -219,7 +220,7 @@ export function DailyReportDetail({ report, isAdmin }: DailyReportDetailProps) {
           </div>
           <div className="mt-3 flex flex-wrap items-center justify-center gap-3 text-sm text-[var(--text-2)]">
             <span>来源：{report.sourceCount} 个引用</span>
-            <span>生成：{new Date(report.generatedAt).toLocaleString("zh-CN")}</span>
+            <span>生成：{formatDailyReportDateTime(report.generatedAt)}</span>
           </div>
         </div>
       </section>

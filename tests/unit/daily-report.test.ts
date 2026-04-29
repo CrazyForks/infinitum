@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { assertDailyReportDateIsNotFuture, getDailyReportDateRange, normalizeDailyReportDate } from "@/lib/daily-report/date";
+import {
+  assertDailyReportDateIsNotFuture,
+  formatDailyReportDateTime,
+  getDailyReportDateRange,
+  normalizeDailyReportDate,
+} from "@/lib/daily-report/date";
 import { renderDailyReportMarkdown } from "@/lib/daily-report/renderer";
 import type { DailyReportCandidate, DailyReportContent } from "@/lib/daily-report/types";
 import { parseDailyReportContent } from "@/lib/daily-report/validator";
@@ -92,6 +97,10 @@ describe("daily report utilities", () => {
       "2026-04-25",
       new Date("2026-04-25T10:00:00.000Z"),
     )).toBe("2026-04-25");
+  });
+
+  it("formats daily report timestamps in Asia/Shanghai", () => {
+    expect(formatDailyReportDateTime("2026-04-24T01:30:00.000Z")).toBe("2026/04/24 09:30");
   });
 
   it("validates structured model output and rejects invalid source ids", () => {

@@ -1,6 +1,7 @@
 import { DAY_MS, MINUTE_MS } from "@/config/constants";
 import type { FeedFilters, FeedRange, FeedSort } from "@/lib/feed/types";
 
+export const DEFAULT_FEED_TIME_ZONE_OFFSET_MINUTES = -8 * 60;
 
 export const RANGE_OPTIONS: Array<{ value: FeedRange; label: string }> = [
   { value: "today", label: "当天" },
@@ -53,16 +54,6 @@ export function normalizeFeedDateInput(value: string | null | undefined): string
   return value;
 }
 
-export function normalizeFeedTimeZoneOffset(value: string | null | undefined): number {
-  const parsed = Number(value);
-
-  if (!Number.isInteger(parsed) || parsed < -24 * 60 || parsed > 24 * 60) {
-    return 0;
-  }
-
-  return parsed;
-}
-
 function shiftInstantToOffsetTimeline(date: Date, timeZoneOffsetMinutes: number): Date {
   return new Date(date.getTime() - timeZoneOffsetMinutes * MINUTE_MS);
 }
@@ -71,7 +62,11 @@ function shiftOffsetTimelineToUtc(date: Date, timeZoneOffsetMinutes: number): Da
   return new Date(date.getTime() + timeZoneOffsetMinutes * MINUTE_MS);
 }
 
-export function getRangeStart(range: FeedRange, now = new Date(), timeZoneOffsetMinutes = 0): Date | null {
+export function getRangeStart(
+  range: FeedRange,
+  now = new Date(),
+  timeZoneOffsetMinutes = DEFAULT_FEED_TIME_ZONE_OFFSET_MINUTES,
+): Date | null {
   const current = new Date(now);
   const localCurrent = shiftInstantToOffsetTimeline(current, timeZoneOffsetMinutes);
 
@@ -112,7 +107,7 @@ function buildDateBoundary(value: string, boundary: "start" | "end", timeZoneOff
 export function resolveFeedFilters(
   input: Partial<FeedFilters> & Pick<FeedFilters, "range" | "sort">,
   now = new Date(),
-  timeZoneOffsetMinutes = 0,
+  timeZoneOffsetMinutes = DEFAULT_FEED_TIME_ZONE_OFFSET_MINUTES,
 ): FeedFilters & {
   rangeStart: Date | null;
   rangeEnd: Date | null;

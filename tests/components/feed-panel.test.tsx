@@ -298,7 +298,7 @@ describe("FeedPanel", () => {
     await selectFilterOption(user, "创建时间", "1月");
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=1m&sort=time_desc&tzOffsetMinutes=-480");
+      expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=1m&sort=time_desc");
     });
 
     expect(await screen.findByText("一月内标题")).toBeInTheDocument();
@@ -449,7 +449,7 @@ describe("FeedPanel", () => {
     await user.click(screen.getByRole("button", { name: "AI (1)" }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=7d&sort=time_desc&groupId=group-ai&tzOffsetMinutes=-480");
+      expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=7d&sort=time_desc&groupId=group-ai");
     });
 
     expect(await screen.findByText("AI 分组内容")).toBeInTheDocument();
@@ -512,7 +512,7 @@ describe("FeedPanel", () => {
     await user.click(screen.getByRole("button", { name: "AI (1)" }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=7d&sort=time_desc&groupId=group-ai&tzOffsetMinutes=-480");
+      expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=7d&sort=time_desc&groupId=group-ai");
     });
 
     expect(await screen.findByRole("button", { name: "全部内容 (5)" })).toBeInTheDocument();
@@ -520,36 +520,8 @@ describe("FeedPanel", () => {
     expect(screen.getByRole("button", { name: "研究 (1)" })).toBeInTheDocument();
   });
 
-  it("refreshes all-group count after client timezone hydration reloads the feed", async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          items: [
-            {
-              ...initialEntries[1],
-              id: "item-timezone-reload",
-              title: "时区重载后的内容",
-            },
-          ],
-          groups: [{ id: "group-ai", name: "AI", count: 4 }],
-          groupTotalCount: 6,
-          nextCursor: null,
-          pagination: {
-            page: 1,
-            size: 50,
-            total: 1,
-            totalPages: 1,
-          },
-          range: "today" satisfies FeedRange,
-          sort: "time_desc" satisfies FeedSort,
-          start: null,
-          end: null,
-          groupId: null,
-          sourceId: null,
-          title: null,
-        }),
-      ),
-    );
+  it("does not reload the feed after hydration when the browser timezone differs", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
 
     vi.stubGlobal("fetch", fetchMock);
 
@@ -570,9 +542,10 @@ describe("FeedPanel", () => {
       -480,
     );
 
-    expect(await screen.findByText("时区重载后的内容")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "全部内容 (6)" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "AI (4)" })).toBeInTheDocument();
+    expect(screen.getByText("OpenAI Agent 发布")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
   });
 
   it("supports advanced filters with automatic refresh and title search", async () => {
@@ -628,7 +601,7 @@ describe("FeedPanel", () => {
     await selectFilterOption(user, "排序方式", "按评分倒序");
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=7d&sort=score_desc&title=Agent&tzOffsetMinutes=-480");
+      expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=7d&sort=score_desc&title=Agent");
     });
 
     expect(await screen.findByText("评分最高内容")).toBeInTheDocument();
@@ -694,7 +667,7 @@ describe("FeedPanel", () => {
     await act(async () => {
       await Promise.resolve();
     });
-    expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=7d&sort=score_desc&tzOffsetMinutes=-480");
+    expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=7d&sort=score_desc");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(screen.queryByText("搜索：Agent")).not.toBeInTheDocument();
 
@@ -709,7 +682,7 @@ describe("FeedPanel", () => {
       await Promise.resolve();
     });
 
-    expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=7d&sort=score_desc&title=Agent&tzOffsetMinutes=-480");
+    expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=7d&sort=score_desc&title=Agent");
     expect(screen.getByText("搜索：Agent")).toBeInTheDocument();
   });
 
@@ -1014,7 +987,7 @@ describe("FeedPanel", () => {
     await user.click(screen.getByRole("button", { name: "展开相关内容" }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("/api/feed/clusters/cluster-1?range=all&sort=time_desc&tzOffsetMinutes=-480");
+      expect(fetchMock).toHaveBeenCalledWith("/api/feed/clusters/cluster-1?range=all&sort=time_desc");
     });
 
     expect(await screen.findByText("详细标题")).toBeInTheDocument();
@@ -1061,7 +1034,7 @@ describe("FeedPanel", () => {
     await user.click(screen.getByRole("heading", { name: "OpenAI Agent 发布" }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("/api/feed/clusters/cluster-1?range=all&sort=time_desc&tzOffsetMinutes=-480");
+      expect(fetchMock).toHaveBeenCalledWith("/api/feed/clusters/cluster-1?range=all&sort=time_desc");
     });
     expect(await screen.findByText("详细标题")).toBeInTheDocument();
   });
@@ -1071,7 +1044,7 @@ describe("FeedPanel", () => {
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
       const url = getFetchUrl(input);
 
-      if (url === "/api/feed/clusters/cluster-1?range=all&sort=time_desc&tzOffsetMinutes=-480") {
+      if (url === "/api/feed/clusters/cluster-1?range=all&sort=time_desc") {
         return new Response(
           JSON.stringify({
             items: [
@@ -1210,7 +1183,7 @@ describe("FeedPanel", () => {
         );
       }
 
-      if (url === "/api/feed?range=7d&sort=time_desc&tzOffsetMinutes=-480") {
+      if (url === "/api/feed?range=7d&sort=time_desc") {
         return new Response(
           JSON.stringify({
             items: [
@@ -1266,7 +1239,7 @@ describe("FeedPanel", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledWith("/api/ingest/status");
-    expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=7d&sort=time_desc&tzOffsetMinutes=-480");
+    expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=7d&sort=time_desc");
     expect(screen.getByText("刷新后的标题")).toBeInTheDocument();
   });
 
@@ -1520,7 +1493,7 @@ describe("FeedPanel", () => {
         );
       }
 
-      if (url === "/api/feed?range=7d&sort=time_desc&tzOffsetMinutes=-480") {
+      if (url === "/api/feed?range=7d&sort=time_desc") {
         return new Response(
           JSON.stringify({
             items: [
@@ -1606,7 +1579,7 @@ describe("FeedPanel", () => {
         );
       }
 
-      if (url === "/api/feed?range=7d&sort=time_desc&tzOffsetMinutes=-480") {
+      if (url === "/api/feed?range=7d&sort=time_desc") {
         return new Response(
           JSON.stringify({
             items: [initialEntries[0]],
@@ -1678,7 +1651,7 @@ describe("FeedPanel", () => {
         );
       }
 
-      if (url === "/api/feed?range=7d&sort=time_desc&tzOffsetMinutes=-480") {
+      if (url === "/api/feed?range=7d&sort=time_desc") {
         return new Response(
           JSON.stringify({
             items: [initialEntries[0]],
@@ -2106,7 +2079,7 @@ describe("FeedPanel", () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/feed?range=7d&sort=score_desc&start=2026-04-01&end=2026-04-10&groupId=group-1&sourceId=source-2&tzOffsetMinutes=-480",
+        "/api/feed?range=7d&sort=score_desc&start=2026-04-01&end=2026-04-10&groupId=group-1&sourceId=source-2",
       );
     });
   });
@@ -2155,7 +2128,7 @@ describe("FeedPanel", () => {
     await user.click(screen.getByRole("button", { name: "清除筛选" }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenLastCalledWith("/api/feed?range=today&sort=time_desc&tzOffsetMinutes=-480");
+      expect(fetchMock).toHaveBeenLastCalledWith("/api/feed?range=today&sort=time_desc");
     });
 
     expect(getSelectRoot("创建时间")).toHaveTextContent("当天");
@@ -2206,7 +2179,7 @@ describe("FeedPanel", () => {
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input) => {
       const url = getFetchUrl(input);
 
-      if (url === "/api/feed?range=7d&sort=time_desc&page=2&tzOffsetMinutes=-480") {
+      if (url === "/api/feed?range=7d&sort=time_desc&page=2") {
         return new Response(
           JSON.stringify({
             items: [
@@ -2234,7 +2207,7 @@ describe("FeedPanel", () => {
         );
       }
 
-      if (url === "/api/feed?range=7d&sort=time_desc&size=100&tzOffsetMinutes=-480") {
+      if (url === "/api/feed?range=7d&sort=time_desc&size=100") {
         return new Response(
           JSON.stringify({
             items: [
@@ -2261,7 +2234,7 @@ describe("FeedPanel", () => {
         );
       }
 
-      if (url === "/api/feed?range=7d&sort=time_desc&page=3&size=100&tzOffsetMinutes=-480") {
+      if (url === "/api/feed?range=7d&sort=time_desc&page=3&size=100") {
         return new Response(
           JSON.stringify({
             items: [
@@ -2289,7 +2262,7 @@ describe("FeedPanel", () => {
         );
       }
 
-      if (url === "/api/feed?range=7d&sort=time_desc&page=2&size=100&tzOffsetMinutes=-480") {
+      if (url === "/api/feed?range=7d&sort=time_desc&page=2&size=100") {
         return new Response(
           JSON.stringify({
             items: [
@@ -2343,7 +2316,7 @@ describe("FeedPanel", () => {
     await user.click(screen.getByRole("button", { name: "下一页" }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=7d&sort=time_desc&page=2&tzOffsetMinutes=-480");
+      expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=7d&sort=time_desc&page=2");
     });
 
     expect(await screen.findByText("第二页标题")).toBeInTheDocument();
@@ -2353,7 +2326,7 @@ describe("FeedPanel", () => {
     await selectFilterOption(user, "每页显示", "100");
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=7d&sort=time_desc&size=100&tzOffsetMinutes=-480");
+      expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=7d&sort=time_desc&size=100");
     });
 
     expect(await screen.findByText("分页尺寸第一页")).toBeInTheDocument();
@@ -2369,7 +2342,7 @@ describe("FeedPanel", () => {
     await user.click(screen.getByRole("button", { name: "跳转" }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=7d&sort=time_desc&page=3&size=100&tzOffsetMinutes=-480");
+      expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=7d&sort=time_desc&page=3&size=100");
     });
 
     expect(await screen.findByText("第三页标题")).toBeInTheDocument();
@@ -2378,7 +2351,7 @@ describe("FeedPanel", () => {
     await user.click(screen.getByRole("button", { name: "上一页" }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=7d&sort=time_desc&page=2&size=100&tzOffsetMinutes=-480");
+      expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=7d&sort=time_desc&page=2&size=100");
     });
 
     expect(await screen.findByText("第二页百条模式")).toBeInTheDocument();

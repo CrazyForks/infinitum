@@ -53,7 +53,6 @@ import {
   formatScore,
   formatGroupOptionLabel,
   getAllSelectableItemIds,
-  getBrowserTimeZoneOffsetMinutes,
   normalizeDateRange,
   normalizeOptionalId,
   normalizeSearchText,
@@ -422,7 +421,6 @@ export function FeedPanel({
   const [isReadingProgressHidden, setIsReadingProgressHidden] = useState(false);
   const [pendingRestoreEntryId, setPendingRestoreEntryId] = useState<string | null>(null);
   const skipTitleEffectRef = useRef(true);
-  const didHydrateTimeZoneRef = useRef(false);
   const progressWriteTimerRef = useRef<number | null>(null);
   const lastSavedProgressRef = useRef<string | null>(null);
   const pendingScrollToTopRef = useRef(false);
@@ -1288,41 +1286,6 @@ export function FeedPanel({
     }, 50);
     setPendingRestoreEntryId(null);
   }, [isPending, items, pendingRestoreEntryId]);
-
-  useEffect(() => {
-    if (didHydrateTimeZoneRef.current) {
-      return;
-    }
-
-    didHydrateTimeZoneRef.current = true;
-
-    // 服务端渲染时无法获取浏览器时区，导致时间筛选可能不准确
-    // 客户端加载完成后，需要重新获取数据以应用正确的时区
-    if (getBrowserTimeZoneOffsetMinutes() === 0 && initialItems.length > 0) {
-      // 如果时区是 UTC 且已有数据，不需要刷新
-      return;
-    }
-
-    startTransition(async () => {
-      const payload = await requestFeed({
-        range,
-        sort,
-        startDate,
-        endDate,
-        publishedStartDate,
-        publishedEndDate,
-        groupId,
-        sourceId,
-        title: titleFilter,
-      }, { page: 1, size: pageSize });
-      setItems(payload.items);
-      setPagination(payload.pagination);
-      setGroups(payload.groups ?? availableGroups);
-      setGroupTotalCount(payload.groupTotalCount ?? payload.pagination.total);
-      resetExpandedClusterState();
-      setRefreshFeedback(null);
-    });
-  }, [availableGroups, endDate, groupId, initialItems.length, pageSize, publishedEndDate, publishedStartDate, range, resetExpandedClusterState, sort, sourceId, startDate, titleFilter]);
 
   useEffect(() => {
     if (skipTitleEffectRef.current) {

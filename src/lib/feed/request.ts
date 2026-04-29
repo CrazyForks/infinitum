@@ -4,7 +4,6 @@ import {
   isFeedSort,
   normalizeFeedDateInput,
   normalizeFeedFilterId,
-  normalizeFeedTimeZoneOffset,
   resolveFeedFilters,
 } from "@/lib/feed/range";
 
@@ -19,7 +18,7 @@ type ResolvedFeedRequest = {
   };
 };
 
-function getSearchParamValue(searchParams: SearchParamSource, key: keyof FeedFilters | "page" | "size" | "tzOffsetMinutes") {
+function getSearchParamValue(searchParams: SearchParamSource, key: keyof FeedFilters | "page" | "size") {
   if (searchParams instanceof URLSearchParams) {
     return searchParams.get(key) ?? undefined;
   }
@@ -48,8 +47,6 @@ export function resolveFeedRequest(searchParams: SearchParamSource, now = new Da
   const groupIdParam = getSearchParamValue(searchParams, "groupId");
   const sourceIdParam = getSearchParamValue(searchParams, "sourceId");
   const titleParam = getSearchParamValue(searchParams, "title");
-  const timeZoneOffsetParam = getSearchParamValue(searchParams, "tzOffsetMinutes");
-
   return {
     filters: resolveFeedFilters(
       {
@@ -64,7 +61,6 @@ export function resolveFeedRequest(searchParams: SearchParamSource, now = new Da
         title: titleParam?.trim() ? titleParam.trim() : null,
       },
       now,
-      normalizeFeedTimeZoneOffset(timeZoneOffsetParam),
     ),
     pagination: {
       page: parsePage(getSearchParamValue(searchParams, "page")),

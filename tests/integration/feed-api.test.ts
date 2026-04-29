@@ -301,7 +301,6 @@ describe("/api/feed", () => {
           title: null,
         },
         new Date("2026-04-10T12:00:00.000Z"),
-        0,
       );
 
       const result = await listFeedItems(filters, { page: 1, size: 2 });
@@ -331,23 +330,27 @@ describe("/api/feed", () => {
 
     const json = await response.json();
 
-    expect(json.items).toHaveLength(1);
+    expect(json.items).toHaveLength(2);
     expect(json.items[0]).toMatchObject({
       type: "cluster",
       id: "cluster-a",
       itemCount: 2,
     });
+    expect(json.items[1]).toMatchObject({
+      type: "single",
+      id: "item-timezone-created",
+    });
     expect(json.start).toBe("2026-04-10");
     expect(json.end).toBe("2026-04-10");
   });
 
-  it("filters by item createdAt and respects the user's timezone offset", async () => {
+  it("filters by item createdAt using the default Asia/Shanghai day boundary", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-10T12:00:00.000Z"));
 
     try {
       const { GET } = await import("@/app/api/feed/route");
-      const response = await GET(new Request("http://localhost/api/feed?range=today&tzOffsetMinutes=-480"));
+      const response = await GET(new Request("http://localhost/api/feed?range=today"));
 
       const json = await response.json();
       const itemIds = json.items.map((item: { id: string }) => item.id);
