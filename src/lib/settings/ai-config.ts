@@ -79,7 +79,7 @@ export function getDefaultPromptSampling(type: PromptConfigType): {
     case "cluster_summary":
       return {
         temperature: 0.2,
-        maxTokens: 300,
+        maxTokens: 450,
         topP: null,
       };
     case "cluster_match":

@@ -432,6 +432,47 @@ function buildClusterFallback(clusterItems: ItemWithSource[], existingTitle?: st
   };
 }
 
+function stripPresentationCodeFence(value: string): string {
+  return value.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+}
+
+function normalizePresentationTitle(value: string | null | undefined, fallback: string) {
+  const title = value
+    ?.replace(/[\r\n]+/g, " ")
+    .replace(/^#+\s*/, "")
+    .trim();
+
+  return title || fallback;
+}
+
+function parseClusterPresentationOutput(
+  rawContent: string | null | undefined,
+  fallback: { title: string; summary: string },
+) {
+  const normalized = stripPresentationCodeFence(rawContent ?? "");
+
+  if (!normalized) {
+    return fallback;
+  }
+
+  try {
+    const parsed = JSON.parse(normalized) as {
+      title?: string | null;
+      summary?: string | null;
+    };
+
+    return {
+      title: normalizePresentationTitle(parsed.title, fallback.title),
+      summary: parsed.summary?.trim() || fallback.summary,
+    };
+  } catch {
+    return {
+      title: fallback.title,
+      summary: normalized || fallback.summary,
+    };
+  }
+}
+
 function shouldGenerateAiClusterSummary(clusterItems: ItemWithSource[], aiProvider?: AiProvider) {
   return Boolean(aiProvider) && clusterItems.length >= 2;
 }
@@ -451,16 +492,12 @@ function buildClusterSummarySeed(clusterItems: ItemWithSource[]) {
     .join("\n");
 }
 
-export function buildClusterSummaryInputHash(clusterItems: ItemWithSource[], existingTitle?: string) {
-  const fallback = buildClusterFallback(clusterItems, existingTitle);
+export function buildClusterSummaryInputHash(clusterItems: ItemWithSource[]) {
   const seed = buildClusterSummarySeed(clusterItems);
 
   return crypto
     .createHash("sha256")
-    .update(JSON.stringify({
-      title: fallback.title,
-      seed,
-    }))
+    .update(JSON.stringify({ seed }))
     .digest("hex");
 }
 
@@ -484,17 +521,25 @@ export async function generateClusterPresentation(
   try {
     const summarySeed = buildClusterSummarySeed(clusterItems);
 
-    let aiSummary = await summaryProvider.summarizeCluster(summarySeed, { title: fallback.title });
-    if (shouldRegenerateChineseSummary(aiSummary)) {
-      aiSummary = await summaryProvider.summarizeCluster(summarySeed, { title: fallback.title });
+    let aiPresentation = parseClusterPresentationOutput(
+      await summaryProvider.summarizeCluster(summarySeed, { title: fallback.title }),
+      fallback,
+    );
+    if (shouldRegenerateChineseSummary(aiPresentation.summary)) {
+      aiPresentation = parseClusterPresentationOutput(
+        await summaryProvider.summarizeCluster(summarySeed, { title: fallback.title }),
+        fallback,
+      );
     }
-    const useAiSummary = Boolean(aiSummary?.trim()) && aiSummary !== fallback.summary;
+    const useAiPresentation =
+      Boolean(aiPresentation.summary.trim()) &&
+      (aiPresentation.title !== fallback.title || aiPresentation.summary !== fallback.summary);
 
     return {
-      title: fallback.title,
-      summary: useAiSummary ? aiSummary : fallback.summary,
+      title: useAiPresentation ? aiPresentation.title : fallback.title,
+      summary: useAiPresentation ? aiPresentation.summary : fallback.summary,
       summaryAttempted: true,
-      summarySucceeded: useAiSummary,
+      summarySucceeded: useAiPresentation,
     };
   } catch {
     return {

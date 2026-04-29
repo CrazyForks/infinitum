@@ -1710,7 +1710,12 @@ describe("runIngestion", () => {
         ],
       }),
     };
-    const summarizeCluster = vi.fn().mockResolvedValue("两篇报道都聚焦 OpenAI agent toolkit。");
+    const summarizeCluster = vi.fn().mockResolvedValue(
+      JSON.stringify({
+        title: "OpenAI 与微软推进 agent toolkit",
+        summary: "两篇报道都聚焦 OpenAI agent toolkit。",
+      }),
+    );
     const aiProvider = buildAiProviderMock({
       summarizeItem: vi.fn().mockResolvedValue("OpenAI 发布 agent toolkit。"),
       enrichContent: vi.fn().mockResolvedValue({
@@ -1751,6 +1756,8 @@ describe("runIngestion", () => {
 
     const storedCluster = await prisma.contentCluster.findFirstOrThrow();
     expect(storedCluster.summaryInputHash).not.toBeNull();
+    expect(storedCluster.title).toBe("OpenAI 与微软推进 agent toolkit");
+    expect(storedCluster.summary).toBe("两篇报道都聚焦 OpenAI agent toolkit。");
     expect(summarizeCluster).toHaveBeenCalledOnce();
 
     await recomputeCluster(storedCluster.id, aiProvider);

@@ -1,7 +1,7 @@
 ---
 forge_loop: true
 artifact: review-report
-slug: ai-调用量趋势样式调整
+slug: ai-cluster-title-presentation
 status: done
 gate: H4
 blocking: false
@@ -10,7 +10,7 @@ security_high_risk: false
 failed_tests_unexplained: false
 ---
 
-# Review Report: ai-调用量趋势样式调整
+# Review Report: ai-cluster-title-presentation
 
 | Field | Value |
 | --- | --- |
@@ -20,49 +20,54 @@ failed_tests_unexplained: false
 | Must Fix Count | 0 |
 | Security High Risk | no |
 | Failed Tests Unexplained | no |
-| Review Scope | current diff: `src/components/admin/ingestion-dashboard.tsx`, quick task artifact |
-| Review Depth | quick |
-| Specialist Reviewers | none |
+| Review Scope | current diff: cluster prompt, cluster presentation parsing, settings seed upgrade, related tests and quick task |
+| Review Depth | standard |
+| Specialist Reviewers | architecture |
 | Adversarial Pass | N/A |
-| Retrospective | skipped: low-risk UI-only quick task |
+| Retrospective | skipped: low-risk quick iteration |
 
 ## Requirement Compliance
 
 | Requirement / AC | Result | Notes |
 | --- | --- | --- |
-| 总调用放第一个 | pass | `AI_USAGE_SERIES` fixed order starts with `totalCalls` / `总调用`. |
-| 指标说明同一行 | pass | Custom legend uses `flex-nowrap`, `min-w-max`, and horizontal overflow for narrow space. |
+| AI generates better multi-item cluster titles | pass | Default cluster summary prompt now asks for `{title, summary}` and `generateClusterPresentation()` writes parsed AI title as display title for multi-item clusters. |
+| Preserve cluster matching semantics | pass | AI title affects `ContentCluster.title` display only; fingerprint and event signature logic remain based on item event fields. |
+| Existing prompt configs are upgraded only when untouched legacy defaults | pass | Seed logic matches the old default cluster summary prompt and sampling values exactly before updating. Customized prompts are preserved. |
+| No schema migration required | pass | Prisma schema is unchanged; existing `PromptConfig` and `ContentCluster` fields are reused. |
 
 ## Design Compliance
 
 | Area | Result | Notes |
 | --- | --- | --- |
-| Architecture | pass | UI-only change remains local to the admin ingestion dashboard chart. |
+| Architecture | pass | Reuses the existing `cluster_summary` AI call instead of adding a second model call or schema field. |
+| Backward compatibility | pass | Plain text cluster summary output is still accepted and falls back to the old summary-only behavior. |
+| Cache / recompute behavior | pass | `summaryInputHash` no longer includes final display title, preventing AI title updates from forcing an extra automatic recompute. |
 
 ## Contract Compliance
 
 | Area | Result | Notes |
 | --- | --- | --- |
-| API | N/A | No API change. |
-| Types | pass | Uses Recharts `LegendPayload` type and existing metric keys. |
-| Auth | N/A | No auth change. |
-| State | N/A | No state flow change. |
+| API | N/A | No route or external API response contract change. |
+| Types | pass | Public `AiProvider.summarizeCluster()` remains `Promise<string>`; structured parsing stays internal to cluster helpers. |
+| Auth | N/A | No auth path touched. |
+| State | pass | Runtime seed upgrade mutates only untouched legacy default `cluster_summary` prompt rows. |
 
 ## Code Quality
 
 - No Must Fix findings.
+- Legacy prompt matching is intentionally strict to avoid overwriting user-customized prompt configs.
 
 ## Commit Readiness
 
 | Check | Result | Notes |
 | --- | --- | --- |
-| Obvious Bugs | pass | Series order and line rendering share one configuration source. |
-| API / Data Breakage | N/A | No public contract, schema, or metric shape change. |
-| Deployability | pass | No env, migration, or dependency change. |
-| Observability | N/A | No runtime logging or metrics change. |
-| Error Handling UX | N/A | Chart empty state unchanged. |
-| Idempotency / Retry | N/A | No write path. |
-| Resource Cleanup | N/A | No resource lifecycle. |
+| Obvious Bugs | pass | Fallback paths cover empty output, non-JSON plain summaries, AI failure, single-item clusters, and Chinese retry path. |
+| API / Data Breakage | pass | No DB schema change; prompt data upgrade is guarded by exact legacy default matching. |
+| Deployability | pass | Existing databases can run new code without migration; untouched old default prompt rows are upgraded at runtime seeding. |
+| Observability | N/A | No logging or metrics change. |
+| Error Handling UX | pass | AI parse failure degrades to plain summary/fallback behavior rather than throwing. |
+| Idempotency / Retry | pass | `ensureRuntimeConfigSeeded()` can run repeatedly; after the guarded update, the legacy match no longer applies. |
+| Resource Cleanup | N/A | No resource lifecycle touched. |
 | Dependency Change | N/A | No manifest or lockfile change. |
 
 ## Autofix Routing
@@ -72,35 +77,39 @@ failed_tests_unexplained: false
 | safe_auto | 0 | N/A |
 | gated_auto | 0 | N/A |
 | manual | 0 | N/A |
-| advisory | 1 | noted |
+| advisory | 2 | noted |
 
 ## Workflow Metrics
 
 | Signal | Value | Notes |
 | --- | --- | --- |
-| Route | quick | Matched low-risk UI-only adjustment. |
+| Route | quick | Matched small scoped implementation and data-upgrade guard. |
 | Gate Friction | low | Review required before commit by project rules. |
-| Verification Freshness | fresh | `npx eslint src/components/admin/ingestion-dashboard.tsx` run in this commit turn. |
-| Rework Signal | none | No rework required. |
-| Template Noise | low | Review report is heavier than the diff but required by commit discipline. |
+| Verification Freshness | fresh | Targeted tests and lint were run in this work. |
+| Rework Signal | low | Follow-up added safe legacy prompt upgrade after initial implementation. |
+| Template Noise | low | Review report is heavier than diff but required before commit. |
 
 ## Follow-ups
 
 | Type | Item | Target | Notes |
 | --- | --- | --- | --- |
-| N/A | N/A | N/A | N/A |
+| test | Fix existing full-repo typecheck blocker | `tests/integration/item-cleanup.test.ts` | `npx tsc --noEmit` still fails on an unrelated `ItemStatus` type error. |
+| test | Fix existing full `admin-settings-service` source assertions | `tests/integration/admin-settings-service.test.ts` | Full file still has 2 unrelated source seeding/latest item failures. |
 
 ## Security Review
 
-- N/A
+- N/A. No auth, secrets, external input execution, or permission path changed.
 
 ## Performance Review
 
-- N/A
+- Pass. The title generation uses the existing cluster summary call; no new AI call or dependency was added. Runtime seed upgrade adds a small prompt-config count/update check.
 
 ## Test Coverage
 
-- Component-level ESLint passed. Full lint and type check are recorded in the quick task; type check is blocked by an existing unrelated `tests/integration/item-cleanup.test.ts` error.
+- `npm test -- tests/unit/config.test.ts tests/unit/ai-provider.test.ts tests/integration/ingestion-service.test.ts tests/integration/item-regeneration.test.ts` passed: 52 tests.
+- `npm test -- tests/integration/admin-settings-service.test.ts -t "upgrades the untouched legacy default cluster summary prompt|does not overwrite a customized cluster summary prompt|seeds code defaults"` passed: 3 selected tests.
+- `npm run lint` passed with 0 errors and 3 unrelated existing warnings.
+- `npx tsc --noEmit` remains blocked by an unrelated existing `tests/integration/item-cleanup.test.ts` type error.
 
 ## Must Fix
 
@@ -114,11 +123,11 @@ failed_tests_unexplained: false
 
 ## Nice To Have
 
-- Screenshot verification after a local admin login method is available.
+- Consider surfacing a one-time admin notice if customized cluster summary prompts still return plain summaries and therefore do not generate AI titles.
 
 ## Final Recommendation
 
-Approve with Follow-ups. The change is low risk and scoped to the AI usage chart legend/order. No Must Fix or security high-risk issue found.
+Approve with Follow-ups. The change is scoped, backward compatible, and has targeted tests for the new structured title behavior and guarded legacy prompt upgrade. No Must Fix or security high-risk issue found.
 
 ## Open Questions
 
@@ -128,11 +137,13 @@ Approve with Follow-ups. The change is low risk and scoped to the AI usage chart
 
 ## Assumptions
 
-- “指标说明” refers to the chart legend below `AI 调用量趋势`.
+- AI-generated cluster titles are display metadata and should not become matching or fingerprint inputs.
+- Strict legacy prompt matching is preferred over broader heuristics to avoid overwriting user customization.
 
 ## Risks
 
-- Browser visual confirmation was blocked by the local admin login redirect; code-level validation passed.
+- Customized legacy prompts will not automatically start producing AI titles; this is intentional to preserve admin edits.
+- Existing unrelated typecheck/test failures remain outside this change.
 
 ## Validation
 

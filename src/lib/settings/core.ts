@@ -16,6 +16,9 @@ import { normalizeKeyword, normalizeText, normalizeUrl } from "@/lib/utils/text"
 
 export const DEFAULT_MODEL_CONFIG_NAME = "默认模型配置";
 
+const LEGACY_DEFAULT_CLUSTER_SUMMARY_PROMPT =
+  "你是聚合摘要助手。请基于给定的多条候选内容，提炼它们共同指向的同一具体事件，并输出 100 到 200 字中文摘要。只输出摘要正文，不要输出 JSON、代码块、标题、前后缀说明或项目符号。可使用有限 Markdown 行内标记突出关键信息：用 **加粗** 标注共同事件、关键进展、结果或数字，用 *斜体* 标注必要差异点或影响；不要使用链接、图片、标题、表格或列表。摘要要突出共同事件、关键进展和必要差异点；要体现这是多条报道的归纳结果，而不是复述某一篇原文；不要写成行业综述、公司介绍或主题总结，不要编造未提供的信息。";
+
 export type SourceInput = SourceConfig & {
   groupId?: string | null;
 };
@@ -375,6 +378,21 @@ const ALL_PROMPT_TYPES = [
   PromptConfigType.daily_report,
 ] as const;
 
+function getLegacyDefaultClusterSummaryPromptWhere() {
+  return {
+    type: PromptConfigType.cluster_summary,
+    name: getDefaultPromptConfigName(PromptConfigType.cluster_summary),
+    prompt: getDefaultPromptTemplate(PromptConfigType.cluster_summary),
+    systemPrompt: LEGACY_DEFAULT_CLUSTER_SUMMARY_PROMPT,
+    temperature: 0.2,
+    maxTokens: 300,
+    topP: null,
+    modelApiConfigId: null,
+    isEnabled: true,
+    isDefault: true,
+  };
+}
+
 function resolveSystemPromptByType(type: PromptConfigType, fileConfig: RuntimeConfig): string {
   switch (type) {
     case PromptConfigType.item_summary:
@@ -409,11 +427,19 @@ async function ensureModelAndPromptConfigsSeeded() {
     (blacklistCount > 0 || fileConfig.blacklistKeywords.length === 0)
   ) {
     // Verify all expected prompt config types exist; missing ones will be backfilled
-    const existingTypes = await prisma.promptConfig.findMany({
-      where: { type: { in: ALL_PROMPT_TYPES as unknown as PromptConfigType[] } },
-      select: { type: true },
-    });
-    if (ALL_PROMPT_TYPES.every((type) => existingTypes.some((row) => row.type === type))) {
+    const [existingTypes, legacyDefaultClusterSummaryPromptCount] = await Promise.all([
+      prisma.promptConfig.findMany({
+        where: { type: { in: ALL_PROMPT_TYPES as unknown as PromptConfigType[] } },
+        select: { type: true },
+      }),
+      prisma.promptConfig.count({
+        where: getLegacyDefaultClusterSummaryPromptWhere(),
+      }),
+    ]);
+    if (
+      legacyDefaultClusterSummaryPromptCount === 0 &&
+      ALL_PROMPT_TYPES.every((type) => existingTypes.some((row) => row.type === type))
+    ) {
       return;
     }
   }
@@ -481,6 +507,17 @@ async function ensureModelAndPromptConfigsSeeded() {
         },
       });
     }
+
+    const clusterSummarySampling = getDefaultPromptSampling(PromptConfigType.cluster_summary);
+    await tx.promptConfig.updateMany({
+      where: getLegacyDefaultClusterSummaryPromptWhere(),
+      data: {
+        systemPrompt: resolveSystemPromptByType(PromptConfigType.cluster_summary, fileConfig),
+        maxTokens: clusterSummarySampling.maxTokens,
+        temperature: clusterSummarySampling.temperature,
+        topP: clusterSummarySampling.topP,
+      },
+    });
 
     if (shouldSeedDefaultSources && fileConfig.rssSources.length > 0) {
       await tx.source.createMany({

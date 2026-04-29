@@ -28,11 +28,11 @@ describe("runtime config defaults", () => {
     expect(defaults.prompts.itemAnalysis).toContain("优先写唯一锚点");
     expect(defaults.prompts.itemAnalysis).not.toContain("restored");
     expect(defaults.prompts.clusterSummary.length).toBeGreaterThan(0);
-    expect(defaults.prompts.clusterSummary).toContain("聚合摘要助手");
-    expect(defaults.prompts.clusterSummary).toContain("只输出摘要正文");
+    expect(defaults.prompts.clusterSummary).toContain("聚合展示编辑");
+    expect(defaults.prompts.clusterSummary).toContain("固定输出格式");
+    expect(defaults.prompts.clusterSummary).toContain('{"title":"...","summary":"..."}');
     expect(defaults.prompts.clusterSummary).toContain("**加粗**");
     expect(defaults.prompts.clusterSummary).toContain("*斜体*");
-    expect(defaults.prompts.clusterSummary).not.toContain('{"summary"');
     expect(defaults.prompts.clusterMatch.length).toBeGreaterThan(0);
     expect(defaults.prompts.clusterMatch).toContain('{"clusterId":"候选组ID"}');
   });

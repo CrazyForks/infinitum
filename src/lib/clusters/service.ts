@@ -395,7 +395,7 @@ export async function recomputeCluster(
     } satisfies ClusterRecomputeResult;
   }
 
-  const summaryInputHash = buildClusterSummaryInputHash(cluster.items, cluster.title);
+  const summaryInputHash = buildClusterSummaryInputHash(cluster.items);
   const presentation =
     !options?.forceSummary && cluster.summaryInputHash && cluster.summaryInputHash === summaryInputHash
       ? {

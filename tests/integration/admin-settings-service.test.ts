@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
+import { DEFAULT_CLUSTER_SUMMARY_PROMPT } from "@/config/prompts";
 import { prisma } from "@/lib/db";
 import * as settingsService from "@/lib/settings/service";
 import {
@@ -9,9 +10,13 @@ import {
   deletePromptConfig,
   deleteSource,
   deleteSourceGroup,
+  ensureRuntimeConfigSeeded,
   getAdminSettings,
   getIngestionRuntimeConfig,
 } from "@/lib/settings/service";
+
+const LEGACY_DEFAULT_CLUSTER_SUMMARY_PROMPT =
+  "你是聚合摘要助手。请基于给定的多条候选内容，提炼它们共同指向的同一具体事件，并输出 100 到 200 字中文摘要。只输出摘要正文，不要输出 JSON、代码块、标题、前后缀说明或项目符号。可使用有限 Markdown 行内标记突出关键信息：用 **加粗** 标注共同事件、关键进展、结果或数字，用 *斜体* 标注必要差异点或影响；不要使用链接、图片、标题、表格或列表。摘要要突出共同事件、关键进展和必要差异点；要体现这是多条报道的归纳结果，而不是复述某一篇原文；不要写成行业综述、公司介绍或主题总结，不要编造未提供的信息。";
 
 describe("admin settings service", () => {
   beforeEach(async () => {
@@ -71,7 +76,7 @@ describe("admin settings service", () => {
     });
     expect(settings.promptConfigs.find((config) => config.type === "cluster_summary")).toMatchObject({
       temperature: 0.2,
-      maxTokens: 300,
+      maxTokens: 450,
       topP: null,
     });
     expect(settings.promptConfigs.find((config) => config.type === "cluster_match")).toMatchObject({
@@ -79,6 +84,50 @@ describe("admin settings service", () => {
       maxTokens: 80,
       topP: null,
     });
+  });
+
+  it("upgrades the untouched legacy default cluster summary prompt", async () => {
+    await getIngestionRuntimeConfig();
+    await prisma.promptConfig.updateMany({
+      where: {
+        type: "cluster_summary",
+        isDefault: true,
+      },
+      data: {
+        systemPrompt: LEGACY_DEFAULT_CLUSTER_SUMMARY_PROMPT,
+        maxTokens: 300,
+      },
+    });
+
+    await ensureRuntimeConfigSeeded();
+
+    const runtimeConfig = await getIngestionRuntimeConfig();
+    const clusterSummaryConfig = runtimeConfig.selectedPromptConfigs?.clusterSummary;
+
+    expect(clusterSummaryConfig?.systemPrompt).toBe(DEFAULT_CLUSTER_SUMMARY_PROMPT);
+    expect(clusterSummaryConfig?.maxTokens).toBe(450);
+  });
+
+  it("does not overwrite a customized cluster summary prompt", async () => {
+    await getIngestionRuntimeConfig();
+    await prisma.promptConfig.updateMany({
+      where: {
+        type: "cluster_summary",
+        isDefault: true,
+      },
+      data: {
+        systemPrompt: "自定义聚合摘要提示词",
+        maxTokens: 300,
+      },
+    });
+
+    await ensureRuntimeConfigSeeded();
+
+    const runtimeConfig = await getIngestionRuntimeConfig();
+    const clusterSummaryConfig = runtimeConfig.selectedPromptConfigs?.clusterSummary;
+
+    expect(clusterSummaryConfig?.systemPrompt).toBe("自定义聚合摘要提示词");
+    expect(clusterSummaryConfig?.maxTokens).toBe(300);
   });
 
   it("uses enabled default configs to build the runtime mapping", async () => {
