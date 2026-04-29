@@ -1,13 +1,12 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import type { ItemStatus } from "@prisma/client";
 
 import { prisma } from "@/lib/db";
 import { invalidateFeedCache } from "@/lib/feed/cache";
 import { executeItemCleanupTask } from "@/lib/items/service";
 import {
   ensureDefaultItemCleanupSchedule,
-  isTaskRunCancellationRequested,
   requestTaskRunCancellation,
-  updateTaskRun,
 } from "@/lib/tasks/service";
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
@@ -41,7 +40,7 @@ describe("executeItemCleanupTask", () => {
     originalTitle: string;
     createdAt: Date;
     clusterId?: string | null;
-    status?: string;
+    status?: ItemStatus;
   }) {
     return prisma.item.create({
       data: {

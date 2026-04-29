@@ -64,6 +64,15 @@ export const CLUSTER_DIRECT_MATCH_MIN_GAP = 20;
 /** 聚类 AI 最小分数 */
 export const CLUSTER_AI_MIN_SCORE = 35;
 
+/** 聚合合并进入 AI 判断的本地候选最低分 */
+export const CLUSTER_MERGE_AI_PAIR_MIN_SCORE = 70;
+
+/** 聚合合并进入 AI 判断的灰区最低分 */
+export const CLUSTER_MERGE_AI_PAIR_GRAY_SCORE = 55;
+
+/** 聚合合并高置信候选分数 */
+export const CLUSTER_MERGE_AI_PAIR_STRONG_SCORE = 95;
+
 // =============================================================================
 // Tasks / Worker
 // =============================================================================

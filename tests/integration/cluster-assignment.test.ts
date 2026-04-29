@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { assignItemToCluster, mergeClusters } from "@/lib/clusters/service";
+import type { AiProvider } from "@/lib/ai/provider";
+import { assignItemToCluster, executeClusterMerge, mergeClusters } from "@/lib/clusters/service";
 import { prisma } from "@/lib/db";
 import { getAdminCluster } from "@/lib/feed/repository";
 
@@ -294,5 +295,245 @@ describe("cluster assignment", () => {
     await expect(getAdminCluster("cluster-target")).resolves.toMatchObject({
       itemCount: 3,
     });
+  });
+
+  it("sends multi-subject singleton merge candidates to AI and merges the selected group", async () => {
+    const source = await prisma.source.create({
+      data: {
+        name: "Singleton Merge Feed",
+        rssUrl: "https://singleton-merge.example.com/feed.xml",
+        siteUrl: "https://singleton-merge.example.com",
+        enabled: true,
+        aiParsingEnabled: true,
+        aggregationEnabled: true,
+      },
+    });
+    await prisma.contentCluster.createMany({
+      data: [
+        {
+          id: "openai-contract-cluster",
+          kind: "topic",
+          title: "OpenAI 与微软调整合作合同",
+          summary: "OpenAI 和微软调整云服务合作合同条款。",
+          score: 84,
+          itemCount: 1,
+          latestPublishedAt: new Date("2026-04-20T09:00:00.000Z"),
+          status: "active",
+          fingerprint: "openai-contract",
+          eventType: "partnership",
+          eventSubject: "OpenAI",
+          eventAction: "变更",
+          eventObject: "微软合同",
+          eventDate: "2026-04-20",
+        },
+        {
+          id: "microsoft-contract-cluster",
+          kind: "topic",
+          title: "微软和 OpenAI 调整合作协议",
+          summary: "微软与 OpenAI 对合作合同进行变更。",
+          score: 86,
+          itemCount: 1,
+          latestPublishedAt: new Date("2026-04-20T10:00:00.000Z"),
+          status: "active",
+          fingerprint: "microsoft-contract",
+          eventType: "partnership",
+          eventSubject: "微软",
+          eventAction: "变更",
+          eventObject: "OpenAI 合同",
+          eventDate: "2026-04-20",
+        },
+      ],
+    });
+    await prisma.item.createMany({
+      data: [
+        {
+          id: "openai-contract-item",
+          sourceId: source.id,
+          clusterId: "openai-contract-cluster",
+          originalUrl: "https://singleton-merge.example.com/openai-contract",
+          canonicalUrl: "https://singleton-merge.example.com/openai-contract",
+          urlHash: "openai-contract-hash",
+          dedupeSignature: "contract|openai",
+          originalTitle: "OpenAI 与微软调整合作合同",
+          publishedAt: new Date("2026-04-20T09:00:00.000Z"),
+          summaryText: "OpenAI 和微软调整云服务合作合同条款。",
+          language: "zh",
+          status: "processed",
+          moderationStatus: "allowed",
+          qualityScore: 84,
+          qualityRationale: "relevant",
+          eventType: "partnership",
+          eventSubject: "OpenAI",
+          eventAction: "变更",
+          eventObject: "微软合同",
+          eventDate: "2026-04-20",
+        },
+        {
+          id: "microsoft-contract-item",
+          sourceId: source.id,
+          clusterId: "microsoft-contract-cluster",
+          originalUrl: "https://singleton-merge.example.com/microsoft-contract",
+          canonicalUrl: "https://singleton-merge.example.com/microsoft-contract",
+          urlHash: "microsoft-contract-hash",
+          dedupeSignature: "contract|microsoft",
+          originalTitle: "微软和 OpenAI 调整合作协议",
+          publishedAt: new Date("2026-04-20T10:00:00.000Z"),
+          summaryText: "微软与 OpenAI 对合作合同进行变更。",
+          language: "zh",
+          status: "processed",
+          moderationStatus: "allowed",
+          qualityScore: 86,
+          qualityRationale: "relevant",
+          eventType: "partnership",
+          eventSubject: "微软",
+          eventAction: "变更",
+          eventObject: "OpenAI 合同",
+          eventDate: "2026-04-20",
+        },
+      ],
+    });
+    const mergeClustersAi = vi.fn().mockImplementation(async (clustersJson: string) => {
+      const clusters = JSON.parse(clustersJson) as Array<{ id: string }>;
+
+      expect(clusters.map((cluster) => cluster.id).sort()).toEqual([
+        "microsoft-contract-cluster",
+        "openai-contract-cluster",
+      ]);
+
+      return [["openai-contract-cluster", "microsoft-contract-cluster"]];
+    });
+    const aiProvider = {
+      mergeClusters: mergeClustersAi,
+    } as unknown as AiProvider;
+
+    const result = await executeClusterMerge(aiProvider, new Date("2026-04-21T10:00:00.000Z"));
+
+    expect(result).toMatchObject({
+      candidates: 2,
+      skipped: false,
+      mergedCount: 1,
+      affectedClusterIds: ["openai-contract-cluster"],
+    });
+    expect(mergeClustersAi).toHaveBeenCalledTimes(1);
+    await expect(prisma.contentCluster.findUnique({ where: { id: "microsoft-contract-cluster" } })).resolves.toBeNull();
+    await expect(
+      prisma.item.count({
+        where: {
+          clusterId: "openai-contract-cluster",
+          id: { in: ["openai-contract-item", "microsoft-contract-item"] },
+        },
+      }),
+    ).resolves.toBe(2);
+  });
+
+  it("does not send singleton merge candidates to AI when key objects conflict", async () => {
+    const source = await prisma.source.create({
+      data: {
+        name: "Object Conflict Feed",
+        rssUrl: "https://object-conflict.example.com/feed.xml",
+        siteUrl: "https://object-conflict.example.com",
+        enabled: true,
+        aiParsingEnabled: true,
+        aggregationEnabled: true,
+      },
+    });
+    await prisma.contentCluster.createMany({
+      data: [
+        {
+          id: "product-a-cluster",
+          kind: "topic",
+          title: "Acme 发布产品 A",
+          summary: "Acme 发布产品 A。",
+          score: 80,
+          itemCount: 1,
+          latestPublishedAt: new Date("2026-04-20T09:00:00.000Z"),
+          status: "active",
+          fingerprint: "product-a",
+          eventType: "launch",
+          eventSubject: "Acme",
+          eventAction: "发布",
+          eventObject: "产品 A",
+          eventDate: "2026-04-20",
+        },
+        {
+          id: "product-b-cluster",
+          kind: "topic",
+          title: "Acme 发布产品 B",
+          summary: "Acme 发布产品 B。",
+          score: 80,
+          itemCount: 1,
+          latestPublishedAt: new Date("2026-04-20T10:00:00.000Z"),
+          status: "active",
+          fingerprint: "product-b",
+          eventType: "launch",
+          eventSubject: "Acme",
+          eventAction: "发布",
+          eventObject: "产品 B",
+          eventDate: "2026-04-20",
+        },
+      ],
+    });
+    await prisma.item.createMany({
+      data: [
+        {
+          id: "product-a-item",
+          sourceId: source.id,
+          clusterId: "product-a-cluster",
+          originalUrl: "https://object-conflict.example.com/product-a",
+          canonicalUrl: "https://object-conflict.example.com/product-a",
+          urlHash: "product-a-hash",
+          dedupeSignature: "product|a",
+          originalTitle: "Acme 发布产品 A",
+          publishedAt: new Date("2026-04-20T09:00:00.000Z"),
+          summaryText: "Acme 发布产品 A。",
+          language: "zh",
+          status: "processed",
+          moderationStatus: "allowed",
+          qualityScore: 80,
+          qualityRationale: "relevant",
+          eventType: "launch",
+          eventSubject: "Acme",
+          eventAction: "发布",
+          eventObject: "产品 A",
+          eventDate: "2026-04-20",
+        },
+        {
+          id: "product-b-item",
+          sourceId: source.id,
+          clusterId: "product-b-cluster",
+          originalUrl: "https://object-conflict.example.com/product-b",
+          canonicalUrl: "https://object-conflict.example.com/product-b",
+          urlHash: "product-b-hash",
+          dedupeSignature: "product|b",
+          originalTitle: "Acme 发布产品 B",
+          publishedAt: new Date("2026-04-20T10:00:00.000Z"),
+          summaryText: "Acme 发布产品 B。",
+          language: "zh",
+          status: "processed",
+          moderationStatus: "allowed",
+          qualityScore: 80,
+          qualityRationale: "relevant",
+          eventType: "launch",
+          eventSubject: "Acme",
+          eventAction: "发布",
+          eventObject: "产品 B",
+          eventDate: "2026-04-20",
+        },
+      ],
+    });
+    const mergeClustersAi = vi.fn();
+    const aiProvider = {
+      mergeClusters: mergeClustersAi,
+    } as unknown as AiProvider;
+
+    const result = await executeClusterMerge(aiProvider, new Date("2026-04-21T10:00:00.000Z"));
+
+    expect(result).toMatchObject({
+      candidates: 0,
+      skipped: true,
+      mergedCount: 0,
+      affectedClusterIds: [],
+    });
+    expect(mergeClustersAi).not.toHaveBeenCalled();
   });
 });

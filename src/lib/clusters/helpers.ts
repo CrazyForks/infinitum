@@ -2,6 +2,11 @@ import crypto from "node:crypto";
 
 import type { Item, Source } from "@prisma/client";
 
+import {
+  CLUSTER_MERGE_AI_PAIR_GRAY_SCORE,
+  CLUSTER_MERGE_AI_PAIR_MIN_SCORE,
+  CLUSTER_MERGE_AI_PAIR_STRONG_SCORE,
+} from "@/config/constants";
 import { type AiEventSignature, type AiProvider } from "@/lib/ai/provider";
 import { shouldRegenerateChineseSummary } from "@/lib/ai/summary-language";
 import type { ClusterAssignmentCandidate } from "@/lib/clusters/repository";
@@ -551,12 +556,31 @@ export async function generateClusterPresentation(
 }
 
 export function buildClusterMergeInputHash(
-  clusters: Array<{ id: string; fingerprint: string; itemCount: number; latestPublishedAt: Date }>,
+  clusters: Array<{
+    id: string;
+    fingerprint: string;
+    title?: string | null;
+    summary?: string | null;
+    eventType?: string | null;
+    eventSubject?: string | null;
+    eventAction?: string | null;
+    eventObject?: string | null;
+    eventDate?: string | null;
+    itemCount: number;
+    latestPublishedAt: Date;
+  }>,
 ): string {
   const sorted = [...clusters].sort((a, b) => a.id.localeCompare(b.id));
   const payload = sorted.map((c) => ({
     id: c.id,
     fingerprint: c.fingerprint,
+    title: c.title ?? null,
+    summary: c.summary ?? null,
+    eventType: c.eventType ?? null,
+    eventSubject: c.eventSubject ?? null,
+    eventAction: c.eventAction ?? null,
+    eventObject: c.eventObject ?? null,
+    eventDate: c.eventDate ?? null,
     itemCount: c.itemCount,
     latestPublishedAt: c.latestPublishedAt.getTime(),
   }));
@@ -571,13 +595,318 @@ export type ClusterMergeCandidate = {
   id: string;
   title: string;
   summary: string;
+  fingerprint: string;
+  mergeInputHash?: string | null;
   eventType: string | null;
   eventSubject: string | null;
   eventAction: string | null;
   eventObject: string | null;
   eventDate: string | null;
   itemCount: number;
+  latestPublishedAt: Date;
 };
+
+function tokenizeMergeText(value: string | null | undefined) {
+  const normalized = normalizeComparableText(value);
+  const words = normalized.match(/[a-z0-9]+|[\u4e00-\u9fff]+/g) ?? [];
+  const tokens = new Set<string>();
+
+  for (const word of words) {
+    if (/^[\u4e00-\u9fff]+$/u.test(word)) {
+      if (word.length <= 2) {
+        tokens.add(word);
+        continue;
+      }
+
+      for (let index = 0; index < word.length - 1; index += 1) {
+        tokens.add(word.slice(index, index + 2));
+      }
+      continue;
+    }
+
+    if (word.length >= 2) {
+      tokens.add(word);
+    }
+  }
+
+  return tokens;
+}
+
+function countTokenOverlap(left: Set<string>, right: Set<string>) {
+  let overlap = 0;
+
+  for (const token of left) {
+    if (right.has(token)) {
+      overlap += 1;
+    }
+  }
+
+  return overlap;
+}
+
+function textSimilarity(left: string | null | undefined, right: string | null | undefined) {
+  const leftText = normalizeComparableText(left);
+  const rightText = normalizeComparableText(right);
+
+  if (!leftText || !rightText) {
+    return {
+      exact: false,
+      similar: false,
+      strong: false,
+      overlap: 0,
+    };
+  }
+
+  if (leftText === rightText) {
+    return {
+      exact: true,
+      similar: true,
+      strong: true,
+      overlap: Math.max(1, tokenizeMergeText(leftText).size),
+    };
+  }
+
+  const includes = leftText.includes(rightText) || rightText.includes(leftText);
+  const leftTokens = tokenizeMergeText(leftText);
+  const rightTokens = tokenizeMergeText(rightText);
+  const overlap = countTokenOverlap(leftTokens, rightTokens);
+  const strongOverlap = overlap >= 2;
+  const weakOverlap = overlap >= 1 && (leftTokens.size <= 2 || rightTokens.size <= 2);
+
+  return {
+    exact: false,
+    similar: includes || strongOverlap || weakOverlap,
+    strong: includes || strongOverlap,
+    overlap,
+  };
+}
+
+function buildMergeTextBlob(candidate: ClusterMergeCandidate) {
+  return [
+    candidate.title,
+    candidate.summary,
+    candidate.eventSubject,
+    candidate.eventObject,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+const RELATIONAL_OBJECT_TOKENS = new Set(["合同", "协议", "合作", "交易", "收购", "融资", "投资", "诉讼", "政策"]);
+const COMMON_MERGE_TOKENS = new Set([
+  "发布",
+  "推出",
+  "上线",
+  "更新",
+  "变更",
+  "调整",
+  "宣布",
+  "报道",
+  "消息",
+  "产品",
+  "功能",
+  "服务",
+  "平台",
+  "公司",
+  "新闻",
+  "内容",
+  "new",
+  "launch",
+  "launched",
+  "release",
+  "released",
+  "update",
+  "updates",
+  "announces",
+  "announced",
+]);
+
+function hasRelationalObjectOverlap(left: string | null, right: string | null) {
+  if (!left || !right) {
+    return false;
+  }
+
+  const leftTokens = tokenizeMergeText(left);
+  const rightTokens = tokenizeMergeText(right);
+
+  for (const token of leftTokens) {
+    if (rightTokens.has(token) && RELATIONAL_OBJECT_TOKENS.has(token)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function buildExcludedMergeTokens(values: Array<string | null | undefined>) {
+  const tokens = new Set<string>(COMMON_MERGE_TOKENS);
+
+  for (const value of values) {
+    for (const token of tokenizeMergeText(value)) {
+      tokens.add(token);
+    }
+  }
+
+  return tokens;
+}
+
+function hasDistinctiveTextOverlap(
+  left: ClusterMergeCandidate,
+  right: ClusterMergeCandidate,
+  excludedTokens: Set<string>,
+) {
+  const leftTokens = tokenizeMergeText(buildMergeTextBlob(left));
+  const rightTokens = tokenizeMergeText(buildMergeTextBlob(right));
+
+  for (const token of leftTokens) {
+    if (!excludedTokens.has(token) && rightTokens.has(token)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function scoreClusterMergePair(left: ClusterMergeCandidate, right: ClusterMergeCandidate) {
+  const leftSubject = normalizeEventSubjectForStorage(left.eventSubject);
+  const rightSubject = normalizeEventSubjectForStorage(right.eventSubject);
+  const leftAction = normalizeEventActionForStorage(left.eventAction) ?? normalizeStoredEventType(left.eventType);
+  const rightAction = normalizeEventActionForStorage(right.eventAction) ?? normalizeStoredEventType(right.eventType);
+  const leftObject = normalizeEventObjectForStorage(left.eventObject);
+  const rightObject = normalizeEventObjectForStorage(right.eventObject);
+  const subjectSimilarity = textSimilarity(leftSubject, rightSubject);
+  const objectSimilarity = textSimilarity(leftObject, rightObject);
+  const textOverlap = textSimilarity(buildMergeTextBlob(left), buildMergeTextBlob(right));
+  const relationalObjectOverlap = hasRelationalObjectOverlap(leftObject, rightObject);
+  const distinctiveTextOverlap = hasDistinctiveTextOverlap(
+    left,
+    right,
+    buildExcludedMergeTokens([leftSubject, rightSubject, leftAction, rightAction]),
+  );
+
+  if (leftObject && rightObject && !objectSimilarity.strong && !relationalObjectOverlap) {
+    return {
+      rejected: true,
+      score: 0,
+    };
+  }
+
+  if (left.eventDate && right.eventDate && left.eventDate !== right.eventDate) {
+    return {
+      rejected: true,
+      score: 0,
+    };
+  }
+
+  let score = 0;
+
+  if (subjectSimilarity.similar) {
+    score += 35;
+  }
+
+  if (objectSimilarity.similar) {
+    score += 40;
+  }
+
+  if (leftAction && rightAction && leftAction === rightAction) {
+    score += 20;
+  } else if (left.eventType && right.eventType && left.eventType === right.eventType) {
+    score += 12;
+  }
+
+  if (left.eventDate && right.eventDate && left.eventDate === right.eventDate) {
+    score += 15;
+  }
+
+  if (textOverlap.strong) {
+    score += 20;
+  } else if (textOverlap.similar) {
+    score += 8;
+  }
+
+  const publishedAtDiffMs = Math.abs(left.latestPublishedAt.getTime() - right.latestPublishedAt.getTime());
+  if (publishedAtDiffMs <= 24 * 60 * 60 * 1000) {
+    score += 8;
+  } else if (publishedAtDiffMs <= 72 * 60 * 60 * 1000) {
+    score += 4;
+  }
+
+  const hasEventAnchor = objectSimilarity.similar || distinctiveTextOverlap;
+  if (!hasEventAnchor) {
+    return {
+      rejected: true,
+      score,
+    };
+  }
+
+  return {
+    rejected: false,
+    score,
+  };
+}
+
+function shouldSendMergePairToAi(score: number, relatedPairCount: number) {
+  if (score >= CLUSTER_MERGE_AI_PAIR_STRONG_SCORE) {
+    return true;
+  }
+
+  if (score >= CLUSTER_MERGE_AI_PAIR_MIN_SCORE) {
+    return true;
+  }
+
+  return score >= CLUSTER_MERGE_AI_PAIR_GRAY_SCORE && relatedPairCount <= 2;
+}
+
+export function buildClusterMergeCandidates(clusters: ClusterMergeCandidate[]) {
+  const selectedIds = new Set(clusters.filter((cluster) => cluster.itemCount >= 2).map((cluster) => cluster.id));
+  const bestScores = new Map<string, number>();
+
+  for (let leftIndex = 0; leftIndex < clusters.length; leftIndex += 1) {
+    const left = clusters[leftIndex]!;
+    const relatedPairs: Array<{ right: ClusterMergeCandidate; score: number }> = [];
+
+    for (let rightIndex = 0; rightIndex < clusters.length; rightIndex += 1) {
+      if (leftIndex === rightIndex) {
+        continue;
+      }
+
+      const right = clusters[rightIndex]!;
+      const result = scoreClusterMergePair(left, right);
+
+      if (!result.rejected && result.score >= CLUSTER_MERGE_AI_PAIR_GRAY_SCORE) {
+        relatedPairs.push({ right, score: result.score });
+      }
+    }
+
+    for (const pair of relatedPairs) {
+      if (!shouldSendMergePairToAi(pair.score, relatedPairs.length)) {
+        continue;
+      }
+
+      selectedIds.add(left.id);
+      selectedIds.add(pair.right.id);
+      bestScores.set(left.id, Math.max(bestScores.get(left.id) ?? 0, pair.score));
+      bestScores.set(pair.right.id, Math.max(bestScores.get(pair.right.id) ?? 0, pair.score));
+    }
+  }
+
+  return clusters
+    .filter((cluster) => selectedIds.has(cluster.id))
+    .sort((left, right) => {
+      if (right.itemCount !== left.itemCount) {
+        return right.itemCount - left.itemCount;
+      }
+
+      const leftBestScore = bestScores.get(left.id) ?? 0;
+      const rightBestScore = bestScores.get(right.id) ?? 0;
+
+      if (rightBestScore !== leftBestScore) {
+        return rightBestScore - leftBestScore;
+      }
+
+      return right.latestPublishedAt.getTime() - left.latestPublishedAt.getTime();
+    });
+}
 
 export function buildClusterMergeInput(clusters: ClusterMergeCandidate[]): string {
   return JSON.stringify(

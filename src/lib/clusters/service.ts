@@ -14,6 +14,7 @@ import {
   buildClusterFingerprintSeed,
   buildClusterMatchInput,
   buildClusterMergeInput,
+  buildClusterMergeCandidates,
   buildClusterMergeInputHash,
   buildClusterSummaryInputHash,
   buildEventDisplayTitle,
@@ -720,15 +721,25 @@ export async function executeClusterMerge(
     AND latestPublishedAt >= ${lookbackSince.getTime()}
   `;
 
-  // Load all active clusters within the 7-day window that have itemCount >= 2
-  const allCandidates = await prisma.contentCluster.findMany({
+  // Load active clusters within the 7-day window, then locally narrow them
+  // before asking AI to judge merge groups.
+  const recentClusters = await prisma.contentCluster.findMany({
     where: {
       status: "active",
       latestPublishedAt: { gte: lookbackSince },
-      itemCount: { gte: 2 },
+      items: {
+        some: {
+          status: "processed",
+          moderationStatus: { in: ["allowed", "restored"] },
+          source: {
+            aggregationEnabled: true,
+          },
+        },
+      },
     },
     orderBy: { id: "asc" },
   });
+  const allCandidates = buildClusterMergeCandidates(recentClusters);
 
   if (allCandidates.length < 2) {
     return {
@@ -740,14 +751,7 @@ export async function executeClusterMerge(
   }
 
   // Compute hash of the candidate set
-  const currentHash = buildClusterMergeInputHash(
-    allCandidates.map((c) => ({
-      id: c.id,
-      fingerprint: c.fingerprint,
-      itemCount: c.itemCount,
-      latestPublishedAt: c.latestPublishedAt,
-    })),
-  );
+  const currentHash = buildClusterMergeInputHash(allCandidates);
 
   // Check if all candidates already have the matching hash
   const allHashesMatch = allCandidates.every((c) => c.mergeInputHash === currentHash);
