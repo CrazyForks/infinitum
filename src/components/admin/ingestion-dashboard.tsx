@@ -13,6 +13,7 @@ import {
   LineChart,
   Line,
 } from "recharts";
+import type { LegendPayload } from "recharts";
 
 import { SourceMonitorPanel } from "@/components/admin/source-monitor-panel";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -37,6 +38,15 @@ const CHART_COLORS = {
   grid: "var(--line)",
   text: "var(--muted)",
 };
+
+const AI_USAGE_SERIES = [
+  { dataKey: "totalCalls", name: "总调用", color: CHART_COLORS.totalCalls, strokeWidth: 2 },
+  { dataKey: "summaries", name: "摘要生成", color: CHART_COLORS.summaries, strokeWidth: 1.5 },
+  { dataKey: "analyses", name: "内容分析", color: CHART_COLORS.analyses, strokeWidth: 1.5 },
+  { dataKey: "clusterMatches", name: "聚合匹配", color: CHART_COLORS.clusterMatches, strokeWidth: 1.5 },
+  { dataKey: "clusterMerges", name: "聚合合并", color: CHART_COLORS.clusterMerges, strokeWidth: 1.5 },
+  { dataKey: "clusterSummaries", name: "聚合摘要", color: CHART_COLORS.clusterSummaries, strokeWidth: 1.5 },
+] as const;
 
 function formatDateLabel(iso: string) {
   const d = new Date(iso);
@@ -73,6 +83,37 @@ function ArticleTrendChart({ data }: { data: DailyArticleStat[] }) {
   );
 }
 
+function AiUsageLegend({ payload }: { payload?: ReadonlyArray<LegendPayload> }) {
+  const payloadByKey = new Map(
+    (payload ?? []).map((entry) => [String(entry.dataKey), entry])
+  );
+
+  return (
+    <div className="mt-2 overflow-x-auto pb-1">
+      <div className="flex min-w-max flex-nowrap items-center justify-center gap-x-4 text-[11px] leading-none">
+        {AI_USAGE_SERIES.map(({ dataKey, name, color }) => {
+          const entry = payloadByKey.get(dataKey);
+          const legendColor = entry?.color ?? color;
+
+          return (
+            <span
+              key={dataKey}
+              className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap"
+              style={{ color: legendColor }}
+            >
+              <span className="relative h-3 w-5 shrink-0">
+                <span className="absolute left-0 right-0 top-1/2 h-px -translate-y-1/2 bg-current" />
+                <span className="absolute left-1/2 top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-current bg-[var(--surface)]" />
+              </span>
+              <span>{name}</span>
+            </span>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function AiUsageChart({ data }: { data: DailyAiUsageStat[] }) {
   if (!data.length) {
     return (
@@ -94,68 +135,18 @@ function AiUsageChart({ data }: { data: DailyAiUsageStat[] }) {
         />
         <YAxis tick={{ fontSize: 12, fill: CHART_COLORS.text }} width={40} />
         <Tooltip labelFormatter={(label) => `日期: ${label}`} />
-        <Legend
-          wrapperStyle={{ fontSize: 11 }}
-          formatter={(value) => {
-            const labels: Record<string, string> = {
-              totalCalls: "总调用",
-              summaries: "摘要生成",
-              analyses: "内容分析",
-              clusterMatches: "聚合匹配",
-              clusterMerges: "聚合合并",
-              clusterSummaries: "聚合摘要",
-            };
-            return labels[String(value)] ?? value;
-          }}
-        />
-        <Line
-          type="monotone"
-          dataKey="totalCalls"
-          stroke={CHART_COLORS.totalCalls}
-          strokeWidth={2}
-          dot={false}
-          name="总调用"
-        />
-        <Line
-          type="monotone"
-          dataKey="summaries"
-          stroke={CHART_COLORS.summaries}
-          strokeWidth={1.5}
-          dot={false}
-          name="摘要生成"
-        />
-        <Line
-          type="monotone"
-          dataKey="analyses"
-          stroke={CHART_COLORS.analyses}
-          strokeWidth={1.5}
-          dot={false}
-          name="内容分析"
-        />
-        <Line
-          type="monotone"
-          dataKey="clusterMatches"
-          stroke={CHART_COLORS.clusterMatches}
-          strokeWidth={1.5}
-          dot={false}
-          name="聚合匹配"
-        />
-        <Line
-          type="monotone"
-          dataKey="clusterMerges"
-          stroke={CHART_COLORS.clusterMerges}
-          strokeWidth={1.5}
-          dot={false}
-          name="聚合合并"
-        />
-        <Line
-          type="monotone"
-          dataKey="clusterSummaries"
-          stroke={CHART_COLORS.clusterSummaries}
-          strokeWidth={1.5}
-          dot={false}
-          name="聚合摘要"
-        />
+        <Legend content={<AiUsageLegend />} />
+        {AI_USAGE_SERIES.map(({ dataKey, name, color, strokeWidth }) => (
+          <Line
+            key={dataKey}
+            type="monotone"
+            dataKey={dataKey}
+            stroke={color}
+            strokeWidth={strokeWidth}
+            dot={false}
+            name={name}
+          />
+        ))}
       </LineChart>
     </ResponsiveContainer>
   );
