@@ -69,3 +69,6 @@ next-env.d.ts
 .agent-workflow/
 .forge-loop/
 .claude/skills/
+
+# Forge Loop local workflow cache
+.forge-loop/state/
