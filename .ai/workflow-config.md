@@ -11,6 +11,13 @@
 | Agent Environment | `codex` |
 | Default Workflow | `feature-iteration` |
 | Quick Workflow | `quick-iteration` |
+| Model Selection Policy | `adaptive` |
+| Codex Low Model | `auto` |
+| Codex Balanced Model | `auto` |
+| Codex High Model | `auto` |
+| Claude Code Low Model | `auto` |
+| Claude Code Balanced Model | `auto` |
+| Claude Code High Model | `auto` |
 | Max Parallel Subagents | 3 |
 | Project Tier | auto |
 | Default Stop Gate | H1 |
