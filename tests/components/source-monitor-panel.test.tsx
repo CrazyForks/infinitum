@@ -95,8 +95,18 @@ describe("SourceMonitorPanel", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("requests the backend when switching pages", async () => {
+  it("requests the backend when switching pages in both directions", async () => {
     const user = userEvent.setup();
+    const pageOneSnapshot = buildSnapshot({
+      sources: [buildSource({ id: "source-1", name: "Source One" })],
+      filteredSourceCount: 11,
+      pagination: {
+        page: 1,
+        pageSize: 10,
+        totalItems: 11,
+        totalPages: 2,
+      },
+    });
     const pageTwoSnapshot = buildSnapshot({
       sources: [buildSource({ id: "source-2", name: "Source Two" })],
       filteredSourceCount: 11,
@@ -107,31 +117,31 @@ describe("SourceMonitorPanel", () => {
         totalPages: 2,
       },
     });
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
-      new Response(JSON.stringify(pageTwoSnapshot)),
-    );
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify(pageTwoSnapshot)))
+      .mockResolvedValueOnce(new Response(JSON.stringify(pageOneSnapshot)));
     vi.stubGlobal("fetch", fetchMock);
 
     renderWithProviders(
       <SourceMonitorPanel
-        initialSnapshot={buildSnapshot({
-          filteredSourceCount: 11,
-          pagination: {
-            page: 1,
-            pageSize: 10,
-            totalItems: 11,
-            totalPages: 2,
-          },
-        })}
+        initialSnapshot={pageOneSnapshot}
       />,
     );
 
     await user.click(screen.getByRole("button", { name: "下一页" }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("/api/admin/monitor/sources?page=2&pageSize=10");
+      expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/admin/monitor/sources?page=2&pageSize=10");
     });
     expect(await screen.findByText("Source Two")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "上一页" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/admin/monitor/sources?page=1&pageSize=10");
+    });
+    expect(await screen.findByText("Source One")).toBeInTheDocument();
   });
 
   it("requests the backend with filters and resets pagination", async () => {

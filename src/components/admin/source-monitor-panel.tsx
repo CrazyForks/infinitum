@@ -290,28 +290,19 @@ export function SourceMonitorPanel({ initialSnapshot, hideStats = false }: Sourc
     }
   }, [groupFilter, healthStatusFilter, inactivityFilter, page, pageSize, showToast]);
 
-  const initialParams = useRef(
-    initialSnapshot
-      ? { page: initialSnapshot.pagination.page, pageSize: initialSnapshot.pagination.pageSize }
-      : { page: 1, pageSize: 10 },
-  );
-
   // Fetch on mount when no initial data was provided via SSR
   const didInitialFetch = useRef(!!initialSnapshot);
+  const shouldSkipInitialEffect = useRef(!!initialSnapshot);
   useEffect(() => {
     if (!didInitialFetch.current) {
       didInitialFetch.current = true;
       void fetchSources();
       return;
     }
-    // Skip if params haven't changed from initial values
-    if (
-      page === initialParams.current.page &&
-      pageSize === initialParams.current.pageSize &&
-      inactivityFilter === "all" &&
-      healthStatusFilter === "all" &&
-      groupFilter === "all"
-    ) {
+    // SSR already supplied this exact first render. Subsequent returns to
+    // the initial params still need to refetch, e.g. page 2 -> page 1.
+    if (shouldSkipInitialEffect.current) {
+      shouldSkipInitialEffect.current = false;
       return;
     }
     void fetchSources();
