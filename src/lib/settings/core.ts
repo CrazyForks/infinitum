@@ -376,6 +376,8 @@ const ALL_PROMPT_TYPES = [
   PromptConfigType.cluster_match,
   PromptConfigType.cluster_merge,
   PromptConfigType.daily_report,
+  PromptConfigType.daily_report_refinement_chat,
+  PromptConfigType.daily_report_refinement_generate,
 ] as const;
 
 function getLegacyDefaultClusterSummaryPromptWhere() {
@@ -387,6 +389,30 @@ function getLegacyDefaultClusterSummaryPromptWhere() {
     temperature: 0.2,
     maxTokens: 300,
     topP: null,
+    modelApiConfigId: null,
+    isEnabled: true,
+    isDefault: true,
+  };
+}
+
+const LEGACY_DEFAULT_DAILY_REPORT_REFINEMENT_GENERATE_USER_PROMPT_TEMPLATE = `日期：{{date}}
+时区：{{timezone}}
+当前日报 JSON：{{currentContentJson}}
+引用来源 registry JSON：{{sourceRegistryJson}}
+本轮管理员指令：{{instruction}}
+历史对话摘要或消息 JSON：{{messagesJson}}`;
+
+function getUntouchedDefaultPromptConfigWhere(type: PromptConfigType, prompt: string, fileConfig: RuntimeConfig) {
+  const sampling = getDefaultPromptSampling(type);
+
+  return {
+    type,
+    name: getDefaultPromptConfigName(type),
+    prompt,
+    systemPrompt: resolveSystemPromptByType(type, fileConfig),
+    temperature: sampling.temperature,
+    maxTokens: sampling.maxTokens,
+    topP: sampling.topP,
     modelApiConfigId: null,
     isEnabled: true,
     isDefault: true,
@@ -407,6 +433,10 @@ function resolveSystemPromptByType(type: PromptConfigType, fileConfig: RuntimeCo
       return fileConfig.prompts.clusterMerge;
     case PromptConfigType.daily_report:
       return fileConfig.prompts.dailyReport;
+    case PromptConfigType.daily_report_refinement_chat:
+      return fileConfig.prompts.dailyReportRefinementChat;
+    case PromptConfigType.daily_report_refinement_generate:
+      return fileConfig.prompts.dailyReportRefinementGenerate;
   }
 }
 
@@ -427,7 +457,11 @@ async function ensureModelAndPromptConfigsSeeded() {
     (blacklistCount > 0 || fileConfig.blacklistKeywords.length === 0)
   ) {
     // Verify all expected prompt config types exist; missing ones will be backfilled
-    const [existingTypes, legacyDefaultClusterSummaryPromptCount] = await Promise.all([
+    const [
+      existingTypes,
+      legacyDefaultClusterSummaryPromptCount,
+      legacyDefaultDailyReportRefinementGeneratePromptCount,
+    ] = await Promise.all([
       prisma.promptConfig.findMany({
         where: { type: { in: ALL_PROMPT_TYPES as unknown as PromptConfigType[] } },
         select: { type: true },
@@ -435,9 +469,17 @@ async function ensureModelAndPromptConfigsSeeded() {
       prisma.promptConfig.count({
         where: getLegacyDefaultClusterSummaryPromptWhere(),
       }),
+      prisma.promptConfig.count({
+        where: getUntouchedDefaultPromptConfigWhere(
+          PromptConfigType.daily_report_refinement_generate,
+          LEGACY_DEFAULT_DAILY_REPORT_REFINEMENT_GENERATE_USER_PROMPT_TEMPLATE,
+          fileConfig,
+        ),
+      }),
     ]);
     if (
       legacyDefaultClusterSummaryPromptCount === 0 &&
+      legacyDefaultDailyReportRefinementGeneratePromptCount === 0 &&
       ALL_PROMPT_TYPES.every((type) => existingTypes.some((row) => row.type === type))
     ) {
       return;
@@ -516,6 +558,17 @@ async function ensureModelAndPromptConfigsSeeded() {
         maxTokens: clusterSummarySampling.maxTokens,
         temperature: clusterSummarySampling.temperature,
         topP: clusterSummarySampling.topP,
+      },
+    });
+
+    await tx.promptConfig.updateMany({
+      where: getUntouchedDefaultPromptConfigWhere(
+        PromptConfigType.daily_report_refinement_generate,
+        LEGACY_DEFAULT_DAILY_REPORT_REFINEMENT_GENERATE_USER_PROMPT_TEMPLATE,
+        fileConfig,
+      ),
+      data: {
+        prompt: getDefaultPromptTemplate(PromptConfigType.daily_report_refinement_generate),
       },
     });
 

@@ -65,7 +65,9 @@ function makeSqliteSchemaIdempotent(sql) {
     .replace(/^CREATE UNIQUE INDEX /gm, "CREATE UNIQUE INDEX IF NOT EXISTS ")
     .replace(/^CREATE INDEX /gm, "CREATE INDEX IF NOT EXISTS ")
     .replace(/^CREATE INDEX IF NOT EXISTS "sources_enabled_healthStatus_idx" ON "sources"\("enabled", "healthStatus"\);\n?/gm, "")
-    .replace(/^CREATE INDEX IF NOT EXISTS "source_groups_sortOrder_name_idx" ON "source_groups"\("sortOrder", "name"\);\n?/gm, "");
+    .replace(/^CREATE INDEX IF NOT EXISTS "source_groups_sortOrder_name_idx" ON "source_groups"\("sortOrder", "name"\);\n?/gm, "")
+    .replace(/^CREATE INDEX IF NOT EXISTS "daily_report_sources_dailyReportId_sourceNumber_idx" ON "daily_report_sources"\("dailyReportId", "sourceNumber"\);\n?/gm, "")
+    .replace(/^CREATE INDEX IF NOT EXISTS "daily_report_sources_dailyReportId_sourceKey_idx" ON "daily_report_sources"\("dailyReportId", "sourceKey"\);\n?/gm, "");
 }
 
 function runSqlite(commandArgs, options = {}) {
@@ -197,6 +199,73 @@ function applyIncrementalMigrations() {
       input: `ALTER TABLE "content_clusters" ADD COLUMN "mergeInputHash" TEXT;\n`,
     });
   }
+
+  if (!columnExists("daily_report_sources", "sourceNumber")) {
+    runSqlite([dbPath], {
+      input: `ALTER TABLE "daily_report_sources" ADD COLUMN "sourceNumber" INTEGER;\n`,
+    });
+  }
+
+  if (!columnExists("daily_report_sources", "sourceKey")) {
+    runSqlite([dbPath], {
+      input: `ALTER TABLE "daily_report_sources" ADD COLUMN "sourceKey" TEXT;\n`,
+    });
+  }
+
+  if (!columnExists("daily_report_sources", "sourceSummary")) {
+    runSqlite([dbPath], {
+      input: `ALTER TABLE "daily_report_sources" ADD COLUMN "sourceSummary" TEXT;\n`,
+    });
+  }
+
+  if (!columnExists("daily_report_sources", "sourcePublishedAt")) {
+    runSqlite([dbPath], {
+      input: `ALTER TABLE "daily_report_sources" ADD COLUMN "sourcePublishedAt" DATETIME;\n`,
+    });
+  }
+
+  if (!columnExists("daily_report_sources", "sourceQualityScore")) {
+    runSqlite([dbPath], {
+      input: `ALTER TABLE "daily_report_sources" ADD COLUMN "sourceQualityScore" INTEGER;\n`,
+    });
+  }
+
+  if (!columnExists("daily_report_sources", "eventType")) {
+    runSqlite([dbPath], {
+      input: `ALTER TABLE "daily_report_sources" ADD COLUMN "eventType" TEXT;\n`,
+    });
+  }
+
+  if (!columnExists("daily_report_sources", "eventSubject")) {
+    runSqlite([dbPath], {
+      input: `ALTER TABLE "daily_report_sources" ADD COLUMN "eventSubject" TEXT;\n`,
+    });
+  }
+
+  if (!columnExists("daily_report_sources", "eventAction")) {
+    runSqlite([dbPath], {
+      input: `ALTER TABLE "daily_report_sources" ADD COLUMN "eventAction" TEXT;\n`,
+    });
+  }
+
+  if (!columnExists("daily_report_sources", "eventObject")) {
+    runSqlite([dbPath], {
+      input: `ALTER TABLE "daily_report_sources" ADD COLUMN "eventObject" TEXT;\n`,
+    });
+  }
+
+  if (!columnExists("daily_report_sources", "eventDate")) {
+    runSqlite([dbPath], {
+      input: `ALTER TABLE "daily_report_sources" ADD COLUMN "eventDate" TEXT;\n`,
+    });
+  }
+
+  runSqlite([dbPath], {
+    input: [
+      `CREATE INDEX IF NOT EXISTS "daily_report_sources_dailyReportId_sourceNumber_idx" ON "daily_report_sources"("dailyReportId", "sourceNumber");`,
+      `CREATE INDEX IF NOT EXISTS "daily_report_sources_dailyReportId_sourceKey_idx" ON "daily_report_sources"("dailyReportId", "sourceKey");`,
+    ].join("\n"),
+  });
 
   if (!ftsTableExists("items_fts")) {
     runSqlite([dbPath], {

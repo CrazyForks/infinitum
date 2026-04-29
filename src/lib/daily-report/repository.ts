@@ -345,7 +345,7 @@ async function getDailyReportByDateUncached(date: string, isAdmin: boolean): Pro
     },
     include: {
       sources: {
-        orderBy: [{ sectionName: "asc" }, { sourceName: "asc" }],
+        orderBy: [{ sectionName: "asc" }, { sourceNumber: "asc" }, { sourceName: "asc" }],
       },
       _count: {
         select: { sources: true },
@@ -383,6 +383,9 @@ async function getDailyReportByDateUncached(date: string, isAdmin: boolean): Pro
     renderedMarkdown: report.renderedMarkdown,
     sources: report.sources.map((source) => ({
       id: source.id,
+      sourceNumber: source.sourceNumber,
+      sourceSummary: source.sourceSummary,
+      sourceQualityScore: source.sourceQualityScore,
       itemId: source.itemId,
       clusterId: source.clusterId,
       sourceName: source.sourceName,

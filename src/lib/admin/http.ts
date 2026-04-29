@@ -5,6 +5,10 @@ export function getAdminErrorStatus(error: unknown, fallbackStatus = 400) {
     return error.status;
   }
 
+  if (error instanceof Error && "status" in error && typeof error.status === "number") {
+    return error.status;
+  }
+
   if (error instanceof Error && error.message === "Unauthorized") {
     return 401;
   }
@@ -20,6 +24,7 @@ export function adminErrorResponse(error: unknown, fallbackStatus = 400, fallbac
   return Response.json(
     {
       error: getErrorMessage(error, fallbackMessage),
+      code: error instanceof Error && "code" in error && typeof error.code === "string" ? error.code : undefined,
     },
     { status: getAdminErrorStatus(error, fallbackStatus) },
   );

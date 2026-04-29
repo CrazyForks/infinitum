@@ -4,6 +4,8 @@ import {
   DEFAULT_CLUSTER_MERGE_PROMPT,
   DEFAULT_CLUSTER_SUMMARY_PROMPT,
   DEFAULT_DAILY_REPORT_PROMPT,
+  DEFAULT_DAILY_REPORT_REFINEMENT_CHAT_PROMPT,
+  DEFAULT_DAILY_REPORT_REFINEMENT_GENERATE_PROMPT,
   DEFAULT_ITEM_ANALYSIS_PROMPT,
   DEFAULT_ITEM_SUMMARY_PROMPT,
 } from "@/config/prompts";
@@ -36,6 +38,8 @@ export type RuntimeConfig = {
     clusterMatch: string;
     clusterMerge: string;
     dailyReport: string;
+    dailyReportRefinementChat: string;
+    dailyReportRefinementGenerate: string;
   };
   selectedPromptConfigs?: {
     itemSummary: {
@@ -92,6 +96,24 @@ export type RuntimeConfig = {
       topP?: number | null;
       modelApi?: RuntimeConfig["modelApi"] | null;
     };
+    dailyReportRefinementChat: {
+      name: string;
+      systemPrompt: string;
+      promptTemplate: string;
+      temperature?: number | null;
+      maxTokens?: number | null;
+      topP?: number | null;
+      modelApi?: RuntimeConfig["modelApi"] | null;
+    };
+    dailyReportRefinementGenerate: {
+      name: string;
+      systemPrompt: string;
+      promptTemplate: string;
+      temperature?: number | null;
+      maxTokens?: number | null;
+      topP?: number | null;
+      modelApi?: RuntimeConfig["modelApi"] | null;
+    };
   };
 };
 
@@ -118,6 +140,8 @@ export function getRuntimeConfig(): RuntimeConfig {
       clusterMatch: DEFAULT_CLUSTER_MATCH_PROMPT,
       clusterMerge: DEFAULT_CLUSTER_MERGE_PROMPT,
       dailyReport: DEFAULT_DAILY_REPORT_PROMPT,
+      dailyReportRefinementChat: DEFAULT_DAILY_REPORT_REFINEMENT_CHAT_PROMPT,
+      dailyReportRefinementGenerate: DEFAULT_DAILY_REPORT_REFINEMENT_GENERATE_PROMPT,
     },
   };
 }

@@ -77,6 +77,9 @@ export type DailyReportContent = {
 
 export type DailyReportSourceDTO = {
   id: string;
+  sourceNumber: number | null;
+  sourceSummary: string | null;
+  sourceQualityScore: number | null;
   itemId: string | null;
   clusterId: string | null;
   sourceName: string;
@@ -84,6 +87,38 @@ export type DailyReportSourceDTO = {
   url: string;
   sectionName: string | null;
   topic: string | null;
+};
+
+export type DailyReportSourceRegistryEntry = {
+  sourceNumber: number;
+  sourceKey: string;
+  itemId: string | null;
+  clusterId: string | null;
+  sourceName: string;
+  title: string;
+  url: string;
+  summary: string | null;
+  publishedAt: string | null;
+  qualityScore: number | null;
+  eventType: string | null;
+  eventSubject: string | null;
+  eventAction: string | null;
+  eventObject: string | null;
+  eventDate: string | null;
+};
+
+export type DailyReportRefineMode = "chat" | "generate";
+
+export type DailyReportRefineStreamEvent =
+  | { event: "session"; sessionId: string; reportDate: string; sourceRegistryVersion: string }
+  | { event: "message_delta"; text: string }
+  | { event: "message_done"; messageId: string }
+  | { event: "candidate"; messageId: string; content: DailyReportContent; renderedMarkdown: string }
+  | { event: "error"; code: string; message: string }
+  | { event: "done"; ok: boolean };
+
+export type DailyReportRefinementSourceSearchResult = Omit<DailyReportSourceRegistryEntry, "sourceNumber"> & {
+  candidateNumber: number;
 };
 
 export type DailyReportListItemDTO = {

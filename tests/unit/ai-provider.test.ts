@@ -3,6 +3,171 @@ import { describe, expect, it, vi } from "vitest";
 import { createAiProvider } from "@/lib/ai/provider";
 
 describe("ai provider", () => {
+  it("streams daily report refinement with current content and source registry context", async () => {
+    async function* streamChunks() {
+      yield { choices: [{ delta: { content: "{\"openingSummary\":" } }] };
+      yield { choices: [{ delta: { content: "\"微调摘要\"}" } }] };
+    }
+
+    const create = vi.fn().mockReturnValue(streamChunks());
+    const provider = createAiProvider(
+      {
+        apiKey: "sk-test",
+        baseURL: "https://example.com/v1",
+        model: "test-model",
+      },
+      {
+        dailyReportRefinementGenerate: {
+          systemPrompt: "日报微调生成配置提示词",
+          promptTemplate: "当前日报 JSON：{{currentContentJson}}\n来源：{{sourceRegistryJson}}\n指令：{{instruction}}\n历史：{{messagesJson}}",
+        },
+      },
+      {
+        chat: {
+          completions: {
+            create,
+          },
+        },
+      },
+    );
+
+    let output = "";
+    for await (const delta of provider.streamDailyReportRefinement({
+      date: "2026-04-24",
+      timezone: "Asia/Shanghai",
+      currentContent: {
+        openingSummary: "当前摘要内容足够长，用于作为微调起点，确保模型不是重新生成整篇日报。",
+        sections: {
+          今日大事: [{
+            topic: "OpenAI 发布新模型",
+            summary: "当前条目摘要",
+            whyImportant: "模型能力提升",
+            sourceIds: [1],
+          }],
+          变更与实践: [{
+            topic: "开发者工具更新",
+            action: "当前行动建议",
+            sourceIds: [1],
+          }],
+          安全与风险: [],
+          开源与工具: [],
+          数据与洞察: [],
+        },
+        closingThought: "当前观察内容足够长，用于作为微调起点。",
+      },
+      sourceRegistry: [{
+        sourceNumber: 1,
+        sourceKey: "item:item-1",
+        itemId: "item-1",
+        clusterId: null,
+        sourceName: "Example",
+        title: "OpenAI 发布新模型",
+        url: "https://example.com/a",
+        summary: "来源摘要",
+        publishedAt: "2026-04-24T01:00:00.000Z",
+        qualityScore: 90,
+        eventType: "release",
+        eventSubject: "OpenAI",
+        eventAction: "发布",
+        eventObject: "新模型",
+        eventDate: "2026-04-24",
+      }],
+      instruction: "压缩摘要",
+      messages: [],
+    })) {
+      output += delta;
+    }
+
+    expect(output).toBe("{\"openingSummary\":\"微调摘要\"}");
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(create.mock.calls[0]?.[0]?.stream).toBe(true);
+    expect(create.mock.calls[0]?.[0]?.response_format).toEqual({ type: "json_object" });
+    expect(create.mock.calls[0]?.[0]?.messages?.[0]?.content).toContain("日报微调生成配置提示词");
+    expect(create.mock.calls[0]?.[0]?.messages?.[1]?.content).toContain("当前日报 JSON");
+    expect(create.mock.calls[0]?.[0]?.messages?.[1]?.content).toContain("sourceNumber");
+    expect(create.mock.calls[0]?.[0]?.messages?.[1]?.content).toContain("压缩摘要");
+  });
+
+  it("streams daily report refinement chat without json response format", async () => {
+    async function* streamChunks() {
+      yield { choices: [{ delta: { content: "可以先确认结构，" } }] };
+      yield { choices: [{ delta: { content: "再生成候选稿。" } }] };
+    }
+
+    const create = vi.fn().mockReturnValue(streamChunks());
+    const provider = createAiProvider(
+      {
+        apiKey: "sk-test",
+        baseURL: "https://example.com/v1",
+        model: "test-model",
+      },
+      {
+        dailyReportRefinementChat: {
+          systemPrompt: "日报微调对话配置提示词",
+          promptTemplate: "当前 session 可用来源：{{sourceRegistryJson}}\n当前日报：{{currentContentJson}}\n历史：{{messagesJson}}\n本轮消息：{{instruction}}",
+        },
+      },
+      {
+        chat: {
+          completions: {
+            create,
+          },
+        },
+      },
+    );
+
+    let output = "";
+    for await (const delta of provider.streamDailyReportRefinementChat({
+      date: "2026-04-24",
+      timezone: "Asia/Shanghai",
+      currentContent: {
+        openingSummary: "当前摘要内容足够长，用于作为微调起点，确保模型不是重新生成整篇日报。",
+        sections: {
+          今日大事: [{
+            topic: "OpenAI 发布新模型",
+            summary: "当前条目摘要",
+            whyImportant: "模型能力提升",
+            sourceIds: [1],
+          }],
+          变更与实践: [],
+          安全与风险: [],
+          开源与工具: [],
+          数据与洞察: [],
+        },
+        closingThought: "当前观察内容足够长，用于作为微调起点。",
+      },
+      sourceRegistry: [{
+        sourceNumber: 1,
+        sourceKey: "item:item-1",
+        itemId: "item-1",
+        clusterId: null,
+        sourceName: "Example",
+        title: "OpenAI 发布新模型",
+        url: "https://example.com/a",
+        summary: "来源摘要",
+        publishedAt: "2026-04-24T01:00:00.000Z",
+        qualityScore: 90,
+        eventType: "release",
+        eventSubject: "OpenAI",
+        eventAction: "发布",
+        eventObject: "新模型",
+        eventDate: "2026-04-24",
+      }],
+      instruction: "先讨论结构",
+      messages: [],
+    })) {
+      output += delta;
+    }
+
+    expect(output).toBe("可以先确认结构，再生成候选稿。");
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(create.mock.calls[0]?.[0]?.stream).toBe(true);
+    expect(create.mock.calls[0]?.[0]?.response_format).toBeUndefined();
+    expect(create.mock.calls[0]?.[0]?.messages?.[0]?.content).toContain("日报微调对话配置提示词");
+    expect(create.mock.calls[0]?.[0]?.messages?.[1]?.content).toContain("当前 session 可用来源");
+    expect(create.mock.calls[0]?.[0]?.messages?.[1]?.content).toContain("先讨论结构");
+  });
+
   it("uses chat completions and returns the full analysis payload", async () => {
     const create = vi.fn().mockResolvedValue({
       choices: [

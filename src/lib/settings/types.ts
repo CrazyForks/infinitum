@@ -4,7 +4,9 @@ export type PromptConfigType =
   | "cluster_summary"
   | "cluster_match"
   | "cluster_merge"
-  | "daily_report";
+  | "daily_report"
+  | "daily_report_refinement_chat"
+  | "daily_report_refinement_generate";
 
 export type AdminModelApiConfig = {
   id: string;

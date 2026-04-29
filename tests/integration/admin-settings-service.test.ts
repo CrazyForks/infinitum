@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { DEFAULT_CLUSTER_SUMMARY_PROMPT } from "@/config/prompts";
+import {
+  DEFAULT_CLUSTER_SUMMARY_PROMPT,
+  DEFAULT_DAILY_REPORT_REFINEMENT_GENERATE_USER_PROMPT_TEMPLATE,
+} from "@/config/prompts";
 import { prisma } from "@/lib/db";
 import * as settingsService from "@/lib/settings/service";
 import {
@@ -17,6 +20,13 @@ import {
 
 const LEGACY_DEFAULT_CLUSTER_SUMMARY_PROMPT =
   "你是聚合摘要助手。请基于给定的多条候选内容，提炼它们共同指向的同一具体事件，并输出 100 到 200 字中文摘要。只输出摘要正文，不要输出 JSON、代码块、标题、前后缀说明或项目符号。可使用有限 Markdown 行内标记突出关键信息：用 **加粗** 标注共同事件、关键进展、结果或数字，用 *斜体* 标注必要差异点或影响；不要使用链接、图片、标题、表格或列表。摘要要突出共同事件、关键进展和必要差异点；要体现这是多条报道的归纳结果，而不是复述某一篇原文；不要写成行业综述、公司介绍或主题总结，不要编造未提供的信息。";
+
+const LEGACY_DEFAULT_DAILY_REPORT_REFINEMENT_GENERATE_USER_PROMPT_TEMPLATE = `日期：{{date}}
+时区：{{timezone}}
+当前日报 JSON：{{currentContentJson}}
+引用来源 registry JSON：{{sourceRegistryJson}}
+本轮管理员指令：{{instruction}}
+历史对话摘要或消息 JSON：{{messagesJson}}`;
 
 describe("admin settings service", () => {
   beforeEach(async () => {
@@ -51,8 +61,20 @@ describe("admin settings service", () => {
     expect(settings.modelApiConfigs[0]?.baseUrl).toBe("");
     expect(settings.modelApiConfigs[0]?.apiKeyMasked).toBe("");
     expect(settings.modelApiConfigs[0]?.ingestionItemConcurrency).toBe(3);
-    expect(settings.promptConfigs).toHaveLength(6);
+    expect(settings.promptConfigs).toHaveLength(8);
     expect(settings.promptConfigs.find((config) => config.type === "daily_report")?.systemPrompt).toContain("AI 新闻日报");
+    expect(settings.promptConfigs.find((config) => config.type === "daily_report_refinement_chat")?.name).toBe(
+      "默认日报微调对话提示词",
+    );
+    expect(settings.promptConfigs.find((config) => config.type === "daily_report_refinement_chat")?.systemPrompt).toContain(
+      "持续对话",
+    );
+    expect(settings.promptConfigs.find((config) => config.type === "daily_report_refinement_generate")?.name).toBe(
+      "默认日报微调生成提示词",
+    );
+    expect(settings.promptConfigs.find((config) => config.type === "daily_report_refinement_generate")?.systemPrompt).toContain(
+      "既有日报草稿",
+    );
     expect(settings.taskSchedule.key).toBe("ingestion_default");
     expect(settings.taskSchedule.enabled).toBe(false);
     expect(settings.taskSchedule.cronExpression).toBe("0 * * * *");
@@ -130,6 +152,27 @@ describe("admin settings service", () => {
     expect(clusterSummaryConfig?.maxTokens).toBe(300);
   });
 
+  it("upgrades the untouched legacy default daily report refinement generate template", async () => {
+    await getIngestionRuntimeConfig();
+    await prisma.promptConfig.updateMany({
+      where: {
+        type: "daily_report_refinement_generate",
+        isDefault: true,
+      },
+      data: {
+        prompt: LEGACY_DEFAULT_DAILY_REPORT_REFINEMENT_GENERATE_USER_PROMPT_TEMPLATE,
+      },
+    });
+
+    await ensureRuntimeConfigSeeded();
+
+    const runtimeConfig = await getIngestionRuntimeConfig();
+    const promptTemplate = runtimeConfig.selectedPromptConfigs?.dailyReportRefinementGenerate.promptTemplate ?? "";
+
+    expect(promptTemplate).toBe(DEFAULT_DAILY_REPORT_REFINEMENT_GENERATE_USER_PROMPT_TEMPLATE);
+    expect(promptTemplate.indexOf("历史对话摘要或消息 JSON")).toBeLessThan(promptTemplate.indexOf("本轮管理员指令"));
+  });
+
   it("uses enabled default configs to build the runtime mapping", async () => {
     const modelConfig = await createModelApiConfig({
       name: "默认模型配置",
@@ -203,6 +246,8 @@ describe("admin settings service", () => {
     expect(runtimeConfig.selectedPromptConfigs?.itemAnalysis.maxTokens).toBe(1000);
     expect(runtimeConfig.selectedPromptConfigs?.clusterSummary.maxTokens).toBe(300);
     expect(runtimeConfig.selectedPromptConfigs?.clusterMatch.maxTokens).toBe(80);
+    expect(runtimeConfig.selectedPromptConfigs?.dailyReportRefinementChat.systemPrompt).toContain("持续对话");
+    expect(runtimeConfig.selectedPromptConfigs?.dailyReportRefinementGenerate.systemPrompt).toContain("既有日报草稿");
   });
 
   it("prevents deleting the default model config", async () => {
