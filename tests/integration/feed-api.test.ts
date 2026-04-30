@@ -744,6 +744,48 @@ describe("/api/feed", () => {
     }
   });
 
+  it("matches short CJK keywords that are below the trigram token length", async () => {
+    const source = await prisma.source.findFirstOrThrow({
+      where: { rssUrl: "https://api.example.com/feed.xml" },
+    });
+
+    await prisma.item.create({
+      data: {
+        id: "item-ant-group",
+        sourceId: source.id,
+        originalUrl: "https://api.example.com/ant-group",
+        canonicalUrl: "https://api.example.com/ant-group",
+        urlHash: "hash-ant-group",
+        dedupeSignature: "api feed|ant group|2026-04-10t10:00:00.000z",
+        originalTitle: "Ant Group AI update",
+        translatedTitle: "蚂蚁集团发布 AI 助手",
+        author: "Author Ant",
+        publishedAt: new Date("2026-04-10T10:00:00.000Z"),
+        summaryText: "蚂蚁集团发布新的企业 AI 助手。",
+        status: "processed",
+        moderationStatus: "allowed",
+        qualityScore: 80,
+        qualityRationale: "高质量",
+        language: "en",
+        createdAt: new Date("2026-04-10T10:05:00.000Z"),
+      },
+    });
+
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-10T12:00:00.000Z"));
+
+    try {
+      const { GET } = await import("@/app/api/feed/route");
+      const response = await GET(new Request("http://localhost/api/feed?range=7d&title=蚂蚁"));
+
+      const json = await response.json();
+
+      expect(json.items.some((item: { title: string }) => item.title === "蚂蚁集团发布 AI 助手")).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("returns unfiltered results when search term is empty", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-10T12:00:00.000Z"));

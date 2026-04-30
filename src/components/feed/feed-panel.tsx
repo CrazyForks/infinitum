@@ -13,7 +13,7 @@ import {
   type ReactNode,
 } from "react";
 
-import { STATUS_POLL_INTERVAL_MS, FEED_SEARCH_DEBOUNCE_MS } from "@/config/constants";
+import { STATUS_POLL_INTERVAL_MS } from "@/config/constants";
 import {
   deleteItem,
   filterItem,
@@ -439,11 +439,10 @@ export function FeedPanel({
   const [readingProgress, setReadingProgress] = useState<ReadingProgress | null>(null);
   const [isReadingProgressHidden, setIsReadingProgressHidden] = useState(false);
   const [pendingRestoreEntryId, setPendingRestoreEntryId] = useState<string | null>(null);
-  const skipTitleEffectRef = useRef(true);
   const progressWriteTimerRef = useRef<number | null>(null);
   const lastSavedProgressRef = useRef<string | null>(null);
   const pendingScrollToTopRef = useRef(false);
-  const latestQueryRef = useRef<FeedQueryState>({
+  const initialQuery: FeedQueryState = {
     range: initialRange,
     sort: initialSort,
     startDate: initialStartDate,
@@ -454,7 +453,9 @@ export function FeedPanel({
     sourceId: normalizeOptionalId(initialSourceId),
     title: normalizeSearchText(initialTitle),
     createdRangeExplicit: initialCreatedRangeExplicit,
-  });
+  };
+  const [appliedQuery, setAppliedQuery] = useState<FeedQueryState>(initialQuery);
+  const latestQueryRef = useRef<FeedQueryState>(initialQuery);
   const visibleSources = useMemo(
     () => availableSources.filter((source) => (!groupId ? true : source.groupId === groupId)),
     [availableSources, groupId],
@@ -466,17 +467,17 @@ export function FeedPanel({
   const shouldShowPagination = total > 0;
   const readingProgressFilterKey = useMemo(
     () => buildReadingProgressFilterKey({
-      range,
-      sort,
-      startDate,
-      endDate,
-      publishedStartDate,
-      publishedEndDate,
-      groupId,
-      sourceId,
-      title: titleFilter,
+      range: appliedQuery.range,
+      sort: appliedQuery.sort,
+      startDate: appliedQuery.startDate,
+      endDate: appliedQuery.endDate,
+      publishedStartDate: appliedQuery.publishedStartDate,
+      publishedEndDate: appliedQuery.publishedEndDate,
+      groupId: appliedQuery.groupId,
+      sourceId: appliedQuery.sourceId,
+      title: appliedQuery.title,
     }),
-    [endDate, groupId, publishedEndDate, publishedStartDate, range, sort, sourceId, startDate, titleFilter],
+    [appliedQuery],
   );
 
   const summary = useMemo(
@@ -566,6 +567,7 @@ export function FeedPanel({
     }
 
     latestQueryRef.current = normalizedQuery;
+    setAppliedQuery(normalizedQuery);
     syncUrlWithQuery(normalizedQuery, page, size);
     startTransition(async () => {
       const payload = await requestFeed(normalizedQuery, { page, size });
@@ -600,18 +602,10 @@ export function FeedPanel({
     setCreatedRangeExplicit(true);
     setStartDate(null);
     setEndDate(null);
-    const query = buildQuery({
-      range: nextRange,
-      startDate: null,
-      endDate: null,
-      createdRangeExplicit: true,
-    });
-    loadFeed(query, 1, pageSize, { scrollToTop: true });
   };
 
   const changeSort = (nextSort: FeedSort) => {
     setSort(nextSort);
-    loadFeed(buildQuery({ sort: nextSort }), 1, pageSize, { scrollToTop: true });
   };
 
   const changeGroup = (nextGroupId: string) => {
@@ -623,16 +617,11 @@ export function FeedPanel({
 
     setGroupId(normalizedGroupId);
     setSourceId(nextSourceId);
-    loadFeed(buildQuery({
-      groupId: normalizedGroupId,
-      sourceId: nextSourceId,
-    }), 1, pageSize, { scrollToTop: true });
   };
 
   const changeSource = (nextSourceId: string) => {
     const normalizedSourceId = normalizeOptionalId(nextSourceId);
     setSourceId(normalizedSourceId);
-    loadFeed(buildQuery({ sourceId: normalizedSourceId }), 1, pageSize, { scrollToTop: true });
   };
 
   const changeDateRange = (nextRange: DateRangeValue) => {
@@ -641,11 +630,6 @@ export function FeedPanel({
     setStartDate(normalizedStartDate);
     setEndDate(normalizedEndDate);
     setCreatedRangeExplicit(true);
-    loadFeed(buildQuery({
-      startDate: normalizedStartDate,
-      endDate: normalizedEndDate,
-      createdRangeExplicit: true,
-    }), 1, pageSize, { scrollToTop: true });
   };
 
   const changePublishedDateRange = (nextRange: DateRangeValue) => {
@@ -653,10 +637,10 @@ export function FeedPanel({
 
     setPublishedStartDate(normalizedStartDate);
     setPublishedEndDate(normalizedEndDate);
-    loadFeed(buildQuery({
-      publishedStartDate: normalizedStartDate,
-      publishedEndDate: normalizedEndDate,
-    }), 1, pageSize, { scrollToTop: true });
+  };
+
+  const applyFilters = () => {
+    loadFeed(buildQuery(), 1, pageSize, { scrollToTop: true });
   };
 
   const clearFilters = () => {
@@ -671,19 +655,6 @@ export function FeedPanel({
     setSourceId(null);
     setTitleInput("");
     setTitleFilter(null);
-    setAdvancedFiltersOpen(false);
-    loadFeed({
-      range: "today" as FeedRange,
-      sort: "time_desc" as FeedSort,
-      createdRangeExplicit: false,
-      startDate: null,
-      endDate: null,
-      publishedStartDate: null,
-      publishedEndDate: null,
-      groupId: null,
-      sourceId: null,
-      title: null,
-    }, 1, pageSize, { scrollToTop: true });
   };
 
   const refresh = () => {
@@ -943,7 +914,7 @@ export function FeedPanel({
       const nextOpen = !openClusters[clusterId];
 
       if (nextOpen && !expandedClusters[clusterId]) {
-        const clusterItems = await requestClusterItems(clusterId, buildQuery());
+        const clusterItems = await requestClusterItems(clusterId, latestQueryRef.current);
         setExpandedClusters((current) => ({
           ...current,
           [clusterId]: clusterItems,
@@ -1194,21 +1165,6 @@ export function FeedPanel({
   };
 
   useEffect(() => {
-    latestQueryRef.current = {
-      range,
-      sort,
-      startDate,
-      endDate,
-      publishedStartDate,
-      publishedEndDate,
-      groupId,
-      sourceId,
-      title: titleFilter,
-      createdRangeExplicit,
-    };
-  }, [createdRangeExplicit, endDate, groupId, publishedEndDate, publishedStartDate, range, sort, sourceId, startDate, titleFilter]);
-
-  useEffect(() => {
     const progress = readStoredReadingProgress(readingProgressFilterKey);
     setReadingProgress(progress);
     setIsReadingProgressHidden(false);
@@ -1323,33 +1279,6 @@ export function FeedPanel({
   }, [isPending, items, pendingRestoreEntryId]);
 
   useEffect(() => {
-    if (skipTitleEffectRef.current) {
-      skipTitleEffectRef.current = false;
-      return;
-    }
-
-    const timer = window.setTimeout(() => {
-      const normalizedTitle = normalizeSearchText(titleInput);
-
-      if (normalizedTitle === latestQueryRef.current.title) {
-        setTitleFilter(normalizedTitle);
-        return;
-      }
-
-      setTitleFilter(normalizedTitle);
-
-      loadFeed({
-        ...latestQueryRef.current,
-        title: normalizedTitle,
-      }, 1, pageSize, { scrollToTop: true });
-    }, FEED_SEARCH_DEBOUNCE_MS);
-
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [availableGroups, pageSize, titleInput, loadFeed]);
-
-  useEffect(() => {
     if (!isAdmin) {
       return;
     }
@@ -1383,17 +1312,7 @@ export function FeedPanel({
         }
 
         setQueuedRefreshAt(null);
-        const feedPayload = await requestFeed({
-          range,
-          sort,
-          startDate,
-          endDate,
-          publishedStartDate,
-          publishedEndDate,
-          groupId,
-          sourceId,
-          title: titleFilter,
-        }, { page: 1, size: pageSize });
+        const feedPayload = await requestFeed(latestQueryRef.current, { page: 1, size: pageSize });
         setItems(feedPayload.items);
         setPagination(feedPayload.pagination);
         setGroups(feedPayload.groups ?? availableGroups);
@@ -1412,7 +1331,7 @@ export function FeedPanel({
     return () => {
       window.clearInterval(timer);
     };
-  }, [availableGroups, endDate, groupId, isAdmin, pageSize, publishedEndDate, publishedStartDate, queuedRefreshAt, range, resetExpandedClusterState, sort, sourceId, startDate, startTransition, status, titleFilter]);
+  }, [availableGroups, isAdmin, pageSize, queuedRefreshAt, resetExpandedClusterState, startTransition, status]);
 
   useEffect(() => {
     setJumpToPage(String(currentPage));
@@ -1423,7 +1342,7 @@ export function FeedPanel({
     if (!FEED_PAGE_SIZE_OPTIONS.includes(nextSize as (typeof FEED_PAGE_SIZE_OPTIONS)[number])) {
       return;
     }
-    loadFeed(buildQuery(), 1, nextSize, { scrollToTop: true });
+    loadFeed(latestQueryRef.current, 1, nextSize, { scrollToTop: true });
   };
 
   const handleJumpToPage = () => {
@@ -1439,7 +1358,7 @@ export function FeedPanel({
       return;
     }
 
-    loadFeed(buildQuery(), normalizedPage, pageSize, { scrollToTop: true });
+    loadFeed(latestQueryRef.current, normalizedPage, pageSize, { scrollToTop: true });
   };
 
   const resumeReadingProgress = () => {
@@ -1464,7 +1383,7 @@ export function FeedPanel({
       }
     }
 
-    loadFeed(buildQuery(), restoredPage, readingProgress.size);
+    loadFeed(latestQueryRef.current, restoredPage, readingProgress.size);
   };
 
   const neutralBadgeClassName =
@@ -1628,7 +1547,10 @@ export function FeedPanel({
                       id="feed-title-filter"
                       label="全文搜索"
                       value={titleInput}
-                      onChange={setTitleInput}
+                      onChange={(value) => {
+                        setTitleInput(value);
+                        setTitleFilter(normalizeSearchText(value));
+                      }}
                       placeholder="输入搜索关键词"
                     />
 
@@ -1676,6 +1598,19 @@ export function FeedPanel({
               items={activeFilterSummary}
               onClear={clearFilters}
               canClear={hasClearableFilters && !isPending}
+              actions={
+                <button
+                  type="button"
+                  onClick={applyFilters}
+                  disabled={isPending}
+                  className="lumina-home-action-button lumina-home-action-button--primary inline-flex items-center justify-center rounded-sm bg-[var(--accent)] px-3 py-1 text-sm font-medium text-white transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(59,130,246,0.35)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <span className="inline-flex items-center gap-1.5">
+                    <SearchIcon />
+                    <span>查询</span>
+                  </span>
+                </button>
+              }
               details={null}
               className="pt-5"
             />
@@ -2110,7 +2045,7 @@ export function FeedPanel({
             totalPages={totalPages}
             pageSize={pageSize}
             pageSizeOptions={FEED_PAGE_SIZE_OPTIONS}
-            onPageChange={(nextPage) => loadFeed(buildQuery(), nextPage, pageSize, { scrollToTop: true })}
+            onPageChange={(nextPage) => loadFeed(latestQueryRef.current, nextPage, pageSize, { scrollToTop: true })}
             onPageSizeChange={handlePageSizeChange}
             disabled={isPending}
             nextLabel={isPending ? "加载中..." : "下一页"}

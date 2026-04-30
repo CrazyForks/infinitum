@@ -473,11 +473,55 @@ function parseClusterPresentationOutput(
       summary: parsed.summary?.trim() || fallback.summary,
     };
   } catch {
+    const recovered = parseMalformedClusterPresentationOutput(normalized, fallback);
+    if (recovered) {
+      return recovered;
+    }
+
+    if (looksLikeClusterPresentationJson(normalized)) {
+      return fallback;
+    }
+
     return {
       title: fallback.title,
       summary: normalized || fallback.summary,
     };
   }
+}
+
+function looksLikeClusterPresentationJson(value: string) {
+  return /"?title"?\s*:/i.test(value) || /"?summary"?\s*:/i.test(value);
+}
+
+function parseMalformedClusterPresentationOutput(
+  value: string,
+  fallback: { title: string; summary: string },
+) {
+  const titleMatch = value.match(/"?title"?\s*:\s*"([\s\S]*?)"\s*,?\s*"?summary"?\s*:/i);
+  const summaryKeyMatch = value.match(/"?summary"?\s*:\s*"/i);
+
+  if (!summaryKeyMatch) {
+    return null;
+  }
+
+  const summaryStart = summaryKeyMatch.index! + summaryKeyMatch[0].length;
+  const summaryEndMatch = value.slice(summaryStart).match(/"\s*}\s*$/);
+  const summaryEnd = summaryEndMatch?.index;
+
+  if (summaryEnd == null) {
+    return null;
+  }
+
+  const summary = value.slice(summaryStart, summaryStart + summaryEnd).trim();
+
+  if (!summary) {
+    return null;
+  }
+
+  return {
+    title: normalizePresentationTitle(titleMatch?.[1], fallback.title),
+    summary,
+  };
 }
 
 function shouldGenerateAiClusterSummary(clusterItems: ItemWithSource[], aiProvider?: AiProvider) {

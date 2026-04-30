@@ -6,6 +6,7 @@ type FilterSummaryProps = {
   items: string[];
   onClear: () => void;
   canClear: boolean;
+  actions?: ReactNode;
   emptyLabel?: string;
   clearLabel?: string;
   details?: ReactNode;
@@ -16,6 +17,7 @@ export function FilterSummary({
   items,
   onClear,
   canClear,
+  actions,
   emptyLabel = "暂无筛选条件",
   clearLabel = "清除筛选",
   details,
@@ -47,6 +49,7 @@ export function FilterSummary({
           >
             {clearLabel}
           </button>
+          {actions}
         </div>
       </div>
       {details ? <div className="mt-3 flex flex-col gap-1 text-sm text-[var(--text-2)]">{details}</div> : null}

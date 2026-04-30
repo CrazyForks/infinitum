@@ -462,6 +462,15 @@ function sanitizeFts5Query(input: string | null) {
   return `"${escaped}"`;
 }
 
+function sanitizeLikeQuery(input: string | null) {
+  const trimmed = input?.trim() ?? "";
+  if (!trimmed) {
+    return null;
+  }
+
+  return `%${trimmed.replace(/[\\%_]/g, "\\$&")}%`;
+}
+
 function toNumber(value: number | bigint) {
   return typeof value === "bigint" ? Number(value) : value;
 }
@@ -512,6 +521,31 @@ function buildFeedEntryCandidatesCte(
     whereClauses.push(Prisma.sql`s.id = ${filters.sourceId}`);
   }
 
+  const likeSearchTerm = sanitizeLikeQuery(filters.title);
+
+  if (searchTerm || likeSearchTerm) {
+    const searchClauses: Prisma.Sql[] = [];
+
+    if (searchTerm) {
+      searchClauses.push(Prisma.sql`i.rowid IN (SELECT rowid FROM items_fts WHERE items_fts MATCH ${searchTerm})`);
+    }
+
+    if (likeSearchTerm) {
+      const likeEscape = "\\";
+      searchClauses.push(Prisma.sql`COALESCE(i."originalTitle", '') LIKE ${likeSearchTerm} ESCAPE ${likeEscape}`);
+      searchClauses.push(Prisma.sql`COALESCE(i."translatedTitle", '') LIKE ${likeSearchTerm} ESCAPE ${likeEscape}`);
+      searchClauses.push(Prisma.sql`COALESCE(i.author, '') LIKE ${likeSearchTerm} ESCAPE ${likeEscape}`);
+      searchClauses.push(Prisma.sql`COALESCE(i."rssExcerpt", '') LIKE ${likeSearchTerm} ESCAPE ${likeEscape}`);
+      searchClauses.push(Prisma.sql`COALESCE(i."rssContent", '') LIKE ${likeSearchTerm} ESCAPE ${likeEscape}`);
+      searchClauses.push(Prisma.sql`COALESCE(i."fullText", '') LIKE ${likeSearchTerm} ESCAPE ${likeEscape}`);
+      searchClauses.push(Prisma.sql`COALESCE(i."summaryText", '') LIKE ${likeSearchTerm} ESCAPE ${likeEscape}`);
+      searchClauses.push(Prisma.sql`COALESCE(c.title, '') LIKE ${likeSearchTerm} ESCAPE ${likeEscape}`);
+      searchClauses.push(Prisma.sql`COALESCE(c.summary, '') LIKE ${likeSearchTerm} ESCAPE ${likeEscape}`);
+    }
+
+    whereClauses.push(Prisma.sql`(${Prisma.join(searchClauses, " OR ")})`);
+  }
+
   const clusterAiScore = Prisma.sql`CAST(ROUND(AVG(fi."qualityScore")) AS INTEGER)`;
   const clusterItemCount = Prisma.sql`COUNT(*)`;
   const clusterSourceCount = Prisma.sql`COUNT(DISTINCT fi."sourceId")`;
@@ -519,10 +553,6 @@ function buildFeedEntryCandidatesCte(
   const clusterDownvotes = Prisma.sql`COALESCE(MIN(cc.downvotes), 0)`;
   const singleUpvotes = Prisma.sql`COALESCE(cg.upvotes, 0)`;
   const singleDownvotes = Prisma.sql`COALESCE(cg.downvotes, 0)`;
-  const ftsJoin = searchTerm
-    ? Prisma.sql`INNER JOIN items_fts ON items_fts.rowid = i.rowid AND items_fts MATCH ${searchTerm}`
-    : Prisma.empty;
-
   return Prisma.sql`
     WITH filtered_items AS (
       SELECT
@@ -539,7 +569,6 @@ function buildFeedEntryCandidatesCte(
       FROM "items" i
       INNER JOIN "sources" s ON s.id = i."sourceId"
       LEFT JOIN "content_clusters" c ON c.id = i."clusterId"
-      ${ftsJoin}
       WHERE ${Prisma.join(whereClauses, " AND ")}
     ),
     cluster_total_counts AS (

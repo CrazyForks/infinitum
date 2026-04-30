@@ -297,6 +297,9 @@ describe("FeedPanel", () => {
 
     await selectFilterOption(user, "创建时间", "1月");
 
+    expect(fetchMock).not.toHaveBeenCalled();
+    await user.click(within(filterRegion).getByRole("button", { name: "查询" }));
+
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=1m&sort=time_desc");
     });
@@ -448,6 +451,9 @@ describe("FeedPanel", () => {
 
     await user.click(screen.getByRole("button", { name: "AI (1)" }));
 
+    expect(fetchMock).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "查询" }));
+
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=7d&sort=time_desc&groupId=group-ai");
     });
@@ -511,6 +517,9 @@ describe("FeedPanel", () => {
 
     await user.click(screen.getByRole("button", { name: "AI (1)" }));
 
+    expect(fetchMock).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "查询" }));
+
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=7d&sort=time_desc&groupId=group-ai");
     });
@@ -548,7 +557,7 @@ describe("FeedPanel", () => {
     });
   });
 
-  it("supports advanced filters with automatic refresh and title search", async () => {
+  it("applies advanced filters only after clicking query", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () =>
       new Response(
@@ -600,6 +609,9 @@ describe("FeedPanel", () => {
     await user.type(screen.getByLabelText("全文搜索"), "Agent");
     await selectFilterOption(user, "排序方式", "按评分倒序");
 
+    expect(fetchMock).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "查询" }));
+
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=7d&sort=score_desc&title=Agent");
     });
@@ -645,6 +657,9 @@ describe("FeedPanel", () => {
     await user.click(screen.getByRole("button", { name: "高级筛选" }));
     await selectFilterOption(user, "信息源", "AI Source");
 
+    expect(fetchMock).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "查询" }));
+
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith("/api/feed?sort=time_desc&sourceId=source-ai");
     });
@@ -688,13 +703,16 @@ describe("FeedPanel", () => {
     await user.click(screen.getByRole("button", { name: "高级筛选" }));
     await selectFilterOption(user, "信息源", "AI Source");
 
+    expect(fetchMock).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "查询" }));
+
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=3d&sort=time_desc&sourceId=source-ai");
     });
   });
 
   it("returns to the implicit today range after removing the last advanced filter", async () => {
-    vi.useFakeTimers();
+    const user = userEvent.setup();
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () =>
       new Response(
         JSON.stringify({
@@ -727,18 +745,16 @@ describe("FeedPanel", () => {
     );
 
     fireEvent.change(screen.getByLabelText("全文搜索"), { target: { value: "" } });
+    expect(fetchMock).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "查询" }));
 
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(320);
-      await Promise.resolve();
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=today&sort=time_desc");
     });
-
-    expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=today&sort=time_desc");
     expect(getSelectRoot("创建时间")).toHaveTextContent("当天");
   });
 
-  it("debounces title search before applying it to subsequent filter requests", async () => {
-    vi.useFakeTimers();
+  it("keeps title and sort edits local until query is clicked", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () =>
       new Response(
         JSON.stringify({
@@ -788,27 +804,16 @@ describe("FeedPanel", () => {
     fireEvent.change(screen.getByLabelText("全文搜索"), { target: { value: "Agent" } });
 
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(screen.queryByText("搜索：Agent")).not.toBeInTheDocument();
+    expect(screen.getByText("搜索：Agent")).toBeInTheDocument();
 
     fireEvent.change(screen.getByRole("combobox", { name: "排序方式" }), { target: { value: "score_desc" } });
 
     await act(async () => {
       await Promise.resolve();
     });
-    expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=7d&sort=score_desc");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(screen.queryByText("搜索：Agent")).not.toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
 
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(319);
-    });
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1);
-      await Promise.resolve();
-    });
+    fireEvent.click(screen.getByRole("button", { name: "查询" }));
 
     expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=7d&sort=score_desc&title=Agent");
     expect(screen.getByText("搜索：Agent")).toBeInTheDocument();
@@ -2205,6 +2210,9 @@ describe("FeedPanel", () => {
     await user.click(within(screen.getByRole("complementary", { name: "分组筛选侧栏" })).getByRole("button", { name: "Core (2)" }));
     await selectFilterOption(user, "信息源", "Feed Two");
 
+    expect(fetchMock).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "查询" }));
+
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/feed?range=7d&sort=score_desc&start=2026-04-01&end=2026-04-10&groupId=group-1&sourceId=source-2",
@@ -2212,7 +2220,7 @@ describe("FeedPanel", () => {
     });
   });
 
-  it("clears active filters and reloads the default view", async () => {
+  it("clears active filters without reloading until query is clicked", async () => {
     const user = userEvent.setup();
     const fetchMock = vi
       .fn<typeof fetch>()
@@ -2255,14 +2263,20 @@ describe("FeedPanel", () => {
     expect(screen.getByRole("button", { name: "高级筛选" })).toHaveAttribute("aria-expanded", "true");
     await user.click(screen.getByRole("button", { name: "清除筛选" }));
 
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenLastCalledWith("/api/feed?range=today&sort=time_desc");
-    });
-
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.getByText("OpenAI Agent 发布")).toBeInTheDocument();
     expect(getSelectRoot("创建时间")).toHaveTextContent("当天");
+    expect(screen.getByRole("button", { name: "高级筛选" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByLabelText("全文搜索")).toHaveValue("");
     expect(screen.getByText("创建时间：当天")).toBeInTheDocument();
     expect(screen.getByText("排序：按时间倒序")).toBeInTheDocument();
     expect(screen.queryByText("搜索：Agent")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "查询" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenLastCalledWith("/api/feed?range=today&sort=time_desc");
+    });
   });
 
   it("renders Lumina-like pagination controls when the feed has another page", () => {

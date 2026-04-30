@@ -739,4 +739,110 @@ describe("regenerateItemContent", () => {
     expect(summarizeCluster).toHaveBeenCalledTimes(2);
     expect(storedSecondTaskRun.aiCallCountActual).toBe(1);
   });
+
+  it("recovers cluster presentation JSON when the summary contains unescaped quotes", async () => {
+    const source = await prisma.source.create({
+      data: {
+        name: "Example Feed",
+        rssUrl: "https://example.com/feed.xml",
+        siteUrl: "https://example.com",
+        enabled: true,
+        aiParsingEnabled: true,
+      },
+    });
+    const cluster = await prisma.contentCluster.create({
+      data: {
+        id: "cluster-malformed-summary-json",
+        kind: "topic",
+        title: "旧聚合标题",
+        summary: "旧聚合摘要",
+        score: 80,
+        itemCount: 2,
+        latestPublishedAt: new Date("2026-04-21T10:00:00.000Z"),
+        status: "active",
+        fingerprint: "openai-gpt-image-2",
+      },
+    });
+
+    await prisma.item.createMany({
+      data: [
+        {
+          id: "cluster-malformed-summary-json-item-1",
+          sourceId: source.id,
+          clusterId: cluster.id,
+          originalUrl: "https://example.com/posts/gpt-image-2-1",
+          canonicalUrl: "https://example.com/posts/gpt-image-2-1",
+          urlHash: "cluster-malformed-summary-json-1",
+          dedupeSignature: "cluster-malformed-summary-json|1",
+          originalTitle: "OpenAI launches GPT Image 2",
+          translatedTitle: "OpenAI 上线 GPT Image 2",
+          summaryText: "OpenAI 推出文生图模型 GPT Image 2。",
+          publishedAt: new Date("2026-04-21T10:00:00.000Z"),
+          status: "processed",
+          moderationStatus: "allowed",
+          qualityScore: 88,
+          qualityRationale: "高质量",
+          eventType: "launch",
+          eventSubject: "OpenAI",
+          eventAction: "上线",
+          eventObject: "GPT Image 2",
+          eventDate: "2026-04-21",
+          language: "en",
+          fullText: "Cluster body one",
+        },
+        {
+          id: "cluster-malformed-summary-json-item-2",
+          sourceId: source.id,
+          clusterId: cluster.id,
+          originalUrl: "https://example.com/posts/gpt-image-2-2",
+          canonicalUrl: "https://example.com/posts/gpt-image-2-2",
+          urlHash: "cluster-malformed-summary-json-2",
+          dedupeSignature: "cluster-malformed-summary-json|2",
+          originalTitle: "GPT Image 2 tops visual model benchmark",
+          translatedTitle: "GPT Image 2 登顶视觉模型榜首",
+          summaryText: "GPT Image 2 在视觉模型榜单中取得领先。",
+          publishedAt: new Date("2026-04-21T09:00:00.000Z"),
+          status: "processed",
+          moderationStatus: "allowed",
+          qualityScore: 86,
+          qualityRationale: "高质量",
+          eventType: "launch",
+          eventSubject: "OpenAI",
+          eventAction: "上线",
+          eventObject: "GPT Image 2",
+          eventDate: "2026-04-21",
+          language: "en",
+          fullText: "Cluster body two",
+        },
+      ],
+    });
+
+    const taskRun = await prisma.backgroundTaskRun.create({
+      data: {
+        kind: "cluster_regenerate_summary",
+        triggerType: "admin_action",
+        status: "queued",
+        label: "重新生成聚合摘要",
+        entityId: cluster.id,
+      },
+    });
+    const summarizeCluster = vi.fn().mockResolvedValue(
+      `{"title":"OpenAI 上线 GPT Image 2 登顶全球视觉模型榜首","summary":"OpenAI 于 *4 月 21 日* 正式推出文生图模型 **GPT Image 2**，并在权威评测中超越谷歌 **Nano Banana 2**，登顶全球视觉模型榜首。该模型有效解决文字"漂浮感"和乱码问题。"}`,
+    );
+
+    await executeClusterSummaryTask(taskRun, {
+      aiProvider: buildAiProviderMock({
+        summarizeCluster,
+        matchClusterCandidate: vi.fn().mockResolvedValue(null),
+      }),
+    });
+
+    const storedCluster = await prisma.contentCluster.findUniqueOrThrow({
+      where: { id: cluster.id },
+    });
+
+    expect(storedCluster.title).toBe("OpenAI 上线 GPT Image 2 登顶全球视觉模型榜首");
+    expect(storedCluster.summary).toContain('文字"漂浮感"和乱码问题');
+    expect(storedCluster.summary).not.toContain('{"title"');
+  });
 });
