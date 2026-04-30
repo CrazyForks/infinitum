@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 
-import { getAdminSession } from "@/lib/admin/session";
 import { FeedPanel } from "@/components/feed/feed-panel";
 import {
   getCachedFeedFilterOptions,
@@ -8,7 +7,6 @@ import {
   getCachedLatestFetchRunSnapshot,
 } from "@/lib/feed/service";
 import { resolveFeedRequest } from "@/lib/feed/request";
-import { getVisitorIdCookie } from "@/lib/feed/visitor";
 import type { FeedEntryDTO, FeedFilters, FeedRange } from "@/lib/feed/types";
 import {
   buildWebSiteJsonLd,
@@ -20,7 +18,7 @@ import {
   toSeoDescription,
 } from "@/lib/seo/metadata";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 30;
 
 type PageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -172,11 +170,9 @@ export default async function Home({ searchParams }: PageProps) {
   const resolvedSearchParams = (await searchParams) ?? {};
   const { filters, pagination } = resolveFeedRequest(resolvedSearchParams);
   const initialCreatedRangeExplicit = hasExplicitHomeCreatedTimeFilter(resolvedSearchParams);
-  const visitorId = await getVisitorIdCookie();
-  const [feed, latestRunSnapshot, adminSession, feedFilterOptions] = await Promise.all([
-    getCachedFeedItems(filters, pagination, visitorId),
+  const [feed, latestRunSnapshot, feedFilterOptions] = await Promise.all([
+    getCachedFeedItems(filters, pagination),
     getCachedLatestFetchRunSnapshot(),
-    getAdminSession(),
     getCachedFeedFilterOptions(),
   ]);
   const { title, description } = buildFeedMetadataText(filters);
@@ -201,7 +197,8 @@ export default async function Home({ searchParams }: PageProps) {
         initialNextCursor={feed.nextCursor}
         initialPagination={feed.pagination}
         initialStatus={latestRunSnapshot}
-        isAdmin={adminSession.isAdmin}
+        isAdmin={false}
+        hydrateAdminClient
         initialGroupId={filters.groupId}
         initialSourceId={filters.sourceId}
         initialTitle={filters.title}

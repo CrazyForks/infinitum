@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { MouseEvent } from "react";
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 
 import {
   deleteDailyReport,
@@ -19,6 +19,7 @@ import { renderInlineMarkdown } from "@/components/ui/inline-markdown";
 import { ModalShell } from "@/components/ui/modal-shell";
 import { getTodayDailyReportDate } from "@/lib/daily-report/date";
 import { PaginationControls } from "@/components/ui/pagination-controls";
+import { useClientAdminSession } from "@/components/ui/use-client-admin-session";
 import type { DailyReportArchiveWeekDTO, DailyReportListItemDTO } from "@/lib/daily-report/types";
 import { cx } from "@/lib/ui/cx";
 
@@ -26,8 +27,17 @@ type DailyReportListProps = {
   reports: DailyReportListItemDTO[];
   weeks: DailyReportArchiveWeekDTO[];
   isAdmin: boolean;
+  hydrateAdminClient?: boolean;
   selectedWeek: string | null;
   selectedStatus: string;
+  total: number;
+  page: number;
+  pageSize: number;
+};
+
+type DailyReportListPayload = {
+  reports: DailyReportListItemDTO[];
+  weeks: DailyReportArchiveWeekDTO[];
   total: number;
   page: number;
   pageSize: number;
@@ -48,25 +58,61 @@ function statusClass(status: DailyReportListItemDTO["status"]) {
 }
 
 export function DailyReportList({
-  reports,
-  weeks,
-  isAdmin,
+  reports: initialReports,
+  weeks: initialWeeks,
+  isAdmin: initialIsAdmin,
+  hydrateAdminClient = false,
   selectedWeek,
   selectedStatus,
-  total,
-  page,
-  pageSize,
+  total: initialTotal,
+  page: initialPage,
+  pageSize: initialPageSize,
 }: DailyReportListProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const isAdmin = useClientAdminSession(initialIsAdmin, hydrateAdminClient);
+  const [adminPayload, setAdminPayload] = useState<DailyReportListPayload | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DailyReportListItemDTO | null>(null);
   const [generateDialogOpen, setGenerateDialogOpen] = useState(false);
   const [generateDate, setGenerateDate] = useState(getTodayValue);
   const [isPending, startTransition] = useTransition();
+  const reports = adminPayload?.reports ?? initialReports;
+  const weeks = adminPayload?.weeks ?? initialWeeks;
+  const total = adminPayload?.total ?? initialTotal;
+  const page = adminPayload?.page ?? initialPage;
+  const pageSize = adminPayload?.pageSize ?? initialPageSize;
   const totalWeekCount = weeks.reduce((sum, week) => sum + week.count, 0);
   const totalPages = Math.ceil(total / pageSize) || 1;
   const [jumpToPage, setJumpToPage] = useState(String(page));
+
+  useEffect(() => {
+    if (!hydrateAdminClient || !isAdmin || initialIsAdmin) {
+      return;
+    }
+
+    let active = true;
+
+    fetch(`/api/daily${searchParams.toString() ? `?${searchParams.toString()}` : ""}`, { cache: "no-store" })
+      .then((response) => response.ok ? response.json() as Promise<DailyReportListPayload> : null)
+      .then((payload) => {
+        if (!active || !payload) {
+          return;
+        }
+
+        setAdminPayload(payload);
+        setJumpToPage(String(payload.page));
+      })
+      .catch(() => {
+        if (active) {
+          setFeedback("管理员视图加载失败，请刷新后重试。");
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [hydrateAdminClient, initialIsAdmin, isAdmin, searchParams]);
 
   const handleJumpToPage = () => {
     const nextPage = Number.parseInt(jumpToPage, 10);

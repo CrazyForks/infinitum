@@ -12,14 +12,13 @@ import { withFeedCache } from "@/lib/feed/cache";
 type FeedFiltersInput = Parameters<typeof listFeedItems>[0];
 type FeedPaginationInput = Parameters<typeof listFeedItems>[1];
 
-function serializeFeedFilters(filters: FeedFiltersInput, visitorId?: string) {
+function serializeFeedFilters(filters: FeedFiltersInput) {
   return JSON.stringify({
     ...filters,
     rangeStart: filters.rangeStart?.toISOString() ?? null,
     rangeEnd: filters.rangeEnd?.toISOString() ?? null,
     publishedRangeStart: filters.publishedRangeStart?.toISOString() ?? null,
     publishedRangeEnd: filters.publishedRangeEnd?.toISOString() ?? null,
-    visitorId: visitorId ?? null,
   });
 }
 
@@ -63,13 +62,13 @@ function serializeFeedSourceConfigCacheVersion(
   return `${sourceVersion}:${groupVersion}`;
 }
 
-export async function getCachedFeedItems(filters: FeedFiltersInput, pagination: FeedPaginationInput, visitorId?: string) {
+export async function getCachedFeedItems(filters: FeedFiltersInput, pagination: FeedPaginationInput) {
   const [latestRun, latestItemUpdate] = await Promise.all([getLatestFetchRun(), getLatestFeedItemUpdate()]);
   const cacheVersion = `${serializeFetchRunCacheVersion(latestRun)}:${serializeFeedDataCacheVersion(latestItemUpdate)}`;
 
   return withFeedCache(
-    `feed:list:${cacheVersion}:${serializeFeedFilters(filters, visitorId)}:${serializeFeedPagination(pagination)}`,
-    () => listFeedItems(filters, pagination, visitorId),
+    `feed:list:${cacheVersion}:${serializeFeedFilters(filters)}:${serializeFeedPagination(pagination)}`,
+    () => listFeedItems(filters, pagination),
     FEED_LIST_CACHE_TTL_MS,
   );
 }

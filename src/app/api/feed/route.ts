@@ -1,12 +1,12 @@
 import { resolveFeedRequest } from "@/lib/feed/request";
 import { getCachedFeedItems } from "@/lib/feed/service";
-import { getVisitorIdCookie } from "@/lib/feed/visitor";
+
+const PUBLIC_FEED_CACHE_CONTROL = "public, s-maxage=30, stale-while-revalidate=300";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const { filters, pagination } = resolveFeedRequest(searchParams);
-  const visitorId = await getVisitorIdCookie();
-  const result = await getCachedFeedItems(filters, pagination, visitorId);
+  const result = await getCachedFeedItems(filters, pagination);
 
   return Response.json(
     {
@@ -23,7 +23,7 @@ export async function GET(request: Request) {
     },
     {
       headers: {
-        "cache-control": "no-store",
+        "cache-control": PUBLIC_FEED_CACHE_CONTROL,
       },
     },
   );

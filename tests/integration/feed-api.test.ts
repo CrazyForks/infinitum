@@ -213,6 +213,8 @@ describe("/api/feed", () => {
 
     const json = await response.json();
 
+    expect(response.headers.get("cache-control")).toBe("public, s-maxage=30, stale-while-revalidate=300");
+    expect(response.headers.get("set-cookie")).toBeNull();
     expect(json.items).toHaveLength(4);
     expect(json.items[0]).toMatchObject({
       type: "cluster",

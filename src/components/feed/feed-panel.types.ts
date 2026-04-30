@@ -24,6 +24,7 @@ export type FeedPanelProps = {
   initialPagination?: FeedPagination | null;
   initialStatus: FetchRunSnapshot | null;
   isAdmin: boolean;
+  hydrateAdminClient?: boolean;
   initialGroupId?: string | null;
   initialSourceId?: string | null;
   initialTitle?: string | null;

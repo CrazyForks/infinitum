@@ -10,6 +10,7 @@ type PageShellNav = "home" | "daily" | "admin" | null;
 type PageShellHeader = {
   activeNav: PageShellNav;
   isAdmin: boolean;
+  resolveAdminClient?: boolean;
   showShadow?: boolean;
   rssHref?: string;
 };
@@ -53,6 +54,7 @@ export function PageShell({
         <GlobalHeader
           activeNav={header.activeNav}
           isAdmin={header.isAdmin}
+          resolveAdminClient={header.resolveAdminClient}
           showShadow={header.showShadow}
           rssHref={header.rssHref}
         />

@@ -6,10 +6,12 @@ import { useRouter } from "next/navigation";
 
 import { IconGithub, IconLock, IconLogout, IconMonitor, IconMoon, IconRss, IconSettings, IconSun } from "@/components/ui/icons";
 import { cx } from "@/lib/ui/cx";
+import { useClientAdminSession } from "@/components/ui/use-client-admin-session";
 
 type GlobalHeaderProps = {
   activeNav: "home" | "daily" | "admin" | null;
   isAdmin: boolean;
+  resolveAdminClient?: boolean;
   showShadow?: boolean;
   rssHref?: string;
 };
@@ -21,8 +23,9 @@ const navItems = [
 
 type ThemePreference = "light" | "dark" | "system";
 
-export function GlobalHeader({ activeNav, isAdmin, showShadow = true, rssHref }: GlobalHeaderProps) {
+export function GlobalHeader({ activeNav, isAdmin: initialIsAdmin, resolveAdminClient = false, showShadow = true, rssHref }: GlobalHeaderProps) {
   const router = useRouter();
+  const isAdmin = useClientAdminSession(initialIsAdmin, resolveAdminClient);
   const [isPending, setIsPending] = useState(false);
   const [theme, setTheme] = useState<ThemePreference>("system");
   const [themeMenuOpen, setThemeMenuOpen] = useState(false);

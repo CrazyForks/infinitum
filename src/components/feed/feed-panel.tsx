@@ -72,6 +72,7 @@ import { ModalShell } from "@/components/ui/modal-shell";
 import { PaginationControls } from "@/components/ui/pagination-controls";
 import { SelectField } from "@/components/ui/select-field";
 import { TextInput } from "@/components/ui/text-input";
+import { useClientAdminSession } from "@/components/ui/use-client-admin-session";
 import { RANGE_OPTIONS, SORT_OPTIONS } from "@/lib/feed/range";
 import type {
   ClusterDTO,
@@ -382,7 +383,8 @@ export function FeedPanel({
   initialNextCursor = null,
   initialPagination = null,
   initialStatus,
-  isAdmin,
+  isAdmin: initialIsAdmin,
+  hydrateAdminClient = false,
   initialGroupId = null,
   initialSourceId = null,
   initialTitle = null,
@@ -391,6 +393,7 @@ export function FeedPanel({
   availableSources = [],
 }: FeedPanelProps) {
   const router = useRouter();
+  const isAdmin = useClientAdminSession(initialIsAdmin, hydrateAdminClient);
   const fallbackInitialPagination: FeedPagination = initialPagination ?? buildFallbackPagination(initialItems, initialNextCursor);
   const [items, setItems] = useState(initialItems);
   const [pagination, setPagination] = useState<FeedPagination>(fallbackInitialPagination);
@@ -1498,6 +1501,7 @@ export function FeedPanel({
       header={{
         activeNav: "home",
         isAdmin,
+        resolveAdminClient: hydrateAdminClient,
       }}
       footerPath="/"
       contentClassName="gap-5 sm:gap-6"

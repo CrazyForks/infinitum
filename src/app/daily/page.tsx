@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 
-import { getAdminSession } from "@/lib/admin/session";
 import { DailyReportList } from "@/components/daily/daily-report-list";
 import { BackToTopButton } from "@/components/ui/back-to-top-button";
 import { listDailyReportArchiveWeeks, listDailyReports } from "@/lib/daily-report/repository";
@@ -13,7 +12,7 @@ import {
   toSeoDescription,
 } from "@/lib/seo/metadata";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 300;
 
 type DailyPageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -73,7 +72,6 @@ function buildDailyListJsonLd(reports: Awaited<ReturnType<typeof listDailyReport
 
 export default async function DailyPage({ searchParams }: DailyPageProps) {
   const resolvedSearchParams = (await searchParams) ?? {};
-  const session = await getAdminSession();
   const selectedWeek = typeof resolvedSearchParams.week === "string" ? resolvedSearchParams.week : null;
   const rawStatus = typeof resolvedSearchParams.status === "string" ? resolvedSearchParams.status : "all";
   const selectedStatus = rawStatus === "draft" || rawStatus === "published" || rawStatus === "all" ? rawStatus : "all";
@@ -84,14 +82,14 @@ export default async function DailyPage({ searchParams }: DailyPageProps) {
 
   const [{ reports, total }, weeks] = await Promise.all([
     listDailyReports({
-      isAdmin: session.isAdmin,
+      isAdmin: false,
       status: selectedStatus,
       week: selectedWeek,
       page,
       pageSize,
     }),
     listDailyReportArchiveWeeks({
-      isAdmin: session.isAdmin,
+      isAdmin: false,
       status: selectedStatus,
     }),
   ]);
@@ -101,7 +99,8 @@ export default async function DailyPage({ searchParams }: DailyPageProps) {
     <PageShell
       header={{
         activeNav: "daily",
-        isAdmin: session.isAdmin,
+        isAdmin: false,
+        resolveAdminClient: true,
         rssHref: "/api/daily/rss",
       }}
       contentPaddingClassName="px-4 pt-3 pb-6 sm:px-6 sm:pt-4 sm:pb-8 lg:px-8 lg:pt-4 lg:pb-10"
@@ -110,7 +109,8 @@ export default async function DailyPage({ searchParams }: DailyPageProps) {
       <DailyReportList
         reports={reports}
         weeks={weeks}
-        isAdmin={session.isAdmin}
+        isAdmin={false}
+        hydrateAdminClient
         selectedWeek={selectedWeek}
         selectedStatus={selectedStatus}
         total={total}

@@ -1,7 +1,7 @@
 ---
 forge_loop: true
 artifact: review-report
-slug: cluster-merge-candidate-optimization
+slug: public-feed-cache-and-html-cache
 status: done
 gate: H4
 blocking: false
@@ -10,7 +10,7 @@ security_high_risk: false
 failed_tests_unexplained: false
 ---
 
-# Review Report: cluster-merge-candidate-optimization
+# Review Report: public-feed-cache-and-html-cache
 
 | Field | Value |
 | --- | --- |
@@ -20,58 +20,57 @@ failed_tests_unexplained: false
 | Must Fix Count | 0 |
 | Security High Risk | no |
 | Failed Tests Unexplained | no |
-| Review Scope | current diff: cluster merge candidate limiting, per-cluster merge hash reuse, merge observability, admin task detail modal width, tests, quick task records |
-| Review Depth | deep |
-| Specialist Reviewers | architecture and security checklist |
-| Adversarial Pass | done |
-| Retrospective | skipped: quick iteration with focused implementation and local validation |
+| Review Scope | current diff: public feed shared cache, PV/UV realtime downgrade, public homepage/daily admin hydration, cache headers, quick task records |
+| Review Depth | standard |
+| Specialist Reviewers | security and deployability checklist |
+| Adversarial Pass | N/A |
+| Retrospective | skipped: quick iteration with focused implementation |
 
 ## Requirement Compliance
 
 | Requirement / AC | Result | Notes |
 | --- | --- | --- |
-| Reduce automatic cluster merge candidate volume | pass | Removed broad multi-item inclusion, added per-anchor related pair cap and total candidate cap. |
-| Avoid repeatedly sending unchanged similar candidates | pass | `mergeInputHash` is checked per cluster, so clean pairs are skipped while changed clusters can still pull relevant neighbors. |
-| Keep changed clusters prioritized | pass | Candidate sorting prefers dirty clusters before score, item count, and recency. |
-| Improve merge pass observability | pass | Timeline now exposes base pool, pair filters, hash skips, dirty candidates, AI groups, moved items, and failed groups. |
-| Make task detail modal wider | pass | Task detail modal width changed from `max-w-2xl` to `max-w-5xl`; confirm modal remains unchanged. |
+| Improve anonymous visitor capacity | pass | Public feed no longer creates/uses visitor cookie; `/api/feed`, `/`, and `/daily` expose shared-cache headers. |
+| Preserve vote dedupe semantics | pass | Vote POST path still owns visitor cookie and database unique vote semantics; feed list only drops historical per-user highlight. |
+| Reduce PV/UV cost | pass | Same visitor/path writes are deduped for a short window and stats are cached. |
+| Keep admin capabilities reachable | pass | Homepage and daily list hydrate admin state from `/api/admin/session`; daily list reloads admin-visible data from `/api/daily`. |
 
 ## Design Compliance
 
 | Area | Result | Notes |
 | --- | --- | --- |
-| Architecture | pass | Pair scoring and diagnostics stay in cluster helpers; merge orchestration stays in cluster service; timeline presentation remains in ingestion/admin layers. |
-| Existing behavior preservation | pass | AI still makes final merge group decisions; merge target selection still sorts by `itemCount` within AI-returned groups. |
-| Cost control | pass | Local filtering now bounds related pairs and total AI candidates before calling the merge prompt. |
-| Operator visibility | pass | Added task timeline metrics make candidate pruning and hash skipping visible from admin task detail. |
+| Cache semantics | pass | Anonymous feed is shared; admin/private functionality remains behind client hydration or admin APIs. |
+| Freshness | pass | Feed cache key still includes fetch/item versioning; edge cache is short TTL. |
+| Admin safety | pass | `/daily/[date]` remains dynamic to avoid caching draft detail/refinement behavior. |
+| Production deployability | pass with follow-up | Code-level headers are present; production Nginx/Cloudflare must be configured after redeploy to honor them. |
 
 ## Contract Compliance
 
 | Area | Result | Notes |
 | --- | --- | --- |
-| API | pass | No route path, auth, or public API response shape changed. |
-| Types | pass | Internal result/counter types were extended consistently; `npx tsc --noEmit` passed. |
-| Auth | N/A | No auth or permission code touched. |
-| State | pass | Existing `contentCluster.mergeInputHash` is reused; no schema or migration required. |
+| API | pass | `/api/feed` response shape unchanged; header behavior changed intentionally. |
+| Types | pass | New optional props are backward compatible. |
+| Auth | pass | Admin state check continues through existing `/api/admin/session`; no permission broadening. |
+| Data | pass | No schema or migration changes. |
 
 ## Code Quality
 
 - No Must Fix findings.
-- Candidate diagnostics are deterministic and covered by unit/component tests.
-- Dirty-first ordering affects candidate input priority only; it does not change actual merge target selection.
-- The admin summary is denser, but the task detail modal width was widened to reduce wrapping on desktop.
+- Client admin hydration is opt-in, so existing component tests and admin pages are not forced to make extra session requests.
+- Daily admin list data is only refetched after client confirms admin session.
+- Analytics cache is process-local; acceptable for short-term load shedding, not a global exact counter.
 
 ## Commit Readiness
 
 | Check | Result | Notes |
 | --- | --- | --- |
-| Obvious Bugs | pass | Reviewed hash comparison, skip paths, AI failure paths, merge result counters, and modal width scope. |
-| API / Data Breakage | pass | No schema, route, auth, or serialized external contract changes. |
-| Deployability | pass | No migration or dependency change; existing clusters may be re-evaluated as hashes differ after candidate input changes. |
-| Observability | pass | Merge pass now records detailed pruning, dirty, AI, success, and failure counters. |
-| Error Handling UX | pass | AI failure and no-provider paths still mark evaluated candidates and return skipped metrics. |
-| Idempotency / Retry | pass | Per-cluster hash gating keeps repeated tasks from resending unchanged pairs, while changed clusters remain eligible. |
-| Resource Cleanup | N/A | No resource lifecycle changes. |
+| Obvious Bugs | pass | Reviewed cache key removal, admin hydration guards, analytics dedupe, and response headers. |
+| API / Data Breakage | pass | No route removal or schema change. |
+| Security | pass | Admin-only data is still loaded through admin-aware API after session confirmation; daily detail remains dynamic. |
+| Test Coverage | pass | Targeted feed, analytics, shell/header, and feed panel tests passed. |
+| Deployability | pass with advisory | Existing production image still needs redeploy before new app headers exist; Nginx/Cloudflare setup follows redeploy. |
+| Error Handling UX | pass | Admin hydration failures fail closed to non-admin UI or show daily admin load feedback. |
+| Resource Cleanup | pass | Client hydration effects use active flags to avoid state updates after unmount. |
 | Dependency Change | N/A | No manifest or lockfile changes. |
 
 ## Autofix Routing
@@ -81,41 +80,30 @@ failed_tests_unexplained: false
 | safe_auto | 0 | N/A |
 | gated_auto | 0 | N/A |
 | manual | 0 | N/A |
-| advisory | 1 | Monitor live metric distribution before further threshold tuning. |
-
-## Workflow Metrics
-
-| Signal | Value | Notes |
-| --- | --- | --- |
-| Route | quick | Work was handled through Quick Lane artifacts. |
-| Gate Friction | low | Multiple quick tasks were created because the user asked iterative follow-ups. |
-| Verification Freshness | fresh | Targeted tests, integration test, typecheck, lint, workflow validation, and diff check were run this turn. |
-| Rework Signal | low | Follow-up widened the task detail modal for the new summary density. |
-| Template Noise | low | Review report required by project pre-commit rule. |
+| advisory | 2 | Configure production edge cache after redeploy; consider vote-status hydration later only if needed. |
 
 ## Follow-ups
 
 | Type | Item | Target | Notes |
 | --- | --- | --- | --- |
-| tuning | Watch real `基础池 / AI候选Pair / Hash跳过 / Dirty候选 / AI返回组 / 移动条目` values | runtime task timeline | Use live distribution to decide whether to tune score thresholds or candidate caps. |
+| deploy | Rebuild/redeploy app image before Nginx/Cloudflare cache tuning | production | Current server still returns old `no-store` headers until redeployed. |
+| ops | Configure Nginx/Cloudflare to respect `s-maxage` and bypass admin/private requests | production | Avoid caching `/admin/*`, mutating methods, or admin-cookie responses. |
 
 ## Security Review
 
-- Pass. No auth, secrets, permission, user input execution, or new external network surface was added.
+- Pass. No new secret exposure, no permission broadening, no public access to admin APIs. The main cache risk is operational: production edge cache must bypass admin/private routes and cookies.
 
 ## Performance Review
 
-- Pass with advisory. Pair scoring remains quadratic over recent active clusters, but AI candidate submission is now bounded by per-anchor and global caps; diagnostics will make future tuning easier.
+- Pass. The change reduces per-visitor feed cache fragmentation, allows public GET edge caching, and lowers pageview write/query amplification.
 
 ## Test Coverage
 
-- `npm test -- tests/unit/cluster-merge-candidates.test.ts` passed: 6 tests.
-- `npm test -- tests/components/task-monitor-panel.test.tsx` passed: 4 tests.
-- `npm test -- tests/integration/cluster-assignment.test.ts` passed: 5 tests.
 - `npx tsc --noEmit` passed.
+- `npx vitest run tests/components/global-header.test.tsx tests/components/page-shell.test.tsx tests/components/feed-panel.test.tsx tests/integration/feed-api.test.ts tests/integration/analytics-api.test.ts` passed: 5 files, 81 tests.
 - `npm run lint` passed with 0 errors and one existing warning: `src/components/admin/admin-page-client.tsx:133` unused `_props`.
-- `npx @shawnxie666/forge-loop validate` passed for all four quick task slugs.
-- `git diff --check` passed.
+- `npm run build` passed.
+- `npx @shawnxie666/forge-loop validate` passed for implementation quick task artifacts.
 
 ## Must Fix
 
@@ -129,11 +117,11 @@ failed_tests_unexplained: false
 
 ## Nice To Have
 
-- Consider a later compact UI layout for cluster merge timeline metrics if the single-line summary remains too dense on smaller desktop widths.
+- Add lightweight vote-status hydration later if the product wants historical vote button highlight after refresh, without putting visitorId back into feed list cache keys.
 
 ## Final Recommendation
 
-Approve with Follow-ups. The diff reduces repeated and oversized cluster merge candidate pools, improves operator-visible metrics, preserves final merge semantics, and has targeted test coverage. No Must Fix, security high-risk issue, or unexplained test failure was found.
+Approve with Follow-ups. The diff is coherent and ready to commit. No Must Fix, security high-risk issue, or unexplained test failure was found.
 
 ## Open Questions
 
@@ -143,19 +131,17 @@ Approve with Follow-ups. The diff reduces repeated and oversized cluster merge c
 
 ## Assumptions
 
-- The existing 7-day merge lookback remains acceptable.
-- `max-w-5xl` is acceptable for the desktop task detail modal while `w-full` and overlay padding protect smaller viewports.
-- Live task timeline metrics are sufficient for the next round of threshold tuning.
+- Anonymous public traffic is the primary load concern.
+- Admin controls can appear after client session hydration.
+- PV/UV can be near-real-time rather than exact per-hit realtime.
 
 ## Risks
 
-- Merge candidate thresholds and caps may need tuning after observing live data.
-- Existing clusters may get a one-time re-evaluation because merge hash semantics now include richer candidate input.
+- Production edge caching must be configured carefully to avoid caching admin/private responses.
+- Until redeploy, the server still runs the previous image and will not emit the new app-level cache headers.
 
 ## Validation
 
-- No Must Fix before merge.
-- No Security High Risk before merge.
-- No unexplained test failure before merge.
-- Review Depth classified and adversarial pass recorded.
-- Architecture follow-ups are typed follow-ups and do not block this commit.
+- No Must Fix before commit.
+- No Security High Risk before commit.
+- No unexplained test failure before commit.
