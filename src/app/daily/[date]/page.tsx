@@ -3,7 +3,6 @@ import { notFound } from "next/navigation";
 
 import { DailyReportDetail } from "@/components/daily/daily-report-detail";
 import { BackToTopButton } from "@/components/ui/back-to-top-button";
-import { getAdminSession } from "@/lib/admin/session";
 import { getDailyReportByDate } from "@/lib/daily-report/repository";
 import { normalizeDailyReportDate } from "@/lib/daily-report/date";
 import { PageShell } from "@/components/ui/page-shell";
@@ -17,7 +16,7 @@ import {
   toSeoDescription,
 } from "@/lib/seo/metadata";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 300;
 
 type DailyReportPageProps = {
   params: Promise<{ date: string }>;
@@ -64,8 +63,7 @@ export async function generateMetadata({ params }: DailyReportPageProps): Promis
     };
   }
 
-  const session = await getAdminSession();
-  const report = await getDailyReportByDate(date, session.isAdmin);
+  const report = await getDailyReportByDate(date, false);
 
   if (!report) {
     return {
@@ -112,19 +110,15 @@ export default async function DailyReportPage({ params }: DailyReportPageProps) 
     notFound();
   }
 
-  const session = await getAdminSession();
-  const report = await getDailyReportByDate(date, session.isAdmin);
-
-  if (!report) {
-    notFound();
-  }
-  const jsonLd = buildDailyReportJsonLd(report);
+  const report = await getDailyReportByDate(date, false);
+  const jsonLd = report ? buildDailyReportJsonLd(report) : null;
 
   return (
     <PageShell
       header={{
         activeNav: "daily",
-        isAdmin: session.isAdmin,
+        isAdmin: false,
+        resolveAdminClient: true,
         showShadow: false,
         rssHref: "/api/daily/rss",
       }}
@@ -132,11 +126,13 @@ export default async function DailyReportPage({ params }: DailyReportPageProps) 
       contentPaddingClassName="px-0 pt-0 pb-6 sm:pb-8 lg:pb-10"
       footerPath={`/daily/${date}`}
     >
-      <DailyReportDetail report={report} isAdmin={session.isAdmin} />
-      <script
-        type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: serializeJsonLd(jsonLd) }}
-      />
+      <DailyReportDetail report={report} date={date} isAdmin={false} hydrateAdminClient />
+      {jsonLd ? (
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: serializeJsonLd(jsonLd) }}
+        />
+      ) : null}
       <BackToTopButton />
     </PageShell>
   );

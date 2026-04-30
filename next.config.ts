@@ -22,6 +22,15 @@ const nextConfig: NextConfig = {
           },
         ],
       },
+      {
+        source: "/daily/:date",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, s-maxage=300, stale-while-revalidate=600",
+          },
+        ],
+      },
     ];
   },
 };

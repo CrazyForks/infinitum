@@ -8,6 +8,7 @@ import {
   addDailyReportRefinementSources,
   deleteDailyReport,
   discardDailyReportRefinementSession,
+  getAdminDailyReportDetail,
   getDailyReportRefinementSession,
   publishDailyReport,
   requestDailyReportGeneration,
@@ -19,6 +20,7 @@ import {
 } from "@/components/daily/daily-report.api";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
+import { useClientAdminSession } from "@/components/ui/use-client-admin-session";
 import {
   IconArrowDown,
   IconCheck,
@@ -44,8 +46,20 @@ import { renderSafeMarkdown } from "@/lib/markdown/safe-html";
 import { cx } from "@/lib/ui/cx";
 
 type DailyReportDetailProps = {
+  report: DailyReportDetailDTO | null;
+  date: string;
+  isAdmin: boolean;
+  hydrateAdminClient?: boolean;
+};
+
+type DailyReportDetailContentProps = {
   report: DailyReportDetailDTO;
   isAdmin: boolean;
+};
+
+type AdminReportState = {
+  date: string | null;
+  report: DailyReportDetailDTO | null;
 };
 
 type TocItem = {
@@ -135,7 +149,81 @@ function TableOfContents({ items, activeId, onSelect }: {
   );
 }
 
-export function DailyReportDetail({ report, isAdmin }: DailyReportDetailProps) {
+function DailyReportUnavailable({ isAdmin, isLoading }: { isAdmin: boolean; isLoading: boolean }) {
+  return (
+    <section className="mx-auto flex w-full max-w-3xl flex-1 items-center justify-center px-4 py-16 text-center sm:px-6 lg:px-8">
+      <div className="panel-raised rounded-sm border border-[color:var(--line)] bg-[var(--surface)] px-6 py-8 shadow-[var(--shadow-sm)]">
+        <h1 className="text-xl font-semibold text-[var(--foreground)]">
+          {isLoading ? "正在加载日报" : "日报不存在"}
+        </h1>
+        <p className="mt-3 text-sm leading-6 text-[var(--text-2)]">
+          {isLoading
+            ? "正在确认管理员权限并读取草稿内容。"
+            : isAdmin
+              ? "未找到这篇日报，或日报已被删除。"
+              : "这篇日报尚未发布或不存在。"}
+        </p>
+        <Link
+          href="/daily"
+          className="mt-5 inline-flex rounded-sm bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90"
+        >
+          返回日报列表
+        </Link>
+      </div>
+    </section>
+  );
+}
+
+export function DailyReportDetail({
+  report: initialReport,
+  date,
+  isAdmin: initialIsAdmin,
+  hydrateAdminClient = false,
+}: DailyReportDetailProps) {
+  const isAdmin = useClientAdminSession(initialIsAdmin, hydrateAdminClient);
+  const [adminReportState, setAdminReportState] = useState<AdminReportState>({
+    date: null,
+    report: null,
+  });
+  const shouldFetchAdminReport = hydrateAdminClient && isAdmin && !initialIsAdmin;
+  const adminReport = adminReportState.date === date ? adminReportState.report : null;
+  const report = adminReport ?? initialReport;
+  const isLoadingAdminReport = shouldFetchAdminReport && adminReportState.date !== date;
+
+  useEffect(() => {
+    if (!shouldFetchAdminReport || adminReportState.date === date) {
+      return;
+    }
+
+    let active = true;
+
+    getAdminDailyReportDetail(date)
+      .then((result) => {
+        if (!active) return;
+        setAdminReportState({
+          date,
+          report: result.ok ? (result.data.report ?? null) : null,
+        });
+      })
+      .catch(() => {
+        if (active) {
+          setAdminReportState({ date, report: null });
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [adminReportState.date, date, shouldFetchAdminReport]);
+
+  if (!report) {
+    return <DailyReportUnavailable isAdmin={isAdmin} isLoading={isAdmin && isLoadingAdminReport} />;
+  }
+
+  return <DailyReportDetailContent report={report} isAdmin={isAdmin} />;
+}
+
+function DailyReportDetailContent({ report, isAdmin }: DailyReportDetailContentProps) {
   const router = useRouter();
   const contentRef = useRef<HTMLDivElement | null>(null);
   const refinementMessagesRef = useRef<HTMLDivElement | null>(null);

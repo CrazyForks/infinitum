@@ -1,5 +1,6 @@
 import type {
   DailyReportContent,
+  DailyReportDetailDTO,
   DailyReportRefineMode,
   DailyReportRefineStreamEvent,
   DailyReportRefinementSourceSearchResult,
@@ -52,6 +53,12 @@ export function deleteDailyReport(date: string) {
   return requestJsonWithMeta<{ deleted?: boolean; error?: string }>(`/api/admin/daily-reports/${date}`, {
     method: "DELETE",
   });
+}
+
+export function getAdminDailyReportDetail(date: string) {
+  return requestJsonWithMeta<{ report?: DailyReportDetailDTO | null; error?: string }>(
+    `/api/admin/daily-reports/${date}`,
+  );
 }
 
 export function getDailyReportRefinementSession(date: string) {
