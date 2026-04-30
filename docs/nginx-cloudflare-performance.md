@@ -82,6 +82,7 @@ Next.js RSC 请求需要额外小心。除非你专门设计了 RSC 相关 heade
   (
     (http.request.uri.path eq "/" and not http.request.uri.query contains "_rsc=") or
     (http.request.uri.path eq "/daily" and not http.request.uri.query contains "_rsc=") or
+    (starts_with(http.request.uri.path, "/daily/") and not http.request.uri.query contains "_rsc=") or
     http.request.uri.path eq "/api/feed" or
     http.request.uri.path eq "/api/feed/rss" or
     http.request.uri.path eq "/api/daily/rss" or
@@ -378,6 +379,7 @@ Infinitum 当前配置：
 | `/` | cache eligible | 30s microcache | Cloudflare 排除 `_rsc` |
 | `/api/feed` | cache eligible | 30s microcache | 匿名公开 feed |
 | `/daily` | cache eligible | 300s microcache | 公开日报列表页 |
+| `/daily/yyyy-mm-dd` | cache eligible | 300s microcache | 公开日报详情页，Cloudflare 排除 `_rsc` |
 | `/api/feed/rss` | cache eligible | 300s microcache | RSS |
 | `/api/daily/rss` | cache eligible | 300s microcache | RSS |
 | `/api/daily/*/export.md` | cache eligible | 300s microcache | 已发布日报 markdown 导出 |
