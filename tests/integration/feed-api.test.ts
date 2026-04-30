@@ -221,28 +221,28 @@ describe("/api/feed", () => {
       id: "cluster-a",
       title: "OpenAI Agent 发布",
       itemCount: 2,
-      score: 91,
+      score: 84,
     });
     expect(json.items[1]).toMatchObject({
       type: "single",
       id: "item-timezone-created",
       title: "按创建时间归档",
       itemCount: 1,
-      score: 75,
+      score: 71,
     });
     expect(json.items[2]).toMatchObject({
       type: "single",
       id: "item-b1",
       title: "故事 B",
       itemCount: 1,
-      score: 62,
+      score: 60,
     });
     expect(json.items[3]).toMatchObject({
       type: "single",
       id: "item-c1",
       title: "故事 C1",
       itemCount: 1,
-      score: 98,
+      score: 89,
     });
     expect(json.pagination).toMatchObject({
       page: 1,
@@ -573,22 +573,22 @@ describe("/api/feed", () => {
       expect(json.items[0]).toMatchObject({
         type: "single",
         id: "item-c1",
-        score: 98,
+        score: 89,
       });
       expect(json.items[1]).toMatchObject({
         type: "cluster",
         id: "cluster-a",
-        score: 91,
+        score: 84,
       });
       expect(json.items[2]).toMatchObject({
         type: "single",
         id: "item-timezone-created",
-        score: 75,
+        score: 71,
       });
       expect(json.items[3]).toMatchObject({
         type: "single",
         id: "item-b1",
-        score: 62,
+        score: 60,
       });
       expect(json.sort).toBe("score_desc");
     } finally {
@@ -674,14 +674,14 @@ describe("/api/feed", () => {
       expect(json.items[0]).toMatchObject({
         type: "cluster",
         id: "cluster-boosted",
-        score: 100,
+        score: 92,
         sourceCount: 3,
         itemCount: 3,
       });
       expect(json.items[1]).toMatchObject({
         type: "single",
         id: "item-c1",
-        score: 98,
+        score: 89,
       });
     } finally {
       vi.useRealTimers();

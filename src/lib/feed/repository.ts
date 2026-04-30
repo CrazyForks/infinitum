@@ -9,6 +9,7 @@ import {
 
 import { prisma } from "@/lib/db";
 import { getDisplaySummary, getDisplayTitle, shouldTranslateTitle } from "@/lib/feed/presentation";
+import { buildRecommendScoreSql, calculateRecommendScore } from "@/lib/feed/recommend-score";
 import { toGroupBadge, type GroupBadge } from "@/lib/groups/badge";
 import type {
   ClusterDTO,
@@ -469,47 +470,6 @@ function toIsoString(value: Date | string) {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 }
 
-/**
- * 计算综合推荐评分
- * 以AI评分为基准，访客推荐值做适当微调
- *
- * 算法：
- * - 基准分 = AI评分 (0-100)
- * - 投票微调 = clamp(upvotes - downvotes, -20, +20)
- * - 来源加权 = min(8, max(0, sourceCount - 1) * 3)
- * - 条目加权 = min(4, floor(log2(itemCount)))
- * - 综合评分 = clamp(基准分 + 投票微调 + 来源加权 + 条目加权, 0, 100)
- */
-function calculateRecommendScore(
-  aiScore: number,
-  upvotes: number,
-  downvotes: number,
-  sourceCount: number,
-  itemCount: number,
-): number {
-  const netVotes = upvotes - downvotes;
-  const voteBoost = Math.max(-20, Math.min(20, netVotes));
-  const sourceBoost = Math.min(8, Math.max(0, sourceCount - 1) * 3);
-  const itemBoost = Math.min(4, Math.floor(Math.log2(Math.max(1, itemCount))));
-
-  return Math.max(0, Math.min(100, aiScore + voteBoost + sourceBoost + itemBoost));
-}
-
-function buildRecommendScoreSql(input: {
-  aiScore: Prisma.Sql;
-  upvotes: Prisma.Sql;
-  downvotes: Prisma.Sql;
-  sourceCount: Prisma.Sql;
-  itemCount: Prisma.Sql;
-}) {
-  const voteBoost = Prisma.sql`CASE WHEN (${input.upvotes} - ${input.downvotes}) > 20 THEN 20 WHEN (${input.upvotes} - ${input.downvotes}) < -20 THEN -20 ELSE (${input.upvotes} - ${input.downvotes}) END`;
-  const sourceBoost = Prisma.sql`CASE WHEN ((${input.sourceCount} - 1) * 3) > 8 THEN 8 WHEN ((${input.sourceCount} - 1) * 3) < 0 THEN 0 ELSE ((${input.sourceCount} - 1) * 3) END`;
-  const itemBoost = Prisma.sql`CASE WHEN ${input.itemCount} >= 16 THEN 4 WHEN ${input.itemCount} >= 8 THEN 3 WHEN ${input.itemCount} >= 4 THEN 2 WHEN ${input.itemCount} >= 2 THEN 1 ELSE 0 END`;
-  const combinedScore = Prisma.sql`${input.aiScore} + ${voteBoost} + ${sourceBoost} + ${itemBoost}`;
-
-  return Prisma.sql`CASE WHEN ${combinedScore} > 100 THEN 100 WHEN ${combinedScore} < 0 THEN 0 ELSE ${combinedScore} END`;
-}
-
 function buildFeedEntryCandidatesCte(
   filters: FeedFilters & {
     rangeStart: Date | null;
@@ -606,7 +566,7 @@ function buildFeedEntryCandidatesCte(
         MAX(COALESCE(ctc.total_count, 0)) AS "totalItemCount",
         ${clusterUpvotes} AS upvotes,
         ${clusterDownvotes} AS downvotes,
-        -- 综合推荐评分 = AI评分 + 投票微调 + 来源/条目聚合加权
+        -- 综合推荐评分 = AI锚点分 + 有限反馈微调 + 来源/条目聚合加权
         ${buildRecommendScoreSql({
           aiScore: clusterAiScore,
           upvotes: clusterUpvotes,
@@ -634,7 +594,7 @@ function buildFeedEntryCandidatesCte(
         1 AS "itemCount",
         COALESCE(cg.upvotes, 0) AS upvotes,
         COALESCE(cg.downvotes, 0) AS downvotes,
-        -- 综合推荐评分 = AI评分 + 投票微调，单条来源/条目加权为 0
+        -- 综合推荐评分 = AI锚点分 + 有限反馈微调，单条来源/条目加权为 0
         ${buildRecommendScoreSql({
           aiScore: Prisma.sql`fi."qualityScore"`,
           upvotes: singleUpvotes,
@@ -677,7 +637,7 @@ function buildFeedEntryCandidatesCte(
 
 function buildFeedEntryOrderBy(sort: FeedFilters["sort"]) {
   if (sort === "score_desc") {
-    // 按综合推荐评分降序（AI评分 + 访客投票微调）
+    // 按综合推荐评分降序（AI锚点分 + 访客反馈 + 聚合加权）
     return Prisma.sql`ORDER BY "recommendScore" DESC, "latestPublishedAt" DESC, "itemCount" DESC, id DESC`;
   }
 
@@ -924,7 +884,7 @@ export async function listFeedItems(
         return [];
       }
       // 为单条卡片注入 clusterId（用于投票）和正确的投票数
-      // 使用综合推荐评分（AI评分 + 访客投票微调）
+      // 使用综合推荐评分（AI锚点分 + 访客反馈）
       const clusterId = row.clusterId ?? item.id;
       return [{
         ...item,
@@ -1053,7 +1013,7 @@ export async function listAdminClusters(page = 1, pageSize = 20) {
 
   return {
     clusters: clusters.map((cluster) => {
-      // 计算综合推荐评分（AI评分 + 投票微调 + 来源/条目聚合加权）
+      // 计算综合推荐评分（AI锚点分 + 有限反馈微调 + 来源/条目聚合加权）
       const clusterWithVotes = cluster as typeof cluster & { upvotes: number; downvotes: number };
       const sourceCount = new Set(cluster.items.map((item) => item.sourceId)).size;
       const recommendScore = calculateRecommendScore(
@@ -1108,7 +1068,7 @@ export async function getAdminCluster(clusterId: string) {
     return null;
   }
 
-  // 计算综合推荐评分（AI评分 + 投票微调 + 来源/条目聚合加权）
+  // 计算综合推荐评分（AI锚点分 + 有限反馈微调 + 来源/条目聚合加权）
   const clusterWithVotes = cluster as typeof cluster & { upvotes: number; downvotes: number };
   const sourceCount = new Set(cluster.items.map((item) => item.sourceId)).size;
   const recommendScore = calculateRecommendScore(

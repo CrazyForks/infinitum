@@ -1,4 +1,7 @@
+import { Prisma } from "@prisma/client";
+
 import { prisma } from "@/lib/db";
+import { buildRecommendScoreSql } from "@/lib/feed/recommend-score";
 
 export type DailyArticleStat = {
   date: string;
@@ -285,15 +288,72 @@ async function getDailySourceHealthStats(days: number): Promise<DailySourceHealt
 // ---------------------------------------------------------------------------
 
 async function getQualityScoreDistribution(): Promise<QualityScoreBucket[]> {
-  const rows = await prisma.item.groupBy({
-    by: ["qualityScore"],
-    where: { moderationStatus: "allowed" },
-    _count: { id: true },
+  const clusterAiScore = Prisma.sql`CAST(ROUND(AVG(fi."qualityScore")) AS INTEGER)`;
+  const clusterItemCount = Prisma.sql`COUNT(*)`;
+  const clusterSourceCount = Prisma.sql`COUNT(DISTINCT fi."sourceId")`;
+  const clusterUpvotes = Prisma.sql`COALESCE(MIN(cc.upvotes), 0)`;
+  const clusterDownvotes = Prisma.sql`COALESCE(MIN(cc.downvotes), 0)`;
+  const clusterRecommendScore = buildRecommendScoreSql({
+    aiScore: clusterAiScore,
+    upvotes: clusterUpvotes,
+    downvotes: clusterDownvotes,
+    sourceCount: clusterSourceCount,
+    itemCount: clusterItemCount,
   });
+  const singleRecommendScore = buildRecommendScoreSql({
+    aiScore: Prisma.sql`fi."qualityScore"`,
+    upvotes: Prisma.sql`COALESCE(cg.upvotes, 0)`,
+    downvotes: Prisma.sql`COALESCE(cg.downvotes, 0)`,
+    sourceCount: Prisma.sql`1`,
+    itemCount: Prisma.sql`1`,
+  });
+
+  const rows = await prisma.$queryRaw<Array<{ score: number | bigint; count: number | bigint }>>`
+    WITH filtered_items AS (
+      SELECT
+        i.id AS "itemId",
+        i."clusterId" AS "clusterId",
+        i."sourceId" AS "sourceId",
+        i."qualityScore" AS "qualityScore"
+      FROM "items" i
+      INNER JOIN "sources" s ON s.id = i."sourceId"
+      LEFT JOIN "content_clusters" cc ON cc.id = i."clusterId"
+      WHERE i.status = 'processed'
+        AND i."moderationStatus" IN ('allowed', 'restored')
+        AND s.enabled = true
+        AND (i."clusterId" IS NULL OR cc.status = 'active')
+    ),
+    cluster_groups AS (
+      SELECT
+        fi."clusterId" AS id,
+        ${clusterItemCount} AS "itemCount",
+        ${clusterSourceCount} AS "sourceCount",
+        ${clusterUpvotes} AS upvotes,
+        ${clusterDownvotes} AS downvotes,
+        ${clusterRecommendScore} AS "recommendScore"
+      FROM filtered_items fi
+      INNER JOIN "content_clusters" cc ON cc.id = fi."clusterId"
+      WHERE fi."clusterId" IS NOT NULL
+      GROUP BY fi."clusterId"
+    ),
+    composite_scores AS (
+      SELECT cg."recommendScore" AS score
+      FROM cluster_groups cg
+      WHERE cg."itemCount" > 1
+      UNION ALL
+      SELECT ${singleRecommendScore} AS score
+      FROM filtered_items fi
+      LEFT JOIN cluster_groups cg ON cg.id = fi."clusterId"
+      WHERE fi."clusterId" IS NULL OR cg."itemCount" = 1
+    )
+    SELECT score, COUNT(*) AS count
+    FROM composite_scores
+    GROUP BY score
+  `;
 
   const scoreCounts = new Map<number, number>();
   for (const row of rows) {
-    scoreCounts.set(row.qualityScore, row._count.id);
+    scoreCounts.set(Number(row.score), Number(row.count));
   }
 
   return QUALITY_BUCKETS.map((bucket) => {

@@ -20,7 +20,7 @@ import { cx } from "@/lib/ui/cx";
 
 // Task status filter options
 type TaskStatusFilter = "" | BackgroundTaskRunStatus;
-type TaskKindFilter = "" | "ingestion" | "item" | "cluster" | "daily";
+type TaskKindFilter = "" | TaskRunSnapshot["kind"];
 type TimeRangeFilter = "" | "today" | "week" | "month";
 
 const statusOptions: Array<{ value: TaskStatusFilter; label: string }> = [
@@ -31,14 +31,6 @@ const statusOptions: Array<{ value: TaskStatusFilter; label: string }> = [
   { value: "failed", label: "失败" },
   { value: "partial", label: "部分成功" },
   { value: "cancelled", label: "已取消" },
-];
-
-const kindOptions: Array<{ value: TaskKindFilter; label: string }> = [
-  { value: "", label: "全部" },
-  { value: "ingestion", label: "抓取任务" },
-  { value: "item", label: "内容处理" },
-  { value: "cluster", label: "聚合处理" },
-  { value: "daily", label: "AI 日报" },
 ];
 
 const timeRangeOptions: Array<{ value: TimeRangeFilter; label: string }> = [
@@ -66,6 +58,14 @@ const kindLabels: Record<TaskRunSnapshot["kind"], string> = {
   daily_report_generate: "AI 日报生成",
   item_cleanup: "文章自动清理",
 };
+
+const kindOptions: Array<{ value: TaskKindFilter; label: string }> = [
+  { value: "", label: "全部" },
+  ...(Object.entries(kindLabels) as Array<[TaskRunSnapshot["kind"], string]>).map(([value, label]) => ({
+    value,
+    label,
+  })),
+];
 
 const triggerLabels: Record<TaskRunSnapshot["triggerType"], string> = {
   scheduled: "定时调度",
@@ -228,11 +228,7 @@ function filterTasks(
   return tasks.filter((task) => {
     if (statusFilter && task.status !== statusFilter) return false;
     if (kindFilter) {
-      if (kindFilter === "ingestion" && task.kind !== "ingestion") return false;
-      if (kindFilter === "item" && !task.kind.startsWith("item_")) return false;
-      if (kindFilter === "cluster" && !task.kind.startsWith("cluster_"))
-        return false;
-      if (kindFilter === "daily" && task.kind !== "daily_report_generate") return false;
+      if (task.kind !== kindFilter) return false;
     }
     if (timeRangeFilter && task.startedAt) {
       const taskDate = new Date(task.startedAt);

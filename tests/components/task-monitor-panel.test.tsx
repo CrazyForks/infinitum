@@ -277,6 +277,46 @@ describe("TaskMonitorPanel", () => {
     expect(within(dialog).getByText("单条新闻标题")).toBeInTheDocument();
   });
 
+  it("lists every task kind in the type filter and filters cleanup tasks precisely", async () => {
+    const user = userEvent.setup();
+    const baseTask = buildMonitorSnapshot().runningTasks[0];
+    const recentTasks: BackgroundTaskMonitorSnapshot["recentTasks"] = [
+      { ...baseTask, id: "task-ingestion", kind: "ingestion", label: "默认抓取任务", status: "succeeded" },
+      { ...baseTask, id: "task-reanalyze", kind: "item_reanalyze", label: "内容重分析", status: "succeeded" },
+      { ...baseTask, id: "task-summary", kind: "item_regenerate_summary", label: "摘要重生成", status: "succeeded" },
+      { ...baseTask, id: "task-translation", kind: "item_regenerate_translation", label: "译文重生成", status: "succeeded" },
+      { ...baseTask, id: "task-cluster", kind: "cluster_regenerate_summary", label: "聚合摘要重生成", status: "succeeded" },
+      { ...baseTask, id: "task-daily", kind: "daily_report_generate", label: "AI 日报生成", status: "succeeded" },
+      { ...baseTask, id: "task-cleanup", kind: "item_cleanup", label: "清理历史文章", status: "succeeded" },
+    ];
+
+    renderWithProviders(
+      <TaskMonitorPanel
+        runningTasks={[]}
+        recentTasks={recentTasks}
+      />,
+    );
+
+    const kindSelect = screen.getByLabelText("任务类型") as HTMLSelectElement;
+    expect(Array.from(kindSelect.options).map((option) => option.textContent)).toEqual([
+      "全部",
+      "抓取任务",
+      "内容重分析",
+      "摘要重生成",
+      "译文重生成",
+      "聚合摘要重生成",
+      "AI 日报生成",
+      "文章自动清理",
+    ]);
+
+    await user.selectOptions(kindSelect, "item_cleanup");
+
+    expect(screen.getByText("清理历史文章")).toBeInTheDocument();
+    expect(screen.getAllByText("文章自动清理")).toHaveLength(2);
+    expect(screen.queryByRole("button", { name: /默认抓取任务/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /内容重分析/ })).not.toBeInTheDocument();
+  });
+
   it("keeps current pagination when opening a task detail route", async () => {
     const user = userEvent.setup();
     const onDetailRouteChange = vi.fn();
