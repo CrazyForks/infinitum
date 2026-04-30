@@ -21,6 +21,7 @@ import { ModalShell } from "@/components/ui/modal-shell";
 import { PaginationControls } from "@/components/ui/pagination-controls";
 import { IconButton } from "@/components/ui/icon-button";
 import { Button } from "@/components/ui/button";
+import { renderInlineMarkdown } from "@/components/ui/inline-markdown";
 import { StatusTag } from "@/components/ui/status-tag";
 import { useToast } from "@/components/ui/toast";
 import {
@@ -242,7 +243,9 @@ function FilteredItemDetailModal({
         {/* Summary */}
         <div className="space-y-2">
           <h4 className="text-sm font-semibold text-[var(--text-1)]">内容摘要</h4>
-          <p className="text-sm text-[var(--text-2)] leading-6">{item.summary || "暂无摘要"}</p>
+          <p className="text-sm text-[var(--text-2)] leading-6">
+            {renderInlineMarkdown(item.summary || "暂无摘要")}
+          </p>
         </div>
 
         {/* Moderation Detail */}
@@ -380,7 +383,7 @@ function ClusterDetailModal({
         <div className="space-y-2">
           <h4 className="text-sm font-semibold text-[var(--text-1)]">聚合摘要</h4>
           <p className="text-sm text-[var(--text-2)] leading-6">
-            {cluster.summary || "暂无摘要"}
+            {renderInlineMarkdown(cluster.summary || "暂无摘要")}
           </p>
         </div>
 

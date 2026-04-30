@@ -204,6 +204,72 @@ describe("ContentReviewPanel", () => {
     });
   });
 
+  it("renders markdown emphasis in the filtered item detail summary", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+      const url = getFetchUrl(input);
+
+      if (url === "/api/admin/items?moderationStatus=filtered&page=1&pageSize=10") {
+        return new Response(
+          JSON.stringify({
+            items: [createFilteredItem({ summary: "这是 **重点** 和 *补充*" })],
+            total: 1,
+          }),
+        );
+      }
+
+      if (url === "/api/admin/clusters?page=1&pageSize=10") {
+        return new Response(JSON.stringify({ clusters: [], total: 0 }));
+      }
+
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderWithProviders(<ContentReviewPanel />);
+    await waitForLoaded();
+
+    await user.click(within(screen.getByRole("table")).getByRole("button", { name: /营销内容/ }));
+    const detailDialog = await screen.findByRole("dialog", { name: "过滤内容详情" });
+
+    expect(within(detailDialog).getByText("重点").tagName).toBe("STRONG");
+    expect(within(detailDialog).getByText("补充").tagName).toBe("EM");
+  });
+
+  it("renders markdown emphasis in the cluster detail summary", async () => {
+    const user = userEvent.setup();
+    const cluster = createCluster({ summary: "聚合 **重点** 与 *背景*" });
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+      const url = getFetchUrl(input);
+
+      if (url === "/api/admin/items?moderationStatus=filtered&page=1&pageSize=10") {
+        return new Response(JSON.stringify({ items: [], total: 0 }));
+      }
+
+      if (url === "/api/admin/clusters?page=1&pageSize=10") {
+        return new Response(JSON.stringify({ clusters: [cluster], total: 1 }));
+      }
+
+      if (url === "/api/admin/clusters/cluster-1") {
+        return new Response(JSON.stringify({ cluster }));
+      }
+
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderWithProviders(<ContentReviewPanel activeTab="clusters" />);
+    await waitForLoaded();
+
+    await user.click(screen.getByText("AI 融资动态"));
+    const detailDialog = await screen.findByRole("dialog", { name: "聚合详情" });
+
+    expect(within(detailDialog).getByText("重点").tagName).toBe("STRONG");
+    expect(within(detailDialog).getByText("背景").tagName).toBe("EM");
+  });
+
   it("queues reanalyze as a background task", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
