@@ -401,7 +401,7 @@ describe("FeedPanel", () => {
     expect(within(sidebar).getByRole("button", { name: "AI (1)" })).toBeInTheDocument();
   });
 
-  it("requests the selected group through the new sidebar entry", async () => {
+  it("requests the selected group immediately through the sidebar entry", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(
@@ -450,9 +450,6 @@ describe("FeedPanel", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "AI (1)" }));
-
-    expect(fetchMock).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: "查询" }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=7d&sort=time_desc&groupId=group-ai");
@@ -516,9 +513,6 @@ describe("FeedPanel", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "AI (1)" }));
-
-    expect(fetchMock).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: "查询" }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=7d&sort=time_desc&groupId=group-ai");
@@ -2208,6 +2202,14 @@ describe("FeedPanel", () => {
 
     expect(screen.getByRole("button", { name: "高级筛选" })).toHaveAttribute("aria-expanded", "true");
     await user.click(within(screen.getByRole("complementary", { name: "分组筛选侧栏" })).getByRole("button", { name: "Core (2)" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/feed?range=7d&sort=score_desc&start=2026-04-01&end=2026-04-10&groupId=group-1",
+      );
+    });
+
+    fetchMock.mockClear();
     await selectFilterOption(user, "信息源", "Feed Two");
 
     expect(fetchMock).not.toHaveBeenCalled();

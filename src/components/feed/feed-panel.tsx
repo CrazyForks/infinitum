@@ -617,6 +617,7 @@ export function FeedPanel({
 
     setGroupId(normalizedGroupId);
     setSourceId(nextSourceId);
+    loadFeed(buildQuery({ groupId: normalizedGroupId, sourceId: nextSourceId }), 1, pageSize, { scrollToTop: true });
   };
 
   const changeSource = (nextSourceId: string) => {
