@@ -17,6 +17,20 @@ const DISPLAYABLE_MODERATION_STATUSES = ["allowed", "restored"] as const;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const WEEK_MS = 7 * DAY_MS;
 const DAILY_REPORT_ARCHIVE_WEEK_COUNT = 53;
+const DAILY_REPORT_CANDIDATE_POOL_MULTIPLIER = 4;
+const DAILY_REPORT_CANDIDATE_POOL_MAX = 2000;
+
+function calculateDailyReportCandidateScore(input: { qualityScore: number; sourceCount: number; itemCount: number }) {
+  const aiBaseScore = 50 + (input.qualityScore - 50) * 0.85;
+  const sourceBoost = Math.min(12, Math.max(0, input.sourceCount - 1) * 4);
+  const itemBoost = Math.min(6, Math.floor(Math.log2(Math.max(1, input.itemCount))) * 2);
+
+  return Math.max(0, Math.min(100, Math.round(aiBaseScore + sourceBoost + itemBoost)));
+}
+
+function getDailyReportCandidatePoolLimit(limit: number) {
+  return Math.max(limit, Math.min(DAILY_REPORT_CANDIDATE_POOL_MAX, limit * DAILY_REPORT_CANDIDATE_POOL_MULTIPLIER));
+}
 
 async function getDailyReportCacheVersion(isAdmin: boolean) {
   const latestReport = await prisma.dailyReport.findFirst({
@@ -49,7 +63,7 @@ async function getDailyReportCacheVersion(isAdmin: boolean) {
 export async function listDailyReportCandidates(date: string, limit = 120) {
   const { start, end } = getDailyReportDateRange(date);
   const rows = await prisma.item.findMany({
-    take: limit,
+    take: getDailyReportCandidatePoolLimit(limit),
     where: {
       createdAt: {
         gte: start,
@@ -64,6 +78,20 @@ export async function listDailyReportCandidates(date: string, limit = 120) {
           enabled: true,
         },
       },
+      AND: [
+        {
+          OR: [
+            { clusterId: null },
+            {
+              cluster: {
+                is: {
+                  status: "active",
+                },
+              },
+            },
+          ],
+        },
+      ],
     },
     select: {
       id: true,
@@ -85,30 +113,113 @@ export async function listDailyReportCandidates(date: string, limit = 120) {
       eventDate: true,
       source: {
         select: {
+          id: true,
           name: true,
+        },
+      },
+      cluster: {
+        select: {
+          id: true,
+          title: true,
+          summary: true,
+          eventType: true,
+          eventSubject: true,
+          eventAction: true,
+          eventObject: true,
+          eventDate: true,
         },
       },
     },
     orderBy: [{ qualityScore: "desc" }, { createdAt: "desc" }],
   });
 
-  return rows.map((item, index): DailyReportCandidate => ({
-    id: index + 1,
-    itemId: item.id,
-    clusterId: item.clusterId,
-    title: getDisplayTitle(item.originalTitle, item.translatedTitle),
-    sourceName: item.source.name,
-    url: item.originalUrl,
-    summary: getDisplaySummary(item.summaryText, item.rssExcerpt, item.fullText ?? item.rssContent),
-    qualityScore: item.qualityScore,
-    createdAt: item.createdAt.toISOString(),
-    publishedAt: item.publishedAt.toISOString(),
-    eventType: item.eventType,
-    eventSubject: item.eventSubject,
-    eventAction: item.eventAction,
-    eventObject: item.eventObject,
-    eventDate: item.eventDate,
-  }));
+  const grouped = new Map<string, {
+    representative: (typeof rows)[number];
+    qualityScore: number;
+    sourceIds: Set<string>;
+    itemCount: number;
+    latestCreatedAt: Date;
+    latestPublishedAt: Date;
+  }>();
+
+  for (const item of rows) {
+    const groupKey = item.clusterId ? `cluster:${item.clusterId}` : `item:${item.id}`;
+    const existing = grouped.get(groupKey);
+
+    if (!existing) {
+      grouped.set(groupKey, {
+        representative: item,
+        qualityScore: item.qualityScore,
+        sourceIds: new Set([item.source.id]),
+        itemCount: 1,
+        latestCreatedAt: item.createdAt,
+        latestPublishedAt: item.publishedAt,
+      });
+      continue;
+    }
+
+    existing.sourceIds.add(item.source.id);
+    existing.qualityScore = Math.max(existing.qualityScore, item.qualityScore);
+    existing.itemCount += 1;
+    if (item.createdAt.getTime() > existing.latestCreatedAt.getTime()) {
+      existing.latestCreatedAt = item.createdAt;
+    }
+    if (item.publishedAt.getTime() > existing.latestPublishedAt.getTime()) {
+      existing.latestPublishedAt = item.publishedAt;
+    }
+    if (
+      item.qualityScore > existing.representative.qualityScore ||
+      (item.qualityScore === existing.representative.qualityScore &&
+        item.createdAt.getTime() > existing.representative.createdAt.getTime())
+    ) {
+      existing.representative = item;
+    }
+  }
+
+  const ranked = [...grouped.values()]
+    .map((entry) => ({
+      ...entry,
+      score: calculateDailyReportCandidateScore({
+        qualityScore: entry.qualityScore,
+        sourceCount: entry.sourceIds.size,
+        itemCount: entry.itemCount,
+      }),
+    }))
+    .sort((left, right) => {
+      if (right.score !== left.score) return right.score - left.score;
+      if (right.qualityScore !== left.qualityScore) return right.qualityScore - left.qualityScore;
+      if (right.latestPublishedAt.getTime() !== left.latestPublishedAt.getTime()) {
+        return right.latestPublishedAt.getTime() - left.latestPublishedAt.getTime();
+      }
+      if (right.latestCreatedAt.getTime() !== left.latestCreatedAt.getTime()) {
+        return right.latestCreatedAt.getTime() - left.latestCreatedAt.getTime();
+      }
+      return right.representative.id.localeCompare(left.representative.id);
+    })
+    .slice(0, limit);
+
+  return ranked.map((entry, index): DailyReportCandidate => {
+    const item = entry.representative;
+    const cluster = item.cluster;
+
+    return {
+      id: index + 1,
+      itemId: item.id,
+      clusterId: item.clusterId,
+      title: cluster?.title || getDisplayTitle(item.originalTitle, item.translatedTitle),
+      sourceName: item.source.name,
+      url: item.originalUrl,
+      summary: cluster?.summary || getDisplaySummary(item.summaryText, item.rssExcerpt, item.fullText ?? item.rssContent),
+      qualityScore: item.qualityScore,
+      createdAt: item.createdAt.toISOString(),
+      publishedAt: item.publishedAt.toISOString(),
+      eventType: cluster?.eventType ?? item.eventType,
+      eventSubject: cluster?.eventSubject ?? item.eventSubject,
+      eventAction: cluster?.eventAction ?? item.eventAction,
+      eventObject: cluster?.eventObject ?? item.eventObject,
+      eventDate: cluster?.eventDate ?? item.eventDate,
+    };
+  });
 }
 
 function parseContent(summaryJson: string): DailyReportContent {

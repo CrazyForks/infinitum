@@ -6,39 +6,72 @@ type AdminSessionPayload = {
   isAdmin?: boolean;
 };
 
-export function useClientAdminSession(initialIsAdmin: boolean, enabled = false) {
-  const [isAdmin, setIsAdmin] = useState(initialIsAdmin);
+type ClientAdminSessionState = {
+  isAdmin: boolean;
+  isResolving: boolean;
+};
+
+export function useClientAdminSessionState(
+  initialIsAdmin: boolean,
+  enabled = false,
+): ClientAdminSessionState {
+  const shouldResolveClientSession = enabled && !initialIsAdmin;
+  const requestKey = `${enabled}:${initialIsAdmin}`;
+  const [clientSession, setClientSession] = useState<{
+    key: string;
+    isAdmin: boolean | null;
+  }>({
+    key: requestKey,
+    isAdmin: shouldResolveClientSession ? null : initialIsAdmin,
+  });
+  const resolvedClientAdmin = clientSession.key === requestKey ? clientSession.isAdmin : null;
 
   useEffect(() => {
-    setIsAdmin(initialIsAdmin);
-  }, [initialIsAdmin]);
-
-  useEffect(() => {
-    if (!enabled || initialIsAdmin) {
+    if (!shouldResolveClientSession) {
       return;
     }
 
     let active = true;
 
     fetch("/api/admin/session", { cache: "no-store" })
-      .then((response) => response.ok ? response.json() as Promise<AdminSessionPayload> : null)
+      .then((response) => (response.ok ? response.json() as Promise<AdminSessionPayload> : null))
       .then((session) => {
-        if (!active || !session) {
+        if (!active) {
           return;
         }
 
-        setIsAdmin(Boolean(session.isAdmin));
+        setClientSession({
+          key: requestKey,
+          isAdmin: Boolean(session?.isAdmin),
+        });
       })
       .catch(() => {
         if (active) {
-          setIsAdmin(false);
+          setClientSession({
+            key: requestKey,
+            isAdmin: false,
+          });
         }
       });
 
     return () => {
       active = false;
     };
-  }, [enabled, initialIsAdmin]);
+  }, [requestKey, shouldResolveClientSession]);
 
-  return isAdmin;
+  if (!shouldResolveClientSession) {
+    return {
+      isAdmin: initialIsAdmin,
+      isResolving: false,
+    };
+  }
+
+  return {
+    isAdmin: Boolean(resolvedClientAdmin),
+    isResolving: resolvedClientAdmin == null,
+  };
+}
+
+export function useClientAdminSession(initialIsAdmin: boolean, enabled = false) {
+  return useClientAdminSessionState(initialIsAdmin, enabled).isAdmin;
 }

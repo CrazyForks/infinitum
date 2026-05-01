@@ -86,7 +86,8 @@ describe("DailyReportDetail", () => {
 
     render(<DailyReportDetail report={null} date="2026-04-29" isAdmin={false} hydrateAdminClient />);
 
-    expect(screen.getByText("日报不存在")).toBeInTheDocument();
+    expect(screen.getByText("加载中...")).toBeInTheDocument();
+    expect(screen.queryByText("日报不存在")).not.toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "草稿日报", level: 1 })).toBeInTheDocument();
     expect(screen.getByText("草稿")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "日报微调" })).toBeInTheDocument();
@@ -105,5 +106,18 @@ describe("DailyReportDetail", () => {
     });
     expect(fetchMock).not.toHaveBeenCalledWith("/api/admin/daily-reports/2026-04-29");
     expect(screen.getByText("这篇日报尚未发布或不存在。")).toBeInTheDocument();
+  });
+
+  it("falls back to the unavailable state when admin session resolution fails", async () => {
+    const fetchMock = vi.fn(async () => Response.json({ error: "unavailable" }, { status: 503 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<DailyReportDetail report={null} date="2026-04-29" isAdmin={false} hydrateAdminClient />);
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/admin/session", { cache: "no-store" });
+    });
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/admin/daily-reports/2026-04-29");
+    expect(screen.getByText("日报不存在")).toBeInTheDocument();
   });
 });

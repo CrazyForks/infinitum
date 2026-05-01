@@ -20,7 +20,7 @@ import {
 } from "@/components/daily/daily-report.api";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
-import { useClientAdminSession } from "@/components/ui/use-client-admin-session";
+import { useClientAdminSessionState } from "@/components/ui/use-client-admin-session";
 import {
   IconArrowDown,
   IconCheck,
@@ -150,18 +150,20 @@ function TableOfContents({ items, activeId, onSelect }: {
 }
 
 function DailyReportUnavailable({ isAdmin, isLoading }: { isAdmin: boolean; isLoading: boolean }) {
+  if (isLoading) {
+    return (
+      <div className="flex min-h-48 w-full items-center justify-center px-4 py-12 text-sm text-[var(--text-2)]">
+        加载中...
+      </div>
+    );
+  }
+
   return (
     <section className="mx-auto flex w-full max-w-3xl flex-1 items-center justify-center px-4 py-16 text-center sm:px-6 lg:px-8">
       <div className="panel-raised rounded-sm border border-[color:var(--line)] bg-[var(--surface)] px-6 py-8 shadow-[var(--shadow-sm)]">
-        <h1 className="text-xl font-semibold text-[var(--foreground)]">
-          {isLoading ? "正在加载日报" : "日报不存在"}
-        </h1>
+        <h1 className="text-xl font-semibold text-[var(--foreground)]">日报不存在</h1>
         <p className="mt-3 text-sm leading-6 text-[var(--text-2)]">
-          {isLoading
-            ? "正在确认管理员权限并读取草稿内容。"
-            : isAdmin
-              ? "未找到这篇日报，或日报已被删除。"
-              : "这篇日报尚未发布或不存在。"}
+          {isAdmin ? "未找到这篇日报，或日报已被删除。" : "这篇日报尚未发布或不存在。"}
         </p>
         <Link
           href="/daily"
@@ -180,7 +182,10 @@ export function DailyReportDetail({
   isAdmin: initialIsAdmin,
   hydrateAdminClient = false,
 }: DailyReportDetailProps) {
-  const isAdmin = useClientAdminSession(initialIsAdmin, hydrateAdminClient);
+  const { isAdmin, isResolving: isResolvingAdminSession } = useClientAdminSessionState(
+    initialIsAdmin,
+    hydrateAdminClient,
+  );
   const [adminReportState, setAdminReportState] = useState<AdminReportState>({
     date: null,
     report: null,
@@ -217,7 +222,12 @@ export function DailyReportDetail({
   }, [adminReportState.date, date, shouldFetchAdminReport]);
 
   if (!report) {
-    return <DailyReportUnavailable isAdmin={isAdmin} isLoading={isAdmin && isLoadingAdminReport} />;
+    return (
+      <DailyReportUnavailable
+        isAdmin={isAdmin}
+        isLoading={isResolvingAdminSession || (isAdmin && isLoadingAdminReport)}
+      />
+    );
   }
 
   return <DailyReportDetailContent report={report} isAdmin={isAdmin} />;

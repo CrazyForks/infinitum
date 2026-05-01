@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 
 import { DailyReportDetail } from "@/components/daily/daily-report-detail";
 import { BackToTopButton } from "@/components/ui/back-to-top-button";
+import { getAdminSession } from "@/lib/admin/session";
 import { getDailyReportByDate } from "@/lib/daily-report/repository";
 import { normalizeDailyReportDate } from "@/lib/daily-report/date";
 import { PageShell } from "@/components/ui/page-shell";
@@ -63,7 +64,14 @@ export async function generateMetadata({ params }: DailyReportPageProps): Promis
     };
   }
 
-  const report = await getDailyReportByDate(date, false);
+  let report = await getDailyReportByDate(date, false);
+
+  if (!report) {
+    const session = await getAdminSession();
+    if (session.isAdmin) {
+      report = await getDailyReportByDate(date, true);
+    }
+  }
 
   if (!report) {
     return {
