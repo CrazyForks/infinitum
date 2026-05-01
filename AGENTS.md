@@ -42,7 +42,7 @@ Agent 必须自动判断走 Quick Lane、Feature Iteration、单任务实现、R
 - 完成声明：必须基于本轮新运行的验证命令和结果，不能用推测性语言代替证据。
 - 准备提交 commit、开 PR、请求 merge 或提交前检查时：先走 `forge-loop review` / Code Review Skill，对当前 diff 做结构化 pre-commit 检查。
 - 并行、Medium 及以上风险、共享契约、跨模块或超过 3 个文件的任务：任务完成后先做 Spec Compliance Review，再做 Code Quality Review。
-- 进入 Quick Lane 或 Feature Iteration 后，读取 `forge-loop route` 返回的 `modelTier`、`recommendedModel` 和 `agentEnvironment`；小改动优先降到低档位模型，复杂任务优先升到高档位模型。
+- 进入 Quick Lane 或 Feature Iteration 后，读取 `forge-loop route` 返回的 `modelTier`、`recommendedModel`、`agentEnvironment`、`neededFiles` 和 `contextEstimate`；小改动优先降到低档位模型，复杂任务优先升到高档位模型，并按 `neededFiles` 读取上下文。
 - 需求、设计、任务和测试命名优先使用 `CONTEXT.md`、`CONTEXT-MAP.md`、`.ai/project-context.md` 或 `docs/agents/domain.md` 中已有的领域语言。
 - Issue URL、`#123` 或本地 issue 文件按可用的 `docs/agents/issue-tracker.md` 和 `docs/agents/triage-labels.md` 做 intake / triage；小范围明确改动仍可走 Quick Lane。
 - 架构改善和 zoom-out 请求默认走 Quick Lane spike，只产出模块地图、架构候选和 follow-up，不直接重构。
@@ -64,9 +64,9 @@ Agent 必须自动判断走 Quick Lane、Feature Iteration、单任务实现、R
 | 填写质量检查 | `forge-loop validate [--slug <slug>]` |
 | 安装与工作流检查 | `forge-loop doctor --tier auto --workflow --slug <slug>` |
 
-CLI 不可用时，才按 `.forge-loop/commands/` 和共享 core 文档手动执行同等逻辑。不得在 `gate` 返回 blocked 时继续跨越对应人工门禁；`gate` 通过后仍需人类确认，并用 `approve` 写入批准记录。
+CLI 不可用时，才按 `.forge-loop/commands/` 和共享 core 文档手动执行同等逻辑。读取 Workflow Core 时只读 `.ai/workflow-config.md` 的 `Core Files` 以及当前阶段需要的 workflow、skill、template，不要读取整个 core 目录。不得在 `gate` 返回 blocked 时继续跨越对应人工门禁；`gate` 通过后仍需人类确认，并用 `approve` 写入批准记录。
 
-`scaffold` 和 `approve` 会维护 `.forge-loop/state/active.json`；未传 `--slug` 的 `status`、`next` 和 `validate` 应优先使用该 active state。CLI 也可以把 route/scaffold/gate/approve/validate 的轻量 eval 事件写入 `.forge-loop/state/evals/`，用于 `forge-loop eval --summary` 和 `forge-loop eval --propose`。`.forge-loop/state/` 是本地运行态，不提交到业务仓库；eval proposal 只能进入 `docs/workflow-experiments/` 实验，不自动改核心规则。
+`scaffold` 和 `approve` 会维护 `.forge-loop/state/active.json`；未传 `--slug` 的 `status`、`next` 和 `validate` 应优先使用该 active state。CLI 也可以把 route/scaffold/gate/approve/validate 的轻量 eval 事件写入 `.forge-loop/state/evals/`，用于 `forge-loop eval --summary` 和 `forge-loop eval --propose`；事件里可包含上下文估算，后续用来发现过大的读取计划。`.forge-loop/state/` 是本地运行态，不提交到业务仓库；eval proposal 只能进入 `docs/workflow-experiments/` 实验，不自动改核心规则。
 
 ## Slash-Style Commands
 

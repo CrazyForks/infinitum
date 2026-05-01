@@ -44,6 +44,8 @@
 
 ## Core Files
 
+`Workflow Core Path` 是 core 根目录，不是一次性读取目标。Agent 应只读取下列核心入口，以及当前阶段实际需要的 workflow、skill、template；优先使用 `forge-loop route --json` 返回的 `neededFiles`。
+
 - `.agent-workflow/forge-loop/core/AGENTS.core.md`
 - `.agent-workflow/forge-loop/core/.ai/adapters/agent-entry.md`
 - `.agent-workflow/forge-loop/core/.ai/adapters/resolver.md`
