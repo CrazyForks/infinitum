@@ -8,6 +8,7 @@ import {
   CLUSTER_MERGE_AI_PAIR_STRONG_SCORE,
   CLUSTER_MERGE_CANDIDATE_LIMIT,
   CLUSTER_MERGE_RELATED_PAIR_LIMIT,
+  CLUSTER_MERGE_TARGET_CANDIDATE_COUNT,
 } from "@/config/constants";
 import { type AiEventSignature, type AiProvider } from "@/lib/ai/provider";
 import { shouldRegenerateChineseSummary } from "@/lib/ai/summary-language";
@@ -807,21 +808,22 @@ function buildExcludedMergeTokens(values: Array<string | null | undefined>) {
   return tokens;
 }
 
-function hasDistinctiveTextOverlap(
+function countDistinctiveTextOverlap(
   left: ClusterMergeCandidate,
   right: ClusterMergeCandidate,
   excludedTokens: Set<string>,
 ) {
   const leftTokens = tokenizeMergeText(buildMergeTextBlob(left));
   const rightTokens = tokenizeMergeText(buildMergeTextBlob(right));
+  let overlap = 0;
 
   for (const token of leftTokens) {
     if (!excludedTokens.has(token) && rightTokens.has(token)) {
-      return true;
+      overlap += 1;
     }
   }
 
-  return false;
+  return overlap;
 }
 
 type ClusterMergePairRejectionReason = "object_conflict" | "date_conflict" | "no_event_anchor";
@@ -830,6 +832,7 @@ type ClusterMergePairScore = {
   rejected: boolean;
   rejectedReason: ClusterMergePairRejectionReason | null;
   score: number;
+  softObjectConflict: boolean;
 };
 
 export type ClusterMergeCandidateDiagnostics = {
@@ -842,6 +845,9 @@ export type ClusterMergeCandidateDiagnostics = {
   aiEligiblePairs: number;
   cleanPairsSkipped: number;
   dirtyPairs: number;
+  softObjectConflictPairs: number;
+  softObjectConflictSelectedPairs: number;
+  softObjectConflictCleanPairsSkipped: number;
   preLimitCandidates: number;
   postLimitCandidates: number;
   dirtyCandidateCount: number;
@@ -858,6 +864,9 @@ function createClusterMergeCandidateDiagnostics(): ClusterMergeCandidateDiagnost
     aiEligiblePairs: 0,
     cleanPairsSkipped: 0,
     dirtyPairs: 0,
+    softObjectConflictPairs: 0,
+    softObjectConflictSelectedPairs: 0,
+    softObjectConflictCleanPairsSkipped: 0,
     preLimitCandidates: 0,
     postLimitCandidates: 0,
     dirtyCandidateCount: 0,
@@ -875,17 +884,25 @@ function scoreClusterMergePair(left: ClusterMergeCandidate, right: ClusterMergeC
   const objectSimilarity = textSimilarity(leftObject, rightObject);
   const textOverlap = textSimilarity(buildMergeTextBlob(left), buildMergeTextBlob(right));
   const relationalObjectOverlap = hasRelationalObjectOverlap(leftObject, rightObject);
-  const distinctiveTextOverlap = hasDistinctiveTextOverlap(
+  const excludedMergeTokens = buildExcludedMergeTokens([leftSubject, rightSubject, leftAction, rightAction]);
+  const distinctiveTextOverlapCount = countDistinctiveTextOverlap(
     left,
     right,
-    buildExcludedMergeTokens([leftSubject, rightSubject, leftAction, rightAction]),
+    excludedMergeTokens,
   );
+  const distinctiveTextOverlap = distinctiveTextOverlapCount > 0;
+  const hasSoftObjectAnchor =
+    subjectSimilarity.similar &&
+    textOverlap.strong &&
+    distinctiveTextOverlapCount >= 2;
+  const hasObjectConflict = Boolean(leftObject && rightObject && !objectSimilarity.strong && !relationalObjectOverlap);
 
-  if (leftObject && rightObject && !objectSimilarity.strong && !relationalObjectOverlap) {
+  if (hasObjectConflict && !hasSoftObjectAnchor) {
     return {
       rejected: true,
       rejectedReason: "object_conflict",
       score: 0,
+      softObjectConflict: false,
     };
   }
 
@@ -894,6 +911,7 @@ function scoreClusterMergePair(left: ClusterMergeCandidate, right: ClusterMergeC
       rejected: true,
       rejectedReason: "date_conflict",
       score: 0,
+      softObjectConflict: false,
     };
   }
 
@@ -930,12 +948,13 @@ function scoreClusterMergePair(left: ClusterMergeCandidate, right: ClusterMergeC
     score += 4;
   }
 
-  const hasEventAnchor = objectSimilarity.similar || distinctiveTextOverlap;
+  const hasEventAnchor = objectSimilarity.similar || distinctiveTextOverlap || (hasObjectConflict && hasSoftObjectAnchor);
   if (!hasEventAnchor) {
     return {
       rejected: true,
       rejectedReason: "no_event_anchor",
       score,
+      softObjectConflict: false,
     };
   }
 
@@ -943,6 +962,7 @@ function scoreClusterMergePair(left: ClusterMergeCandidate, right: ClusterMergeC
     rejected: false,
     rejectedReason: null,
     score,
+    softObjectConflict: hasObjectConflict,
   };
 }
 
@@ -989,6 +1009,11 @@ export function buildClusterMergeCandidateSelection(clusters: ClusterMergeCandid
       .map((cluster) => cluster.id),
   );
   const diagnostics = createClusterMergeCandidateDiagnostics();
+  const softObjectConflictPairs: Array<{
+    left: ClusterMergeCandidate;
+    right: ClusterMergeCandidate;
+    score: number;
+  }> = [];
 
   for (let leftIndex = 0; leftIndex < clusters.length; leftIndex += 1) {
     const left = clusters[leftIndex]!;
@@ -1010,6 +1035,12 @@ export function buildClusterMergeCandidateSelection(clusters: ClusterMergeCandid
 
       if (result.score < CLUSTER_MERGE_AI_PAIR_GRAY_SCORE) {
         diagnostics.belowGrayScore += 1;
+        continue;
+      }
+
+      if (result.softObjectConflict) {
+        diagnostics.softObjectConflictPairs += 1;
+        softObjectConflictPairs.push({ left, right, score: result.score });
         continue;
       }
 
@@ -1042,6 +1073,46 @@ export function buildClusterMergeCandidateSelection(clusters: ClusterMergeCandid
       selectedIds.add(left.id);
       selectedIds.add(pair.right.id);
       bestScores.set(left.id, Math.max(bestScores.get(left.id) ?? 0, pair.score));
+      bestScores.set(pair.right.id, Math.max(bestScores.get(pair.right.id) ?? 0, pair.score));
+    }
+  }
+
+  if (selectedIds.size < CLUSTER_MERGE_TARGET_CANDIDATE_COUNT) {
+    const sortedSoftPairs = softObjectConflictPairs
+      .sort((left, right) => {
+        const leftDirty = dirtyIds.has(left.left.id) || dirtyIds.has(left.right.id) ? 1 : 0;
+        const rightDirty = dirtyIds.has(right.left.id) || dirtyIds.has(right.right.id) ? 1 : 0;
+
+        if (rightDirty !== leftDirty) {
+          return rightDirty - leftDirty;
+        }
+
+        if (right.score !== left.score) {
+          return right.score - left.score;
+        }
+
+        return Math.max(right.left.latestPublishedAt.getTime(), right.right.latestPublishedAt.getTime()) -
+          Math.max(left.left.latestPublishedAt.getTime(), left.right.latestPublishedAt.getTime());
+      });
+
+    for (const pair of sortedSoftPairs) {
+      if (selectedIds.size >= CLUSTER_MERGE_TARGET_CANDIDATE_COUNT) {
+        break;
+      }
+
+      const leftChanged = pair.left.mergeInputHash !== currentInputHashes.get(pair.left.id);
+      const rightChanged = pair.right.mergeInputHash !== currentInputHashes.get(pair.right.id);
+
+      if (!leftChanged && !rightChanged) {
+        diagnostics.softObjectConflictCleanPairsSkipped += 1;
+        continue;
+      }
+
+      diagnostics.dirtyPairs += 1;
+      diagnostics.softObjectConflictSelectedPairs += 1;
+      selectedIds.add(pair.left.id);
+      selectedIds.add(pair.right.id);
+      bestScores.set(pair.left.id, Math.max(bestScores.get(pair.left.id) ?? 0, pair.score));
       bestScores.set(pair.right.id, Math.max(bestScores.get(pair.right.id) ?? 0, pair.score));
     }
   }

@@ -505,7 +505,18 @@ export async function detachItemFromCluster(itemId: string, aiProvider?: AiProvi
       manualClusterAssignedAt: null,
     },
   });
+
+  const detachedAssignment = await assignItemToCluster(itemId, {
+    aiProvider,
+    aggregationEnabled: false,
+  });
+
   await recomputeCluster(previousClusterId, aiProvider);
+
+  if (detachedAssignment.clusterId) {
+    await recomputeCluster(detachedAssignment.clusterId, aiProvider);
+  }
+
   invalidateFeedCache();
 
   return previousClusterId;
@@ -813,6 +824,9 @@ export type ClusterMergePassResult = {
   aiEligiblePairs: number;
   cleanPairsSkipped: number;
   dirtyPairs: number;
+  softObjectConflictPairs: number;
+  softObjectConflictSelectedPairs: number;
+  softObjectConflictCleanPairsSkipped: number;
   preLimitCandidates: number;
   postLimitCandidates: number;
   dirtyCandidates: number;
@@ -896,6 +910,9 @@ export async function executeClusterMerge(
     aiEligiblePairs: diagnostics.aiEligiblePairs,
     cleanPairsSkipped: diagnostics.cleanPairsSkipped,
     dirtyPairs: diagnostics.dirtyPairs,
+    softObjectConflictPairs: diagnostics.softObjectConflictPairs,
+    softObjectConflictSelectedPairs: diagnostics.softObjectConflictSelectedPairs,
+    softObjectConflictCleanPairsSkipped: diagnostics.softObjectConflictCleanPairsSkipped,
     preLimitCandidates: diagnostics.preLimitCandidates,
     postLimitCandidates: diagnostics.postLimitCandidates,
     dirtyCandidates: diagnostics.dirtyCandidateCount,

@@ -1,7 +1,7 @@
 ---
 forge_loop: true
 artifact: review-report
-slug: cluster-search-and-homepage-batch-merge
+slug: cluster-merge-soft-candidate-budget
 status: done
 gate: H4
 blocking: false
@@ -10,7 +10,7 @@ security_high_risk: false
 failed_tests_unexplained: false
 ---
 
-# Review Report: cluster-search-and-homepage-batch-merge
+# Review Report: cluster-merge-soft-candidate-budget
 
 | Field | Value |
 | --- | --- |
@@ -20,101 +20,59 @@ failed_tests_unexplained: false
 | Must Fix Count | 0 |
 | Security High Risk | no |
 | Failed Tests Unexplained | no |
-| Review Scope | current diff: admin cluster Chinese search recall, singleton display title, homepage batch merge, tests, quick task records |
-| Review Depth | deep |
-| Specialist Reviewers | security lightweight, data mutation/adversarial pass |
-| Adversarial Pass | completed |
-| Retrospective | skipped: focused quick iterations |
+| Review Scope | current diff: cluster_merge soft candidate recall, detach singleton assignment, ingestion timeline diagnostics, task monitor summary, quick task records |
+| Review Depth | standard |
+| Specialist Reviewers | data mutation and observability lightweight pass |
+| Adversarial Pass | not required for standard depth |
 
 ## Requirement Compliance
 
 | Requirement / AC | Result | Notes |
 | --- | --- | --- |
-| 中文模糊搜索召回 | pass | Added shared search normalization and database-search terms, with tests for CJK compact/subsequence cases. |
-| 手动加入聚合组搜索 | pass | Picker now uses backend search, debounce, larger page size, no default itemCount restriction, and singleton original item title display. |
-| 聚合管理关键词筛选 | pass | Admin list search uses backend filtering with debounce; default list keeps `minItemCount=2` through explicit frontend parameter. |
-| 聚合详情合并搜索 | pass | Merge modal uses independent backend candidate search and displays singleton original title. |
-| 首页批量合并 | pass | Batch toolbar supports selected item merge; backend chooses the selected item cluster with largest `itemCount` as target. |
-
-## Design Compliance
-
-| Area | Result | Notes |
-| --- | --- | --- |
-| API shape | pass | `minItemCount` is generic and defaults to no restriction; avoids bespoke `includeSingletons`. |
-| Pagination | pass | Admin cluster search still applies Prisma `where`, `count`, `take`, and `skip`; no app-layer pagination. |
-| Batch merge semantics | pass | Operation is item-id based and does not implicitly move unselected sibling items. |
-| Display logic | pass | Singleton display title logic centralized in `getClusterDisplayTitle`. |
+| Budgeted soft candidate channel | pass | Strict candidates are selected first; soft object-conflict pairs only fill toward target 50, while hard limit 80 remains in force. |
+| Preserve object-conflict guardrails | pass | Date conflicts remain hard rejects; object conflict only softens when subject/text anchors are strong and distinctive overlap count is at least 2. |
+| Avoid permanent orphan after detach | pass | Detached items are reassigned into a singleton cluster with normal aggregation disabled for that operation. |
+| Timeline observability | pass | Backend timeline records soft object pair/selected/hash-skipped counters. |
+| Monitoring readability | pass | The cluster_merge UI summary compresses soft-object diagnostics into `软对象 selected/total`. |
 
 ## Contract Compliance
 
 | Area | Result | Notes |
 | --- | --- | --- |
-| Auth | pass | New merge-items API requires `requireAdmin`. |
-| Data mutation | pass | Merge service validates processed/displayable items and active clusters before moving items. |
-| Types | pass | DTO adds optional `originalTitle`; existing callers remain compatible. |
-| Schema | pass | No database schema or dependency changes. |
+| API shape | pass | No public route contract or schema migration changed. |
+| Serialized timeline | pass | Added metrics are additive label/value entries; older timeline consumers continue to parse unknown metrics generically. |
+| Data mutation | pass | Detach still returns previous cluster id and invalidates feed cache; new singleton recompute keeps item visible for later merge passes. |
+| Limits | pass | `CLUSTER_MERGE_TARGET_CANDIDATE_COUNT=50` is a fill target, not a replacement for the 80 hard cap. |
 
 ## Code Quality
 
 - No Must Fix findings.
-- Search and display behavior is extracted to helpers instead of repeating ad hoc logic across components.
-- Batch merge service keeps the existing recompute/invalidate path and mirrors manual cluster movement semantics.
-- Untracked unrelated quick task files were identified and left unstaged.
+- Candidate expansion is isolated in `buildClusterMergeCandidateSelection` and keeps clean-pair hash skipping.
+- The UI summary avoids exposing every diagnostic counter while still surfacing whether soft recall contributed.
+- Quick task artifacts are marked done and production spike records are included as evidence for the rule change.
 
 ## Commit Readiness
 
 | Check | Result | Notes |
 | --- | --- | --- |
-| Obvious Bugs | pass | Checked empty selections, same-cluster selections, missing items, inactive clusters, singleton display fallback. |
-| API / Data Breakage | pass | New optional query param; existing default route remains valid. |
-| Security | pass | Admin-only mutations and existing admin cluster listing auth remain intact. |
-| Performance | pass | Search stays database-paginated; picker/merge candidates use bounded page sizes and debounce. |
-| Deployability | pass | No migrations, env, dependency, or build pipeline changes. |
-| Error Handling UX | pass | Batch merge reports backend error or generic failure; dialogs can be cancelled. |
-| Idempotency / Retry | pass | Repeating a merge on already co-located items returns a controlled error rather than silently mutating. |
-| Resource Cleanup | pass | Search effects clear timers and cancellation flags. |
+| Obvious Bugs | pass | Checked soft-pair gating, target cap, date conflict preservation, detach singleton reassignment, and summary fallback when soft metrics are zero. |
+| API / Data Breakage | pass | No schema, env, or route changes. |
+| Security | pass | No new auth surface; production investigation remained read-only. |
+| Performance | pass | Soft expansion only runs after strict candidate selection and remains bounded by target/hard candidate limits. |
+| Deployability | pass | Docker compose rebuild succeeded; no migration required. |
+| Error Handling UX | pass | Existing cluster merge AI failure/hash skip flows are preserved. |
+| Idempotency / Retry | pass | MergeInputHash handling remains per candidate; detached singleton can participate in future passes without immediate normal rejoin. |
 | Dependency Change | N/A | manifest and lockfile unchanged. |
-
-## Autofix Routing
-
-| Class | Count | Action |
-| --- | --- | --- |
-| safe_auto | 2 | Replaced bespoke singleton flag with `minItemCount`; added singleton original title display helper. |
-| gated_auto | 0 | N/A |
-| manual | 0 | N/A |
-| advisory | 1 | Full `npm test` was not run; targeted validation covers changed surfaces. |
-
-## Workflow Metrics
-
-| Signal | Value | Notes |
-| --- | --- | --- |
-| Route | quick | CLI route recommended Quick Lane, low risk. |
-| Gate Friction | low | No human gate blockers after implementation. |
-| Verification Freshness | fresh | Commands listed below were run in this turn. |
-| Rework Signal | medium | Search API semantics refined from app-layer pagination to database pagination and generic `minItemCount`. |
-| Template Noise | low | Quick task records kept concise. |
-
-## Follow-ups
-
-| Type | Item | Target | Notes |
-| --- | --- | --- | --- |
-| performance | Consider indexed search key if cluster count grows | future | Current Prisma `contains` + CJK terms is adequate for current bounded admin use. |
-
-## Security Review
-
-- Pass. New mutation route requires admin auth. No user-controlled SQL is introduced; Prisma query builders are used.
-
-## Performance Review
-
-- Pass. Search requests are debounced at 500ms and database-paginated. Merge picker and manual picker are bounded to 100 and 50 rows respectively.
 
 ## Test Coverage
 
+- `npm test -- tests/unit/cluster-merge-candidates.test.ts tests/integration/cluster-assignment.test.ts tests/components/task-monitor-panel.test.tsx` passed: 3 files, 20 tests.
 - `npx tsc --noEmit` passed.
-- `npx vitest run tests/integration/cluster-assignment.test.ts tests/components/feed-panel.test.tsx` passed: 2 files, 55 tests.
-- `npx vitest run tests/integration/admin-cluster-api.test.ts tests/components/content-review-panel.test.tsx tests/unit/search.test.ts` passed: 3 files, 24 tests.
-- `npx vitest run tests/components/feed-panel.test.tsx tests/components/content-review-merge-modal.test.tsx tests/components/content-review-panel.test.tsx tests/integration/admin-cluster-api.test.ts tests/unit/search.test.ts` passed: 5 files, 74 tests.
-- Relevant local ESLint commands passed for changed surfaces.
+- `npm run lint` exited 0 with one pre-existing warning: `src/components/admin/admin-page-client.tsx:133` `_props` unused.
+- `npx @shawnxie666/forge-loop validate --slug cluster-merge-soft-candidate-budget` passed.
+- `npx @shawnxie666/forge-loop validate --slug deepseek-cluster-prod-spike` passed.
+- `npx @shawnxie666/forge-loop validate --slug openai-stargate-compute-prod-spike` passed.
+- `docker compose up -d --build` passed and restarted local app/worker.
 - `git diff --check` passed.
 
 ## Must Fix
@@ -129,30 +87,8 @@ failed_tests_unexplained: false
 
 ## Nice To Have
 
-- Future indexed or precomputed search key if admin cluster volume grows enough that multi-term `contains` becomes slow.
+- After deployment, compare `软对象入选`, `候选组`, and downstream AI merge results for a few ingestion runs to tune the target or soft-anchor threshold if recall/noise balance drifts.
 
 ## Final Recommendation
 
 Approve. Current diff has no Must Fix, no Security High Risk, and no unexplained test failure. It is ready to commit.
-
-## Open Questions
-
-| Question | Owner | Blocking | Resolution |
-| --- | --- | --- | --- |
-| N/A | N/A | no | N/A |
-
-## Assumptions
-
-- Homepage batch merge should move only explicitly selected items, not all items from selected items' source clusters.
-- Default admin cluster management list should remain multi-item by passing `minItemCount=2` from the frontend.
-
-## Risks
-
-- Batch merge recomputes affected clusters synchronously and may take longer if many clusters are selected at once.
-
-## Validation
-
-- No Must Fix before commit.
-- No Security High Risk before commit.
-- No unexplained test failure before commit.
-- Review Depth classified and specialist checks recorded.

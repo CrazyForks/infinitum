@@ -1,7 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AiProvider } from "@/lib/ai/provider";
-import { assignItemToCluster, executeClusterMerge, mergeClusters, mergeSelectedItemsToLargestCluster } from "@/lib/clusters/service";
+import {
+  assignItemToCluster,
+  detachItemFromCluster,
+  executeClusterMerge,
+  mergeClusters,
+  mergeSelectedItemsToLargestCluster,
+} from "@/lib/clusters/service";
 import { prisma } from "@/lib/db";
 import { getAdminCluster } from "@/lib/feed/repository";
 
@@ -408,6 +414,93 @@ describe("cluster assignment", () => {
       itemCount: 2,
     });
     await expect(prisma.contentCluster.findUnique({ where: { id: "batch-source" } })).resolves.toMatchObject({
+      itemCount: 1,
+    });
+  });
+
+  it("keeps a detached item in a singleton cluster so it can enter later merge passes", async () => {
+    const source = await prisma.source.create({
+      data: {
+        name: "Detach Feed",
+        rssUrl: "https://detach.example.com/feed.xml",
+        siteUrl: "https://detach.example.com",
+        enabled: true,
+        aiParsingEnabled: true,
+        aggregationEnabled: true,
+      },
+    });
+    await prisma.contentCluster.create({
+      data: {
+        id: "detach-cluster",
+        kind: "topic",
+        title: "OpenAI 发布 Stargate 算力计划",
+        summary: "OpenAI 发布 Stargate 算力基础设施计划。",
+        score: 85,
+        itemCount: 2,
+        latestPublishedAt: new Date("2026-04-20T10:00:00.000Z"),
+        status: "active",
+        fingerprint: "detach-cluster",
+      },
+    });
+    await prisma.item.createMany({
+      data: [
+        {
+          id: "detach-target-item",
+          sourceId: source.id,
+          clusterId: "detach-cluster",
+          originalUrl: "https://detach.example.com/target",
+          canonicalUrl: "https://detach.example.com/target",
+          urlHash: "detach-target-hash",
+          dedupeSignature: "detach|target",
+          originalTitle: "OpenAI 调整星际之门计划",
+          publishedAt: new Date("2026-04-20T10:00:00.000Z"),
+          summaryText: "OpenAI 调整星际之门计划和算力基础设施布局。",
+          language: "zh",
+          status: "processed",
+          moderationStatus: "allowed",
+          qualityScore: 85,
+          qualityRationale: "relevant",
+          eventType: "other",
+          eventSubject: "OpenAI",
+          eventAction: "调整战略",
+          eventObject: "星际之门计划",
+        },
+        {
+          id: "detach-sibling-item",
+          sourceId: source.id,
+          clusterId: "detach-cluster",
+          originalUrl: "https://detach.example.com/sibling",
+          canonicalUrl: "https://detach.example.com/sibling",
+          urlHash: "detach-sibling-hash",
+          dedupeSignature: "detach|sibling",
+          originalTitle: "OpenAI 发布 Stargate 算力计划",
+          publishedAt: new Date("2026-04-20T09:00:00.000Z"),
+          summaryText: "OpenAI 发布 Stargate 算力基础设施计划。",
+          language: "zh",
+          status: "processed",
+          moderationStatus: "allowed",
+          qualityScore: 82,
+          qualityRationale: "relevant",
+          eventType: "release",
+          eventSubject: "OpenAI",
+          eventAction: "发布",
+          eventObject: "Stargate算力基础设施计划",
+        },
+      ],
+    });
+
+    await detachItemFromCluster("detach-target-item");
+
+    const detached = await prisma.item.findUniqueOrThrow({ where: { id: "detach-target-item" } });
+    expect(detached.clusterId).toBeTruthy();
+    expect(detached.clusterId).not.toBe("detach-cluster");
+    await expect(prisma.contentCluster.findUnique({ where: { id: detached.clusterId! } })).resolves.toMatchObject({
+      fingerprint: "single-detach-target-item",
+      itemCount: 1,
+      eventSubject: "OpenAI",
+      eventObject: "星际之门计划",
+    });
+    await expect(prisma.contentCluster.findUnique({ where: { id: "detach-cluster" } })).resolves.toMatchObject({
       itemCount: 1,
     });
   });

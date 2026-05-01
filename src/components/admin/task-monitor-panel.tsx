@@ -121,8 +121,30 @@ function formatTaskTimelineDetail(task: TaskRunSnapshot, node: NonNullable<TaskR
       return `完成 ${getValue("完成")} · 过滤 ${getValue("过滤")}`;
     case "cluster_assignment":
       return `指纹命中 ${getValue("指纹命中")} · 本地直连 ${getValue("本地直连")} · AI归组 ${getValue("AI归组")} · 跳过 ${getValue("跳过")} · 新建 ${getValue("新建")}`;
-    case "cluster_merge":
-      return `基础池 ${getValue("基础池")} · 候选 ${getValue("候选组")}/${getValue("裁剪前")} · Dirty ${getValue("Dirty候选")} · Hash跳过 ${getValue("Hash跳过")} · AI返回 ${getValue("AI返回组")} · 移动 ${getValue("移动条目")} · 失败 ${getValue("失败组")} · ${getValue("跳过") ? "已跳过" : "已合并"} · 合并后 ${getValue("合并后")} 组`;
+    case "cluster_merge": {
+      const softObjectPairs = getValue("软对象Pair");
+      const softObjectSelected = getValue("软对象入选");
+      const softObjectHashSkipped = getValue("软对象Hash跳过");
+      const parts = [
+        `候选 ${getValue("候选组")}/${getValue("裁剪前")}`,
+        `Dirty ${getValue("Dirty候选")}`,
+        `Hash跳过 ${getValue("Hash跳过")}`,
+      ];
+
+      if (softObjectPairs > 0 || softObjectSelected > 0 || softObjectHashSkipped > 0) {
+        parts.push(`软对象 ${softObjectSelected}/${softObjectPairs}`);
+      }
+
+      parts.push(
+        `AI返回 ${getValue("AI返回组")}`,
+        `移动 ${getValue("移动条目")}`,
+        `失败 ${getValue("失败组")}`,
+        getValue("跳过") ? "已跳过" : "已合并",
+        `合并后 ${getValue("合并后")} 组`,
+      );
+
+      return parts.join(" · ");
+    }
     case "cluster_finalize":
       return `参与重算 ${getValue("参与重算")} · 完成更新 ${getValue("完成更新")} · 摘要完成 ${getValue("摘要完成")} · 摘要失败 ${getValue("摘要失败")} · 已删除 ${getValue("已删除")}`;
     default:
