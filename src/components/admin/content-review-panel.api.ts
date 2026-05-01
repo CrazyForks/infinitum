@@ -64,8 +64,25 @@ export async function fetchFilteredReviewItems(page = 1, pageSize = 10) {
   return { items: payload.items ?? [], total: payload.total ?? 0 };
 }
 
-export async function fetchReviewClusters(page = 1, pageSize = 10) {
-  const response = await fetch(`/api/admin/clusters?page=${page}&pageSize=${pageSize}`);
+export async function fetchReviewClusters(
+  page = 1,
+  pageSize = 10,
+  search = "",
+  options?: { minItemCount?: number | null },
+) {
+  const params = new URLSearchParams({
+    page: String(page),
+    pageSize: String(pageSize),
+  });
+  const normalizedSearch = search.trim();
+  if (normalizedSearch) {
+    params.set("search", normalizedSearch);
+  }
+  if (typeof options?.minItemCount === "number") {
+    params.set("minItemCount", String(options.minItemCount));
+  }
+
+  const response = await fetch(`/api/admin/clusters?${params.toString()}`);
   const payload = await parseJsonResponse<CollectionPayload>(response, "审核数据加载失败。");
   return { clusters: payload.clusters ?? [], total: payload.total ?? 0 };
 }

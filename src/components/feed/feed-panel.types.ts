@@ -77,7 +77,7 @@ export type DeleteItemDialogState = {
   itemTitle: string;
 } | null;
 
-export type BatchActionType = "regenerate" | "filter" | "delete";
+export type BatchActionType = "regenerate" | "filter" | "delete" | "merge";
 
 export type BatchActionDialogState = {
   type: BatchActionType;

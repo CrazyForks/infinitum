@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { IconMerge, IconRotateCw } from "@/components/ui/icons";
 import { ModalShell } from "@/components/ui/modal-shell";
+import { getClusterDisplayTitle } from "@/lib/feed/cluster-display";
 import type { ClusterDTO } from "@/lib/feed/types";
 import { cx } from "@/lib/ui/cx";
 
@@ -121,32 +122,36 @@ export function ContentReviewMergeModal({
                 {searchQuery.trim() ? "未找到匹配的聚合组" : "暂无可合并的聚合组"}
               </p>
             ) : (
-              availableClusters.map((cluster) => (
-                <label
-                  key={cluster.id}
-                  className={cx(
-                    "flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors",
-                    selectedClusterIds.has(cluster.id)
-                      ? "bg-[var(--accent-soft)] border border-[color:var(--accent)]"
-                      : "hover:bg-[var(--surface)] border border-transparent",
-                  )}
-                >
-                  <input
-                    type="checkbox"
-                    checked={selectedClusterIds.has(cluster.id)}
-                    onChange={() => onToggleSource(cluster.id)}
-                    className="h-4 w-4 text-[var(--accent)] rounded"
-                  />
-                  <div className="flex-1 min-w-0">
-                    <div className="font-medium text-sm text-[var(--foreground)] truncate">
-                      {cluster.title}
+              availableClusters.map((cluster) => {
+                const clusterDisplayTitle = getClusterDisplayTitle(cluster);
+
+                return (
+                  <label
+                    key={cluster.id}
+                    className={cx(
+                      "flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors",
+                      selectedClusterIds.has(cluster.id)
+                        ? "bg-[var(--accent-soft)] border border-[color:var(--accent)]"
+                        : "hover:bg-[var(--surface)] border border-transparent",
+                    )}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedClusterIds.has(cluster.id)}
+                      onChange={() => onToggleSource(cluster.id)}
+                      className="h-4 w-4 text-[var(--accent)] rounded"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-sm text-[var(--foreground)] truncate">
+                        {clusterDisplayTitle}
+                      </div>
+                      <div className="text-xs text-[var(--muted)]">
+                        {cluster.itemCount} 条内容 · 质量分: {cluster.score}
+                      </div>
                     </div>
-                    <div className="text-xs text-[var(--muted)]">
-                      {cluster.itemCount} 条内容 · 质量分: {cluster.score}
-                    </div>
-                  </div>
-                </label>
-              ))
+                  </label>
+                );
+              })
             )}
           </div>
         </div>

@@ -40,6 +40,18 @@ type ErrorResponse = {
   error?: string;
 };
 
+type MergeSelectedItemsPayload = {
+  success?: boolean;
+  result?: {
+    targetClusterId: string;
+    targetClusterTitle: string;
+    movedItemIds: string[];
+    affectedClusterIds: string[];
+    itemsMoved: number;
+  };
+  error?: string;
+};
+
 type ApiResult<T> = {
   ok: boolean;
   status: number;
@@ -98,8 +110,17 @@ export async function requestClusterItems(clusterId: string, query: FeedQuerySta
   return payload.items;
 }
 
-export async function requestClusterOptions() {
-  return requestJsonWithMeta<{ clusters?: ClusterDTO[]; error?: string }>("/api/admin/clusters");
+export async function requestClusterOptions(search = "") {
+  const params = new URLSearchParams({
+    page: "1",
+    pageSize: "50",
+  });
+  const normalizedSearch = search.trim();
+  if (normalizedSearch) {
+    params.set("search", normalizedSearch);
+  }
+
+  return requestJsonWithMeta<{ clusters?: ClusterDTO[]; error?: string }>(`/api/admin/clusters?${params.toString()}`);
 }
 
 export async function queueIngestionRun() {
@@ -123,6 +144,16 @@ export async function joinCluster(itemId: string, clusterId: string) {
       "content-type": "application/json",
     },
     body: JSON.stringify({ clusterId }),
+  });
+}
+
+export async function mergeSelectedItems(itemIds: string[]) {
+  return requestJsonWithMeta<MergeSelectedItemsPayload>("/api/admin/clusters/merge-items", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ itemIds }),
   });
 }
 

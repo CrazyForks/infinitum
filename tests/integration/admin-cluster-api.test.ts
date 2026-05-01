@@ -61,6 +61,20 @@ describe("/api/admin/clusters", () => {
       },
     });
 
+    await prisma.contentCluster.create({
+      data: {
+        id: "cluster-singleton",
+        kind: "topic",
+        title: "全模态全尺寸全国发布",
+        summary: "单条目聚合摘要",
+        score: 72,
+        itemCount: 1,
+        latestPublishedAt: new Date("2026-04-10T08:00:00.000Z"),
+        status: "active",
+        fingerprint: "all-modal-all-size-national",
+      },
+    });
+
     await prisma.item.createMany({
       data: [
         {
@@ -99,6 +113,24 @@ describe("/api/admin/clusters", () => {
           qualityRationale: "较高质量",
           language: "en",
         },
+        {
+          id: "cluster-item-singleton",
+          sourceId: source.id,
+          clusterId: "cluster-singleton",
+          originalUrl: "https://cluster.example.com/singleton",
+          canonicalUrl: "https://cluster.example.com/singleton",
+          urlHash: "cluster-hash-singleton",
+          dedupeSignature: "cluster|singleton",
+          originalTitle: "全模态全尺寸全国发布",
+          translatedTitle: null,
+          publishedAt: new Date("2026-04-10T08:00:00.000Z"),
+          summaryText: "单条内容",
+          status: "processed",
+          moderationStatus: "allowed",
+          qualityScore: 72,
+          qualityRationale: "可用内容",
+          language: "zh",
+        },
       ],
     });
   });
@@ -107,7 +139,7 @@ describe("/api/admin/clusters", () => {
     requireAdmin.mockResolvedValue(undefined);
 
     const { GET } = await import("@/app/api/admin/clusters/route");
-    const response = await GET(new Request("http://localhost/api/admin/clusters"));
+    const response = await GET(new Request("http://localhost/api/admin/clusters?minItemCount=2"));
     const json = await response.json();
 
     expect(response.status).toBe(200);
@@ -117,6 +149,40 @@ describe("/api/admin/clusters", () => {
       id: "cluster-1",
       itemCount: 2,
       status: "active",
+    });
+  });
+
+  it("searches clusters with fuzzy Chinese keywords across child item titles", async () => {
+    requireAdmin.mockResolvedValue(undefined);
+
+    const { GET } = await import("@/app/api/admin/clusters/route");
+    const response = await GET(new Request("http://localhost/api/admin/clusters?search=工具细节"));
+    const json = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(json.clusters).toHaveLength(1);
+    expect(json.total).toBe(1);
+    expect(json.clusters[0].id).toBe("cluster-1");
+  });
+
+  it("does not restrict singleton clusters unless minItemCount is provided", async () => {
+    requireAdmin.mockResolvedValue(undefined);
+
+    const { GET } = await import("@/app/api/admin/clusters/route");
+    const restrictedResponse = await GET(
+      new Request("http://localhost/api/admin/clusters?search=全模态全尺寸全国&minItemCount=2"),
+    );
+    const restrictedJson = await restrictedResponse.json();
+    const defaultResponse = await GET(new Request("http://localhost/api/admin/clusters?search=全模态全尺寸全国"));
+    const defaultJson = await defaultResponse.json();
+
+    expect(restrictedResponse.status).toBe(200);
+    expect(restrictedJson.clusters).toHaveLength(0);
+    expect(defaultResponse.status).toBe(200);
+    expect(defaultJson.clusters).toHaveLength(1);
+    expect(defaultJson.clusters[0]).toMatchObject({
+      id: "cluster-singleton",
+      itemCount: 1,
     });
   });
 

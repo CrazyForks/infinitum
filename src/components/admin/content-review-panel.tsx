@@ -12,6 +12,7 @@ import {
   type ContentReviewActionPayload,
   type RequiredActionField,
 } from "@/components/admin/content-review-panel.api";
+import { ADMIN_CLUSTER_SEARCH_DEBOUNCE_MS } from "@/config/constants";
 import { ContentReviewMergeModal } from "@/components/admin/content-review-merge-modal";
 import { PageShell } from "@/components/ui/page-shell";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -33,7 +34,9 @@ import {
   IconMerge,
 } from "@/components/ui/icons";
 import type { ClusterDTO, ReviewItemDTO } from "@/lib/feed/types";
+import { getClusterDisplayTitle } from "@/lib/feed/cluster-display";
 import { cx } from "@/lib/ui/cx";
+import { matchesFuzzySearch } from "@/lib/utils/search";
 
 type ReviewTab = "filtered" | "clusters";
 
@@ -459,6 +462,7 @@ function ContentReviewContent({
   const [filteredSource, setFilteredSource] = useState("");
   const [filteredReason, setFilteredReason] = useState("");
   const [clusterSearch, setClusterSearch] = useState("");
+  const [debouncedClusterSearch, setDebouncedClusterSearch] = useState("");
   const [clusterStatus, setClusterStatus] = useState<ClusterDTO["status"] | "">("");
   const [clusterTimeRange, setClusterTimeRange] = useState<TimeRangeFilter>("");
   const [isPending, startTransition] = useTransition();
@@ -485,6 +489,7 @@ function ContentReviewContent({
   const [mergeTargetId, setMergeTargetId] = useState<string | null>(null);
   const [mergeSourceIds, setMergeSourceIds] = useState<Set<string>>(new Set());
   const [mergeSearchQuery, setMergeSearchQuery] = useState("");
+  const [mergeCandidateClusters, setMergeCandidateClusters] = useState<ClusterDTO[]>([]);
 
   // Confirmation modal states
   const [confirmModal, setConfirmModal] = useState<{
@@ -513,7 +518,9 @@ function ContentReviewContent({
           setFilteredItems(result.items);
           setFilteredTotal(result.total);
         } else {
-          const result = await fetchReviewClusters(page, pageSize);
+          const result = await fetchReviewClusters(page, pageSize, debouncedClusterSearch, {
+            minItemCount: debouncedClusterSearch.trim() ? null : 2,
+          });
 
           if (cancelled) return;
           setClusters(result.clusters);
@@ -529,12 +536,52 @@ function ContentReviewContent({
     return () => {
       cancelled = true;
     };
-  }, [activeTab, page, pageSize, showToast]);
+  }, [activeTab, page, pageSize, debouncedClusterSearch, showToast]);
 
   useEffect(() => {
     const cleanup = fetchData();
     return cleanup;
   }, [fetchData]);
+
+  useEffect(() => {
+    if (activeTab !== "clusters") {
+      return;
+    }
+
+    const timer = window.setTimeout(
+      () => setDebouncedClusterSearch(clusterSearch),
+      clusterSearch.trim() ? ADMIN_CLUSTER_SEARCH_DEBOUNCE_MS : 0,
+    );
+
+    return () => window.clearTimeout(timer);
+  }, [activeTab, clusterSearch]);
+
+  useEffect(() => {
+    if (!isMergeModalOpen) {
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      startTransition(async () => {
+        try {
+          const result = await fetchReviewClusters(1, 100, mergeSearchQuery);
+          if (!cancelled) {
+            setMergeCandidateClusters(result.clusters);
+          }
+        } catch (error) {
+          if (!cancelled) {
+            showToast(error instanceof Error ? error.message : "聚合组搜索失败。", "error");
+          }
+        }
+      });
+    }, mergeSearchQuery.trim() ? ADMIN_CLUSTER_SEARCH_DEBOUNCE_MS : 0);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [isMergeModalOpen, mergeSearchQuery, showToast]);
 
   const runTransition = useCallback((action: () => Promise<void>) => {
     startTransition(() => {
@@ -609,42 +656,32 @@ function ContentReviewContent({
   }, [filteredItems, filteredSearch, filteredSource, filteredReason]);
 
   const visibleClusters = useMemo(() => {
-    const keyword = clusterSearch.trim().toLowerCase();
     return clusters.filter((cluster) => {
-      const matchesKeyword =
-        !keyword ||
-        cluster.title.toLowerCase().includes(keyword) ||
-        (cluster.summary ?? "").toLowerCase().includes(keyword) ||
-        cluster.items.some(
-          (item) =>
-            item.title.toLowerCase().includes(keyword) ||
-            (item.summary ?? "").toLowerCase().includes(keyword) ||
-            item.sourceName.toLowerCase().includes(keyword),
-        );
       const matchesStatus = !clusterStatus || cluster.status === clusterStatus;
       const matchesTimeRange = isWithinTimeRange(cluster.latestPublishedAt, clusterTimeRange);
-      return matchesKeyword && matchesStatus && matchesTimeRange;
+      return matchesStatus && matchesTimeRange;
     });
-  }, [clusters, clusterSearch, clusterStatus, clusterTimeRange]);
+  }, [clusters, clusterStatus, clusterTimeRange]);
 
   // Available clusters for merge (exclude current cluster and filter by search)
   const availableClustersForMerge = useMemo(() => {
-    const query = mergeSearchQuery.trim().toLowerCase();
-    const filtered = clusters.filter((cluster: ClusterDTO) => {
+    const filtered = mergeCandidateClusters.filter((cluster: ClusterDTO) => {
       // Exclude target cluster
       if (cluster.id === mergeTargetId) return false;
       // Only show clusters with items
       if (cluster.itemCount < 1) return false;
       // Apply search filter
-      if (!query) return true;
-      return (
-        cluster.title.toLowerCase().includes(query) ||
-        (cluster.summary ?? "").toLowerCase().includes(query)
-      );
+      return matchesFuzzySearch(mergeSearchQuery, [
+        getClusterDisplayTitle(cluster),
+        cluster.title,
+        cluster.summary,
+        cluster.items[0]?.title,
+        cluster.items[0]?.originalTitle,
+      ]);
     });
     // Limit to first 20 clusters to avoid overwhelming the UI
     return filtered.slice(0, 20);
-  }, [clusters, mergeTargetId, mergeSearchQuery]);
+  }, [mergeCandidateClusters, mergeTargetId, mergeSearchQuery]);
 
   // Get target cluster info for merge modal
   const targetClusterForMerge = useMemo(() => {
@@ -876,6 +913,7 @@ function ContentReviewContent({
     setMergeTargetId(targetClusterId);
     setMergeSearchQuery("");
     setMergeSourceIds(new Set());
+    setMergeCandidateClusters([]);
     setIsMergeModalOpen(true);
   };
 
@@ -883,6 +921,7 @@ function ContentReviewContent({
     setIsMergeModalOpen(false);
     setMergeTargetId(null);
     setMergeSourceIds(new Set());
+    setMergeCandidateClusters([]);
   };
 
   const handleToggleMergeSource = (clusterId: string) => {

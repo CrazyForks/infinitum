@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AiProvider } from "@/lib/ai/provider";
-import { assignItemToCluster, executeClusterMerge, mergeClusters } from "@/lib/clusters/service";
+import { assignItemToCluster, executeClusterMerge, mergeClusters, mergeSelectedItemsToLargestCluster } from "@/lib/clusters/service";
 import { prisma } from "@/lib/db";
 import { getAdminCluster } from "@/lib/feed/repository";
 
@@ -294,6 +294,121 @@ describe("cluster assignment", () => {
     });
     await expect(getAdminCluster("cluster-target")).resolves.toMatchObject({
       itemCount: 3,
+    });
+  });
+
+  it("merges selected items into the largest selected cluster without moving unselected siblings", async () => {
+    const source = await prisma.source.create({
+      data: {
+        name: "Batch Merge Feed",
+        rssUrl: "https://batch-merge.example.com/feed.xml",
+        siteUrl: "https://batch-merge.example.com",
+        enabled: true,
+        aiParsingEnabled: true,
+        aggregationEnabled: true,
+      },
+    });
+    await prisma.contentCluster.createMany({
+      data: [
+        {
+          id: "batch-target",
+          kind: "topic",
+          title: "目标大聚合",
+          summary: "目标摘要",
+          score: 80,
+          itemCount: 3,
+          latestPublishedAt: new Date("2026-04-20T10:00:00.000Z"),
+          status: "active",
+          fingerprint: "batch-target",
+        },
+        {
+          id: "batch-source",
+          kind: "topic",
+          title: "来源聚合",
+          summary: "来源摘要",
+          score: 75,
+          itemCount: 2,
+          latestPublishedAt: new Date("2026-04-20T09:00:00.000Z"),
+          status: "active",
+          fingerprint: "batch-source",
+        },
+      ],
+    });
+    await prisma.item.createMany({
+      data: [
+        {
+          id: "batch-target-item",
+          sourceId: source.id,
+          clusterId: "batch-target",
+          originalUrl: "https://batch-merge.example.com/target",
+          canonicalUrl: "https://batch-merge.example.com/target",
+          urlHash: "batch-target-hash",
+          dedupeSignature: "batch|target",
+          originalTitle: "目标条目",
+          publishedAt: new Date("2026-04-20T10:00:00.000Z"),
+          summaryText: "目标条目摘要",
+          language: "zh",
+          status: "processed",
+          moderationStatus: "allowed",
+          qualityScore: 80,
+          qualityRationale: "relevant",
+        },
+        {
+          id: "batch-source-selected",
+          sourceId: source.id,
+          clusterId: "batch-source",
+          originalUrl: "https://batch-merge.example.com/source-selected",
+          canonicalUrl: "https://batch-merge.example.com/source-selected",
+          urlHash: "batch-source-selected-hash",
+          dedupeSignature: "batch|source-selected",
+          originalTitle: "选中来源条目",
+          publishedAt: new Date("2026-04-20T09:00:00.000Z"),
+          summaryText: "选中来源摘要",
+          language: "zh",
+          status: "processed",
+          moderationStatus: "allowed",
+          qualityScore: 75,
+          qualityRationale: "relevant",
+        },
+        {
+          id: "batch-source-unselected",
+          sourceId: source.id,
+          clusterId: "batch-source",
+          originalUrl: "https://batch-merge.example.com/source-unselected",
+          canonicalUrl: "https://batch-merge.example.com/source-unselected",
+          urlHash: "batch-source-unselected-hash",
+          dedupeSignature: "batch|source-unselected",
+          originalTitle: "未选中来源条目",
+          publishedAt: new Date("2026-04-20T08:00:00.000Z"),
+          summaryText: "未选中来源摘要",
+          language: "zh",
+          status: "processed",
+          moderationStatus: "allowed",
+          qualityScore: 74,
+          qualityRationale: "relevant",
+        },
+      ],
+    });
+
+    const result = await mergeSelectedItemsToLargestCluster(["batch-target-item", "batch-source-selected"]);
+
+    expect(result).toMatchObject({
+      targetClusterId: "batch-target",
+      movedItemIds: ["batch-source-selected"],
+      itemsMoved: 1,
+    });
+    await expect(prisma.item.findUnique({ where: { id: "batch-source-selected" } })).resolves.toMatchObject({
+      clusterId: "batch-target",
+      manualClusterAssignedAt: expect.any(Date),
+    });
+    await expect(prisma.item.findUnique({ where: { id: "batch-source-unselected" } })).resolves.toMatchObject({
+      clusterId: "batch-source",
+    });
+    await expect(prisma.contentCluster.findUnique({ where: { id: "batch-target" } })).resolves.toMatchObject({
+      itemCount: 2,
+    });
+    await expect(prisma.contentCluster.findUnique({ where: { id: "batch-source" } })).resolves.toMatchObject({
+      itemCount: 1,
     });
   });
 

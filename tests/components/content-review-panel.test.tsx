@@ -117,7 +117,7 @@ describe("ContentReviewPanel", () => {
         );
       }
 
-      if (url === "/api/admin/clusters?page=1&pageSize=10") {
+      if (url === "/api/admin/clusters?page=1&pageSize=10&minItemCount=2") {
         return new Response(
           JSON.stringify({
             clusters: [],
@@ -181,7 +181,7 @@ describe("ContentReviewPanel", () => {
         return new Response(JSON.stringify({ items: [createFilteredItem()], total: 1 }));
       }
 
-      if (url === "/api/admin/clusters?page=1&pageSize=10") {
+      if (url === "/api/admin/clusters?page=1&pageSize=10&minItemCount=2") {
         return new Response(JSON.stringify({ clusters: [], total: 0 }));
       }
 
@@ -218,7 +218,7 @@ describe("ContentReviewPanel", () => {
         );
       }
 
-      if (url === "/api/admin/clusters?page=1&pageSize=10") {
+      if (url === "/api/admin/clusters?page=1&pageSize=10&minItemCount=2") {
         return new Response(JSON.stringify({ clusters: [], total: 0 }));
       }
 
@@ -247,7 +247,7 @@ describe("ContentReviewPanel", () => {
         return new Response(JSON.stringify({ items: [], total: 0 }));
       }
 
-      if (url === "/api/admin/clusters?page=1&pageSize=10") {
+      if (url === "/api/admin/clusters?page=1&pageSize=10&minItemCount=2") {
         return new Response(JSON.stringify({ clusters: [cluster], total: 1 }));
       }
 
@@ -283,7 +283,7 @@ describe("ContentReviewPanel", () => {
         );
       }
 
-      if (url === "/api/admin/clusters?page=1&pageSize=10") {
+      if (url === "/api/admin/clusters?page=1&pageSize=10&minItemCount=2") {
         return new Response(JSON.stringify({ clusters: [], total: 0 }));
       }
 
@@ -338,7 +338,7 @@ describe("ContentReviewPanel", () => {
         return new Response(JSON.stringify({ items: [createFilteredItem()], total: 1 }));
       }
 
-      if (url === "/api/admin/clusters?page=1&pageSize=10") {
+      if (url === "/api/admin/clusters?page=1&pageSize=10&minItemCount=2") {
         return new Response(JSON.stringify({ clusters: [], total: 0 }));
       }
 
@@ -383,7 +383,7 @@ describe("ContentReviewPanel", () => {
         return new Response(JSON.stringify({ items: [], total: 0 }));
       }
 
-      if (url === "/api/admin/clusters?page=1&pageSize=10") {
+      if (url === "/api/admin/clusters?page=1&pageSize=10&minItemCount=2") {
         return new Response(
           JSON.stringify({
             clusters: [
@@ -446,7 +446,7 @@ describe("ContentReviewPanel", () => {
         return new Response(JSON.stringify({ items: [], total: 0 }));
       }
 
-      if (url === "/api/admin/clusters?page=1&pageSize=10") {
+      if (url === "/api/admin/clusters?page=1&pageSize=10&minItemCount=2") {
         return new Response(
           JSON.stringify({
             clusters: [
@@ -497,7 +497,7 @@ describe("ContentReviewPanel", () => {
         return new Response(JSON.stringify({ items: [], total: 0 }));
       }
 
-      if (url === "/api/admin/clusters?page=1&pageSize=10") {
+      if (url === "/api/admin/clusters?page=1&pageSize=10&minItemCount=2") {
         return new Response(
           JSON.stringify({
             clusters: [
@@ -564,7 +564,7 @@ describe("ContentReviewPanel", () => {
         return new Response(JSON.stringify({ items: [], total: 0 }));
       }
 
-      if (url === "/api/admin/clusters?page=1&pageSize=10") {
+      if (url === "/api/admin/clusters?page=1&pageSize=10&minItemCount=2") {
         return new Response(JSON.stringify({ clusters: [cluster], total: 1 }));
       }
 
@@ -603,13 +603,13 @@ describe("ContentReviewPanel", () => {
     {
       name: "filtered request returns a non-2xx response",
       failingUrl: "/api/admin/items?moderationStatus=filtered&page=1&pageSize=10",
-      okUrl: "/api/admin/clusters?page=1&pageSize=10",
+      okUrl: "/api/admin/clusters?page=1&pageSize=10&minItemCount=2",
       okBody: { clusters: [], total: 0 },
       activeTab: "filtered" as const,
     },
     {
       name: "cluster request returns a non-2xx response",
-      failingUrl: "/api/admin/clusters?page=1&pageSize=10",
+      failingUrl: "/api/admin/clusters?page=1&pageSize=10&minItemCount=2",
       okUrl: "/api/admin/items?moderationStatus=filtered&page=1&pageSize=10",
       okBody: { items: [], total: 0 },
       activeTab: "clusters" as const,

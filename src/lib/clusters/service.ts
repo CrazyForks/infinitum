@@ -571,6 +571,116 @@ export async function moveItemToCluster(itemId: string, clusterId: string, aiPro
   return clusterId;
 }
 
+export type MergeSelectedItemsResult = {
+  targetClusterId: string;
+  targetClusterTitle: string;
+  movedItemIds: string[];
+  affectedClusterIds: string[];
+  itemsMoved: number;
+};
+
+export async function mergeSelectedItemsToLargestCluster(
+  itemIds: string[],
+  aiProvider?: AiProvider,
+): Promise<MergeSelectedItemsResult> {
+  const uniqueItemIds = [...new Set(itemIds.map((id) => id.trim()).filter(Boolean))];
+  if (uniqueItemIds.length < 2) {
+    throw new Error("至少需要选择两个条目进行合并");
+  }
+
+  const items = await prisma.item.findMany({
+    where: { id: { in: uniqueItemIds } },
+    select: {
+      id: true,
+      clusterId: true,
+      moderationStatus: true,
+      status: true,
+      cluster: {
+        select: {
+          id: true,
+          title: true,
+          itemCount: true,
+          latestPublishedAt: true,
+          status: true,
+        },
+      },
+    },
+  });
+  const itemsById = new Map(items.map((item) => [item.id, item]));
+  const missingIds = uniqueItemIds.filter((id) => !itemsById.has(id));
+  if (missingIds.length > 0) {
+    throw new Error(`部分条目不存在: ${missingIds.join(", ")}`);
+  }
+
+  const invalidItem = items.find(
+    (item) => item.status !== "processed" || (item.moderationStatus !== "allowed" && item.moderationStatus !== "restored"),
+  );
+  if (invalidItem) {
+    throw new Error("只能合并已处理且可展示的条目");
+  }
+
+  const clusterCandidates = new Map<string, NonNullable<(typeof items)[number]["cluster"]>>();
+  for (const item of items) {
+    if (!item.cluster) {
+      continue;
+    }
+    if (item.cluster.status !== "active") {
+      throw new Error("只能合并 active 状态聚合组中的条目");
+    }
+    clusterCandidates.set(item.cluster.id, item.cluster);
+  }
+
+  if (clusterCandidates.size === 0) {
+    throw new Error("所选条目没有可作为合并基准的聚合组");
+  }
+
+  const targetCluster = [...clusterCandidates.values()].sort((left, right) => {
+    if (right.itemCount !== left.itemCount) {
+      return right.itemCount - left.itemCount;
+    }
+    return right.latestPublishedAt.getTime() - left.latestPublishedAt.getTime();
+  })[0]!;
+
+  const movedItemIds = items
+    .filter((item) => item.clusterId !== targetCluster.id)
+    .map((item) => item.id);
+
+  if (movedItemIds.length === 0) {
+    throw new Error("所选条目已在同一个聚合组中");
+  }
+
+  const previousClusterIds = [
+    ...new Set(
+      items
+        .filter((item) => item.clusterId && item.clusterId !== targetCluster.id)
+        .map((item) => item.clusterId!),
+    ),
+  ];
+
+  await prisma.item.updateMany({
+    where: { id: { in: movedItemIds } },
+    data: {
+      clusterId: targetCluster.id,
+      manualClusterAssignedAt: new Date(),
+    },
+  });
+
+  const affectedClusterIds = [targetCluster.id, ...previousClusterIds];
+  for (const clusterId of affectedClusterIds) {
+    await recomputeCluster(clusterId, aiProvider);
+  }
+
+  invalidateFeedCache();
+
+  return {
+    targetClusterId: targetCluster.id,
+    targetClusterTitle: targetCluster.title,
+    movedItemIds,
+    affectedClusterIds,
+    itemsMoved: movedItemIds.length,
+  };
+}
+
 export async function setClusterVisibility(clusterId: string, visible: boolean) {
   const cluster = await updateClusterStatus(clusterId, visible ? "active" : "hidden");
   invalidateFeedCache();

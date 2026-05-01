@@ -11,6 +11,7 @@ import { prisma } from "@/lib/db";
 import { getDisplaySummary, getDisplayTitle, shouldTranslateTitle } from "@/lib/feed/presentation";
 import { buildRecommendScoreSql, calculateRecommendScore } from "@/lib/feed/recommend-score";
 import { toGroupBadge, type GroupBadge } from "@/lib/groups/badge";
+import { getDatabaseSearchTerms } from "@/lib/utils/search";
 import type {
   ClusterDTO,
   FeedGroupOption,
@@ -316,6 +317,7 @@ function mapItemToClusterPreview(item: ItemWithSource): FeedClusterPreviewItemDT
   return {
     id: item.id,
     title: getDisplayTitle(item.originalTitle, item.translatedTitle),
+    originalTitle: item.originalTitle,
     originalUrl: item.originalUrl,
     publishedAt: item.publishedAt.toISOString(),
     sourceName: item.source.name,
@@ -1007,9 +1009,46 @@ export async function listFilteredItems(page = 1, pageSize = 20) {
   return { items: items.map(mapItemToReviewItem), total, page, pageSize };
 }
 
-export async function listAdminClusters(page = 1, pageSize = 20) {
+export async function listAdminClusters(
+  page = 1,
+  pageSize = 20,
+  search?: string | null,
+  options?: { minItemCount?: number | null },
+) {
   const skip = (page - 1) * pageSize;
-  const where = { itemCount: { gt: 1 } };
+  const searchTerms = getDatabaseSearchTerms(search);
+  const minItemCount = options?.minItemCount;
+  const where: Prisma.ContentClusterWhereInput = {
+    ...(typeof minItemCount === "number" ? { itemCount: { gte: minItemCount } } : {}),
+    ...(searchTerms.length > 0
+      ? {
+          AND: searchTerms.map((term) => ({
+            OR: [
+              { title: { contains: term } },
+              { summary: { contains: term } },
+              {
+                items: {
+                  some: {
+                    status: "processed",
+                    moderationStatus: {
+                      in: [...DISPLAYABLE_MODERATION_STATUSES],
+                    },
+                    OR: [
+                      { originalTitle: { contains: term } },
+                      { translatedTitle: { contains: term } },
+                      { summaryText: { contains: term } },
+                      { rssExcerpt: { contains: term } },
+                      { rssContent: { contains: term } },
+                      { source: { name: { contains: term } } },
+                    ],
+                  },
+                },
+              },
+            ],
+          })),
+        }
+      : {}),
+  };
 
   const [clusters, total] = await Promise.all([
     prisma.contentCluster.findMany({
@@ -1040,30 +1079,31 @@ export async function listAdminClusters(page = 1, pageSize = 20) {
     prisma.contentCluster.count({ where }),
   ]);
 
-  return {
-    clusters: clusters.map((cluster) => {
-      // 计算综合推荐评分（AI锚点分 + 有限反馈微调 + 来源/条目聚合加权）
-      const clusterWithVotes = cluster as typeof cluster & { upvotes: number; downvotes: number };
-      const sourceCount = new Set(cluster.items.map((item) => item.sourceId)).size;
-      const recommendScore = calculateRecommendScore(
-        cluster.score,
-        clusterWithVotes.upvotes ?? 0,
-        clusterWithVotes.downvotes ?? 0,
-        sourceCount,
-        cluster.items.length,
-      );
+  const mappedClusters = clusters.map((cluster) => {
+    // 计算综合推荐评分（AI锚点分 + 有限反馈微调 + 来源/条目聚合加权）
+    const clusterWithVotes = cluster as typeof cluster & { upvotes: number; downvotes: number };
+    const sourceCount = new Set(cluster.items.map((item) => item.sourceId)).size;
+    const recommendScore = calculateRecommendScore(
+      cluster.score,
+      clusterWithVotes.upvotes ?? 0,
+      clusterWithVotes.downvotes ?? 0,
+      sourceCount,
+      cluster.items.length,
+    );
 
-      return {
-        id: cluster.id,
-        title: cluster.title,
-        summary: cluster.summary,
-        score: recommendScore,
-        itemCount: cluster.itemCount,
-        latestPublishedAt: cluster.latestPublishedAt.toISOString(),
-        status: cluster.status,
-        items: cluster.items.map(mapItemToClusterPreview),
-      } satisfies ClusterDTO;
-    }),
+    return {
+      id: cluster.id,
+      title: cluster.title,
+      summary: cluster.summary,
+      score: recommendScore,
+      itemCount: cluster.itemCount,
+      latestPublishedAt: cluster.latestPublishedAt.toISOString(),
+      status: cluster.status,
+      items: cluster.items.slice(0, 5).map(mapItemToClusterPreview),
+    } satisfies ClusterDTO;
+  });
+  return {
+    clusters: mappedClusters,
     total,
     page,
     pageSize,

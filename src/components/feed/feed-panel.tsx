@@ -13,11 +13,12 @@ import {
   type ReactNode,
 } from "react";
 
-import { STATUS_POLL_INTERVAL_MS } from "@/config/constants";
+import { ADMIN_CLUSTER_SEARCH_DEBOUNCE_MS, STATUS_POLL_INTERVAL_MS } from "@/config/constants";
 import {
   deleteItem,
   filterItem,
   joinCluster,
+  mergeSelectedItems,
   queueIngestionRun,
   regenerateClusterSummary,
   requestClusterItems,
@@ -87,7 +88,9 @@ import type {
 import { FEED_PAGE_SIZE_OPTIONS } from "@/lib/feed/types";
 import type { GroupBadge as FeedGroupBadge } from "@/lib/groups/badge";
 import { cx } from "@/lib/ui/cx";
+import { matchesFuzzySearch } from "@/lib/utils/search";
 import { Button } from "@/components/ui/button";
+import { getClusterDisplayTitle } from "@/lib/feed/cluster-display";
 
 function SearchIcon() {
   return (
@@ -511,8 +514,6 @@ export function FeedPanel({
     return filters;
   }, [availableGroups, availableSources, groupId, sourceId, summary.publishedRangeLabel, summary.rangeLabel, summary.sortLabel, titleFilter]);
   const visibleClusterOptions = useMemo(() => {
-    const normalizedSearch = clusterSearch.trim().toLocaleLowerCase();
-
     return clusterOptions.filter((cluster) => {
       if (cluster.status !== "active") {
         return false;
@@ -522,11 +523,13 @@ export function FeedPanel({
         return false;
       }
 
-      if (!normalizedSearch) {
-        return true;
-      }
-
-      return cluster.title.toLocaleLowerCase().includes(normalizedSearch);
+      return matchesFuzzySearch(clusterSearch, [
+        getClusterDisplayTitle(cluster),
+        cluster.title,
+        cluster.summary,
+        cluster.items[0]?.title,
+        cluster.items[0]?.originalTitle,
+      ]);
     });
   }, [assignClusterDialog?.currentClusterId, clusterOptions, clusterSearch]);
 
@@ -707,32 +710,55 @@ export function FeedPanel({
     setClusterSearch("");
     setSelectedClusterId(null);
     setIsLoadingClusterOptions(true);
-
-    startTransition(async () => {
-      try {
-        const result = await requestClusterOptions();
-
-        if (!result.ok || result.data.error) {
-          setRefreshFeedback({
-            tone: "error",
-            message: result.data.error ?? "加载聚合组选项失败，请稍后重试。",
-          });
-          setAssignClusterDialog(null);
-          return;
-        }
-
-        setClusterOptions(result.data.clusters ?? []);
-      } catch {
-        setRefreshFeedback({
-          tone: "error",
-          message: "加载聚合组选项失败，请稍后重试。",
-        });
-        setAssignClusterDialog(null);
-      } finally {
-        setIsLoadingClusterOptions(false);
-      }
-    });
   };
+
+  useEffect(() => {
+    if (!assignClusterDialog) {
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setIsLoadingClusterOptions(true);
+      startTransition(async () => {
+        try {
+          const result = await requestClusterOptions(clusterSearch);
+
+          if (cancelled) {
+            return;
+          }
+
+          if (!result.ok || result.data.error) {
+            setRefreshFeedback({
+              tone: "error",
+              message: result.data.error ?? "加载聚合组选项失败，请稍后重试。",
+            });
+            setAssignClusterDialog(null);
+            return;
+          }
+
+          setClusterOptions(result.data.clusters ?? []);
+        } catch {
+          if (!cancelled) {
+            setRefreshFeedback({
+              tone: "error",
+              message: "加载聚合组选项失败，请稍后重试。",
+            });
+            setAssignClusterDialog(null);
+          }
+        } finally {
+          if (!cancelled) {
+            setIsLoadingClusterOptions(false);
+          }
+        }
+      });
+    }, clusterSearch.trim() ? ADMIN_CLUSTER_SEARCH_DEBOUNCE_MS : 0);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [assignClusterDialog, clusterSearch]);
 
   const confirmAssignCluster = () => {
     if (!assignClusterDialog || !selectedClusterId) {
@@ -1043,6 +1069,15 @@ export function FeedPanel({
     });
   };
 
+  const openBatchMergeDialog = () => {
+    if (selectedItems.size < 2) return;
+    setBatchActionDialog({
+      type: "merge",
+      itemIds: Array.from(selectedItems),
+      itemTitles: [],
+    });
+  };
+
   const runBatchRegeneration = async (targets: Array<"translation" | "summary">) => {
     if (!batchActionDialog || batchActionDialog.type !== "regenerate") return;
 
@@ -1163,6 +1198,37 @@ export function FeedPanel({
     }
 
     setSelectedItems(new Set());
+  };
+
+  const confirmBatchMerge = async () => {
+    if (!batchActionDialog || batchActionDialog.type !== "merge") return;
+
+    const itemIds = batchActionDialog.itemIds;
+
+    try {
+      const result = await mergeSelectedItems(itemIds);
+
+      if (!result.ok || result.data.error || !result.data.result) {
+        setRefreshFeedback({
+          tone: "error",
+          message: result.data.error ?? "批量合并失败，请稍后重试。",
+        });
+        return;
+      }
+
+      setBatchActionDialog(null);
+      reloadCurrentFeed();
+      setRefreshFeedback({
+        tone: "success",
+        message: `已将 ${result.data.result.itemsMoved} 条内容合并到「${result.data.result.targetClusterTitle}」。`,
+      });
+      setSelectedItems(new Set());
+    } catch {
+      setRefreshFeedback({
+        tone: "error",
+        message: "批量合并失败，请稍后重试。",
+      });
+    }
   };
 
   useEffect(() => {
@@ -1643,6 +1709,14 @@ export function FeedPanel({
                     </button>
                     <button
                       type="button"
+                      onClick={openBatchMergeDialog}
+                      disabled={isPending || selectedItems.size < 2}
+                      className="inline-flex items-center gap-1 rounded-sm bg-[var(--bg-muted)] px-3 py-1.5 text-sm font-medium text-[var(--text-2)] transition hover:bg-[var(--accent-soft)] hover:text-[var(--accent-strong)] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      批量合并
+                    </button>
+                    <button
+                      type="button"
                       onClick={openBatchFilterDialog}
                       disabled={isPending}
                       className="inline-flex items-center gap-1 rounded-sm bg-[var(--bg-muted)] px-3 py-1.5 text-sm font-medium text-[var(--text-2)] transition hover:bg-[var(--accent-soft)] hover:text-[var(--accent-strong)] disabled:cursor-not-allowed disabled:opacity-50"
@@ -2119,13 +2193,14 @@ export function FeedPanel({
               ) : visibleClusterOptions.length ? (
                 visibleClusterOptions.map((cluster) => {
                   const isSelected = selectedClusterId === cluster.id;
+                  const clusterDisplayTitle = getClusterDisplayTitle(cluster);
 
                   return (
                     <button
                       key={cluster.id}
                       type="button"
                       aria-pressed={isSelected}
-                      aria-label={`选择聚合组：${cluster.title}`}
+                      aria-label={`选择聚合组：${clusterDisplayTitle}`}
                       onClick={() => setSelectedClusterId(cluster.id)}
                       className={cx(
                         "w-full rounded-sm border px-3 py-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(59,130,246,0.28)]",
@@ -2134,7 +2209,7 @@ export function FeedPanel({
                           : "border-[color:var(--line)] bg-[var(--surface)] hover:bg-[var(--surface-muted)]",
                       )}
                     >
-                      <div className="text-sm font-medium">{cluster.title}</div>
+                      <div className="text-sm font-medium">{clusterDisplayTitle}</div>
                       <div className="mt-1 text-xs text-[var(--muted)]">{cluster.itemCount} 条内容</div>
                     </button>
                   );
@@ -2316,6 +2391,28 @@ export function FeedPanel({
           <div className="space-y-3 text-sm text-[var(--muted)]">
             <p>将永久删除 {batchActionDialog?.itemIds.length ?? 0} 条内容。</p>
             <p>删除后会立即从主页列表移除，此操作不可恢复。</p>
+          </div>
+        </ModalShell>
+        <ModalShell
+          isOpen={Boolean(batchActionDialog) && batchActionDialog?.type === "merge"}
+          onClose={() => setBatchActionDialog(null)}
+          title="确认批量合并"
+          widthClassName="max-w-md"
+          bodyClassName="space-y-3 p-4"
+          footer={
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="secondary" onClick={() => setBatchActionDialog(null)} disabled={isPending}>
+                取消
+              </Button>
+              <Button type="button" variant="primary" onClick={confirmBatchMerge} disabled={isPending}>
+                确认合并
+              </Button>
+            </div>
+          }
+        >
+          <div className="space-y-3 text-sm text-[var(--muted)]">
+            <p>将把 {batchActionDialog?.itemIds.length ?? 0} 条内容合并到同一个聚合组。</p>
+            <p>系统会以所选内容中当前聚合条目数最多的聚合组作为基准。</p>
           </div>
         </ModalShell>
         {readingProgress && !isReadingProgressHidden ? (

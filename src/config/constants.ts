@@ -137,3 +137,6 @@ export const STATUS_POLL_INTERVAL_MS = 30 * 1000;
 
 /** 全文搜索防抖延迟: 320ms */
 export const FEED_SEARCH_DEBOUNCE_MS = 320;
+
+/** 管理端聚合搜索防抖延迟: 500ms */
+export const ADMIN_CLUSTER_SEARCH_DEBOUNCE_MS = 500;

@@ -1579,19 +1579,31 @@ describe("FeedPanel", () => {
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
       const url = getFetchUrl(input);
 
-      if (url === "/api/admin/clusters") {
+      if (url.startsWith("/api/admin/clusters?")) {
         return new Response(
           JSON.stringify({
             clusters: [
               {
                 id: "cluster-singleton",
-                title: "单条聚合候选",
+                title: "AI 生成的单条聚合标题",
                 summary: "只有一条内容的聚合",
                 score: 75,
                 itemCount: 1,
                 latestPublishedAt: "2026-04-08T09:00:00.000Z",
                 status: "active",
-                items: [],
+                items: [
+                  {
+                    id: "cluster-singleton-item",
+                    title: "翻译后的单条标题",
+                    originalTitle: "单条原始标题",
+                    originalUrl: "https://example.com/singleton",
+                    publishedAt: "2026-04-08T09:00:00.000Z",
+                    sourceName: "Example Feed",
+                    author: "Alex",
+                    summary: "单条摘要",
+                    score: 75,
+                  },
+                ],
               },
               {
                 id: "cluster-joined",
@@ -1669,11 +1681,12 @@ describe("FeedPanel", () => {
     await user.click(screen.getByRole("button", { name: "加入聚合组：中文标题" }));
 
     const dialog = await screen.findByRole("dialog", { name: "手动加入聚合组" });
-    expect(await within(dialog).findByText("单条聚合候选")).toBeInTheDocument();
+    expect(await within(dialog).findByText("单条原始标题")).toBeInTheDocument();
+    expect(within(dialog).queryByText("AI 生成的单条聚合标题")).not.toBeInTheDocument();
     expect(within(dialog).getByText("1 条内容")).toBeInTheDocument();
 
     await user.type(within(dialog).getByLabelText("搜索聚合标题"), "单条");
-    await user.click(within(dialog).getByRole("button", { name: /选择聚合组：单条聚合候选/ }));
+    await user.click(within(dialog).getByRole("button", { name: /选择聚合组：单条原始标题/ }));
     await user.click(within(dialog).getByRole("button", { name: "确认加入" }));
 
     await waitFor(() => {
@@ -1894,6 +1907,87 @@ describe("FeedPanel", () => {
         "noopener,noreferrer",
       );
     });
+  });
+
+  it("merges selected homepage items through the batch toolbar", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
+      const url = getFetchUrl(input);
+
+      if (url === "/api/admin/clusters/merge-items") {
+        expect(init?.method).toBe("POST");
+        expect(init?.body).toBe(JSON.stringify({ itemIds: ["item-preview-1", "item-1"] }));
+
+        return new Response(
+          JSON.stringify({
+            success: true,
+            result: {
+              targetClusterId: "cluster-1",
+              targetClusterTitle: "OpenAI Agent 发布",
+              movedItemIds: ["item-1"],
+              affectedClusterIds: ["cluster-1", "item-1"],
+              itemsMoved: 1,
+            },
+          }),
+        );
+      }
+
+      if (url === "/api/feed?range=7d&sort=time_desc") {
+        return new Response(
+          JSON.stringify({
+            items: initialEntries,
+            pagination: {
+              page: 1,
+              size: 50,
+              total: initialEntries.length,
+              totalPages: 1,
+            },
+            range: "7d" satisfies FeedRange,
+            sort: "time_desc" satisfies FeedSort,
+            start: null,
+            end: null,
+            groupId: null,
+            sourceId: null,
+            title: null,
+          }),
+        );
+      }
+
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <FeedPanel
+        initialItems={initialEntries}
+        initialRange="7d"
+        initialSort="time_desc"
+        initialStartDate={null}
+        initialEndDate={null}
+        initialNextCursor={null}
+        initialStatus={null}
+        isAdmin
+      />,
+    );
+
+    await user.click(screen.getByLabelText(/全选/));
+    await user.click(screen.getByRole("button", { name: "批量合并" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "确认批量合并" });
+    expect(within(dialog).getByText(/当前聚合条目数最多/)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "确认合并" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/admin/clusters/merge-items", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ itemIds: ["item-preview-1", "item-1"] }),
+      });
+    });
+    expect(await screen.findByText("已将 1 条内容合并到「OpenAI Agent 发布」。")).toBeInTheDocument();
   });
 
   it("renders homepage cards with a top-right icon action area and full-width summary copy", () => {

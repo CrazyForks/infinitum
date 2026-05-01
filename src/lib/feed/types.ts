@@ -50,6 +50,7 @@ export type FeedSingleEntryDTO = {
 export type FeedClusterPreviewItemDTO = {
   id: string;
   title: string;
+  originalTitle?: string;
   originalUrl: string;
   publishedAt: string;
   sourceName: string;
