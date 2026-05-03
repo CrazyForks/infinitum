@@ -90,7 +90,7 @@ export const CLUSTER_MERGE_RELATED_PAIR_LIMIT = 3;
 export const CLUSTER_MERGE_CANDIDATE_LIMIT = 80;
 
 /** 聚合合并软召回目标候选组数，硬上限仍由 CLUSTER_MERGE_CANDIDATE_LIMIT 控制 */
-export const CLUSTER_MERGE_TARGET_CANDIDATE_COUNT = 50;
+export const CLUSTER_MERGE_TARGET_CANDIDATE_COUNT = 10;
 
 // =============================================================================
 // Tasks / Worker
