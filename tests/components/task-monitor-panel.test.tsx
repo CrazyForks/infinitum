@@ -181,9 +181,6 @@ function buildMonitorSnapshot(): BackgroundTaskMonitorSnapshot {
               { label: "AI候选Pair", value: 12 },
               { label: "Hash跳过", value: 4 },
               { label: "Dirty Pair", value: 8 },
-              { label: "软对象Pair", value: 6 },
-              { label: "软对象入选", value: 3 },
-              { label: "软对象Hash跳过", value: 1 },
               { label: "裁剪前", value: 18 },
               { label: "候选组", value: 12 },
               { label: "Dirty候选", value: 5 },
@@ -250,7 +247,7 @@ describe("TaskMonitorPanel", () => {
     expect(within(dialog).getByText("完成 5 · 失败 1")).toBeInTheDocument();
     expect(within(dialog).getByText("完成 4 · 过滤 2")).toBeInTheDocument();
     expect(within(dialog).getByText("指纹命中 1 · 本地直连 2 · AI归组 1 · 跳过 0 · 新建 1")).toBeInTheDocument();
-    expect(within(dialog).getByText("候选 12/18 · Dirty 5 · Hash跳过 4 · 软对象 3/6 · AI返回 2 · 移动 6 · 失败 1 · 已合并 · 合并后 9 组")).toBeInTheDocument();
+    expect(within(dialog).getByText("候选 12/18 · Dirty 5 · Hash跳过 4 · AI返回 2 · 移动 6 · 失败 1 · 已合并 · 合并后 9 组")).toBeInTheDocument();
     expect(within(dialog).getByText("参与重算 2 · 完成更新 2 · 摘要完成 1 · 摘要失败 0 · 已删除 0")).toBeInTheDocument();
   });
 

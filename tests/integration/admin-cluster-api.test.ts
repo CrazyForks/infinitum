@@ -165,6 +165,21 @@ describe("/api/admin/clusters", () => {
     expect(json.clusters[0].id).toBe("cluster-1");
   });
 
+  it("does not search cluster summaries or child item details", async () => {
+    requireAdmin.mockResolvedValue(undefined);
+
+    const { GET } = await import("@/app/api/admin/clusters/route");
+    const clusterSummaryResponse = await GET(new Request("http://localhost/api/admin/clusters?search=聚合摘要"));
+    const itemSummaryResponse = await GET(new Request("http://localhost/api/admin/clusters?search=内容一"));
+    const clusterSummaryJson = await clusterSummaryResponse.json();
+    const itemSummaryJson = await itemSummaryResponse.json();
+
+    expect(clusterSummaryResponse.status).toBe(200);
+    expect(itemSummaryResponse.status).toBe(200);
+    expect(clusterSummaryJson.clusters).toHaveLength(0);
+    expect(itemSummaryJson.clusters).toHaveLength(0);
+  });
+
   it("does not restrict singleton clusters unless minItemCount is provided", async () => {
     requireAdmin.mockResolvedValue(undefined);
 

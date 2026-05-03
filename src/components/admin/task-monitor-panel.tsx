@@ -122,18 +122,11 @@ function formatTaskTimelineDetail(task: TaskRunSnapshot, node: NonNullable<TaskR
     case "cluster_assignment":
       return `指纹命中 ${getValue("指纹命中")} · 本地直连 ${getValue("本地直连")} · AI归组 ${getValue("AI归组")} · 跳过 ${getValue("跳过")} · 新建 ${getValue("新建")}`;
     case "cluster_merge": {
-      const softObjectPairs = getValue("软对象Pair");
-      const softObjectSelected = getValue("软对象入选");
-      const softObjectHashSkipped = getValue("软对象Hash跳过");
       const parts = [
         `候选 ${getValue("候选组")}/${getValue("裁剪前")}`,
         `Dirty ${getValue("Dirty候选")}`,
         `Hash跳过 ${getValue("Hash跳过")}`,
       ];
-
-      if (softObjectPairs > 0 || softObjectSelected > 0 || softObjectHashSkipped > 0) {
-        parts.push(`软对象 ${softObjectSelected}/${softObjectPairs}`);
-      }
 
       parts.push(
         `AI返回 ${getValue("AI返回组")}`,

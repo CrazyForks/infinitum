@@ -49,9 +49,6 @@ export type IngestionTimelineCounters = {
     aiEligiblePairs: number;
     cleanPairsSkipped: number;
     dirtyPairs: number;
-    softObjectConflictPairs: number;
-    softObjectConflictSelectedPairs: number;
-    softObjectConflictCleanPairsSkipped: number;
     preLimitCandidates: number;
     postLimitCandidates: number;
     dirtyCandidates: number;
@@ -163,9 +160,6 @@ export function createIngestionTimelineCounters(): IngestionTimelineCounters {
       aiEligiblePairs: 0,
       cleanPairsSkipped: 0,
       dirtyPairs: 0,
-      softObjectConflictPairs: 0,
-      softObjectConflictSelectedPairs: 0,
-      softObjectConflictCleanPairsSkipped: 0,
       preLimitCandidates: 0,
       postLimitCandidates: 0,
       dirtyCandidates: 0,
@@ -356,9 +350,6 @@ export function buildIngestionTaskTimeline(input: {
         { label: "AI候选Pair", value: counters.clusterMerge.aiEligiblePairs },
         { label: "Hash跳过", value: counters.clusterMerge.cleanPairsSkipped },
         { label: "Dirty Pair", value: counters.clusterMerge.dirtyPairs },
-        { label: "软对象Pair", value: counters.clusterMerge.softObjectConflictPairs },
-        { label: "软对象入选", value: counters.clusterMerge.softObjectConflictSelectedPairs },
-        { label: "软对象Hash跳过", value: counters.clusterMerge.softObjectConflictCleanPairsSkipped },
         { label: "裁剪前", value: counters.clusterMerge.preLimitCandidates },
         { label: "候选组", value: counters.clusterMerge.candidates },
         { label: "Dirty候选", value: counters.clusterMerge.dirtyCandidates },

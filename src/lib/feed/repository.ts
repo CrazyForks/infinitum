@@ -50,6 +50,10 @@ type CountRow = {
   total: bigint;
 };
 
+type IdRow = {
+  id: string;
+};
+
 type FeedGroupCountRow = {
   id: string;
   name: string;
@@ -471,6 +475,54 @@ function sanitizeLikeQuery(input: string | null) {
   }
 
   return `%${trimmed.replace(/[\\%_]/g, "\\$&")}%`;
+}
+
+function buildAdminClusterSearchCte(searchTerms: string[]) {
+  const termMatchQueries = searchTerms.flatMap((term, index) => {
+    const likeSearchTerm = sanitizeLikeQuery(term);
+    if (!likeSearchTerm) {
+      return [];
+    }
+
+    const likeEscape = "\\";
+    const queries: Prisma.Sql[] = [
+      Prisma.sql`
+        SELECT ${index} AS term_index, cc.id AS cluster_id
+        FROM "content_clusters" cc
+        WHERE COALESCE(cc.title, '') LIKE ${likeSearchTerm} ESCAPE ${likeEscape}
+      `,
+      Prisma.sql`
+        SELECT DISTINCT ${index} AS term_index, i."clusterId" AS cluster_id
+        FROM "items" i
+        WHERE i."clusterId" IS NOT NULL
+          AND i.status = ${"processed"}
+          AND i."moderationStatus" IN (${Prisma.join([...DISPLAYABLE_MODERATION_STATUSES])})
+          AND (
+            COALESCE(i."originalTitle", '') LIKE ${likeSearchTerm} ESCAPE ${likeEscape}
+            OR COALESCE(i."translatedTitle", '') LIKE ${likeSearchTerm} ESCAPE ${likeEscape}
+          )
+      `,
+    ];
+
+    return queries;
+  });
+
+  if (termMatchQueries.length === 0) {
+    return null;
+  }
+
+  return Prisma.sql`
+    WITH term_matches AS (
+      ${Prisma.join(termMatchQueries, "\nUNION ALL\n")}
+    ),
+    matched_clusters AS (
+      SELECT cluster_id AS id
+      FROM term_matches
+      WHERE cluster_id IS NOT NULL
+      GROUP BY cluster_id
+      HAVING COUNT(DISTINCT term_index) = ${searchTerms.length}
+    )
+  `;
 }
 
 function toNumber(value: number | bigint) {
@@ -1018,36 +1070,92 @@ export async function listAdminClusters(
   const skip = (page - 1) * pageSize;
   const searchTerms = getDatabaseSearchTerms(search);
   const minItemCount = options?.minItemCount;
-  const where: Prisma.ContentClusterWhereInput = {
-    ...(typeof minItemCount === "number" ? { itemCount: { gte: minItemCount } } : {}),
-    ...(searchTerms.length > 0
-      ? {
-          AND: searchTerms.map((term) => ({
-            OR: [
-              { title: { contains: term } },
-              { summary: { contains: term } },
-              {
-                items: {
-                  some: {
-                    status: "processed",
-                    moderationStatus: {
-                      in: [...DISPLAYABLE_MODERATION_STATUSES],
-                    },
-                    OR: [
-                      { originalTitle: { contains: term } },
-                      { translatedTitle: { contains: term } },
-                      { summaryText: { contains: term } },
-                      { rssExcerpt: { contains: term } },
-                      { rssContent: { contains: term } },
-                      { source: { name: { contains: term } } },
-                    ],
+  const searchCte = buildAdminClusterSearchCte(searchTerms);
+
+  if (searchCte) {
+    const minItemCountClause =
+      typeof minItemCount === "number" ? Prisma.sql`WHERE cc."itemCount" >= ${minItemCount}` : Prisma.empty;
+    const [idRows, totalRows] = await Promise.all([
+      prisma.$queryRaw<IdRow[]>(Prisma.sql`
+        ${searchCte}
+        SELECT cc.id
+        FROM "content_clusters" cc
+        INNER JOIN matched_clusters mc ON mc.id = cc.id
+        ${minItemCountClause}
+        ORDER BY cc."latestPublishedAt" DESC, cc."createdAt" DESC
+        LIMIT ${pageSize}
+        OFFSET ${skip}
+      `),
+      prisma.$queryRaw<CountRow[]>(Prisma.sql`
+        ${searchCte}
+        SELECT COUNT(*) AS total
+        FROM "content_clusters" cc
+        INNER JOIN matched_clusters mc ON mc.id = cc.id
+        ${minItemCountClause}
+      `),
+    ]);
+    const ids = idRows.map((row) => row.id);
+    const order = new Map(ids.map((id, index) => [id, index]));
+    const clusters =
+      ids.length > 0
+        ? await prisma.contentCluster.findMany({
+            where: { id: { in: ids } },
+            include: {
+              items: {
+                where: {
+                  status: "processed",
+                  moderationStatus: {
+                    in: [...DISPLAYABLE_MODERATION_STATUSES],
                   },
                 },
+                include: {
+                  source: {
+                    include: {
+                      group: true,
+                    },
+                  },
+                },
+                orderBy: [{ publishedAt: "desc" }, { createdAt: "desc" }],
+                take: 5,
               },
-            ],
-          })),
-        }
-      : {}),
+            },
+          })
+        : [];
+    const mappedClusters = clusters
+      .sort((left, right) => (order.get(left.id) ?? 0) - (order.get(right.id) ?? 0))
+      .map((cluster) => {
+        const clusterWithVotes = cluster as typeof cluster & { upvotes: number; downvotes: number };
+        const sourceCount = new Set(cluster.items.map((item) => item.sourceId)).size;
+        const recommendScore = calculateRecommendScore(
+          cluster.score,
+          clusterWithVotes.upvotes ?? 0,
+          clusterWithVotes.downvotes ?? 0,
+          sourceCount,
+          cluster.items.length,
+        );
+
+        return {
+          id: cluster.id,
+          title: cluster.title,
+          summary: cluster.summary,
+          score: recommendScore,
+          itemCount: cluster.itemCount,
+          latestPublishedAt: cluster.latestPublishedAt.toISOString(),
+          status: cluster.status,
+          items: cluster.items.slice(0, 5).map(mapItemToClusterPreview),
+        } satisfies ClusterDTO;
+      });
+
+    return {
+      clusters: mappedClusters,
+      total: toNumber(totalRows[0]?.total ?? BigInt(0)),
+      page,
+      pageSize,
+    };
+  }
+
+  const where: Prisma.ContentClusterWhereInput = {
+    ...(typeof minItemCount === "number" ? { itemCount: { gte: minItemCount } } : {}),
   };
 
   const [clusters, total] = await Promise.all([

@@ -1,7 +1,7 @@
 ---
 forge_loop: true
 artifact: review-report
-slug: cluster-merge-soft-candidate-budget
+slug: 聚合管理搜索优化与删除软候选逻辑
 status: done
 gate: H4
 blocking: false
@@ -10,7 +10,7 @@ security_high_risk: false
 failed_tests_unexplained: false
 ---
 
-# Review Report: cluster-merge-soft-candidate-budget
+# Review Report: 聚合管理搜索优化与删除软候选逻辑
 
 | Field | Value |
 | --- | --- |
@@ -20,60 +20,53 @@ failed_tests_unexplained: false
 | Must Fix Count | 0 |
 | Security High Risk | no |
 | Failed Tests Unexplained | no |
-| Review Scope | current diff: cluster_merge soft candidate recall, detach singleton assignment, ingestion timeline diagnostics, task monitor summary, quick task records |
+| Review Scope | current diff: remove cluster_merge soft candidate channel; remove related timeline/UI metrics; optimize admin cluster search to title-only fuzzy matching; update tests and quick tasks |
 | Review Depth | standard |
-| Specialist Reviewers | data mutation and observability lightweight pass |
+| Specialist Reviewers | data mutation, observability, and query performance lightweight pass |
 | Adversarial Pass | not required for standard depth |
 
 ## Requirement Compliance
 
 | Requirement / AC | Result | Notes |
 | --- | --- | --- |
-| Budgeted soft candidate channel | pass | Strict candidates are selected first; soft object-conflict pairs only fill toward target 50, while hard limit 80 remains in force. |
-| Preserve object-conflict guardrails | pass | Date conflicts remain hard rejects; object conflict only softens when subject/text anchors are strong and distinctive overlap count is at least 2. |
-| Avoid permanent orphan after detach | pass | Detached items are reassigned into a singleton cluster with normal aggregation disabled for that operation. |
-| Timeline observability | pass | Backend timeline records soft object pair/selected/hash-skipped counters. |
-| Monitoring readability | pass | The cluster_merge UI summary compresses soft-object diagnostics into `软对象 selected/total`. |
+| Remove soft candidate logic | pass | Object-conflict pairs are hard rejected again and no budget-fill pass remains. |
+| Preserve non-soft behavior | pass | Existing strict candidate scoring, dirty/hash skip, related pair limit, and hard cap 80 remain. |
+| Keep detach fix | pass | No changes to detach singleton reassignment. |
+| Remove soft metrics | pass | Merge result, ingestion timeline counters, and monitor summary no longer reference soft object metrics. |
+| Optimize admin cluster search | pass | Search branch now matches only cluster title and child item titles through a CTE id selection before loading page details. |
+| Exclude details from fuzzy search | pass | Tests lock that cluster summaries and child item details do not participate in admin cluster search. |
 
 ## Contract Compliance
 
 | Area | Result | Notes |
 | --- | --- | --- |
-| API shape | pass | No public route contract or schema migration changed. |
-| Serialized timeline | pass | Added metrics are additive label/value entries; older timeline consumers continue to parse unknown metrics generically. |
-| Data mutation | pass | Detach still returns previous cluster id and invalidates feed cache; new singleton recompute keeps item visible for later merge passes. |
-| Limits | pass | `CLUSTER_MERGE_TARGET_CANDIDATE_COUNT=50` is a fill target, not a replacement for the 80 hard cap. |
+| API shape | pass | No route contract, schema, or dependency changes. |
+| Serialized timeline | pass | Removed newly added soft metrics; existing core metrics remain unchanged. |
+| Data mutation | pass | No new mutation path introduced. |
+| Search semantics | pass | Behavior intentionally narrows search scope per product decision: title fields only. |
 
 ## Code Quality
 
 - No Must Fix findings.
-- Candidate expansion is isolated in `buildClusterMergeCandidateSelection` and keeps clean-pair hash skipping.
-- The UI summary avoids exposing every diagnostic counter while still surfacing whether soft recall contributed.
-- Quick task artifacts are marked done and production spike records are included as evidence for the rule change.
+- The deletion is narrow and returns helper logic to the hard object-conflict path.
+- Tests now lock in that strong text overlap does not bypass object conflict.
+- The search SQL uses parameterized Prisma raw fragments and keeps the default no-search list path unchanged.
 
 ## Commit Readiness
 
 | Check | Result | Notes |
 | --- | --- | --- |
-| Obvious Bugs | pass | Checked soft-pair gating, target cap, date conflict preservation, detach singleton reassignment, and summary fallback when soft metrics are zero. |
-| API / Data Breakage | pass | No schema, env, or route changes. |
-| Security | pass | No new auth surface; production investigation remained read-only. |
-| Performance | pass | Soft expansion only runs after strict candidate selection and remains bounded by target/hard candidate limits. |
-| Deployability | pass | Docker compose rebuild succeeded; no migration required. |
-| Error Handling UX | pass | Existing cluster merge AI failure/hash skip flows are preserved. |
-| Idempotency / Retry | pass | MergeInputHash handling remains per candidate; detached singleton can participate in future passes without immediate normal rejoin. |
-| Dependency Change | N/A | manifest and lockfile unchanged. |
+| Obvious Bugs | pass | Checked stale references, object-conflict branch, UI summary, and timeline counters. |
+| API / Data Breakage | pass | No schema/env/dependency changes. |
+| Security | pass | No auth or external data transmission changes. |
+| Performance | pass | Removes an extra candidate expansion pass and avoids Prisma correlated LIKE scans over large item fields in admin cluster search. |
+| Deployability | pass | Typecheck and focused tests pass. |
 
 ## Test Coverage
 
-- `npm test -- tests/unit/cluster-merge-candidates.test.ts tests/integration/cluster-assignment.test.ts tests/components/task-monitor-panel.test.tsx` passed: 3 files, 20 tests.
+- `npm test -- tests/unit/cluster-merge-candidates.test.ts tests/components/task-monitor-panel.test.tsx tests/integration/cluster-assignment.test.ts` passed: 3 files, 19 tests.
+- `npm test -- tests/integration/admin-cluster-api.test.ts` passed: 8 tests.
 - `npx tsc --noEmit` passed.
-- `npm run lint` exited 0 with one pre-existing warning: `src/components/admin/admin-page-client.tsx:133` `_props` unused.
-- `npx @shawnxie666/forge-loop validate --slug cluster-merge-soft-candidate-budget` passed.
-- `npx @shawnxie666/forge-loop validate --slug deepseek-cluster-prod-spike` passed.
-- `npx @shawnxie666/forge-loop validate --slug openai-stargate-compute-prod-spike` passed.
-- `docker compose up -d --build` passed and restarted local app/worker.
-- `git diff --check` passed.
 
 ## Must Fix
 
@@ -87,8 +80,9 @@ failed_tests_unexplained: false
 
 ## Nice To Have
 
-- After deployment, compare `软对象入选`, `候选组`, and downstream AI merge results for a few ingestion runs to tune the target or soft-anchor threshold if recall/noise balance drifts.
+- If recall still needs improvement later, design a more conservative rule with offline examples before enabling it in production.
+- If detail/body search is needed later, implement it as a separate full-text search entry instead of overloading admin cluster list search.
 
 ## Final Recommendation
 
-Approve. Current diff has no Must Fix, no Security High Risk, and no unexplained test failure. It is ready to commit.
+Approve. Current diff has no Must Fix, no Security High Risk, and no unexplained test failure.

@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { CLUSTER_MERGE_CANDIDATE_LIMIT, CLUSTER_MERGE_TARGET_CANDIDATE_COUNT } from "@/config/constants";
+import { CLUSTER_MERGE_CANDIDATE_LIMIT } from "@/config/constants";
 import {
   buildClusterMergeCandidateInputHash,
   buildClusterMergeCandidates,
-  buildClusterMergeCandidateSelection,
   type ClusterMergeCandidate,
 } from "@/lib/clusters/helpers";
 
@@ -199,7 +198,7 @@ describe("buildClusterMergeCandidates", () => {
     expect(candidates).toEqual([]);
   });
 
-  it("uses soft object-conflict candidates to recover same-subject events with strong text overlap", () => {
+  it("rejects object-conflict pairs even when subject and text overlap are strong", () => {
     const candidates = buildClusterMergeCandidates([
       createCandidate({
         id: "deepseek-vision-mode",
@@ -224,34 +223,7 @@ describe("buildClusterMergeCandidates", () => {
       }),
     ]);
 
-    expect(candidates.map((candidate) => candidate.id).sort()).toEqual([
-      "deepseek-multimodal-vision",
-      "deepseek-vision-mode",
-    ]);
-  });
-
-  it("stops soft object-conflict expansion at the target candidate budget", () => {
-    const { candidates, diagnostics } = buildClusterMergeCandidateSelection(
-      Array.from({ length: CLUSTER_MERGE_TARGET_CANDIDATE_COUNT + 20 }, (_, index) =>
-        createCandidate({
-          id: `openai-stargate-${index}`,
-          title:
-            index % 2 === 0
-              ? `OpenAI 调整星际之门计划 ${index}`
-              : `OpenAI 构建 Stargate 算力基础设施 ${index}`,
-          summary: "OpenAI 围绕 Stargate 与星际之门计划调整算力基础设施布局。",
-          fingerprint: `openai-stargate-${index}`,
-          eventType: index % 2 === 0 ? "other" : "release",
-          eventSubject: "OpenAI",
-          eventAction: index % 2 === 0 ? "调整战略" : "发布",
-          eventObject: index % 2 === 0 ? `alpha-${index}` : `beta-${index}`,
-          latestPublishedAt: new Date(`2026-04-20T${String(index % 24).padStart(2, "0")}:00:00.000Z`),
-        }),
-      ),
-    );
-
-    expect(candidates).toHaveLength(CLUSTER_MERGE_TARGET_CANDIDATE_COUNT);
-    expect(diagnostics.softObjectConflictSelectedPairs).toBeGreaterThan(0);
+    expect(candidates).toEqual([]);
   });
 
   it("caps large merge candidate pools before sending them to AI", () => {
