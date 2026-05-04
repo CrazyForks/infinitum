@@ -32,6 +32,7 @@ import {
   IconExternalLink,
   IconTrash,
   IconMerge,
+  IconSplit,
 } from "@/components/ui/icons";
 import type { ClusterDTO, ReviewItemDTO } from "@/lib/feed/types";
 import { getClusterDisplayTitle } from "@/lib/feed/cluster-display";
@@ -101,6 +102,10 @@ function formatDateTime(value: string) {
 
 function formatDate(value: string) {
   return dateFormatter.format(new Date(value));
+}
+
+function getClusterLatestItemUpdatedAt(cluster: ClusterDTO) {
+  return cluster.latestItemUpdatedAt ?? cluster.latestPublishedAt;
 }
 
 function getLocalDateString(date: Date): string {
@@ -291,8 +296,10 @@ interface ClusterDetailModalProps {
   onToggleStatus?: () => void;
   onDetachItem?: (itemId: string) => void;
   onMerge?: () => void;
+  onSplit?: () => void;
   isRegenerating?: boolean;
   isTogglingStatus?: boolean;
+  isSplitting?: boolean;
 }
 
 function ClusterDetailModal({
@@ -303,8 +310,10 @@ function ClusterDetailModal({
   onToggleStatus,
   onDetachItem,
   onMerge,
+  onSplit,
   isRegenerating,
   isTogglingStatus,
+  isSplitting,
 }: ClusterDetailModalProps) {
   if (!cluster) return null;
 
@@ -331,6 +340,12 @@ function ClusterDetailModal({
             <Button onClick={onRegenerateSummary} variant="secondary" disabled={isRegenerating}>
               <IconRotateCw className={cx("h-4 w-4 mr-1", isRegenerating && "animate-spin")} />
               重新生成摘要
+            </Button>
+          )}
+          {onSplit && (
+            <Button onClick={onSplit} variant="danger" disabled={isSplitting}>
+              <IconSplit className={cx("h-4 w-4 mr-1", isSplitting && "animate-pulse")} />
+              全部拆分
             </Button>
           )}
           {onToggleStatus && (
@@ -367,8 +382,8 @@ function ClusterDetailModal({
               <span className="text-[var(--text-3)]">内容数:</span> {cluster.itemCount} 条
             </div>
             <div>
-              <span className="text-[var(--text-3)]">最新发布:</span>{" "}
-              {formatDateTime(cluster.latestPublishedAt)}
+              <span className="text-[var(--text-3)]">最新更新:</span>{" "}
+              {formatDateTime(getClusterLatestItemUpdatedAt(cluster))}
             </div>
             <div>
               <span className="text-[var(--text-3)]">状态:</span>{" "}
@@ -483,6 +498,7 @@ function ContentReviewContent({
   const [regeneratingClusterId, setRegeneratingClusterId] = useState<string | null>(null);
   const [togglingClusterId, setTogglingClusterId] = useState<string | null>(null);
   const [mergingClusterId, setMergingClusterId] = useState<string | null>(null);
+  const [splittingClusterId, setSplittingClusterId] = useState<string | null>(null);
 
   // Merge modal states
   const [isMergeModalOpen, setIsMergeModalOpen] = useState(false);
@@ -519,7 +535,7 @@ function ContentReviewContent({
           setFilteredTotal(result.total);
         } else {
           const result = await fetchReviewClusters(page, pageSize, debouncedClusterSearch, {
-            minItemCount: debouncedClusterSearch.trim() ? null : 2,
+            minItemCount: 2,
           });
 
           if (cancelled) return;
@@ -658,7 +674,7 @@ function ContentReviewContent({
   const visibleClusters = useMemo(() => {
     return clusters.filter((cluster) => {
       const matchesStatus = !clusterStatus || cluster.status === clusterStatus;
-      const matchesTimeRange = isWithinTimeRange(cluster.latestPublishedAt, clusterTimeRange);
+      const matchesTimeRange = isWithinTimeRange(getClusterLatestItemUpdatedAt(cluster), clusterTimeRange);
       return matchesStatus && matchesTimeRange;
     });
   }, [clusters, clusterStatus, clusterTimeRange]);
@@ -824,6 +840,25 @@ function ContentReviewContent({
     });
   };
 
+  const handleSplitCluster = (clusterId: string) => {
+    runTransition(async () => {
+      await executeWithPendingId(clusterId, setSplittingClusterId, async () => {
+        const succeeded = await postAction(`/api/admin/clusters/${clusterId}/split`, "已拆分为单条目聚合。", {
+          onSuccess: () => {
+            setClusters((current) => current.filter((entry) => entry.id !== clusterId));
+            if (selectedCluster?.id === clusterId) {
+              handleCloseClusterDetail();
+            }
+          },
+        });
+
+        if (succeeded) {
+          fetchData();
+        }
+      });
+    });
+  };
+
   // Confirmation handlers
   const openConfirmRestore = (itemId: string) => {
     const item = filteredItems.find((i) => i.id === itemId);
@@ -899,6 +934,21 @@ function ContentReviewContent({
       variant: "danger",
       onConfirm: () => {
         handleDetachItem(clusterId, itemId);
+        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+      },
+    });
+  };
+
+  const openConfirmSplit = (clusterId: string) => {
+    const cluster = selectedCluster?.id === clusterId ? selectedCluster : clusters.find((c) => c.id === clusterId);
+    setConfirmModal({
+      isOpen: true,
+      title: "确认全部拆分",
+      message: `确定要将聚合 "${cluster?.title ?? ""}" 的 ${cluster?.itemCount ?? 0} 个条目全部拆成单聚合吗？`,
+      confirmText: "全部拆分",
+      variant: "danger",
+      onConfirm: () => {
+        handleSplitCluster(clusterId);
         setConfirmModal((prev) => ({ ...prev, isOpen: false }));
       },
     });
@@ -990,7 +1040,7 @@ function ContentReviewContent({
           id="content-review-keyword"
           label="关键词"
           ariaLabel="审核关键词"
-          placeholder={activeTab === "filtered" ? "搜索标题、摘要或复核说明" : "搜索聚合标题、摘要或子项"}
+          placeholder={activeTab === "filtered" ? "搜索标题、摘要或复核说明" : "搜索聚合标题或子项标题"}
           value={activeTab === "filtered" ? filteredSearch : clusterSearch}
           onChange={(value) => {
             if (activeTab === "filtered") {
@@ -1051,8 +1101,8 @@ function ContentReviewContent({
 
             <FilterSelect
               id="content-review-time-range"
-              label="最新发布时间"
-              ariaLabel="最新发布时间范围"
+              label="最新更新时间"
+              ariaLabel="最新更新时间范围"
               value={clusterTimeRange}
               onChange={(value) => {
                 setClusterTimeRange(value as TimeRangeFilter);
@@ -1145,7 +1195,7 @@ function ContentReviewContent({
                 <th className="w-[10%] whitespace-nowrap text-left px-4 py-3">内容数</th>
                 <th className="w-[12%] whitespace-nowrap text-left px-4 py-3">状态</th>
                 <th className="w-[10%] whitespace-nowrap text-left px-4 py-3">质量</th>
-                <th className="w-[15%] whitespace-nowrap text-left px-4 py-3">最新发布</th>
+                <th className="w-[15%] whitespace-nowrap text-left px-4 py-3">最新更新</th>
                 <th className="w-[18%] whitespace-nowrap text-right px-4 py-3">操作</th>
               </tr>
             </thead>
@@ -1171,7 +1221,7 @@ function ContentReviewContent({
                   </td>
                   <td className="px-4 py-3 text-[var(--text-2)]">{cluster.score}</td>
                   <td className="px-4 py-3 text-[var(--text-3)] text-xs">
-                    {formatDate(cluster.latestPublishedAt)}
+                    {formatDate(getClusterLatestItemUpdatedAt(cluster))}
                   </td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-1">
@@ -1192,6 +1242,15 @@ function ContentReviewContent({
                         disabled={regeneratingClusterId === cluster.id}
                       >
                         <IconRotateCw className={cx("h-4 w-4", regeneratingClusterId === cluster.id && "animate-spin")} />
+                      </IconButton>
+                      <IconButton
+                        onClick={() => openConfirmSplit(cluster.id)}
+                        variant="ghost"
+                        size="sm"
+                        title="全部拆分"
+                        disabled={splittingClusterId === cluster.id}
+                      >
+                        <IconSplit className={cx("h-4 w-4 text-[var(--danger-ink)]", splittingClusterId === cluster.id && "animate-pulse")} />
                       </IconButton>
                       <IconButton
                         onClick={() => openConfirmToggleStatus(cluster.id, cluster.status)}
@@ -1249,8 +1308,10 @@ function ContentReviewContent({
           onToggleStatus={() => openConfirmToggleStatus(selectedCluster.id, selectedCluster.status)}
           onDetachItem={(itemId) => openConfirmDetach(selectedCluster.id, itemId)}
           onMerge={() => handleOpenMergeModal(selectedCluster.id)}
+          onSplit={() => openConfirmSplit(selectedCluster.id)}
           isRegenerating={regeneratingClusterId === selectedCluster?.id}
           isTogglingStatus={togglingClusterId === selectedCluster?.id}
+          isSplitting={splittingClusterId === selectedCluster?.id}
         />
       )}
 

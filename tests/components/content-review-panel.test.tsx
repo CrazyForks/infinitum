@@ -91,6 +91,7 @@ function createCluster(overrides: Partial<Record<string, unknown>> = {}) {
     score: 92,
     itemCount: 1,
     latestPublishedAt: "2026-04-10T09:00:00.000Z",
+    latestItemUpdatedAt: "2026-04-10T11:00:00.000Z",
     items: [createClusterItem()],
     ...overrides,
   };
@@ -270,6 +271,37 @@ describe("ContentReviewPanel", () => {
     expect(within(detailDialog).getByText("背景").tagName).toBe("EM");
   });
 
+  it("keeps cluster list keyword searches restricted to multi-item clusters", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+      const url = getFetchUrl(input);
+
+      if (url === "/api/admin/clusters?page=1&pageSize=10&minItemCount=2") {
+        return new Response(JSON.stringify({ clusters: [createCluster({ itemCount: 2 })], total: 1 }));
+      }
+
+      if (url === "/api/admin/clusters?page=1&pageSize=10&search=OpenAI&minItemCount=2") {
+        return new Response(JSON.stringify({ clusters: [], total: 0 }));
+      }
+
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderWithProviders(<ContentReviewPanel activeTab="clusters" />);
+    await waitForLoaded();
+
+    await user.type(screen.getByLabelText("审核关键词"), "OpenAI");
+
+    await waitFor(
+      () => {
+        expect(fetchMock).toHaveBeenCalledWith("/api/admin/clusters?page=1&pageSize=10&search=OpenAI&minItemCount=2");
+      },
+      { timeout: 2_000 },
+    );
+  });
+
   it("queues reanalyze as a background task", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
@@ -435,6 +467,75 @@ describe("ContentReviewPanel", () => {
 
     expect(screen.getByText("包含内容 (0)")).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("已移出聚合组。");
+  });
+
+  it("splits a whole cluster into singleton clusters from the cluster list", async () => {
+    const user = userEvent.setup();
+    let splitCalled = false;
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
+      const url = getFetchUrl(input);
+
+      if (url === "/api/admin/items?moderationStatus=filtered&page=1&pageSize=10") {
+        return new Response(JSON.stringify({ items: [], total: 0 }));
+      }
+
+      if (url === "/api/admin/clusters?page=1&pageSize=10&minItemCount=2") {
+        return new Response(
+          JSON.stringify({
+            clusters: splitCalled
+              ? []
+              : [
+                  createCluster({
+                    itemCount: 2,
+                    items: [createClusterItem(), createClusterItem({ id: "item-2", title: "条目 B" })],
+                  }),
+                ],
+            total: splitCalled ? 0 : 1,
+          }),
+        );
+      }
+
+      if (url === "/api/admin/clusters/cluster-1/split") {
+        expect(init?.method).toBe("POST");
+        splitCalled = true;
+        return new Response(
+          JSON.stringify({
+            success: true,
+            cluster: null,
+            result: {
+              clusterId: "cluster-1",
+              itemCount: 2,
+              singletonClusterIds: ["single-item-1", "single-item-2"],
+            },
+          }),
+        );
+      }
+
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderWithProviders(<ContentReviewPanel activeTab="clusters" />);
+    await waitForLoaded();
+
+    expect(screen.getAllByText("最新更新").length).toBeGreaterThan(0);
+    expect(within(screen.getByRole("table")).getByText("AI 融资动态")).toBeInTheDocument();
+
+    await user.click(screen.getByTitle("全部拆分"));
+    const confirmDialog = await screen.findByRole("dialog", { name: "确认全部拆分" });
+    await user.click(within(confirmDialog).getByRole("button", { name: "全部拆分" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/admin/clusters/cluster-1/split", {
+        method: "POST",
+      });
+    });
+    await waitFor(() => {
+      expect(screen.queryByText("AI 融资动态")).not.toBeInTheDocument();
+    });
+
+    expect(screen.getByRole("status")).toHaveTextContent("已拆分为单条目聚合。");
   });
 
   it("shows an error when detaching an item returns 200 without cluster", async () => {

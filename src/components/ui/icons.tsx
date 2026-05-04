@@ -384,3 +384,16 @@ export function IconMerge(props: IconProps) {
     </IconBase>
   );
 }
+
+export function IconSplit(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M12 4v5" />
+      <path d="M12 15v5" />
+      <path d="M5 9h14" />
+      <path d="M7 15h10" />
+      <path d="M9 9v2a4 4 0 0 0 4 4" />
+      <path d="M15 9v2a4 4 0 0 1-4 4" />
+    </IconBase>
+  );
+}

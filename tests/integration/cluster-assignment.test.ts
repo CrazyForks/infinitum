@@ -7,6 +7,7 @@ import {
   executeClusterMerge,
   mergeClusters,
   mergeSelectedItemsToLargestCluster,
+  splitClusterIntoSingletons,
 } from "@/lib/clusters/service";
 import { prisma } from "@/lib/db";
 import { getAdminCluster } from "@/lib/feed/repository";
@@ -503,6 +504,121 @@ describe("cluster assignment", () => {
     await expect(prisma.contentCluster.findUnique({ where: { id: "detach-cluster" } })).resolves.toMatchObject({
       itemCount: 1,
     });
+  });
+
+  it("splits every item in a cluster into singleton clusters", async () => {
+    const source = await prisma.source.create({
+      data: {
+        name: "Split Feed",
+        rssUrl: "https://split.example.com/feed.xml",
+        siteUrl: "https://split.example.com",
+        enabled: true,
+        aiParsingEnabled: true,
+        aggregationEnabled: true,
+      },
+    });
+    await prisma.contentCluster.create({
+      data: {
+        id: "split-cluster",
+        kind: "topic",
+        title: "OpenAI 算力基础设施动态",
+        summary: "OpenAI 算力基础设施动态聚合。",
+        score: 86,
+        itemCount: 3,
+        latestPublishedAt: new Date("2026-04-20T10:00:00.000Z"),
+        status: "active",
+        fingerprint: "split-cluster",
+      },
+    });
+    await prisma.item.createMany({
+      data: [
+        {
+          id: "split-item-1",
+          sourceId: source.id,
+          clusterId: "split-cluster",
+          originalUrl: "https://split.example.com/1",
+          canonicalUrl: "https://split.example.com/1",
+          urlHash: "split-hash-1",
+          dedupeSignature: "split|1",
+          originalTitle: "OpenAI 调整星际之门计划",
+          publishedAt: new Date("2026-04-20T10:00:00.000Z"),
+          summaryText: "OpenAI 调整星际之门计划。",
+          language: "zh",
+          status: "processed",
+          moderationStatus: "allowed",
+          qualityScore: 86,
+          qualityRationale: "relevant",
+          eventSubject: "OpenAI",
+          eventObject: "星际之门计划",
+        },
+        {
+          id: "split-item-2",
+          sourceId: source.id,
+          clusterId: "split-cluster",
+          originalUrl: "https://split.example.com/2",
+          canonicalUrl: "https://split.example.com/2",
+          urlHash: "split-hash-2",
+          dedupeSignature: "split|2",
+          originalTitle: "为智能时代构建算力基础设施",
+          publishedAt: new Date("2026-04-20T09:00:00.000Z"),
+          summaryText: "为智能时代构建算力基础设施。",
+          language: "zh",
+          status: "processed",
+          moderationStatus: "allowed",
+          qualityScore: 82,
+          qualityRationale: "relevant",
+          eventSubject: "OpenAI",
+          eventObject: "算力基础设施",
+        },
+        {
+          id: "split-item-3",
+          sourceId: source.id,
+          clusterId: "split-cluster",
+          originalUrl: "https://split.example.com/3",
+          canonicalUrl: "https://split.example.com/3",
+          urlHash: "split-hash-3",
+          dedupeSignature: "split|3",
+          originalTitle: "OpenAI 租赁算力加速 AI 布局",
+          publishedAt: new Date("2026-04-20T08:00:00.000Z"),
+          summaryText: "OpenAI 租赁算力加速 AI 布局。",
+          language: "zh",
+          status: "processed",
+          moderationStatus: "allowed",
+          qualityScore: 84,
+          qualityRationale: "relevant",
+          eventSubject: "OpenAI",
+          eventObject: "算力租赁",
+        },
+      ],
+    });
+
+    const result = await splitClusterIntoSingletons("split-cluster");
+
+    expect(result).toMatchObject({
+      clusterId: "split-cluster",
+      itemCount: 3,
+    });
+    expect(result.singletonClusterIds).toHaveLength(3);
+    await expect(prisma.contentCluster.findUnique({ where: { id: "split-cluster" } })).resolves.toBeNull();
+
+    const splitItems = await prisma.item.findMany({
+      where: { id: { in: ["split-item-1", "split-item-2", "split-item-3"] } },
+      orderBy: { id: "asc" },
+    });
+    expect(splitItems.map((item) => item.clusterId)).toHaveLength(3);
+    expect(new Set(splitItems.map((item) => item.clusterId)).size).toBe(3);
+    expect(splitItems.every((item) => item.clusterId && item.clusterId !== "split-cluster")).toBe(true);
+
+    const singletonClusters = await prisma.contentCluster.findMany({
+      where: { id: { in: splitItems.map((item) => item.clusterId!) } },
+      orderBy: { fingerprint: "asc" },
+    });
+    expect(singletonClusters.map((cluster) => cluster.fingerprint)).toEqual([
+      "single-split-item-1",
+      "single-split-item-2",
+      "single-split-item-3",
+    ]);
+    expect(singletonClusters.every((cluster) => cluster.itemCount === 1)).toBe(true);
   });
 
   it("sends multi-subject singleton merge candidates to AI and merges the selected group", async () => {

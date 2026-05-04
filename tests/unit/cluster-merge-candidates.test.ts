@@ -88,6 +88,99 @@ describe("buildClusterMergeCandidates", () => {
     expect(candidates.map((candidate) => candidate.id).sort()).toEqual(["microsoft-contract", "openai-contract"]);
   });
 
+  it("keeps narrow multi-subject bridge pairs when time and distinctive anchors are strong", () => {
+    const candidates = buildClusterMergeCandidates([
+      createCandidate({
+        id: "openai-stargate-shift",
+        title: "OpenAI 调整 Stargate 星际之门计划转向算力租赁",
+        summary: "OpenAI 的 Stargate 星际之门计划转向算力租赁和算力基础设施合作。",
+        fingerprint: "openai-stargate-shift",
+        eventType: "infrastructure",
+        eventSubject: "OpenAI",
+        eventAction: "调整战略",
+        eventObject: "星际之门计划",
+        eventDate: "2026-04-20",
+      }),
+      createCandidate({
+        id: "oracle-stargate-infra",
+        title: "Oracle 支持 OpenAI Stargate 算力租赁基础设施",
+        summary: "Oracle 支持 OpenAI Stargate 算力租赁基础设施合作。",
+        fingerprint: "oracle-stargate-infra",
+        eventType: "infrastructure",
+        eventSubject: "Oracle",
+        eventAction: "支持建设",
+        eventObject: "OpenAI 算力基础设施",
+        eventDate: "2026-04-20",
+        latestPublishedAt: new Date("2026-04-20T10:00:00.000Z"),
+      }),
+    ]);
+
+    expect(candidates.map((candidate) => candidate.id).sort()).toEqual([
+      "openai-stargate-shift",
+      "oracle-stargate-infra",
+    ]);
+  });
+
+  it("rejects multi-subject bridge pairs when explicit event dates differ", () => {
+    const candidates = buildClusterMergeCandidates([
+      createCandidate({
+        id: "openai-stargate-shift",
+        title: "OpenAI 调整 Stargate 星际之门计划转向算力租赁",
+        summary: "OpenAI 的 Stargate 星际之门计划转向算力租赁和算力基础设施合作。",
+        fingerprint: "openai-stargate-shift",
+        eventType: "infrastructure",
+        eventSubject: "OpenAI",
+        eventAction: "调整战略",
+        eventObject: "星际之门计划",
+        eventDate: "2026-04-20",
+      }),
+      createCandidate({
+        id: "oracle-stargate-infra",
+        title: "Oracle 支持 OpenAI Stargate 算力租赁基础设施",
+        summary: "Oracle 支持 OpenAI Stargate 算力租赁基础设施合作。",
+        fingerprint: "oracle-stargate-infra",
+        eventType: "infrastructure",
+        eventSubject: "Oracle",
+        eventAction: "支持建设",
+        eventObject: "OpenAI 算力基础设施",
+        eventDate: "2026-04-21",
+        latestPublishedAt: new Date("2026-04-20T10:00:00.000Z"),
+      }),
+    ]);
+
+    expect(candidates).toEqual([]);
+  });
+
+  it("rejects multi-subject bridge pairs when overlap is only generic wording", () => {
+    const candidates = buildClusterMergeCandidates([
+      createCandidate({
+        id: "acme-product",
+        title: "Acme 发布新产品",
+        summary: "Acme 发布新产品。",
+        fingerprint: "acme-product",
+        eventType: "launch",
+        eventSubject: "Acme",
+        eventAction: "发布",
+        eventObject: "产品 A",
+        eventDate: "2026-04-20",
+      }),
+      createCandidate({
+        id: "beta-product",
+        title: "Beta 发布新产品",
+        summary: "Beta 发布新产品。",
+        fingerprint: "beta-product",
+        eventType: "launch",
+        eventSubject: "Beta",
+        eventAction: "发布",
+        eventObject: "产品 B",
+        eventDate: "2026-04-20",
+        latestPublishedAt: new Date("2026-04-20T10:00:00.000Z"),
+      }),
+    ]);
+
+    expect(candidates).toEqual([]);
+  });
+
   it("skips already evaluated merge pairs when neither side changed", () => {
     const openaiContract = createCandidate({
       id: "openai-contract",

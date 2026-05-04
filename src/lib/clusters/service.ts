@@ -522,6 +522,69 @@ export async function detachItemFromCluster(itemId: string, aiProvider?: AiProvi
   return previousClusterId;
 }
 
+export type ClusterSplitResult = {
+  clusterId: string;
+  itemCount: number;
+  singletonClusterIds: string[];
+};
+
+export async function splitClusterIntoSingletons(
+  clusterId: string,
+  aiProvider?: AiProvider,
+): Promise<ClusterSplitResult> {
+  const cluster = await prisma.contentCluster.findUnique({
+    where: { id: clusterId },
+    include: {
+      items: {
+        where: {
+          status: "processed",
+          moderationStatus: { in: ["allowed", "restored"] },
+        },
+        select: { id: true },
+        orderBy: [{ publishedAt: "desc" }, { createdAt: "desc" }],
+      },
+    },
+  });
+
+  if (!cluster) {
+    throw new Error("聚合组不存在");
+  }
+
+  if (cluster.items.length < 2) {
+    throw new Error("聚合组条目不足，无需拆分");
+  }
+
+  const itemIds = cluster.items.map((item) => item.id);
+  await prisma.item.updateMany({
+    where: { id: { in: itemIds } },
+    data: {
+      clusterId: null,
+      manualClusterAssignedAt: null,
+    },
+  });
+
+  const singletonClusterIds: string[] = [];
+  for (const itemId of itemIds) {
+    const assignment = await assignItemToCluster(itemId, {
+      aiProvider,
+      aggregationEnabled: false,
+    });
+    if (assignment.clusterId) {
+      singletonClusterIds.push(assignment.clusterId);
+      await recomputeCluster(assignment.clusterId, aiProvider);
+    }
+  }
+
+  await recomputeCluster(clusterId, aiProvider);
+  invalidateFeedCache();
+
+  return {
+    clusterId,
+    itemCount: itemIds.length,
+    singletonClusterIds,
+  };
+}
+
 export async function moveItemToCluster(itemId: string, clusterId: string, aiProvider?: AiProvider) {
   const [item, targetCluster] = await Promise.all([
     prisma.item.findUnique({

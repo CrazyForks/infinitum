@@ -750,6 +750,9 @@ function buildMergeTextBlob(candidate: ClusterMergeCandidate) {
 }
 
 const RELATIONAL_OBJECT_TOKENS = new Set(["合同", "协议", "合作", "交易", "收购", "融资", "投资", "诉讼", "政策"]);
+const MULTI_SUBJECT_BRIDGE_MAX_PUBLISHED_DIFF_MS = 24 * 60 * 60 * 1000;
+const MULTI_SUBJECT_BRIDGE_MIN_DISTINCTIVE_OVERLAP = 3;
+const MULTI_SUBJECT_BRIDGE_SCORE_BONUS = 15;
 const COMMON_MERGE_TOKENS = new Set([
   "发布",
   "推出",
@@ -807,21 +810,111 @@ function buildExcludedMergeTokens(values: Array<string | null | undefined>) {
   return tokens;
 }
 
-function hasDistinctiveTextOverlap(
+function countDistinctiveTextOverlap(
   left: ClusterMergeCandidate,
   right: ClusterMergeCandidate,
   excludedTokens: Set<string>,
 ) {
   const leftTokens = tokenizeMergeText(buildMergeTextBlob(left));
   const rightTokens = tokenizeMergeText(buildMergeTextBlob(right));
+  let overlap = 0;
 
   for (const token of leftTokens) {
     if (!excludedTokens.has(token) && rightTokens.has(token)) {
-      return true;
+      overlap += 1;
     }
   }
 
-  return false;
+  return overlap;
+}
+
+function hasSubjectObjectRoleOverlap(
+  leftSubject: string | null,
+  rightSubject: string | null,
+  leftObject: string | null,
+  rightObject: string | null,
+) {
+  return textSimilarity(leftSubject, rightObject).similar || textSimilarity(rightSubject, leftObject).similar;
+}
+
+function hasCompatibleMergeAction(
+  leftAction: string | null,
+  rightAction: string | null,
+  leftEventType: string | null,
+  rightEventType: string | null,
+) {
+  if (!leftAction || !rightAction) {
+    return true;
+  }
+
+  if (leftAction === rightAction || (leftEventType && rightEventType && leftEventType === rightEventType)) {
+    return true;
+  }
+
+  const leftTokens = tokenizeMergeText(leftAction);
+  const rightTokens = tokenizeMergeText(rightAction);
+  if (countTokenOverlap(leftTokens, rightTokens) > 0) {
+    return true;
+  }
+
+  const negativeActionTokens = ["否认", "辟谣", "取消", "终止", "撤回", "暂停", "下架", "deny", "cancel", "terminate"];
+  const leftNegative = negativeActionTokens.some((token) => leftAction.includes(token));
+  const rightNegative = negativeActionTokens.some((token) => rightAction.includes(token));
+
+  return leftNegative === rightNegative;
+}
+
+function isMultiSubjectBridgePair(input: {
+  left: ClusterMergeCandidate;
+  right: ClusterMergeCandidate;
+  leftSubject: string | null;
+  rightSubject: string | null;
+  leftAction: string | null;
+  rightAction: string | null;
+  leftObject: string | null;
+  rightObject: string | null;
+  subjectSimilarity: ReturnType<typeof textSimilarity>;
+  textOverlap: ReturnType<typeof textSimilarity>;
+  distinctiveTextOverlapCount: number;
+}) {
+  const {
+    left,
+    right,
+    leftSubject,
+    rightSubject,
+    leftAction,
+    rightAction,
+    leftObject,
+    rightObject,
+    subjectSimilarity,
+    textOverlap,
+    distinctiveTextOverlapCount,
+  } = input;
+  const bothSubjectsPresent = Boolean(leftSubject && rightSubject);
+  const hasDifferentSubject =
+    bothSubjectsPresent ? !subjectSimilarity.similar : Boolean(leftSubject || rightSubject);
+
+  if (!hasDifferentSubject) {
+    return false;
+  }
+
+  const publishedAtDiffMs = Math.abs(left.latestPublishedAt.getTime() - right.latestPublishedAt.getTime());
+  if (publishedAtDiffMs > MULTI_SUBJECT_BRIDGE_MAX_PUBLISHED_DIFF_MS) {
+    return false;
+  }
+
+  if (!textOverlap.strong || distinctiveTextOverlapCount < MULTI_SUBJECT_BRIDGE_MIN_DISTINCTIVE_OVERLAP) {
+    return false;
+  }
+
+  if (!hasCompatibleMergeAction(leftAction, rightAction, left.eventType, right.eventType)) {
+    return false;
+  }
+
+  return (
+    hasSubjectObjectRoleOverlap(leftSubject, rightSubject, leftObject, rightObject) ||
+    distinctiveTextOverlapCount >= MULTI_SUBJECT_BRIDGE_MIN_DISTINCTIVE_OVERLAP
+  );
 }
 
 type ClusterMergePairRejectionReason = "object_conflict" | "date_conflict" | "no_event_anchor";
@@ -875,13 +968,27 @@ function scoreClusterMergePair(left: ClusterMergeCandidate, right: ClusterMergeC
   const objectSimilarity = textSimilarity(leftObject, rightObject);
   const textOverlap = textSimilarity(buildMergeTextBlob(left), buildMergeTextBlob(right));
   const relationalObjectOverlap = hasRelationalObjectOverlap(leftObject, rightObject);
-  const distinctiveTextOverlap = hasDistinctiveTextOverlap(
+  const distinctiveTextOverlapCount = countDistinctiveTextOverlap(
     left,
     right,
     buildExcludedMergeTokens([leftSubject, rightSubject, leftAction, rightAction]),
   );
+  const distinctiveTextOverlap = distinctiveTextOverlapCount > 0;
+  const multiSubjectBridge = isMultiSubjectBridgePair({
+    left,
+    right,
+    leftSubject,
+    rightSubject,
+    leftAction,
+    rightAction,
+    leftObject,
+    rightObject,
+    subjectSimilarity,
+    textOverlap,
+    distinctiveTextOverlapCount,
+  });
 
-  if (leftObject && rightObject && !objectSimilarity.strong && !relationalObjectOverlap) {
+  if (leftObject && rightObject && !objectSimilarity.strong && !relationalObjectOverlap && !multiSubjectBridge) {
     return {
       rejected: true,
       rejectedReason: "object_conflict",
@@ -930,7 +1037,11 @@ function scoreClusterMergePair(left: ClusterMergeCandidate, right: ClusterMergeC
     score += 4;
   }
 
-  const hasEventAnchor = objectSimilarity.similar || distinctiveTextOverlap;
+  if (multiSubjectBridge) {
+    score += MULTI_SUBJECT_BRIDGE_SCORE_BONUS;
+  }
+
+  const hasEventAnchor = objectSimilarity.similar || distinctiveTextOverlap || multiSubjectBridge;
   if (!hasEventAnchor) {
     return {
       rejected: true,

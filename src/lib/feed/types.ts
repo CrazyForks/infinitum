@@ -106,6 +106,7 @@ export type ClusterDTO = {
   score: number;
   itemCount: number;
   latestPublishedAt: string;
+  latestItemUpdatedAt?: string;
   status: "active" | "hidden";
   items: FeedClusterPreviewItemDTO[];
 };

@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 const requireAdmin = vi.fn();
 const enqueueClusterSummaryTask = vi.fn();
 const mergeClusters = vi.fn();
+const splitClusterIntoSingletons = vi.fn();
 
 vi.mock("@/lib/admin/session", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/admin/session")>();
@@ -22,6 +23,7 @@ vi.mock("@/lib/clusters/service", async (importOriginal) => {
     ...actual,
     enqueueClusterSummaryTask,
     mergeClusters,
+    splitClusterIntoSingletons,
   };
 });
 
@@ -152,6 +154,81 @@ describe("/api/admin/clusters", () => {
     });
   });
 
+  it("orders admin clusters by latest child item update time", async () => {
+    requireAdmin.mockResolvedValue(undefined);
+    const source = await prisma.source.findFirstOrThrow({ where: { name: "Cluster Feed" } });
+
+    await prisma.contentCluster.create({
+      data: {
+        id: "cluster-older-published-newer-updated",
+        kind: "topic",
+        title: "Compute infrastructure update",
+        summary: "更新更晚的聚合",
+        score: 76,
+        itemCount: 2,
+        latestPublishedAt: new Date("2026-04-09T10:00:00.000Z"),
+        status: "active",
+        fingerprint: "compute-infrastructure-update",
+      },
+    });
+
+    await prisma.item.createMany({
+      data: [
+        {
+          id: "cluster-update-item-1",
+          sourceId: source.id,
+          clusterId: "cluster-older-published-newer-updated",
+          originalUrl: "https://cluster.example.com/update-1",
+          canonicalUrl: "https://cluster.example.com/update-1",
+          urlHash: "cluster-update-hash-1",
+          dedupeSignature: "cluster|update|1",
+          originalTitle: "Compute infrastructure update",
+          translatedTitle: null,
+          publishedAt: new Date("2026-04-09T10:00:00.000Z"),
+          summaryText: "更新内容一",
+          status: "processed",
+          moderationStatus: "allowed",
+          qualityScore: 76,
+          qualityRationale: "可用内容",
+          language: "en",
+        },
+        {
+          id: "cluster-update-item-2",
+          sourceId: source.id,
+          clusterId: "cluster-older-published-newer-updated",
+          originalUrl: "https://cluster.example.com/update-2",
+          canonicalUrl: "https://cluster.example.com/update-2",
+          urlHash: "cluster-update-hash-2",
+          dedupeSignature: "cluster|update|2",
+          originalTitle: "Compute infrastructure update detail",
+          translatedTitle: null,
+          publishedAt: new Date("2026-04-09T09:00:00.000Z"),
+          summaryText: "更新内容二",
+          status: "processed",
+          moderationStatus: "allowed",
+          qualityScore: 74,
+          qualityRationale: "可用内容",
+          language: "en",
+        },
+      ],
+    });
+    await prisma.item.update({
+      where: { id: "cluster-update-item-2" },
+      data: { summaryText: "最近被更新的内容" },
+    });
+
+    const { GET } = await import("@/app/api/admin/clusters/route");
+    const response = await GET(new Request("http://localhost/api/admin/clusters?minItemCount=2"));
+    const json = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(json.clusters.map((cluster: { id: string }) => cluster.id)).toEqual([
+      "cluster-older-published-newer-updated",
+      "cluster-1",
+    ]);
+    expect(json.clusters[0].latestItemUpdatedAt).toEqual(expect.any(String));
+  });
+
   it("searches clusters with fuzzy Chinese keywords across child item titles", async () => {
     requireAdmin.mockResolvedValue(undefined);
 
@@ -241,6 +318,36 @@ describe("/api/admin/clusters", () => {
     expect(enqueueClusterSummaryTask).toHaveBeenCalledWith("cluster-1");
     expect(json.taskRun.id).toBe("task-cluster-1");
     expect(json.taskRun.kind).toBe("cluster_regenerate_summary");
+  });
+
+  it("splits all cluster items into singleton clusters for admins", async () => {
+    requireAdmin.mockResolvedValue(undefined);
+    splitClusterIntoSingletons.mockResolvedValue({
+      clusterId: "cluster-1",
+      itemCount: 2,
+      singletonClusterIds: ["single-a", "single-b"],
+    });
+
+    const { POST } = await import("@/app/api/admin/clusters/[id]/split/route");
+    const response = await POST(
+      new Request("http://localhost/api/admin/clusters/cluster-1/split", { method: "POST" }),
+      {
+        params: Promise.resolve({ id: "cluster-1" }),
+      },
+    );
+    const json = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(splitClusterIntoSingletons).toHaveBeenCalledWith("cluster-1");
+    expect(json).toEqual({
+      success: true,
+      cluster: null,
+      result: {
+        clusterId: "cluster-1",
+        itemCount: 2,
+        singletonClusterIds: ["single-a", "single-b"],
+      },
+    });
   });
 
   it("merges selected clusters for admins", async () => {

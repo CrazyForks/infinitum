@@ -54,6 +54,20 @@ type IdRow = {
   id: string;
 };
 
+type ClusterWithPreviewItems = Prisma.ContentClusterGetPayload<{
+  include: {
+    items: {
+      include: {
+        source: {
+          include: {
+            group: true;
+          };
+        };
+      };
+    };
+  };
+}>;
+
 type FeedGroupCountRow = {
   id: string;
   name: string;
@@ -531,6 +545,54 @@ function toNumber(value: number | bigint) {
 
 function toIsoString(value: Date | string) {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+}
+
+function mapClusterToAdminDto(cluster: ClusterWithPreviewItems, latestItemUpdatedAt?: Date | null) {
+  const clusterWithVotes = cluster as typeof cluster & { upvotes: number; downvotes: number };
+  const sourceCount = new Set(cluster.items.map((item) => item.sourceId)).size;
+  const recommendScore = calculateRecommendScore(
+    cluster.score,
+    clusterWithVotes.upvotes ?? 0,
+    clusterWithVotes.downvotes ?? 0,
+    sourceCount,
+    cluster.items.length,
+  );
+
+  return {
+    id: cluster.id,
+    title: cluster.title,
+    summary: cluster.summary,
+    score: recommendScore,
+    itemCount: cluster.itemCount,
+    latestPublishedAt: cluster.latestPublishedAt.toISOString(),
+    latestItemUpdatedAt: (latestItemUpdatedAt ?? cluster.updatedAt).toISOString(),
+    status: cluster.status,
+    items: cluster.items.slice(0, 5).map(mapItemToClusterPreview),
+  } satisfies ClusterDTO;
+}
+
+async function getLatestItemUpdatedAtByCluster(clusterIds: string[]) {
+  if (clusterIds.length === 0) {
+    return new Map<string, Date>();
+  }
+
+  const rows = await prisma.item.groupBy({
+    by: ["clusterId"],
+    where: {
+      clusterId: { in: clusterIds },
+      status: "processed",
+      moderationStatus: {
+        in: [...DISPLAYABLE_MODERATION_STATUSES],
+      },
+    },
+    _max: {
+      updatedAt: true,
+    },
+  });
+
+  return new Map(
+    rows.flatMap((row) => (row.clusterId && row._max.updatedAt ? [[row.clusterId, row._max.updatedAt] as const] : [])),
+  );
 }
 
 function buildFeedEntryCandidatesCte(
@@ -1071,18 +1133,28 @@ export async function listAdminClusters(
   const searchTerms = getDatabaseSearchTerms(search);
   const minItemCount = options?.minItemCount;
   const searchCte = buildAdminClusterSearchCte(searchTerms);
+  const minItemCountClause =
+    typeof minItemCount === "number" ? Prisma.sql`WHERE cc."itemCount" >= ${minItemCount}` : Prisma.empty;
+  const itemUpdatedJoin = Prisma.sql`
+    LEFT JOIN "items" latest_items ON latest_items."clusterId" = cc.id
+      AND latest_items.status = ${"processed"}
+      AND latest_items."moderationStatus" IN (${Prisma.join([...DISPLAYABLE_MODERATION_STATUSES])})
+  `;
+  const orderByLatestItemUpdatedAt = Prisma.sql`
+    ORDER BY MAX(latest_items."updatedAt") DESC, MAX(cc."updatedAt") DESC, cc.id DESC
+  `;
 
   if (searchCte) {
-    const minItemCountClause =
-      typeof minItemCount === "number" ? Prisma.sql`WHERE cc."itemCount" >= ${minItemCount}` : Prisma.empty;
     const [idRows, totalRows] = await Promise.all([
       prisma.$queryRaw<IdRow[]>(Prisma.sql`
         ${searchCte}
         SELECT cc.id
         FROM "content_clusters" cc
         INNER JOIN matched_clusters mc ON mc.id = cc.id
+        ${itemUpdatedJoin}
         ${minItemCountClause}
-        ORDER BY cc."latestPublishedAt" DESC, cc."createdAt" DESC
+        GROUP BY cc.id
+        ${orderByLatestItemUpdatedAt}
         LIMIT ${pageSize}
         OFFSET ${skip}
       `),
@@ -1096,9 +1168,9 @@ export async function listAdminClusters(
     ]);
     const ids = idRows.map((row) => row.id);
     const order = new Map(ids.map((id, index) => [id, index]));
-    const clusters =
+    const [clusters, latestItemUpdatedAtByCluster] = await Promise.all([
       ids.length > 0
-        ? await prisma.contentCluster.findMany({
+        ? prisma.contentCluster.findMany({
             where: { id: { in: ids } },
             include: {
               items: {
@@ -1120,31 +1192,12 @@ export async function listAdminClusters(
               },
             },
           })
-        : [];
+        : [],
+      getLatestItemUpdatedAtByCluster(ids),
+    ]);
     const mappedClusters = clusters
       .sort((left, right) => (order.get(left.id) ?? 0) - (order.get(right.id) ?? 0))
-      .map((cluster) => {
-        const clusterWithVotes = cluster as typeof cluster & { upvotes: number; downvotes: number };
-        const sourceCount = new Set(cluster.items.map((item) => item.sourceId)).size;
-        const recommendScore = calculateRecommendScore(
-          cluster.score,
-          clusterWithVotes.upvotes ?? 0,
-          clusterWithVotes.downvotes ?? 0,
-          sourceCount,
-          cluster.items.length,
-        );
-
-        return {
-          id: cluster.id,
-          title: cluster.title,
-          summary: cluster.summary,
-          score: recommendScore,
-          itemCount: cluster.itemCount,
-          latestPublishedAt: cluster.latestPublishedAt.toISOString(),
-          status: cluster.status,
-          items: cluster.items.slice(0, 5).map(mapItemToClusterPreview),
-        } satisfies ClusterDTO;
-      });
+      .map((cluster) => mapClusterToAdminDto(cluster, latestItemUpdatedAtByCluster.get(cluster.id)));
 
     return {
       clusters: mappedClusters,
@@ -1158,58 +1211,52 @@ export async function listAdminClusters(
     ...(typeof minItemCount === "number" ? { itemCount: { gte: minItemCount } } : {}),
   };
 
-  const [clusters, total] = await Promise.all([
-    prisma.contentCluster.findMany({
-      where,
-      include: {
-        items: {
-          where: {
-            status: "processed",
-            moderationStatus: {
-              in: [...DISPLAYABLE_MODERATION_STATUSES],
-            },
-          },
-          include: {
-            source: {
-              include: {
-                group: true,
-              },
-            },
-          },
-          orderBy: [{ publishedAt: "desc" }, { createdAt: "desc" }],
-          take: 5,
-        },
-      },
-      orderBy: [{ latestPublishedAt: "desc" }, { createdAt: "desc" }],
-      take: pageSize,
-      skip,
-    }),
+  const [idRows, total] = await Promise.all([
+    prisma.$queryRaw<IdRow[]>(Prisma.sql`
+      SELECT cc.id
+      FROM "content_clusters" cc
+      ${itemUpdatedJoin}
+      ${minItemCountClause}
+      GROUP BY cc.id
+      ${orderByLatestItemUpdatedAt}
+      LIMIT ${pageSize}
+      OFFSET ${skip}
+    `),
     prisma.contentCluster.count({ where }),
   ]);
+  const ids = idRows.map((row) => row.id);
+  const order = new Map(ids.map((id, index) => [id, index]));
+  const [clusters, latestItemUpdatedAtByCluster] = await Promise.all([
+    ids.length > 0
+      ? prisma.contentCluster.findMany({
+          where: { id: { in: ids } },
+          include: {
+            items: {
+              where: {
+                status: "processed",
+                moderationStatus: {
+                  in: [...DISPLAYABLE_MODERATION_STATUSES],
+                },
+              },
+              include: {
+                source: {
+                  include: {
+                    group: true,
+                  },
+                },
+              },
+              orderBy: [{ publishedAt: "desc" }, { createdAt: "desc" }],
+              take: 5,
+            },
+          },
+        })
+      : [],
+    getLatestItemUpdatedAtByCluster(ids),
+  ]);
 
-  const mappedClusters = clusters.map((cluster) => {
-    // 计算综合推荐评分（AI锚点分 + 有限反馈微调 + 来源/条目聚合加权）
-    const clusterWithVotes = cluster as typeof cluster & { upvotes: number; downvotes: number };
-    const sourceCount = new Set(cluster.items.map((item) => item.sourceId)).size;
-    const recommendScore = calculateRecommendScore(
-      cluster.score,
-      clusterWithVotes.upvotes ?? 0,
-      clusterWithVotes.downvotes ?? 0,
-      sourceCount,
-      cluster.items.length,
-    );
-
-    return {
-      id: cluster.id,
-      title: cluster.title,
-      summary: cluster.summary,
-      score: recommendScore,
-      itemCount: cluster.itemCount,
-      latestPublishedAt: cluster.latestPublishedAt.toISOString(),
-      status: cluster.status,
-      items: cluster.items.slice(0, 5).map(mapItemToClusterPreview),
-    } satisfies ClusterDTO;
-  });
+  const mappedClusters = clusters
+    .sort((left, right) => (order.get(left.id) ?? 0) - (order.get(right.id) ?? 0))
+    .map((cluster) => mapClusterToAdminDto(cluster, latestItemUpdatedAtByCluster.get(cluster.id)));
   return {
     clusters: mappedClusters,
     total,
@@ -1245,25 +1292,16 @@ export async function getAdminCluster(clusterId: string) {
     return null;
   }
 
-  // 计算综合推荐评分（AI锚点分 + 有限反馈微调 + 来源/条目聚合加权）
-  const clusterWithVotes = cluster as typeof cluster & { upvotes: number; downvotes: number };
-  const sourceCount = new Set(cluster.items.map((item) => item.sourceId)).size;
-  const recommendScore = calculateRecommendScore(
-    cluster.score,
-    clusterWithVotes.upvotes ?? 0,
-    clusterWithVotes.downvotes ?? 0,
-    sourceCount,
-    cluster.items.length,
-  );
+  const latestItemUpdatedAt = cluster.items.reduce<Date | null>((latest, item) => {
+    if (!latest || item.updatedAt.getTime() > latest.getTime()) {
+      return item.updatedAt;
+    }
+    return latest;
+  }, null);
 
   return {
-    id: cluster.id,
-    title: cluster.title,
-    summary: cluster.summary,
-    score: recommendScore,
+    ...mapClusterToAdminDto(cluster, latestItemUpdatedAt),
     itemCount: cluster.items.length,
-    latestPublishedAt: cluster.latestPublishedAt.toISOString(),
-    status: cluster.status,
     items: cluster.items.map(mapItemToClusterPreview),
   } satisfies ClusterDTO;
 }
