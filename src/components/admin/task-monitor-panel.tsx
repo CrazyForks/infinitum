@@ -549,16 +549,17 @@ export function TaskMonitorPanel({
     }
   }, [allTasks, initialFocusTaskId, isDetailOpen, selectedTask?.id]);
 
-  const filteredTasks = useMemo(
-    () => filterTasks(allTasks, statusFilter, kindFilter, timeRangeFilter),
-    [allTasks, statusFilter, kindFilter, timeRangeFilter]
+  const visibleRecentTasks = useMemo(
+    () => filterTasks(taskLists.recentTasks, statusFilter, kindFilter, timeRangeFilter),
+    [kindFilter, statusFilter, taskLists.recentTasks, timeRangeFilter],
   );
 
   // recentTotal from the API already counts all tasks (including running).
   const mergedTotal = recentTotal;
   const totalPages = Math.ceil(mergedTotal / pageSize) || 1;
-  // Server-paginated recent + all running; no client-side slice needed
-  const paginatedTasks = filteredTasks;
+  // The API returns the current page in recentTasks. runningTasks is kept for
+  // detail updates, but must not be merged into every page.
+  const paginatedTasks = visibleRecentTasks;
 
   const hasFilters = statusFilter || kindFilter || timeRangeFilter;
 

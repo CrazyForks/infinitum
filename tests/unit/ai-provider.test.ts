@@ -548,6 +548,53 @@ describe("ai provider", () => {
     expect(summary).not.toMatch(/\.\.\.$/);
   });
 
+  it("retries item summaries with an explicit Chinese-only instruction when the first output is English", async () => {
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce({
+        choices: [
+          {
+            message: {
+              content: "SAS explains AI is just a tool for enterprise customers.",
+            },
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        choices: [
+          {
+            message: {
+              content: "SAS 强调 AI 只是服务企业客户的工具。",
+            },
+          },
+        ],
+      });
+    const provider = createAiProvider(
+      {
+        apiKey: "sk-test",
+        baseURL: "https://example.com/v1",
+        model: "test-model",
+      },
+      undefined,
+      {
+        chat: {
+          completions: {
+            create,
+          },
+        },
+      },
+    );
+
+    const summary = await provider.summarizeItem("Long body text", {
+      title: "SAS sells AI to the Fortune 500",
+      sourceName: "The New Stack",
+    });
+
+    expect(summary).toBe("SAS 强调 AI 只是服务企业客户的工具。");
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(create.mock.calls[1]?.[0]?.messages?.[1]?.content).toContain("上一次输出不是中文摘要");
+  });
+
   it("retries once when the provider returns invalid json before succeeding", async () => {
     const create = vi
       .fn()

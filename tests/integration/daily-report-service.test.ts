@@ -658,7 +658,7 @@ describe("daily report service", () => {
     });
   });
 
-  it("reports sourceCount as distinct selected source numbers", async () => {
+  it("reports sourceCount as distinct referenced items", async () => {
     await createReportCandidates();
     generateDailyReportMock.mockResolvedValue(buildDailyReportOutputWithRepeatedSources());
 
@@ -670,6 +670,39 @@ describe("daily report service", () => {
 
     expect(rows).toBe(3);
     expect(detail?.sourceCount).toBe(2);
+  });
+
+  it("counts expanded cluster items as report sources", async () => {
+    await createClusteredReportCandidates();
+    generateDailyReportMock.mockResolvedValue(JSON.stringify({
+      openingSummary: "今天的 AI 生态重点集中在多来源确认的模型发布，多个独立来源围绕同一事件提供了互补信息，适合用于验证日报引用计数。",
+      sections: {
+        今日大事: [{
+          topic: "多来源模型发布",
+          summary: "多家来源确认同一个模型发布事件。",
+          whyImportant: "多源确认",
+          sourceIds: [1],
+        }],
+        变更与实践: [{
+          topic: "引用计数口径调整",
+          action: "按展开后的实际单条内容核算日报来源数量。",
+          sourceIds: [1],
+        }],
+        安全与风险: [],
+        开源与工具: [],
+        数据与洞察: [],
+      },
+      closingThought: "多来源引用应按展开后的单条内容计数，避免把一个聚合候选误读为一个来源。",
+    }));
+
+    const result = await generateDailyReport({ date: REPORT_DATE, force: true });
+    const rows = await prisma.dailyReportSource.count({
+      where: { dailyReportId: result.report?.id },
+    });
+    const detail = await getDailyReportByDate(REPORT_DATE, true);
+
+    expect(rows).toBe(6);
+    expect(detail?.sourceCount).toBe(3);
   });
 
   it("ranks daily report candidates by daily composite score and collapses clustered items", async () => {

@@ -582,6 +582,13 @@ export async function generateClusterPresentation(
         fallback,
       );
     }
+    if (shouldRegenerateChineseSummary(aiPresentation.summary)) {
+      return {
+        ...fallback,
+        summaryAttempted: true,
+        summarySucceeded: false,
+      };
+    }
     const useAiPresentation =
       Boolean(aiPresentation.summary.trim()) &&
       (aiPresentation.title !== fallback.title || aiPresentation.summary !== fallback.summary);

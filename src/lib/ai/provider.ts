@@ -24,6 +24,7 @@ import {
   DEFAULT_ITEM_SUMMARY_USER_PROMPT_TEMPLATE,
 } from "@/config/prompts";
 import type { RuntimeConfig } from "@/config/runtime";
+import { shouldRegenerateChineseSummary } from "@/lib/ai/summary-language";
 import type { DailyReportContent, DailyReportSourceRegistryEntry } from "@/lib/daily-report/types";
 import { normalizeOptionalText } from "@/lib/utils/text";
 
@@ -270,6 +271,12 @@ function stripCodeFence(value: string): string {
 function parseSummaryOutput(rawContent: string, fallback: string): string {
   const normalized = stripCodeFence(rawContent);
   return normalized || fallback;
+}
+
+function buildChineseSummaryRetryPrompt(userContent: string) {
+  return `${userContent}
+
+重要：上一次输出不是中文摘要。请重新生成，必须使用中文，且只输出中文摘要正文。`;
 }
 
 function parseJsonLikeEnrichment(
@@ -918,20 +925,36 @@ export function createAiProvider(
   return {
     async summarizeItem(inputText, metadata) {
       const fallback = getFallbackSummary(inputText);
+      const userContent = renderPromptTemplate(itemSummaryConfig.promptTemplate, {
+        title: metadata.title,
+        sourceName: metadata.sourceName ?? "未知来源",
+        inputText,
+      });
       const output = await completeTextWithCircuitBreaker(
         itemSummaryConfig,
-        renderPromptTemplate(itemSummaryConfig.promptTemplate, {
-          title: metadata.title,
-          sourceName: metadata.sourceName ?? "未知来源",
-          inputText,
-        }),
+        userContent,
       );
 
       if (output == null) {
         return fallback;
       }
 
-      return parseSummaryOutput(output, fallback);
+      const summary = parseSummaryOutput(output, fallback);
+
+      if (!shouldRegenerateChineseSummary(summary)) {
+        return summary;
+      }
+
+      const retryOutput = await completeTextWithCircuitBreaker(
+        itemSummaryConfig,
+        buildChineseSummaryRetryPrompt(userContent),
+      );
+
+      if (retryOutput == null) {
+        return summary;
+      }
+
+      return parseSummaryOutput(retryOutput, summary);
     },
     async enrichContent(inputText, metadata) {
       const fallback = getFallbackEnrichment(metadata);
@@ -986,19 +1009,35 @@ export function createAiProvider(
     },
     async summarizeCluster(inputText, metadata) {
       const fallback = getFallbackSummary(inputText);
+      const userContent = renderPromptTemplate(clusterSummaryConfig.promptTemplate, {
+        title: metadata.title,
+        inputText,
+      });
       const output = await completeTextWithCircuitBreaker(
         clusterSummaryConfig,
-        renderPromptTemplate(clusterSummaryConfig.promptTemplate, {
-          title: metadata.title,
-          inputText,
-        }),
+        userContent,
       );
 
       if (output == null) {
         return fallback;
       }
 
-      return parseSummaryOutput(output, fallback);
+      const summary = parseSummaryOutput(output, fallback);
+
+      if (!shouldRegenerateChineseSummary(summary)) {
+        return summary;
+      }
+
+      const retryOutput = await completeTextWithCircuitBreaker(
+        clusterSummaryConfig,
+        buildChineseSummaryRetryPrompt(userContent),
+      );
+
+      if (retryOutput == null) {
+        return summary;
+      }
+
+      return parseSummaryOutput(retryOutput, summary);
     },
     async matchClusterCandidate(inputText, metadata) {
       if (metadata.candidates.length === 0) {

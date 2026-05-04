@@ -605,37 +605,19 @@ function buildFeedEntryCandidatesCte(
   },
   searchTerm: string | null = null,
 ) {
-  const whereClauses: Prisma.Sql[] = [
+  const nonTimeWhereClauses: Prisma.Sql[] = [
     Prisma.sql`i.status = ${"processed"}`,
     Prisma.sql`i."moderationStatus" IN (${Prisma.join([...DISPLAYABLE_MODERATION_STATUSES])})`,
     Prisma.sql`s.enabled = ${true}`,
     Prisma.sql`(i."clusterId" IS NULL OR c.status = ${"active"})`,
   ];
 
-  if (filters.rangeStart) {
-    // SQLite 存储的是毫秒时间戳，需要将 Date 转换为时间戳数字
-    whereClauses.push(Prisma.sql`i."createdAt" >= ${filters.rangeStart.getTime()}`);
-  }
-
-  if (filters.rangeEnd) {
-    // SQLite 存储的是毫秒时间戳，需要将 Date 转换为时间戳数字
-    whereClauses.push(Prisma.sql`i."createdAt" <= ${filters.rangeEnd.getTime()}`);
-  }
-
-  if (filters.publishedRangeStart) {
-    whereClauses.push(Prisma.sql`i."publishedAt" >= ${filters.publishedRangeStart.getTime()}`);
-  }
-
-  if (filters.publishedRangeEnd) {
-    whereClauses.push(Prisma.sql`i."publishedAt" <= ${filters.publishedRangeEnd.getTime()}`);
-  }
-
   if (filters.groupId) {
-    whereClauses.push(Prisma.sql`s."groupId" = ${filters.groupId}`);
+    nonTimeWhereClauses.push(Prisma.sql`s."groupId" = ${filters.groupId}`);
   }
 
   if (filters.sourceId) {
-    whereClauses.push(Prisma.sql`s.id = ${filters.sourceId}`);
+    nonTimeWhereClauses.push(Prisma.sql`s.id = ${filters.sourceId}`);
   }
 
   const likeSearchTerm = sanitizeLikeQuery(filters.title);
@@ -660,7 +642,27 @@ function buildFeedEntryCandidatesCte(
       searchClauses.push(Prisma.sql`COALESCE(c.summary, '') LIKE ${likeSearchTerm} ESCAPE ${likeEscape}`);
     }
 
-    whereClauses.push(Prisma.sql`(${Prisma.join(searchClauses, " OR ")})`);
+    nonTimeWhereClauses.push(Prisma.sql`(${Prisma.join(searchClauses, " OR ")})`);
+  }
+
+  const whereClauses = [...nonTimeWhereClauses];
+
+  if (filters.rangeStart) {
+    // SQLite 存储的是毫秒时间戳，需要将 Date 转换为时间戳数字
+    whereClauses.push(Prisma.sql`i."createdAt" >= ${filters.rangeStart.getTime()}`);
+  }
+
+  if (filters.rangeEnd) {
+    // SQLite 存储的是毫秒时间戳，需要将 Date 转换为时间戳数字
+    whereClauses.push(Prisma.sql`i."createdAt" <= ${filters.rangeEnd.getTime()}`);
+  }
+
+  if (filters.publishedRangeStart) {
+    whereClauses.push(Prisma.sql`i."publishedAt" >= ${filters.publishedRangeStart.getTime()}`);
+  }
+
+  if (filters.publishedRangeEnd) {
+    whereClauses.push(Prisma.sql`i."publishedAt" <= ${filters.publishedRangeEnd.getTime()}`);
   }
 
   const clusterAiScore = Prisma.sql`CAST(ROUND(AVG(fi."qualityScore")) AS INTEGER)`;
@@ -693,10 +695,9 @@ function buildFeedEntryCandidatesCte(
         i."clusterId",
         COUNT(*) AS total_count
       FROM "items" i
-      INNER JOIN "sources" s ON s.id = i."sourceId" AND s.enabled = true
-      WHERE i.status = 'processed'
-        AND i."moderationStatus" IN ('allowed', 'restored')
-        AND i."clusterId" IS NOT NULL
+      INNER JOIN "sources" s ON s.id = i."sourceId"
+      LEFT JOIN "content_clusters" c ON c.id = i."clusterId"
+      WHERE ${Prisma.join([...nonTimeWhereClauses, Prisma.sql`i."clusterId" IS NOT NULL`], " AND ")}
       GROUP BY i."clusterId"
     ),
     cluster_groups AS (
@@ -750,7 +751,7 @@ function buildFeedEntryCandidatesCte(
         })} AS "recommendScore"
       FROM filtered_items fi
       LEFT JOIN cluster_groups cg ON cg.id = fi."clusterId"
-      WHERE fi."clusterId" IS NULL OR cg."itemCount" = 1
+      WHERE fi."clusterId" IS NULL OR COALESCE(cg."totalItemCount", cg."itemCount") <= 1
     ),
     cluster_entries AS (
       SELECT
@@ -769,7 +770,7 @@ function buildFeedEntryCandidatesCte(
         cg.downvotes AS downvotes,
         cg."recommendScore" AS "recommendScore"
       FROM cluster_groups cg
-      WHERE cg."itemCount" > 1
+      WHERE cg."totalItemCount" > 1
     ),
     entry_candidates AS (
       SELECT id, type, NULL AS "clusterId", title, summary, "latestPublishedAt", "createdAt", score, "sourceCount", "itemCount", "totalItemCount", upvotes, downvotes, "recommendScore"

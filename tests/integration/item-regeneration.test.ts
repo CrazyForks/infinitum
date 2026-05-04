@@ -177,6 +177,50 @@ describe("regenerateItemContent", () => {
     expect(regenerated.summaryText).toBe("新的摘要内容");
   });
 
+  it("retries item summary regeneration once when the first AI summary is English", async () => {
+    const source = await prisma.source.create({
+      data: {
+        name: "Example Feed",
+        rssUrl: "https://example.com/feed.xml",
+        siteUrl: "https://example.com",
+        enabled: true,
+        aiParsingEnabled: true,
+      },
+    });
+
+    const item = await prisma.item.create({
+      data: {
+        sourceId: source.id,
+        originalUrl: "https://example.com/posts/english-summary",
+        canonicalUrl: "https://example.com/posts/english-summary",
+        urlHash: "hash-english-summary",
+        dedupeSignature: "example|english-summary|2026-04-10t09:45:00.000z",
+        originalTitle: "Anthropic launches an enterprise AI services company",
+        translatedTitle: "Anthropic 推出企业 AI 服务公司",
+        summaryText: "旧摘要",
+        publishedAt: new Date("2026-04-10T09:45:00.000Z"),
+        status: "processed",
+        language: "en",
+        fullText: "Anthropic announced a new enterprise AI services company with several financial partners.",
+      },
+    });
+    const summarizeItem = vi
+      .fn()
+      .mockResolvedValueOnce("Anthropic announced a new enterprise AI services company with financial partners.")
+      .mockResolvedValueOnce("Anthropic 与多家金融机构共同成立企业 AI 服务公司。");
+
+    const regenerated = await regenerateItemContent(item.id, "summary", {
+      aiProvider: buildAiProviderMock({
+        summarizeItem,
+        summarizeCluster: vi.fn().mockResolvedValue("聚合摘要"),
+        matchClusterCandidate: vi.fn().mockResolvedValue(null),
+      }),
+    });
+
+    expect(summarizeItem).toHaveBeenCalledTimes(2);
+    expect(regenerated.summaryText).toBe("Anthropic 与多家金融机构共同成立企业 AI 服务公司。");
+  });
+
   it("keeps the old value and records the error when regeneration fails", async () => {
     const source = await prisma.source.create({
       data: {
@@ -215,6 +259,52 @@ describe("regenerateItemContent", () => {
 
     expect(regenerated.summaryText).toBe("保留原摘要");
     expect(regenerated.errorMessage).toContain("Upstream regeneration failed");
+  });
+
+  it("keeps the old value and records the error when regenerated summaries remain English", async () => {
+    const source = await prisma.source.create({
+      data: {
+        name: "Example Feed",
+        rssUrl: "https://example.com/feed.xml",
+        siteUrl: "https://example.com",
+        enabled: true,
+        aiParsingEnabled: true,
+      },
+    });
+
+    const item = await prisma.item.create({
+      data: {
+        sourceId: source.id,
+        originalUrl: "https://example.com/posts/english-after-retry",
+        canonicalUrl: "https://example.com/posts/english-after-retry",
+        urlHash: "hash-english-after-retry",
+        dedupeSignature: "example|english-after-retry|2026-04-10t10:15:00.000z",
+        originalTitle: "SAS sells AI to Fortune 500 companies",
+        translatedTitle: "SAS 向财富500强企业推销AI",
+        summaryText: "保留中文旧摘要",
+        publishedAt: new Date("2026-04-10T10:15:00.000Z"),
+        status: "processed",
+        language: "en",
+        fullText: "Body for regeneration",
+      },
+    });
+    const summarizeItem = vi
+      .fn()
+      .mockResolvedValueOnce("SAS explains AI is just a tool for enterprise customers.")
+      .mockResolvedValueOnce("SAS still explains AI is just a tool for enterprise customers.");
+
+    const regenerated = await regenerateItemContent(item.id, "summary", {
+      aiProvider: buildAiProviderMock({
+        summarizeItem,
+        summarizeCluster: vi.fn().mockResolvedValue("聚合摘要"),
+        matchClusterCandidate: vi.fn().mockResolvedValue(null),
+      }),
+    });
+
+    expect(summarizeItem).toHaveBeenCalledTimes(2);
+    expect(regenerated.summaryText).toBe("保留中文旧摘要");
+    expect(regenerated.summaryStatus).toBe("failed");
+    expect(regenerated.errorMessage).toContain("AI summary is not Chinese after retry");
   });
 
   it("records ai usage for item summary regeneration tasks", async () => {

@@ -729,14 +729,14 @@ export async function getBackgroundTaskMonitorSnapshot(
             ...where,
             status: runningStatus,
           },
-          orderBy: { createdAt: "desc" },
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         })
       : Promise.resolve([]),
     prisma.backgroundTaskRun.findMany({
       where,
       take: pageSize,
       skip,
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     }),
     prisma.backgroundTaskRun.count({ where }),
   ]);

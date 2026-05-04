@@ -110,6 +110,50 @@ describe("background task persistence", () => {
     expect(tasks[0]?.createdAt.getTime()).toBeGreaterThanOrEqual(tasks[1]?.createdAt.getTime() ?? 0);
   });
 
+  it("paginates task monitor runs with a stable order when tasks share a createdAt timestamp", async () => {
+    const createdAt = new Date("2026-04-12T00:00:00.000Z");
+
+    await prisma.backgroundTaskRun.createMany({
+      data: Array.from({ length: 12 }, (_, index) => {
+        const taskNumber = index + 1;
+
+        return {
+          id: `task-${String(taskNumber).padStart(2, "0")}`,
+          kind: "item_regenerate_summary",
+          triggerType: "admin_action",
+          status: "succeeded",
+          label: `摘要重生成 ${taskNumber}`,
+          createdAt,
+        } as const;
+      }),
+    });
+
+    const pageOne = await getBackgroundTaskMonitorSnapshot(new Date("2026-04-12T01:00:00.000Z"), {
+      page: 1,
+      pageSize: 5,
+    });
+    const pageTwo = await getBackgroundTaskMonitorSnapshot(new Date("2026-04-12T01:00:00.000Z"), {
+      page: 2,
+      pageSize: 5,
+    });
+
+    expect(pageOne.recentTasks.map((task) => task.id)).toEqual([
+      "task-12",
+      "task-11",
+      "task-10",
+      "task-09",
+      "task-08",
+    ]);
+    expect(pageTwo.recentTasks.map((task) => task.id)).toEqual([
+      "task-07",
+      "task-06",
+      "task-05",
+      "task-04",
+      "task-03",
+    ]);
+    expect(new Set([...pageOne.recentTasks, ...pageTwo.recentTasks].map((task) => task.id)).size).toBe(10);
+  });
+
   it("marks stale running tasks as failed during recovery", async () => {
     const taskRun = await prisma.backgroundTaskRun.create({
       data: {

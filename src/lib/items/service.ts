@@ -1,6 +1,7 @@
 import type { BackgroundTaskRun, Item } from "@prisma/client";
 
 import { createAiProvider, type AiProvider } from "@/lib/ai/provider";
+import { retryChineseSummary } from "@/lib/ai/summary-language";
 import { assignItemToCluster, recomputeCluster } from "@/lib/clusters/service";
 import { prisma } from "@/lib/db";
 import { invalidateFeedCache } from "@/lib/feed/cache";
@@ -51,11 +52,16 @@ async function resolveItemSummary(
     return existingSummary;
   }
 
+  const inputText = getItemSourceText(item);
+
   return normalizeSummary(
-    await aiProvider.summarizeItem(getItemSourceText(item), {
-      title: item.originalTitle,
-      sourceName: item.source.name,
-    }),
+    await retryChineseSummary(
+      (metadata) => aiProvider.summarizeItem(inputText, metadata),
+      {
+        title: item.originalTitle,
+        sourceName: item.source.name,
+      },
+    ),
   );
 }
 

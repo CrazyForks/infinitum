@@ -287,7 +287,7 @@ function parseContent(summaryJson: string): DailyReportContent {
   return JSON.parse(summaryJson) as DailyReportContent;
 }
 
-function countLogicalDailyReportSources(sources?: Array<{
+function countDailyReportSourceItems(sources?: Array<{
   sourceNumber: number | null;
   itemId: string | null;
   clusterId: string | null;
@@ -297,7 +297,7 @@ function countLogicalDailyReportSources(sources?: Array<{
     return fallback;
   }
 
-  return new Set(sources.map((source) => source.sourceNumber ?? source.itemId ?? source.clusterId ?? source.url)).size;
+  return new Set(sources.map((source) => source.itemId ?? source.url)).size;
 }
 
 function toListItem(report: {
@@ -325,7 +325,7 @@ function toListItem(report: {
     status: report.status,
     title: report.title,
     openingSummary: stripDailyReportGeneratedLabel(report.openingSummary),
-    sourceCount: countLogicalDailyReportSources(report.sources, report._count?.sources ?? 0),
+    sourceCount: countDailyReportSourceItems(report.sources, report._count?.sources ?? 0),
     generatedAt: report.generatedAt.toISOString(),
     publishedAt: report.publishedAt?.toISOString() ?? null,
     errorMessage: report.errorMessage,

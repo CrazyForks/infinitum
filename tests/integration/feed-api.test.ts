@@ -255,6 +255,93 @@ describe("/api/feed", () => {
     vi.useRealTimers();
   });
 
+  it("keeps a multi-item cluster as a cluster when only one item matches the time range", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-10T12:00:00.000Z"));
+
+    try {
+      const source = await prisma.source.findFirstOrThrow({
+        where: { rssUrl: "https://api.example.com/feed.xml" },
+      });
+
+      await prisma.contentCluster.create({
+        data: {
+          id: "cluster-temporal",
+          kind: "topic",
+          title: "Temporal Cluster",
+          summary: "Temporal cluster summary",
+          score: 82,
+          itemCount: 2,
+          latestPublishedAt: new Date("2026-04-10T11:00:00.000Z"),
+          status: "active",
+          fingerprint: "temporal-cluster",
+        },
+      });
+
+      await prisma.item.createMany({
+        data: [
+          {
+            id: "item-temporal-today",
+            sourceId: source.id,
+            clusterId: "cluster-temporal",
+            originalUrl: "https://api.example.com/temporal-today",
+            canonicalUrl: "https://api.example.com/temporal-today",
+            urlHash: "hash-temporal-today",
+            dedupeSignature: "api feed|temporal today|2026-04-10t11:00:00.000z",
+            originalTitle: "Temporal Story Today",
+            translatedTitle: "时间范围内事件",
+            publishedAt: new Date("2026-04-10T11:00:00.000Z"),
+            summaryText: "今天命中的摘要",
+            status: "processed",
+            moderationStatus: "allowed",
+            qualityScore: 82,
+            qualityRationale: "时间范围测试",
+            language: "en",
+            createdAt: new Date("2026-04-10T11:05:00.000Z"),
+          },
+          {
+            id: "item-temporal-old",
+            sourceId: source.id,
+            clusterId: "cluster-temporal",
+            originalUrl: "https://api.example.com/temporal-old",
+            canonicalUrl: "https://api.example.com/temporal-old",
+            urlHash: "hash-temporal-old",
+            dedupeSignature: "api feed|temporal old|2026-04-08t11:00:00.000z",
+            originalTitle: "Temporal Story Old",
+            translatedTitle: "时间范围外事件",
+            publishedAt: new Date("2026-04-08T11:00:00.000Z"),
+            summaryText: "旧摘要",
+            status: "processed",
+            moderationStatus: "allowed",
+            qualityScore: 80,
+            qualityRationale: "时间范围测试",
+            language: "en",
+            createdAt: new Date("2026-04-08T11:05:00.000Z"),
+          },
+        ],
+      });
+
+      const { GET } = await import("@/app/api/feed/route");
+      const response = await GET(new Request("http://localhost/api/feed?range=today&title=Temporal"));
+      const json = await response.json();
+
+      expect(json.items).toHaveLength(1);
+      expect(json.items[0]).toMatchObject({
+        type: "cluster",
+        id: "cluster-temporal",
+        title: "Temporal Cluster",
+        itemCount: 2,
+        hasMoreItems: true,
+      });
+      expect(json.items[0].itemsPreview).toHaveLength(1);
+      expect(json.items[0].itemsPreview[0]).toMatchObject({
+        id: "item-temporal-today",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("supports page and size parameters for feed pagination", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-10T12:00:00.000Z"));

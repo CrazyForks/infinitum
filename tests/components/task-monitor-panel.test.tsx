@@ -359,6 +359,73 @@ describe("TaskMonitorPanel", () => {
     });
   });
 
+  it("renders the next page returned by the monitor API without carrying running tasks into every page", async () => {
+    const user = userEvent.setup();
+    const baseTask = buildMonitorSnapshot().runningTasks[0];
+    const pageOneTasks = Array.from({ length: 10 }, (_, index) => ({
+      ...baseTask,
+      id: `page-1-task-${index + 1}`,
+      label: `第一页任务 ${index + 1}`,
+      status: "succeeded" as const,
+      startedAt: "2026-04-21T00:00:00.000Z",
+      finishedAt: "2026-04-21T00:00:10.000Z",
+    }));
+    const pageTwoTasks = [
+      {
+        ...baseTask,
+        id: "page-2-task-1",
+        label: "第二页任务 1",
+        status: "succeeded" as const,
+        startedAt: "2026-04-20T00:00:00.000Z",
+        finishedAt: "2026-04-20T00:00:10.000Z",
+      },
+      {
+        ...baseTask,
+        id: "page-2-task-2",
+        label: "第二页任务 2",
+        status: "succeeded" as const,
+        startedAt: "2026-04-20T00:00:00.000Z",
+        finishedAt: "2026-04-20T00:00:10.000Z",
+      },
+    ];
+    const runningTask = {
+      ...baseTask,
+      id: "running-task",
+      label: "运行中但不属于当前页",
+      status: "running" as const,
+    };
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = new URL(String(input), "http://localhost");
+      const requestedPage = Number(url.searchParams.get("page")) || 1;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            ...buildMonitorSnapshot(),
+            runningTasks: [runningTask],
+            recentTasks: requestedPage === 2 ? pageTwoTasks : pageOneTasks,
+            recentTotal: 12,
+            page: requestedPage,
+            pageSize: 10,
+          }),
+        ),
+      );
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderWithProviders(<TaskMonitorPanel runningTasks={[]} recentTasks={[]} />);
+
+    expect(await screen.findByText("第一页任务 1")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "下一页" }));
+
+    expect(await screen.findByText("第二页任务 1")).toBeInTheDocument();
+    expect(screen.getByText("第二页任务 2")).toBeInTheDocument();
+    expect(screen.queryByText("第一页任务 1")).not.toBeInTheDocument();
+    expect(screen.queryByText("运行中但不属于当前页")).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/admin/monitor?page=2&pageSize=10");
+  });
+
   it("refreshes task progress from the task detail modal", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(

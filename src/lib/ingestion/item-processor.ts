@@ -1,7 +1,7 @@
 import type { Item } from "@prisma/client";
 
 import type { AiEventSignature } from "@/lib/ai/provider";
-import { shouldRegenerateChineseSummary } from "@/lib/ai/summary-language";
+import { retryChineseSummary } from "@/lib/ai/summary-language";
 import type { ClusterAssignmentCoordinator } from "@/lib/clusters/helpers";
 import { assignItemToCluster } from "@/lib/clusters/service";
 import { prisma } from "@/lib/db";
@@ -130,13 +130,10 @@ async function summarizeItemWithChineseRetry(
   inputText: string,
   metadata: { title: string; sourceName: string },
 ) {
-  const firstSummary = await aiProvider.summarizeItem(inputText, metadata);
-
-  if (!shouldRegenerateChineseSummary(firstSummary)) {
-    return firstSummary;
-  }
-
-  return aiProvider.summarizeItem(inputText, metadata);
+  return retryChineseSummary(
+    (nextMetadata) => aiProvider.summarizeItem(inputText, nextMetadata),
+    metadata,
+  );
 }
 
 function hasSucceededSummary(existing?: {
