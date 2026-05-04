@@ -116,6 +116,24 @@ function createStreamFromText(text: string) {
   })();
 }
 
+function getLastGeneratedDailyReportArticles() {
+  const input = generateDailyReportMock.mock.calls.at(-1)?.[0] as {
+    articles: Array<{
+      id: number;
+      itemId: string;
+      clusterId: string | null;
+      title: string;
+      eventType: string | null;
+      eventSubject: string | null;
+      eventAction: string | null;
+      eventObject: string | null;
+      eventDate: string | null;
+    }>;
+  } | undefined;
+
+  return input?.articles ?? [];
+}
+
 async function createReportCandidates() {
   const source = await prisma.source.create({
     data: {
@@ -182,6 +200,97 @@ async function createReportCandidates() {
         moderationStatus: "allowed",
         summaryText: "Claude Code 支持子代理工作流摘要",
         qualityScore: 70,
+      },
+    ],
+  });
+}
+
+async function createEventSignatureCandidates() {
+  const source = await prisma.source.create({
+    data: {
+      name: "Event Source",
+      rssUrl: "https://event-source.example.com/feed.xml",
+      siteUrl: "https://event-source.example.com",
+    },
+  });
+
+  await prisma.item.createMany({
+    data: [
+      {
+        sourceId: source.id,
+        originalUrl: "https://event-source.example.com/duplicate-model-release",
+        canonicalUrl: "https://event-source.example.com/duplicate-model-release",
+        urlHash: "event-duplicate-model-release",
+        dedupeSignature: "event-duplicate-model-release",
+        originalTitle: "Anthropic 发布 Claude 4",
+        publishedAt: new Date("2026-04-24T01:00:00.000Z"),
+        createdAt: new Date("2026-04-24T01:00:00.000Z"),
+        status: "processed",
+        moderationStatus: "allowed",
+        summaryText: "Anthropic 发布 Claude 4 摘要",
+        qualityScore: 99,
+        eventType: "release",
+        eventSubject: "Anthropic",
+        eventAction: "发布",
+        eventObject: "Claude 4",
+        eventDate: "2026-04-20",
+      },
+      {
+        sourceId: source.id,
+        originalUrl: "https://event-source.example.com/new-date-model-release",
+        canonicalUrl: "https://event-source.example.com/new-date-model-release",
+        urlHash: "event-new-date-model-release",
+        dedupeSignature: "event-new-date-model-release",
+        originalTitle: "Anthropic 发布 Claude 4 新进展",
+        publishedAt: new Date("2026-04-24T02:00:00.000Z"),
+        createdAt: new Date("2026-04-24T02:00:00.000Z"),
+        status: "processed",
+        moderationStatus: "allowed",
+        summaryText: "Anthropic 发布 Claude 4 新进展摘要",
+        qualityScore: 94,
+        eventType: "release",
+        eventSubject: "Anthropic",
+        eventAction: "发布",
+        eventObject: "Claude 4",
+        eventDate: REPORT_DATE,
+      },
+      {
+        sourceId: source.id,
+        originalUrl: "https://event-source.example.com/model-update",
+        canonicalUrl: "https://event-source.example.com/model-update",
+        urlHash: "event-model-update",
+        dedupeSignature: "event-model-update",
+        originalTitle: "Anthropic 更新 Claude 4",
+        publishedAt: new Date("2026-04-24T03:00:00.000Z"),
+        createdAt: new Date("2026-04-24T03:00:00.000Z"),
+        status: "processed",
+        moderationStatus: "allowed",
+        summaryText: "Anthropic 更新 Claude 4 摘要",
+        qualityScore: 93,
+        eventType: "update",
+        eventSubject: "Anthropic",
+        eventAction: "更新",
+        eventObject: "Claude 4",
+        eventDate: "2026-04-20",
+      },
+      {
+        sourceId: source.id,
+        originalUrl: "https://event-source.example.com/other-tool",
+        canonicalUrl: "https://event-source.example.com/other-tool",
+        urlHash: "event-other-tool",
+        dedupeSignature: "event-other-tool",
+        originalTitle: "独立工具发布",
+        publishedAt: new Date("2026-04-24T04:00:00.000Z"),
+        createdAt: new Date("2026-04-24T04:00:00.000Z"),
+        status: "processed",
+        moderationStatus: "allowed",
+        summaryText: "独立工具发布摘要",
+        qualityScore: 80,
+        eventType: "launch",
+        eventSubject: "独立团队",
+        eventAction: "发布",
+        eventObject: "独立工具",
+        eventDate: REPORT_DATE,
       },
     ],
   });
@@ -388,6 +497,57 @@ async function createPublishedReport() {
   });
 }
 
+async function createHistoricalDailyReportSource(input: {
+  date: string;
+  status?: "draft" | "published" | "failed";
+  itemId?: string | null;
+  clusterId?: string | null;
+  sourceKey?: string | null;
+  title?: string;
+  url?: string;
+  eventType?: string | null;
+  eventSubject?: string | null;
+  eventAction?: string | null;
+  eventObject?: string | null;
+  eventDate?: string | null;
+}) {
+  const report = await prisma.dailyReport.create({
+    data: {
+      date: input.date,
+      timezone: "Asia/Shanghai",
+      status: input.status ?? "published",
+      title: `${input.date} AI 日报`,
+      openingSummary: "历史摘要",
+      closingThought: "历史观察",
+      summaryJson: buildDailyReportOutput(),
+      renderedMarkdown: "# 历史日报\n",
+      inputHash: `historical-${input.date}-${input.title ?? "source"}`,
+      publishedAt: input.status === "draft" || input.status === "failed" ? null : new Date(`${input.date}T00:00:00.000Z`),
+    },
+  });
+
+  return prisma.dailyReportSource.create({
+    data: {
+      dailyReportId: report.id,
+      sourceNumber: 1,
+      sourceKey: input.sourceKey ?? null,
+      itemId: input.itemId ?? null,
+      clusterId: input.clusterId ?? null,
+      sourceName: "历史来源",
+      title: input.title ?? "历史事件",
+      url: input.url ?? `https://history.example.com/${input.date}`,
+      sourceSummary: "历史来源摘要",
+      sourcePublishedAt: new Date(`${input.date}T01:00:00.000Z`),
+      sourceQualityScore: 90,
+      eventType: input.eventType ?? null,
+      eventSubject: input.eventSubject ?? null,
+      eventAction: input.eventAction ?? null,
+      eventObject: input.eventObject ?? null,
+      eventDate: input.eventDate ?? null,
+    },
+  });
+}
+
 async function createDailyReportSchedule(input: { autoPublish: boolean }) {
   return prisma.taskSchedule.create({
     data: {
@@ -491,6 +651,115 @@ describe("daily report service", () => {
     expect(titles).toContain("入库日期再次命中日报日期");
     expect(titles).not.toContain("仅事件日期命中日报日期");
     expect(titles).not.toContain("仅发布时间命中日报日期");
+  });
+
+  it("filters candidates that match a source from the previous 7 days by cluster", async () => {
+    const { cluster } = await createClusteredReportCandidates();
+    await createReportCandidates();
+    await createHistoricalDailyReportSource({
+      date: "2026-04-20",
+      clusterId: cluster.id,
+      sourceKey: `cluster:${cluster.id}`,
+      title: "多来源确认的模型发布",
+    });
+    generateDailyReportMock.mockResolvedValue(buildDailyReportOutput());
+
+    await generateDailyReport({ date: REPORT_DATE, force: true });
+
+    const articles = getLastGeneratedDailyReportArticles();
+    expect(articles).toHaveLength(5);
+    expect(articles.map((article) => article.id)).toEqual([1, 2, 3, 4, 5]);
+    expect(articles.some((article) => article.clusterId === cluster.id)).toBe(false);
+    expect(articles.map((article) => article.title)).not.toContain("多来源确认的模型发布");
+  });
+
+  it("filters different-source candidates with the same strict event signature from recent reports", async () => {
+    await createEventSignatureCandidates();
+    await createHistoricalDailyReportSource({
+      date: "2026-04-20",
+      title: "另一来源报道 Anthropic 发布 Claude 4",
+      eventType: "release",
+      eventSubject: "Anthropic",
+      eventAction: "发布",
+      eventObject: "Claude 4",
+      eventDate: "2026-04-20",
+    });
+    generateDailyReportMock.mockResolvedValue(buildDailyReportOutput());
+
+    await generateDailyReport({ date: REPORT_DATE, force: true });
+
+    const articles = getLastGeneratedDailyReportArticles();
+    expect(articles.map((article) => article.title)).not.toContain("Anthropic 发布 Claude 4");
+    expect(articles.map((article) => article.title)).toEqual(expect.arrayContaining([
+      "Anthropic 发布 Claude 4 新进展",
+      "Anthropic 更新 Claude 4",
+      "独立工具发布",
+    ]));
+  });
+
+  it("keeps same-subject follow-ups when event date or action changed", async () => {
+    await createEventSignatureCandidates();
+    await createHistoricalDailyReportSource({
+      date: "2026-04-20",
+      title: "另一来源报道 Anthropic 发布 Claude 4",
+      eventType: "release",
+      eventSubject: "Anthropic",
+      eventAction: "发布",
+      eventObject: "Claude 4",
+      eventDate: "2026-04-20",
+    });
+    generateDailyReportMock.mockResolvedValue(buildDailyReportOutput());
+
+    await generateDailyReport({ date: REPORT_DATE, force: true });
+
+    const articles = getLastGeneratedDailyReportArticles();
+    expect(articles).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        title: "Anthropic 发布 Claude 4 新进展",
+        eventDate: REPORT_DATE,
+      }),
+      expect.objectContaining({
+        title: "Anthropic 更新 Claude 4",
+        eventAction: "更新",
+      }),
+    ]));
+  });
+
+  it("does not filter candidates against reports older than 7 days", async () => {
+    await createEventSignatureCandidates();
+    await createHistoricalDailyReportSource({
+      date: "2026-04-16",
+      title: "另一来源报道 Anthropic 发布 Claude 4",
+      eventType: "release",
+      eventSubject: "Anthropic",
+      eventAction: "发布",
+      eventObject: "Claude 4",
+      eventDate: "2026-04-20",
+    });
+    generateDailyReportMock.mockResolvedValue(buildDailyReportOutput());
+
+    await generateDailyReport({ date: REPORT_DATE, force: true });
+
+    expect(getLastGeneratedDailyReportArticles().map((article) => article.title)).toContain("Anthropic 发布 Claude 4");
+  });
+
+  it("does not filter candidates against failed historical reports", async () => {
+    await createEventSignatureCandidates();
+    await createHistoricalDailyReportSource({
+      date: "2026-04-20",
+      status: "failed",
+      title: "另一来源报道 Anthropic 发布 Claude 4",
+      eventType: "release",
+      eventSubject: "Anthropic",
+      eventAction: "发布",
+      eventObject: "Claude 4",
+      eventDate: "2026-04-20",
+    });
+    generateDailyReportMock.mockResolvedValue(buildDailyReportOutput());
+
+    await generateDailyReport({ date: REPORT_DATE, force: true });
+
+    expect(getLastGeneratedDailyReportArticles().map((article) => article.title)).toContain("Anthropic 发布 Claude 4");
   });
 
   it("streams a refinement candidate and saves it to a draft report", async () => {

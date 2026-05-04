@@ -2,11 +2,15 @@ import { createHash } from "node:crypto";
 
 import type { BackgroundTaskRun } from "@prisma/client";
 
-import { createAiProvider } from "@/lib/ai/provider";
+import { createAiProvider, type AiEventSignature } from "@/lib/ai/provider";
 import { prisma } from "@/lib/db";
 import { getDailyReportDateRange, getTodayDailyReportDate, normalizeDailyReportDate } from "@/lib/daily-report/date";
 import { invalidateDailyReportCache } from "@/lib/daily-report/cache";
-import { listDailyReportCandidates } from "@/lib/daily-report/repository";
+import {
+  listDailyReportCandidates,
+  listRecentDailyReportSourceSnapshots,
+  type RecentDailyReportSourceSnapshot,
+} from "@/lib/daily-report/repository";
 import { renderDailyReportMarkdown } from "@/lib/daily-report/renderer";
 import {
   DAILY_REPORT_SECTION_NAMES,
@@ -19,11 +23,13 @@ import {
   type DailyReportSectionName,
 } from "@/lib/daily-report/types";
 import { parseDailyReportContent } from "@/lib/daily-report/validator";
+import { normalizeEventSignatureForStorage } from "@/lib/clusters/normalization";
 import { getIngestionRuntimeConfig } from "@/lib/settings/runtime-service";
 import { DEFAULT_DAILY_REPORT_TASK_LABEL, type TaskTimelineNodeSnapshot } from "@/lib/tasks/types";
 import { enqueueTaskRun, ensureDefaultDailyReportSchedule, updateTaskRun } from "@/lib/tasks/service";
 
 const MIN_CANDIDATE_COUNT = 2;
+const DAILY_REPORT_RECENT_SOURCE_LOOKBACK_DAYS = 7;
 
 export class DailyReportRefinementError extends Error {
   code: string;
@@ -76,6 +82,104 @@ function buildDailyReportSourceKey(input: { itemId: string | null; clusterId: st
   if (input.itemId) return `item:${input.itemId}`;
   if (input.clusterId) return `cluster:${input.clusterId}`;
   return `url:${input.url.trim().toLowerCase()}`;
+}
+
+function compactDailyReportCandidates(candidates: DailyReportCandidate[]) {
+  return candidates.map((candidate, index) => ({
+    ...candidate,
+    id: index + 1,
+  }));
+}
+
+function normalizeOptionalDailyReportText(value: string | null | undefined) {
+  const normalized = value?.trim().toLowerCase() ?? "";
+  return normalized || null;
+}
+
+function getDailyReportEventIdentity(input: {
+  eventType: string | null;
+  eventSubject: string | null;
+  eventAction: string | null;
+  eventObject: string | null;
+  eventDate: string | null;
+}) {
+  const normalized = normalizeEventSignatureForStorage({
+    eventType: input.eventType as AiEventSignature["eventType"],
+    eventSubject: input.eventSubject,
+    eventAction: input.eventAction,
+    eventObject: input.eventObject,
+    eventDate: input.eventDate,
+  });
+
+  return {
+    eventType: normalizeOptionalDailyReportText(normalized?.eventType),
+    eventSubject: normalizeOptionalDailyReportText(normalized?.eventSubject),
+    eventAction: normalizeOptionalDailyReportText(normalized?.eventAction),
+    eventObject: normalizeOptionalDailyReportText(normalized?.eventObject),
+    eventDate: normalizeOptionalDailyReportText(normalized?.eventDate),
+  };
+}
+
+function matchesRecentDailyReportEvent(
+  candidate: DailyReportCandidate,
+  recentSource: RecentDailyReportSourceSnapshot,
+) {
+  const candidateEvent = getDailyReportEventIdentity(candidate);
+  const recentEvent = getDailyReportEventIdentity(recentSource);
+
+  if (
+    !candidateEvent.eventSubject ||
+    !candidateEvent.eventObject ||
+    candidateEvent.eventSubject !== recentEvent.eventSubject ||
+    candidateEvent.eventObject !== recentEvent.eventObject
+  ) {
+    return false;
+  }
+
+  if (
+    candidateEvent.eventDate &&
+    recentEvent.eventDate &&
+    candidateEvent.eventDate !== recentEvent.eventDate
+  ) {
+    return false;
+  }
+
+  if (candidateEvent.eventAction && recentEvent.eventAction) {
+    return candidateEvent.eventAction === recentEvent.eventAction;
+  }
+
+  return Boolean(
+    candidateEvent.eventType &&
+      recentEvent.eventType &&
+      candidateEvent.eventType === recentEvent.eventType,
+  );
+}
+
+function matchesRecentDailyReportSource(
+  candidate: DailyReportCandidate,
+  recentSource: RecentDailyReportSourceSnapshot,
+) {
+  const candidateSourceKey = buildDailyReportSourceKey(candidate);
+  const recentSourceKey = recentSource.sourceKey ?? buildDailyReportSourceKey(recentSource);
+
+  return Boolean(
+    (recentSourceKey && candidateSourceKey === recentSourceKey) ||
+      (candidate.itemId && recentSource.itemId && candidate.itemId === recentSource.itemId) ||
+      (candidate.clusterId && recentSource.clusterId && candidate.clusterId === recentSource.clusterId) ||
+      matchesRecentDailyReportEvent(candidate, recentSource),
+  );
+}
+
+async function filterRecentDailyReportDuplicates(date: string, candidates: DailyReportCandidate[]) {
+  const recentSources = await listRecentDailyReportSourceSnapshots(date, DAILY_REPORT_RECENT_SOURCE_LOOKBACK_DAYS);
+
+  if (recentSources.length === 0) {
+    return candidates;
+  }
+
+  return compactDailyReportCandidates(candidates.filter(
+    (candidate) => !recentSources.some((recentSource) => matchesRecentDailyReportSource(candidate, recentSource)),
+  ));
 }
 
 function toDailyReportSourceRegistryRow(input: {
@@ -600,7 +704,10 @@ export async function generateDailyReport(input: {
 }) {
   const { date } = getDailyReportDateRange(input.date);
   const schedule = await ensureDefaultDailyReportSchedule();
-  const candidates = await listDailyReportCandidates(date, schedule.dailyReportCandidateLimit);
+  const candidates = await filterRecentDailyReportDuplicates(
+    date,
+    await listDailyReportCandidates(date, schedule.dailyReportCandidateLimit),
+  );
   await input.onCandidatesLoaded?.(candidates.length);
   const inputHash = buildInputHash(date, candidates);
   const existing = await prisma.dailyReport.findUnique({

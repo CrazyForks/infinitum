@@ -20,6 +20,20 @@ const DAILY_REPORT_ARCHIVE_WEEK_COUNT = 53;
 const DAILY_REPORT_CANDIDATE_POOL_MULTIPLIER = 4;
 const DAILY_REPORT_CANDIDATE_POOL_MAX = 2000;
 
+export type RecentDailyReportSourceSnapshot = {
+  sourceKey: string | null;
+  itemId: string | null;
+  clusterId: string | null;
+  url: string;
+  eventType: string | null;
+  eventSubject: string | null;
+  eventAction: string | null;
+  eventObject: string | null;
+  eventDate: string | null;
+  title: string;
+  sourceSummary: string | null;
+};
+
 function calculateDailyReportCandidateScore(input: { qualityScore: number; sourceCount: number; itemCount: number }) {
   const aiBaseScore = 50 + (input.qualityScore - 50) * 0.85;
   const sourceBoost = Math.min(12, Math.max(0, input.sourceCount - 1) * 4);
@@ -30,6 +44,14 @@ function calculateDailyReportCandidateScore(input: { qualityScore: number; sourc
 
 function getDailyReportCandidatePoolLimit(limit: number) {
   return Math.max(limit, Math.min(DAILY_REPORT_CANDIDATE_POOL_MAX, limit * DAILY_REPORT_CANDIDATE_POOL_MULTIPLIER));
+}
+
+function addUtcDays(date: string, days: number) {
+  const normalized = getDailyReportDateRange(date).date;
+  const [year, month, day] = normalized.split("-").map((part) => Number.parseInt(part, 10));
+  const value = new Date(Date.UTC(year, month - 1, day));
+  value.setUTCDate(value.getUTCDate() + days);
+  return value.toISOString().slice(0, 10);
 }
 
 async function getDailyReportCacheVersion(isAdmin: boolean) {
@@ -219,6 +241,42 @@ export async function listDailyReportCandidates(date: string, limit = 120) {
       eventObject: cluster?.eventObject ?? item.eventObject,
       eventDate: cluster?.eventDate ?? item.eventDate,
     };
+  });
+}
+
+export async function listRecentDailyReportSourceSnapshots(
+  date: string,
+  lookbackDays: number,
+): Promise<RecentDailyReportSourceSnapshot[]> {
+  const { date: normalizedDate } = getDailyReportDateRange(date);
+  const startDate = addUtcDays(normalizedDate, -lookbackDays);
+
+  return prisma.dailyReportSource.findMany({
+    where: {
+      dailyReport: {
+        date: {
+          gte: startDate,
+          lt: normalizedDate,
+        },
+        timezone: DAILY_REPORT_TIMEZONE,
+        status: {
+          not: "failed",
+        },
+      },
+    },
+    select: {
+      sourceKey: true,
+      itemId: true,
+      clusterId: true,
+      url: true,
+      eventType: true,
+      eventSubject: true,
+      eventAction: true,
+      eventObject: true,
+      eventDate: true,
+      title: true,
+      sourceSummary: true,
+    },
   });
 }
 
