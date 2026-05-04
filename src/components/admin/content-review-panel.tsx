@@ -473,6 +473,7 @@ function ContentReviewContent({
   const [mergeSourceIds, setMergeSourceIds] = useState<Set<string>>(new Set());
   const [mergeSearchQuery, setMergeSearchQuery] = useState("");
   const [mergeCandidateClusters, setMergeCandidateClusters] = useState<ClusterDTO[]>([]);
+  const [isMergeCandidatesLoading, setIsMergeCandidatesLoading] = useState(false);
 
   // Confirmation modal states
   const [confirmModal, setConfirmModal] = useState<{
@@ -575,6 +576,7 @@ function ContentReviewContent({
     }
 
     let cancelled = false;
+    setIsMergeCandidatesLoading(true);
     const timer = window.setTimeout(() => {
       startTransition(async () => {
         try {
@@ -585,6 +587,10 @@ function ContentReviewContent({
         } catch (error) {
           if (!cancelled) {
             showToast(error instanceof Error ? error.message : "聚合组搜索失败。", "error");
+          }
+        } finally {
+          if (!cancelled) {
+            setIsMergeCandidatesLoading(false);
           }
         }
       });
@@ -943,6 +949,7 @@ function ContentReviewContent({
     setMergeSearchQuery("");
     setMergeSourceIds(new Set());
     setMergeCandidateClusters([]);
+    setIsMergeCandidatesLoading(false);
     setIsMergeModalOpen(true);
   };
 
@@ -951,6 +958,7 @@ function ContentReviewContent({
     setMergeTargetId(null);
     setMergeSourceIds(new Set());
     setMergeCandidateClusters([]);
+    setIsMergeCandidatesLoading(false);
   };
 
   const handleToggleMergeSource = (clusterId: string) => {
@@ -1327,6 +1335,7 @@ function ContentReviewContent({
         availableClusters={availableClustersForMerge}
         selectedClusterIds={mergeSourceIds}
         searchQuery={mergeSearchQuery}
+        isLoadingCandidates={isMergeCandidatesLoading}
         isMerging={mergingClusterId === mergeTargetId}
         onSearchQueryChange={setMergeSearchQuery}
         onToggleSource={handleToggleMergeSource}

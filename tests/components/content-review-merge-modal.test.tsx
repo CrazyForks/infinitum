@@ -40,6 +40,7 @@ describe("ContentReviewMergeModal", () => {
         availableClusters={[createCluster()]}
         selectedClusterIds={new Set()}
         searchQuery="单条"
+        isLoadingCandidates={false}
         isMerging={false}
         onSearchQueryChange={vi.fn()}
         onToggleSource={vi.fn()}
@@ -50,5 +51,27 @@ describe("ContentReviewMergeModal", () => {
     const dialog = screen.getByRole("dialog", { name: "合并聚合组" });
     expect(within(dialog).getByText("单条原始标题")).toBeInTheDocument();
     expect(within(dialog).queryByText("AI 生成的单条聚合标题")).not.toBeInTheDocument();
+  });
+
+  it("shows a loading state before empty search results", () => {
+    render(
+      <ContentReviewMergeModal
+        isOpen
+        onClose={vi.fn()}
+        targetCluster={createCluster({ id: "target", title: "目标聚合", itemCount: 3, items: [] })}
+        availableClusters={[]}
+        selectedClusterIds={new Set()}
+        searchQuery="不存在"
+        isLoadingCandidates
+        isMerging={false}
+        onSearchQueryChange={vi.fn()}
+        onToggleSource={vi.fn()}
+        onExecuteMerge={vi.fn()}
+      />,
+    );
+
+    const dialog = screen.getByRole("dialog", { name: "合并聚合组" });
+    expect(within(dialog).getByText("正在搜索聚合组...")).toBeInTheDocument();
+    expect(within(dialog).queryByText("未找到匹配的聚合组")).not.toBeInTheDocument();
   });
 });

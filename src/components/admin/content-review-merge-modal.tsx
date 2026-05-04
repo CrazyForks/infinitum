@@ -12,6 +12,7 @@ type ContentReviewMergeModalProps = {
   availableClusters: ClusterDTO[];
   selectedClusterIds: Set<string>;
   searchQuery: string;
+  isLoadingCandidates: boolean;
   isMerging: boolean;
   onSearchQueryChange: (value: string) => void;
   onToggleSource: (clusterId: string) => void;
@@ -25,6 +26,7 @@ export function ContentReviewMergeModal({
   availableClusters,
   selectedClusterIds,
   searchQuery,
+  isLoadingCandidates,
   isMerging,
   onSearchQueryChange,
   onToggleSource,
@@ -117,7 +119,9 @@ export function ContentReviewMergeModal({
           </div>
 
           <div className="max-h-[280px] overflow-y-auto space-y-1 border border-[color:var(--line)] rounded-lg p-2">
-            {availableClusters.length === 0 ? (
+            {isLoadingCandidates ? (
+              <p className="text-sm text-[var(--muted)] text-center py-4">正在搜索聚合组...</p>
+            ) : availableClusters.length === 0 ? (
               <p className="text-sm text-[var(--muted)] text-center py-4">
                 {searchQuery.trim() ? "未找到匹配的聚合组" : "暂无可合并的聚合组"}
               </p>
