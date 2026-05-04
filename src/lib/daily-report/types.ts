@@ -21,6 +21,9 @@ export type DailyReportCandidate = {
   url: string;
   summary: string;
   qualityScore: number;
+  candidateScore: number;
+  sourceCount: number;
+  itemCount: number;
   createdAt: string;
   publishedAt: string;
   eventType: string | null;

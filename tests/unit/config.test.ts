@@ -35,6 +35,11 @@ describe("runtime config defaults", () => {
     expect(defaults.prompts.clusterSummary).toContain("*斜体*");
     expect(defaults.prompts.clusterMatch.length).toBeGreaterThan(0);
     expect(defaults.prompts.clusterMatch).toContain('{"clusterId":"候选组ID"}');
+    expect(defaults.prompts.dailyReport).toContain("candidateScore 是综合质量、聚合热度和时效排序后的参考分");
+    expect(defaults.prompts.dailyReport).toContain("sourceCount 表示不同来源数量");
+    expect(defaults.prompts.dailyReport).toContain("多个 sourceIds 只能用于同一事件的多来源互证");
+    expect(defaults.prompts.dailyReport).toContain("Anthropic Claude Security 公开测试和 Mistral Medium 3.5/Vibe 发布不是同一事件");
+    expect(defaults.prompts.dailyReport).toContain("同一事件不得同时出现在多个栏目");
   });
 
   it("returns fresh copies for mutable arrays", () => {

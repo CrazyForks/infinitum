@@ -6,23 +6,42 @@ import {
 
 export const DAILY_REPORT_AI_NOTICE = "声明：完全使用AI生成，可能存在错误，需谨慎甄别。";
 
+export type DailyReportMarkdownSource = {
+  sourceNumber: number;
+  title: string;
+  url: string;
+  sourceName: string;
+};
+
 function escapeMarkdown(value: string) {
   return value.replace(/\r/g, "").trim();
 }
 
-function formatSources(sourceIds: number[], candidatesById: Map<number, DailyReportCandidate>) {
+function formatSources(sourceIds: number[], sourcesByNumber: Map<number, DailyReportMarkdownSource[]>) {
   return sourceIds
-    .map((id) => candidatesById.get(id))
-    .filter((candidate): candidate is DailyReportCandidate => Boolean(candidate))
-    .map((candidate) => `- [${escapeMarkdown(candidate.title)}](${escapeMarkdown(candidate.url)})（${escapeMarkdown(candidate.sourceName)}）`);
+    .flatMap((id) => sourcesByNumber.get(id) ?? [])
+    .map((source) => `- [${escapeMarkdown(source.title)}](${escapeMarkdown(source.url)})（${escapeMarkdown(source.sourceName)}）`);
 }
 
 export function renderDailyReportMarkdown(
   content: DailyReportContent,
   candidates: DailyReportCandidate[],
   title: string,
+  sources = candidates.map((candidate) => ({
+    sourceNumber: candidate.id,
+    title: candidate.title,
+    url: candidate.url,
+    sourceName: candidate.sourceName,
+  })),
 ) {
-  const candidatesById = new Map(candidates.map((candidate) => [candidate.id, candidate]));
+  const sourcesByNumber = new Map<number, DailyReportMarkdownSource[]>();
+  for (const source of sources) {
+    const existing = sourcesByNumber.get(source.sourceNumber) ?? [];
+    if (!existing.some((entry) => entry.url === source.url)) {
+      existing.push(source);
+    }
+    sourcesByNumber.set(source.sourceNumber, existing);
+  }
   const lines: string[] = [
     `# ${escapeMarkdown(title)}`,
     "",
@@ -58,7 +77,7 @@ export function renderDailyReportMarkdown(
       if ("whyImportant" in item && item.whyImportant) {
         lines.push("", `**重点：** ${escapeMarkdown(item.whyImportant)}`);
       }
-      const sourceLines = formatSources(item.sourceIds, candidatesById);
+      const sourceLines = formatSources(item.sourceIds, sourcesByNumber);
       if (sourceLines.length > 0) {
         lines.push("", "**来源：**", ...sourceLines);
       }

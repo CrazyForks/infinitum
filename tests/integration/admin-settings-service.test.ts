@@ -4,6 +4,7 @@ import {
   DEFAULT_CLUSTER_MERGE_PROMPT,
   DEFAULT_CLUSTER_MERGE_USER_PROMPT_TEMPLATE,
   DEFAULT_CLUSTER_SUMMARY_PROMPT,
+  DEFAULT_DAILY_REPORT_PROMPT,
   DEFAULT_DAILY_REPORT_REFINEMENT_GENERATE_USER_PROMPT_TEMPLATE,
 } from "@/config/prompts";
 import { prisma } from "@/lib/db";
@@ -84,6 +85,9 @@ describe("admin settings service", () => {
     expect(settings.modelApiConfigs[0]?.ingestionItemConcurrency).toBe(3);
     expect(settings.promptConfigs).toHaveLength(8);
     expect(settings.promptConfigs.find((config) => config.type === "daily_report")?.systemPrompt).toContain("AI 新闻日报");
+    expect(settings.promptConfigs.find((config) => config.type === "daily_report")?.systemPrompt).toContain(
+      "candidateScore 是综合质量、聚合热度和时效排序后的参考分",
+    );
     expect(settings.promptConfigs.find((config) => config.type === "daily_report_refinement_chat")?.name).toBe(
       "默认日报微调对话提示词",
     );
@@ -215,6 +219,18 @@ describe("admin settings service", () => {
 
     expect(clusterMergeConfig?.systemPrompt).toBe("自定义聚合合并提示词");
     expect(clusterMergeConfig?.promptTemplate).toBe(LEGACY_DEFAULT_CLUSTER_MERGE_USER_PROMPT_TEMPLATE);
+  });
+
+  it("keeps the tightened default daily report prompt in seeded settings", async () => {
+    await getIngestionRuntimeConfig();
+
+    const runtimeConfig = await getIngestionRuntimeConfig();
+    const dailyReportConfig = runtimeConfig.selectedPromptConfigs?.dailyReport;
+
+    expect(dailyReportConfig?.systemPrompt).toBe(DEFAULT_DAILY_REPORT_PROMPT);
+    expect(dailyReportConfig?.systemPrompt).toContain("sourceCount 表示不同来源数量");
+    expect(dailyReportConfig?.systemPrompt).toContain("如果只是同属“模型发布”“安全工具”“开源项目”等主题相近但不是同一事件");
+    expect(dailyReportConfig?.systemPrompt).toContain("同一事件不得同时出现在多个栏目");
   });
 
   it("upgrades the untouched legacy default daily report refinement generate template", async () => {

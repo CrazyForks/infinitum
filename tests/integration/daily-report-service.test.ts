@@ -10,7 +10,7 @@ import {
   searchDailyReportRefinementSources,
   streamDailyReportRefinement,
 } from "@/lib/daily-report/service";
-import { listDailyReportCandidates } from "@/lib/daily-report/repository";
+import { getDailyReportByDate, listDailyReportCandidates } from "@/lib/daily-report/repository";
 
 const {
   generateDailyReportMock,
@@ -55,6 +55,38 @@ function buildDailyReportOutput() {
       数据与洞察: [],
     },
     closingThought: "整体来看，今天的主线仍是模型能力与工程工具继续耦合，后续需要观察实际开发效率是否随之改善。",
+  });
+}
+
+function buildDailyReportOutputWithRepeatedSources() {
+  const parsed = JSON.parse(buildDailyReportOutput()) as {
+    openingSummary: string;
+    sections: {
+      今日大事: Array<{ topic: string; summary: string; whyImportant: string; sourceIds: number[] }>;
+      变更与实践: Array<{ topic: string; action: string; sourceIds: number[] }>;
+      安全与风险: unknown[];
+      开源与工具: unknown[];
+      数据与洞察: Array<{ topic: string; keyNumbers: string; reason: string; sourceIds: number[] }>;
+    };
+    closingThought: string;
+  };
+
+  return JSON.stringify({
+    ...parsed,
+    sections: {
+      ...parsed.sections,
+      变更与实践: [{
+        topic: "OpenAI 发布新模型实践影响",
+        action: "跟进同一事件对开发工作流的影响。",
+        sourceIds: [1],
+      }],
+      数据与洞察: [{
+        topic: "开发者工具更新数据",
+        keyNumbers: "2 个来源编号去重",
+        reason: "同一来源编号即使跨栏目出现也只应计为一个逻辑引用。",
+        sourceIds: [2],
+      }],
+    },
   });
 }
 
@@ -128,6 +160,10 @@ function getLastGeneratedDailyReportArticles() {
       eventAction: string | null;
       eventObject: string | null;
       eventDate: string | null;
+      qualityScore: number;
+      candidateScore: number;
+      sourceCount: number;
+      itemCount: number;
     }>;
   } | undefined;
 
@@ -622,6 +658,20 @@ describe("daily report service", () => {
     });
   });
 
+  it("reports sourceCount as distinct selected source numbers", async () => {
+    await createReportCandidates();
+    generateDailyReportMock.mockResolvedValue(buildDailyReportOutputWithRepeatedSources());
+
+    const result = await generateDailyReport({ date: REPORT_DATE, force: true });
+    const rows = await prisma.dailyReportSource.count({
+      where: { dailyReportId: result.report?.id },
+    });
+    const detail = await getDailyReportByDate(REPORT_DATE, true);
+
+    expect(rows).toBe(3);
+    expect(detail?.sourceCount).toBe(2);
+  });
+
   it("ranks daily report candidates by daily composite score and collapses clustered items", async () => {
     const { cluster } = await createClusteredReportCandidates();
 
@@ -633,12 +683,42 @@ describe("daily report service", () => {
       title: "多来源确认的模型发布",
       summary: "多家来源确认同一个模型发布事件，具备更高日报价值。",
       eventType: "launch",
+      sourceCount: 3,
+      itemCount: 3,
     });
+    expect(candidates[0]?.candidateScore).toBeGreaterThan(candidates[0]?.qualityScore ?? 0);
     expect(candidates[1]).toMatchObject({
       clusterId: null,
       title: "单篇高分工具更新",
+      sourceCount: 1,
+      itemCount: 1,
     });
     expect(candidates.filter((candidate) => candidate.clusterId === cluster.id)).toHaveLength(1);
+  });
+
+  it("expands selected clustered candidates into all clustered source links", async () => {
+    const { cluster } = await createClusteredReportCandidates();
+    generateDailyReportMock.mockResolvedValue(buildDailyReportOutput());
+
+    const result = await generateDailyReport({ date: REPORT_DATE, force: true });
+    const clusteredSources = await prisma.dailyReportSource.findMany({
+      where: {
+        dailyReportId: result.report?.id,
+        sourceNumber: 1,
+      },
+      orderBy: { title: "asc" },
+    });
+
+    expect(clusteredSources).toHaveLength(3);
+    expect(new Set(clusteredSources.map((source) => source.clusterId))).toEqual(new Set([cluster.id]));
+    expect(clusteredSources.map((source) => source.title)).toEqual([
+      "模型发布 来源 A",
+      "模型发布 来源 B",
+      "模型发布 来源 C",
+    ]);
+    expect(result.report?.renderedMarkdown).toContain("[模型发布 来源 A](https://source-a.example.com/model-launch)");
+    expect(result.report?.renderedMarkdown).toContain("[模型发布 来源 B](https://source-b.example.com/model-launch)");
+    expect(result.report?.renderedMarkdown).toContain("[模型发布 来源 C](https://source-c.example.com/model-launch)");
   });
 
   it("uses created date for daily report candidate boundaries", async () => {

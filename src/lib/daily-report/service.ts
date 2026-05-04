@@ -24,12 +24,14 @@ import {
 } from "@/lib/daily-report/types";
 import { parseDailyReportContent } from "@/lib/daily-report/validator";
 import { normalizeEventSignatureForStorage } from "@/lib/clusters/normalization";
+import { getDisplaySummary, getDisplayTitle } from "@/lib/feed/presentation";
 import { getIngestionRuntimeConfig } from "@/lib/settings/runtime-service";
 import { DEFAULT_DAILY_REPORT_TASK_LABEL, type TaskTimelineNodeSnapshot } from "@/lib/tasks/types";
 import { enqueueTaskRun, ensureDefaultDailyReportSchedule, updateTaskRun } from "@/lib/tasks/service";
 
 const MIN_CANDIDATE_COUNT = 2;
 const DAILY_REPORT_RECENT_SOURCE_LOOKBACK_DAYS = 7;
+const DISPLAYABLE_DAILY_REPORT_SOURCE_STATUSES = ["allowed", "restored"] as const;
 
 export class DailyReportRefinementError extends Error {
   code: string;
@@ -59,6 +61,9 @@ function buildInputHash(date: string, candidates: DailyReportCandidate[]) {
       title: candidate.title,
       summary: candidate.summary,
       qualityScore: candidate.qualityScore,
+      candidateScore: candidate.candidateScore,
+      sourceCount: candidate.sourceCount,
+      itemCount: candidate.itemCount,
     }));
   }
   return hash.digest("hex");
@@ -245,6 +250,106 @@ function candidateToDailyReportSourceRegistryEntry(
   };
 }
 
+async function listExpandedClusterSourceRegistryEntries(candidates: DailyReportCandidate[]) {
+  const clusterCandidates = candidates.filter((candidate) => candidate.clusterId);
+  const clusterIds = Array.from(new Set(clusterCandidates.map((candidate) => candidate.clusterId!)));
+
+  if (clusterIds.length === 0) {
+    return new Map<string, DailyReportSourceRegistryEntry[]>();
+  }
+
+  const candidateByClusterId = new Map(clusterCandidates.map((candidate) => [candidate.clusterId!, candidate]));
+  const rows = await prisma.item.findMany({
+    where: {
+      clusterId: { in: clusterIds },
+      status: "processed",
+      moderationStatus: {
+        in: [...DISPLAYABLE_DAILY_REPORT_SOURCE_STATUSES],
+      },
+      source: {
+        is: {
+          enabled: true,
+        },
+      },
+    },
+    select: {
+      id: true,
+      clusterId: true,
+      originalTitle: true,
+      translatedTitle: true,
+      originalUrl: true,
+      summaryText: true,
+      rssExcerpt: true,
+      fullText: true,
+      rssContent: true,
+      qualityScore: true,
+      publishedAt: true,
+      eventType: true,
+      eventSubject: true,
+      eventAction: true,
+      eventObject: true,
+      eventDate: true,
+      source: {
+        select: {
+          name: true,
+        },
+      },
+    },
+    orderBy: [{ qualityScore: "desc" }, { publishedAt: "desc" }, { createdAt: "desc" }],
+  });
+  const entriesByClusterId = new Map<string, DailyReportSourceRegistryEntry[]>();
+
+  for (const row of rows) {
+    if (!row.clusterId) continue;
+    const candidate = candidateByClusterId.get(row.clusterId);
+    if (!candidate) continue;
+    const entries = entriesByClusterId.get(row.clusterId) ?? [];
+    entries.push({
+      sourceNumber: candidate.id,
+      sourceKey: buildDailyReportSourceKey({ itemId: row.id, clusterId: null, url: row.originalUrl }),
+      itemId: row.id,
+      clusterId: row.clusterId,
+      sourceName: row.source.name,
+      title: getDisplayTitle(row.originalTitle, row.translatedTitle),
+      url: row.originalUrl,
+      summary: getDisplaySummary(row.summaryText, row.rssExcerpt, row.fullText ?? row.rssContent),
+      publishedAt: row.publishedAt.toISOString(),
+      qualityScore: row.qualityScore,
+      eventType: candidate.eventType ?? row.eventType,
+      eventSubject: candidate.eventSubject ?? row.eventSubject,
+      eventAction: candidate.eventAction ?? row.eventAction,
+      eventObject: candidate.eventObject ?? row.eventObject,
+      eventDate: candidate.eventDate ?? row.eventDate,
+    });
+    entriesByClusterId.set(row.clusterId, entries);
+  }
+
+  return entriesByClusterId;
+}
+
+async function buildExpandedDailyReportSourceRegistry(input: {
+  candidatesById: Map<number, DailyReportCandidate>;
+  sourceRows: Array<{ sourceId: number }>;
+}) {
+  const selectedCandidates = Array.from(new Set(input.sourceRows.map((row) => row.sourceId)))
+    .map((sourceId) => input.candidatesById.get(sourceId))
+    .filter((candidate): candidate is DailyReportCandidate => Boolean(candidate));
+  const expandedClusterEntries = await listExpandedClusterSourceRegistryEntries(selectedCandidates);
+  const entriesByNumber = new Map<number, DailyReportSourceRegistryEntry[]>();
+
+  for (const candidate of selectedCandidates) {
+    const expandedEntries = candidate.clusterId ? expandedClusterEntries.get(candidate.clusterId) : null;
+    entriesByNumber.set(
+      candidate.id,
+      expandedEntries && expandedEntries.length > 0
+        ? expandedEntries
+        : [candidateToDailyReportSourceRegistryEntry(candidate)],
+    );
+  }
+
+  return entriesByNumber;
+}
+
 function candidateToRefinementSourceSearchResult(candidate: DailyReportCandidate): DailyReportRefinementSourceSearchResult {
   const entry = candidateToDailyReportSourceRegistryEntry(candidate);
   return {
@@ -303,6 +408,9 @@ function registryToCandidates(registry: DailyReportSourceRegistryEntry[]): Daily
     url: entry.url,
     summary: entry.summary ?? "",
     qualityScore: entry.qualityScore ?? 0,
+    candidateScore: entry.qualityScore ?? 0,
+    sourceCount: 1,
+    itemCount: 1,
     createdAt: entry.publishedAt ?? new Date(0).toISOString(),
     publishedAt: entry.publishedAt ?? new Date(0).toISOString(),
     eventType: entry.eventType,
@@ -408,14 +516,22 @@ export function buildDailyReportSourceRegistryFromRows(rows: Array<{
   eventObject: string | null;
   eventDate: string | null;
 }>): DailyReportSourceRegistryEntry[] {
-  const entries = new Map<number, DailyReportSourceRegistryEntry>();
+  const entries = new Map<string, DailyReportSourceRegistryEntry>();
 
   for (const row of rows) {
-    if (!row.sourceNumber || row.sourceNumber < 1 || entries.has(row.sourceNumber)) {
+    if (!row.sourceNumber || row.sourceNumber < 1) {
       continue;
     }
 
-    entries.set(row.sourceNumber, {
+    const entryKey = [
+      row.sourceNumber,
+      row.itemId ?? row.sourceKey ?? row.url.trim().toLowerCase(),
+    ].join("\u0000");
+    if (entries.has(entryKey)) {
+      continue;
+    }
+
+    entries.set(entryKey, {
       sourceNumber: row.sourceNumber,
       sourceKey: row.sourceKey ?? buildDailyReportSourceKey(row),
       itemId: row.itemId,
@@ -434,7 +550,11 @@ export function buildDailyReportSourceRegistryFromRows(rows: Array<{
     });
   }
 
-  return Array.from(entries.values()).sort((left, right) => left.sourceNumber - right.sourceNumber);
+  return Array.from(entries.values()).sort((left, right) =>
+    left.sourceNumber - right.sourceNumber ||
+    (right.publishedAt ?? "").localeCompare(left.publishedAt ?? "") ||
+    left.title.localeCompare(right.title)
+  );
 }
 
 export async function getDailyReportSourceRegistry(dailyReportId: string) {
@@ -596,13 +716,14 @@ async function countExistingSelectedDailyReportCandidates(dailyReportId: string)
   const rows = await prisma.dailyReportSource.findMany({
     where: { dailyReportId },
     select: {
+      sourceNumber: true,
       itemId: true,
       clusterId: true,
       url: true,
     },
   });
 
-  return new Set(rows.map((row) => row.itemId ?? row.clusterId ?? row.url)).size;
+  return new Set(rows.map((row) => row.sourceNumber ?? row.itemId ?? row.clusterId ?? row.url)).size;
 }
 
 function getDailyReportTaskFinishedLabel(status: "succeeded" | "failed" | "skipped") {
@@ -778,11 +899,17 @@ export async function generateDailyReport(input: {
     eventObject: candidate.eventObject,
     eventDate: candidate.eventDate,
   })));
-  const title = buildDailyReportTitle(date);
-  const renderedMarkdown = renderDailyReportMarkdown(content, candidates, title);
   const sourceRows = getSectionSourceIds(content);
   const selectedCount = countSelectedDailyReportCandidates(content);
   const candidatesById = new Map(candidates.map((candidate) => [candidate.id, candidate]));
+  const expandedSourcesByNumber = await buildExpandedDailyReportSourceRegistry({ candidatesById, sourceRows });
+  const title = buildDailyReportTitle(date);
+  const renderedMarkdown = renderDailyReportMarkdown(
+    content,
+    candidates,
+    title,
+    Array.from(expandedSourcesByNumber.values()).flat(),
+  );
   const shouldAutoPublish = schedule.dailyReportAutoPublish;
   const publishedAt = shouldAutoPublish ? new Date() : null;
 
@@ -829,30 +956,28 @@ export async function generateDailyReport(input: {
     });
     await tx.dailyReportSource.createMany({
       data: sourceRows.flatMap((row) => {
-        const candidate = candidatesById.get(row.sourceId);
-        if (!candidate) {
-          return [];
-        }
-        return [{
+        const sources = expandedSourcesByNumber.get(row.sourceId);
+        if (!sources) return [];
+        return sources.map((source) => ({
           dailyReportId: saved.id,
-          sourceNumber: candidate.id,
-          sourceKey: buildDailyReportSourceKey(candidate),
-          itemId: candidate.itemId,
-          clusterId: candidate.clusterId,
-          sourceName: candidate.sourceName,
-          title: candidate.title,
-          url: candidate.url,
-          sourceSummary: candidate.summary,
-          sourcePublishedAt: new Date(candidate.publishedAt),
-          sourceQualityScore: candidate.qualityScore,
-          eventType: candidate.eventType,
-          eventSubject: candidate.eventSubject,
-          eventAction: candidate.eventAction,
-          eventObject: candidate.eventObject,
-          eventDate: candidate.eventDate,
+          sourceNumber: source.sourceNumber,
+          sourceKey: source.sourceKey,
+          itemId: source.itemId,
+          clusterId: source.clusterId,
+          sourceName: source.sourceName,
+          title: source.title,
+          url: source.url,
+          sourceSummary: source.summary,
+          sourcePublishedAt: source.publishedAt ? new Date(source.publishedAt) : null,
+          sourceQualityScore: source.qualityScore,
+          eventType: source.eventType,
+          eventSubject: source.eventSubject,
+          eventAction: source.eventAction,
+          eventObject: source.eventObject,
+          eventDate: source.eventDate,
           sectionName: row.sectionName,
           topic: row.topic,
-        }];
+        }));
       }),
     });
 
@@ -1375,7 +1500,10 @@ export async function saveDailyReportRefinementCandidate(input: {
     throw toInvalidAiOutputError(error);
   }
   const renderedMarkdown = renderDailyReportMarkdownFromRegistry(content, registry, report.title);
-  const registryByNumber = new Map(registry.map((entry) => [entry.sourceNumber, entry]));
+  const registryByNumber = new Map<number, DailyReportSourceRegistryEntry[]>();
+  for (const entry of registry) {
+    registryByNumber.set(entry.sourceNumber, [...(registryByNumber.get(entry.sourceNumber) ?? []), entry]);
+  }
   const sourceRows = getSectionSourceIds(content);
 
   const saved = await prisma.$transaction(async (tx) => {
@@ -1396,9 +1524,9 @@ export async function saveDailyReportRefinementCandidate(input: {
     });
     await tx.dailyReportSource.createMany({
       data: sourceRows.flatMap((row) => {
-        const source = registryByNumber.get(row.sourceId);
-        if (!source) return [];
-        return [{
+        const sources = registryByNumber.get(row.sourceId);
+        if (!sources) return [];
+        return sources.map((source) => ({
           dailyReportId: report.id,
           sourceNumber: source.sourceNumber,
           sourceKey: source.sourceKey,
@@ -1417,7 +1545,7 @@ export async function saveDailyReportRefinementCandidate(input: {
           eventDate: source.eventDate,
           sectionName: row.sectionName,
           topic: row.topic,
-        }];
+        }));
       }),
     });
 
@@ -1492,5 +1620,15 @@ export async function validateDailyReportContentForRegistry(rawContent: string, 
 }
 
 export function renderDailyReportMarkdownFromRegistry(content: DailyReportContent, registry: DailyReportSourceRegistryEntry[], title: string) {
-  return renderDailyReportMarkdown(content, registryToCandidates(registry), title);
+  return renderDailyReportMarkdown(
+    content,
+    registryToCandidates(registry),
+    title,
+    registry.map((entry) => ({
+      sourceNumber: entry.sourceNumber,
+      title: entry.title,
+      url: entry.url,
+      sourceName: entry.sourceName,
+    })),
+  );
 }

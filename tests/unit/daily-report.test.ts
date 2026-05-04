@@ -20,6 +20,9 @@ const candidates: DailyReportCandidate[] = [
     url: "https://example.com/a",
     summary: "OpenAI 发布新模型摘要",
     qualityScore: 90,
+    candidateScore: 90,
+    sourceCount: 1,
+    itemCount: 1,
     createdAt: "2026-04-24T01:00:00.000Z",
     publishedAt: "2026-04-24T01:00:00.000Z",
     eventType: "release",
@@ -37,6 +40,9 @@ const candidates: DailyReportCandidate[] = [
     url: "https://example.com/b",
     summary: "开发者工具更新摘要",
     qualityScore: 80,
+    candidateScore: 80,
+    sourceCount: 1,
+    itemCount: 1,
     createdAt: "2026-04-24T02:00:00.000Z",
     publishedAt: "2026-04-24T02:00:00.000Z",
     eventType: "update",
@@ -189,5 +195,32 @@ describe("daily report utilities", () => {
     expect(markdown).toContain("[OpenAI 发布新模型](https://example.com/a)");
     expect(markdown).toContain("## 今日观察");
     expect(markdown).not.toContain("深挖");
+  });
+
+  it("renders multiple links for one selected clustered source number", () => {
+    const markdown = renderDailyReportMarkdown(content, candidates, "2026-04-24 AI 日报", [
+      {
+        sourceNumber: 1,
+        title: "OpenAI 发布新模型 来源 A",
+        url: "https://example.com/a",
+        sourceName: "Source A",
+      },
+      {
+        sourceNumber: 1,
+        title: "OpenAI 发布新模型 来源 B",
+        url: "https://example.com/a-2",
+        sourceName: "Source B",
+      },
+      {
+        sourceNumber: 2,
+        title: "开发者工具更新",
+        url: "https://example.com/b",
+        sourceName: "Source B",
+      },
+    ]);
+
+    expect(markdown).toContain("[OpenAI 发布新模型 来源 A](https://example.com/a)");
+    expect(markdown).toContain("[OpenAI 发布新模型 来源 B](https://example.com/a-2)");
+    expect(markdown).toContain("[开发者工具更新](https://example.com/b)");
   });
 });

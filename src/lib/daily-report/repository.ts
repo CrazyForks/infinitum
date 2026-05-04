@@ -233,6 +233,9 @@ export async function listDailyReportCandidates(date: string, limit = 120) {
       url: item.originalUrl,
       summary: cluster?.summary || getDisplaySummary(item.summaryText, item.rssExcerpt, item.fullText ?? item.rssContent),
       qualityScore: item.qualityScore,
+      candidateScore: entry.score,
+      sourceCount: entry.sourceIds.size,
+      itemCount: entry.itemCount,
       createdAt: item.createdAt.toISOString(),
       publishedAt: item.publishedAt.toISOString(),
       eventType: cluster?.eventType ?? item.eventType,
@@ -284,6 +287,19 @@ function parseContent(summaryJson: string): DailyReportContent {
   return JSON.parse(summaryJson) as DailyReportContent;
 }
 
+function countLogicalDailyReportSources(sources?: Array<{
+  sourceNumber: number | null;
+  itemId: string | null;
+  clusterId: string | null;
+  url: string;
+}>, fallback = 0) {
+  if (!sources) {
+    return fallback;
+  }
+
+  return new Set(sources.map((source) => source.sourceNumber ?? source.itemId ?? source.clusterId ?? source.url)).size;
+}
+
 function toListItem(report: {
   id: string;
   date: string;
@@ -295,6 +311,12 @@ function toListItem(report: {
   publishedAt: Date | null;
   errorMessage: string | null;
   _count?: { sources: number };
+  sources?: Array<{
+    sourceNumber: number | null;
+    itemId: string | null;
+    clusterId: string | null;
+    url: string;
+  }>;
 }): DailyReportListItemDTO {
   return {
     id: report.id,
@@ -303,7 +325,7 @@ function toListItem(report: {
     status: report.status,
     title: report.title,
     openingSummary: stripDailyReportGeneratedLabel(report.openingSummary),
-    sourceCount: report._count?.sources ?? 0,
+    sourceCount: countLogicalDailyReportSources(report.sources, report._count?.sources ?? 0),
     generatedAt: report.generatedAt.toISOString(),
     publishedAt: report.publishedAt?.toISOString() ?? null,
     errorMessage: report.errorMessage,
@@ -353,6 +375,14 @@ async function listDailyReportsUncached(input: {
     prisma.dailyReport.findMany({
       where,
       include: {
+        sources: {
+          select: {
+            sourceNumber: true,
+            itemId: true,
+            clusterId: true,
+            url: true,
+          },
+        },
         _count: {
           select: { sources: true },
         },
