@@ -717,12 +717,18 @@ describe("cluster assignment", () => {
       ],
     });
     const mergeClustersAi = vi.fn().mockImplementation(async (clustersJson: string) => {
-      const clusters = JSON.parse(clustersJson) as Array<{ id: string }>;
+      const input = JSON.parse(clustersJson) as {
+        pairs: Array<{ left: { id: string }; right: { id: string } }>;
+      };
 
-      expect(clusters.map((cluster) => cluster.id).sort()).toEqual([
-        "microsoft-contract-cluster",
-        "openai-contract-cluster",
-      ]);
+      expect(input.pairs).toHaveLength(1);
+      expect(
+        input.pairs.some(
+          (pair) =>
+            [pair.left.id, pair.right.id].sort().join("|") ===
+            ["microsoft-contract-cluster", "openai-contract-cluster"].sort().join("|"),
+        ),
+      ).toBe(true);
 
       return [["openai-contract-cluster", "microsoft-contract-cluster"]];
     });

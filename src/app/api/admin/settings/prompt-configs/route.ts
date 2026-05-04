@@ -6,10 +6,11 @@ import {
   createPromptConfig,
   listPromptConfigs,
 } from "@/lib/settings/service";
+import { PROMPT_CONFIG_TYPES } from "@/lib/settings/types";
 
 const promptConfigSchema = z.object({
   name: z.string().min(1),
-  type: z.enum(["item_summary", "item_analysis", "cluster_summary", "cluster_match", "daily_report"]),
+  type: z.enum(PROMPT_CONFIG_TYPES),
   prompt: z.string().min(1),
   systemPrompt: z.string().min(1),
   temperature: z.number().min(0).max(2).nullable().optional(),

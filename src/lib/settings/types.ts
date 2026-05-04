@@ -1,12 +1,15 @@
-export type PromptConfigType =
-  | "item_summary"
-  | "item_analysis"
-  | "cluster_summary"
-  | "cluster_match"
-  | "cluster_merge"
-  | "daily_report"
-  | "daily_report_refinement_chat"
-  | "daily_report_refinement_generate";
+export const PROMPT_CONFIG_TYPES = [
+  "item_summary",
+  "item_analysis",
+  "cluster_summary",
+  "cluster_match",
+  "cluster_merge",
+  "daily_report",
+  "daily_report_refinement_chat",
+  "daily_report_refinement_generate",
+] as const;
+
+export type PromptConfigType = typeof PROMPT_CONFIG_TYPES[number];
 
 export type AdminModelApiConfig = {
   id: string;

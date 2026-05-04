@@ -3,6 +3,145 @@ import { describe, expect, it, vi } from "vitest";
 import { createAiProvider } from "@/lib/ai/provider";
 
 describe("ai provider", () => {
+  it("turns approved merge pairs into conservative target-direct merge groups", async () => {
+    const create = vi.fn().mockResolvedValue({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              approvedPairs: [
+                ["cluster-a", "cluster-b"],
+                ["cluster-b", "cluster-c"],
+              ],
+            }),
+          },
+        },
+      ],
+    });
+    const provider = createAiProvider(
+      {
+        apiKey: "sk-test",
+        baseURL: "https://example.com/v1",
+        model: "test-model",
+      },
+      undefined,
+      {
+        chat: {
+          completions: {
+            create,
+          },
+        },
+      },
+    );
+
+    const groups = await provider.mergeClusters(JSON.stringify({
+      pairs: [
+        {
+          left: { id: "cluster-a", title: "A", summary: "A", itemCount: 10 },
+          right: { id: "cluster-b", title: "B", summary: "B", itemCount: 5 },
+          score: 95,
+        },
+        {
+          left: { id: "cluster-b", title: "B", summary: "B", itemCount: 5 },
+          right: { id: "cluster-c", title: "C", summary: "C", itemCount: 1 },
+          score: 95,
+        },
+      ],
+    }));
+
+    expect(groups).toEqual([["cluster-a", "cluster-b"]]);
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(create.mock.calls[0]?.[0]?.messages?.[0]?.content).toContain("候选聚合 Pair");
+    expect(create.mock.calls[0]?.[0]?.messages?.[0]?.content).toContain("score 是本地规则");
+    expect(create.mock.calls[0]?.[0]?.messages?.[1]?.content).toContain("\"pairs\"");
+  });
+
+  it("ignores approved merge pairs that were not present in the local pair input", async () => {
+    const create = vi.fn().mockResolvedValue({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              approvedPairs: [
+                ["cluster-a", "cluster-b"],
+                ["cluster-a", "cluster-c"],
+              ],
+            }),
+          },
+        },
+      ],
+    });
+    const provider = createAiProvider(
+      {
+        apiKey: "sk-test",
+        baseURL: "https://example.com/v1",
+        model: "test-model",
+      },
+      undefined,
+      {
+        chat: {
+          completions: {
+            create,
+          },
+        },
+      },
+    );
+
+    const groups = await provider.mergeClusters(JSON.stringify({
+      pairs: [
+        {
+          left: { id: "cluster-a", title: "A", summary: "A", itemCount: 3 },
+          right: { id: "cluster-b", title: "B", summary: "B", itemCount: 2 },
+          score: 95,
+        },
+      ],
+    }));
+
+    expect(groups).toEqual([["cluster-a", "cluster-b"]]);
+  });
+
+  it("honors explicit empty approved merge pairs over legacy merge groups", async () => {
+    const create = vi.fn().mockResolvedValue({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              approvedPairs: [],
+              mergeGroups: [["cluster-a", "cluster-b"]],
+            }),
+          },
+        },
+      ],
+    });
+    const provider = createAiProvider(
+      {
+        apiKey: "sk-test",
+        baseURL: "https://example.com/v1",
+        model: "test-model",
+      },
+      undefined,
+      {
+        chat: {
+          completions: {
+            create,
+          },
+        },
+      },
+    );
+
+    const groups = await provider.mergeClusters(JSON.stringify({
+      pairs: [
+        {
+          left: { id: "cluster-a", title: "A", summary: "A", itemCount: 3 },
+          right: { id: "cluster-b", title: "B", summary: "B", itemCount: 2 },
+          score: 95,
+        },
+      ],
+    }));
+
+    expect(groups).toEqual([]);
+  });
+
   it("streams daily report refinement with current content and source registry context", async () => {
     async function* streamChunks() {
       yield { choices: [{ delta: { content: "{\"openingSummary\":" } }] };

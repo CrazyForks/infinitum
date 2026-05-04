@@ -20,6 +20,7 @@ import {
   buildEventDisplayTitle,
   buildItemSummary,
   buildExactMatchKey,
+  filterClusterMergeSourcesByAllowedEdges,
   generateClusterPresentation,
   getClusterAssignmentWindowKeys,
   getItemEventSignature,
@@ -956,7 +957,7 @@ export async function executeClusterMerge(
     },
     orderBy: { id: "asc" },
   });
-  const { candidates: allCandidates, diagnostics } = buildClusterMergeCandidateSelection(recentClusters);
+  const { candidates: allCandidates, allowedPairs, diagnostics } = buildClusterMergeCandidateSelection(recentClusters);
 
   const baseResult = {
     baseClusters: recentClusters.length,
@@ -975,7 +976,7 @@ export async function executeClusterMerge(
     dirtyCandidates: diagnostics.dirtyCandidateCount,
   };
 
-  if (allCandidates.length < 2) {
+  if (allCandidates.length < 2 || allowedPairs.length === 0) {
     return {
       ...baseResult,
       aiMergeGroups: 0,
@@ -1021,7 +1022,7 @@ export async function executeClusterMerge(
   }
 
   // Build merge candidates and call AI
-  const clustersJson = buildClusterMergeInput(allCandidates);
+  const clustersJson = buildClusterMergeInput(allCandidates, allowedPairs);
   let mergeGroups: string[][];
 
   try {
@@ -1059,7 +1060,13 @@ export async function executeClusterMerge(
     if (groupWithCounts.length < 2) continue;
 
     const target = groupWithCounts[0]!;
-    const sources = groupWithCounts.slice(1).map((c) => c.id);
+    const sources = filterClusterMergeSourcesByAllowedEdges(
+      target.id,
+      groupWithCounts.slice(1).map((c) => c.id),
+      allowedPairs,
+    );
+
+    if (sources.length === 0) continue;
 
     try {
       const mergeResult = await mergeClustersInternal(target.id, sources);

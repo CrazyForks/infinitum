@@ -663,6 +663,12 @@ export type ClusterMergeCandidate = {
   latestPublishedAt: Date;
 };
 
+export type ClusterMergeCandidateEdge = {
+  leftId: string;
+  rightId: string;
+  score: number;
+};
+
 function tokenizeMergeText(value: string | null | undefined) {
   const normalized = normalizeComparableText(value);
   const words = normalized.match(/[a-z0-9]+|[\u4e00-\u9fff]+/g) ?? [];
@@ -1088,9 +1094,31 @@ function incrementClusterMergeRejection(
   }
 }
 
+function buildClusterMergeEdgeKey(leftId: string, rightId: string) {
+  return [leftId, rightId].sort().join("\u0000");
+}
+
+export function hasClusterMergeCandidateEdge(
+  edges: ClusterMergeCandidateEdge[],
+  leftId: string,
+  rightId: string,
+) {
+  const key = buildClusterMergeEdgeKey(leftId, rightId);
+  return edges.some((edge) => buildClusterMergeEdgeKey(edge.leftId, edge.rightId) === key);
+}
+
+export function filterClusterMergeSourcesByAllowedEdges(
+  targetId: string,
+  sourceIds: string[],
+  edges: ClusterMergeCandidateEdge[],
+) {
+  return sourceIds.filter((sourceId) => hasClusterMergeCandidateEdge(edges, targetId, sourceId));
+}
+
 export function buildClusterMergeCandidateSelection(clusters: ClusterMergeCandidate[]) {
   const selectedIds = new Set<string>();
   const bestScores = new Map<string, number>();
+  const selectedEdges = new Map<string, ClusterMergeCandidateEdge>();
   const currentInputHashes = new Map(
     clusters.map((cluster) => [cluster.id, buildClusterMergeCandidateInputHash(cluster)]),
   );
@@ -1154,6 +1182,15 @@ export function buildClusterMergeCandidateSelection(clusters: ClusterMergeCandid
       selectedIds.add(pair.right.id);
       bestScores.set(left.id, Math.max(bestScores.get(left.id) ?? 0, pair.score));
       bestScores.set(pair.right.id, Math.max(bestScores.get(pair.right.id) ?? 0, pair.score));
+      const edgeKey = buildClusterMergeEdgeKey(left.id, pair.right.id);
+      const existingEdge = selectedEdges.get(edgeKey);
+      if (!existingEdge || pair.score > existingEdge.score) {
+        selectedEdges.set(edgeKey, {
+          leftId: left.id,
+          rightId: pair.right.id,
+          score: pair.score,
+        });
+      }
     }
   }
 
@@ -1183,10 +1220,23 @@ export function buildClusterMergeCandidateSelection(clusters: ClusterMergeCandid
   diagnostics.dirtyCandidateCount = candidates.filter((candidate) => dirtyIds.has(candidate.id)).length;
 
   const limitedCandidates = candidates.slice(0, CLUSTER_MERGE_CANDIDATE_LIMIT);
+  const limitedCandidateIds = new Set(limitedCandidates.map((candidate) => candidate.id));
+  const allowedPairs = [...selectedEdges.values()]
+    .filter((edge) => limitedCandidateIds.has(edge.leftId) && limitedCandidateIds.has(edge.rightId))
+    .sort((left, right) => {
+      if (right.score !== left.score) {
+        return right.score - left.score;
+      }
+
+      return buildClusterMergeEdgeKey(left.leftId, left.rightId).localeCompare(
+        buildClusterMergeEdgeKey(right.leftId, right.rightId),
+      );
+    });
   diagnostics.postLimitCandidates = limitedCandidates.length;
 
   return {
     candidates: limitedCandidates,
+    allowedPairs,
     diagnostics,
   };
 }
@@ -1195,20 +1245,41 @@ export function buildClusterMergeCandidates(clusters: ClusterMergeCandidate[]) {
   return buildClusterMergeCandidateSelection(clusters).candidates;
 }
 
-export function buildClusterMergeInput(clusters: ClusterMergeCandidate[]): string {
-  return JSON.stringify(
-    clusters.map((c) => ({
-      id: c.id,
-      title: c.title,
-      summary: c.summary,
-      eventType: c.eventType,
-      eventSubject: c.eventSubject,
-      eventAction: c.eventAction,
-      eventObject: c.eventObject,
-      eventDate: c.eventDate,
-      itemCount: c.itemCount,
-    })),
-  );
+export function buildClusterMergeInput(
+  clusters: ClusterMergeCandidate[],
+  allowedPairs: ClusterMergeCandidateEdge[] = [],
+): string {
+  const clustersById = new Map(clusters.map((cluster) => [cluster.id, cluster]));
+  const serializeCluster = (cluster: ClusterMergeCandidate) => ({
+    id: cluster.id,
+    title: cluster.title,
+    summary: cluster.summary,
+    eventType: cluster.eventType,
+    eventSubject: cluster.eventSubject,
+    eventAction: cluster.eventAction,
+    eventObject: cluster.eventObject,
+    eventDate: cluster.eventDate,
+    itemCount: cluster.itemCount,
+  });
+
+  return JSON.stringify({
+    pairs: allowedPairs.flatMap((edge) => {
+      const left = clustersById.get(edge.leftId);
+      const right = clustersById.get(edge.rightId);
+
+      if (!left || !right) {
+        return [];
+      }
+
+      return [
+        {
+          left: serializeCluster(left),
+          right: serializeCluster(right),
+          score: edge.score,
+        },
+      ];
+    }),
+  });
 }
 
 export function getClusterAssignmentWindowKeys(publishedAt: Date, lookbackMs: number) {

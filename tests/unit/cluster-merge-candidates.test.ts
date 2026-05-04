@@ -3,7 +3,11 @@ import { describe, expect, it } from "vitest";
 import { CLUSTER_MERGE_CANDIDATE_LIMIT } from "@/config/constants";
 import {
   buildClusterMergeCandidateInputHash,
+  buildClusterMergeCandidateSelection,
   buildClusterMergeCandidates,
+  buildClusterMergeInput,
+  filterClusterMergeSourcesByAllowedEdges,
+  hasClusterMergeCandidateEdge,
   type ClusterMergeCandidate,
 } from "@/lib/clusters/helpers";
 
@@ -119,6 +123,79 @@ describe("buildClusterMergeCandidates", () => {
       "openai-stargate-shift",
       "oracle-stargate-infra",
     ]);
+  });
+
+  it("emits only local related pair edges for AI merge input", () => {
+    const selection = buildClusterMergeCandidateSelection([
+      createCandidate({
+        id: "baidu-ai-comic-base",
+        title: "百度携手淄博师专共建山东首个AI漫剧创作基地",
+        summary: "山东首家百度AI漫剧创作基地正式落户淄博。",
+        fingerprint: "baidu-ai-comic-base",
+        eventType: "partnership",
+        eventSubject: "百度与淄博师范高等专科学校",
+        eventAction: "合作",
+        eventObject: "百度AI漫剧创作基地",
+        eventDate: "2025-04-27",
+      }),
+      createCandidate({
+        id: "git-am-fake-diff",
+        title: "git-am 误把提交消息里的假 diff 当补丁",
+        summary: "git-am 误把提交消息里的假 diff 当补丁。",
+        fingerprint: "git-am-fake-diff",
+        eventType: "other",
+        eventSubject: "Git",
+        eventAction: "披露漏洞",
+        eventObject: "git-am",
+        latestPublishedAt: new Date("2026-04-20T10:00:00.000Z"),
+      }),
+      createCandidate({
+        id: "zibo-ai-comic-base",
+        title: "山东首家百度AI漫剧创作基地正式落户淄博",
+        summary: "百度与淄博师范高等专科学校合作建设 AI 漫剧创作基地。",
+        fingerprint: "zibo-ai-comic-base",
+        eventType: "partnership",
+        eventSubject: "百度与淄博师范高等专科学校",
+        eventAction: "合作",
+        eventObject: "百度AI漫剧创作基地",
+        eventDate: "2025-04-27",
+        latestPublishedAt: new Date("2026-04-20T11:00:00.000Z"),
+      }),
+    ]);
+
+    expect(hasClusterMergeCandidateEdge(selection.allowedPairs, "baidu-ai-comic-base", "zibo-ai-comic-base")).toBe(true);
+    expect(hasClusterMergeCandidateEdge(selection.allowedPairs, "baidu-ai-comic-base", "git-am-fake-diff")).toBe(false);
+    expect(hasClusterMergeCandidateEdge(selection.allowedPairs, "zibo-ai-comic-base", "git-am-fake-diff")).toBe(false);
+
+    const input = JSON.parse(buildClusterMergeInput(selection.candidates, selection.allowedPairs)) as {
+      pairs: Array<{ left: { id: string }; right: { id: string }; score: number }>;
+    };
+
+    expect(input.pairs).toEqual([
+      expect.objectContaining({
+        left: expect.objectContaining({ id: "baidu-ai-comic-base" }),
+        right: expect.objectContaining({ id: "zibo-ai-comic-base" }),
+        score: expect.any(Number),
+      }),
+    ]);
+  });
+
+  it("filters AI returned merge groups by local target edges before execution", () => {
+    const allowedPairs = [
+      {
+        leftId: "baidu-ai-comic-base",
+        rightId: "zibo-ai-comic-base",
+        score: 95,
+      },
+    ];
+
+    expect(
+      filterClusterMergeSourcesByAllowedEdges(
+        "baidu-ai-comic-base",
+        ["zibo-ai-comic-base", "git-am-fake-diff"],
+        allowedPairs,
+      ),
+    ).toEqual(["zibo-ai-comic-base"]);
   });
 
   it("rejects multi-subject bridge pairs when explicit event dates differ", () => {

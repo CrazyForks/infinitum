@@ -454,12 +454,28 @@ function buildEnrichmentFromParsed(
   };
 }
 
-function parseMergeGroups(rawContent: string, validClusterIds: string[]): string[][] {
+type ClusterMergeInputMetadata = {
+  validIds: string[];
+  allowedPairKeys: Set<string>;
+  itemCounts: Map<string, number>;
+};
+
+function buildClusterMergePairKey(leftId: string, rightId: string) {
+  return [leftId, rightId].sort().join("\u0000");
+}
+
+function parseMergeGroups(rawContent: string, metadata: ClusterMergeInputMetadata): string[][] {
   const normalized = stripCodeFence(rawContent);
-  const validSet = new Set(validClusterIds);
+  const validSet = new Set(metadata.validIds);
 
   try {
-    const parsed = JSON.parse(normalized) as { mergeGroups?: unknown };
+    const parsed = JSON.parse(normalized) as { approvedPairs?: unknown; pairs?: unknown; mergeGroups?: unknown };
+    const approvedPairs = parseApprovedClusterMergePairs(parsed, metadata);
+
+    if (Array.isArray(parsed.approvedPairs) || Array.isArray(parsed.pairs)) {
+      return buildClusterMergeGroupsFromApprovedPairs(approvedPairs, metadata);
+    }
+
     if (!Array.isArray(parsed.mergeGroups)) {
       return [];
     }
@@ -487,6 +503,197 @@ function parseMergeGroups(rawContent: string, validClusterIds: string[]): string
   } catch {
     return [];
   }
+}
+
+function parseApprovedClusterMergePairs(
+  parsed: { approvedPairs?: unknown; pairs?: unknown },
+  metadata: ClusterMergeInputMetadata,
+) {
+  const validSet = new Set(metadata.validIds);
+  const rawPairs = Array.isArray(parsed.approvedPairs)
+    ? parsed.approvedPairs
+    : Array.isArray(parsed.pairs)
+      ? parsed.pairs
+      : [];
+  const pairs: Array<[string, string]> = [];
+  const seenPairKeys = new Set<string>();
+
+  for (const rawPair of rawPairs) {
+    const pair = normalizeApprovedClusterMergePair(rawPair, Array.isArray(parsed.approvedPairs));
+
+    if (!pair) {
+      continue;
+    }
+
+    const [leftId, rightId] = pair;
+    const pairKey = buildClusterMergePairKey(leftId, rightId);
+
+    if (
+      leftId === rightId ||
+      !validSet.has(leftId) ||
+      !validSet.has(rightId) ||
+      !metadata.allowedPairKeys.has(pairKey) ||
+      seenPairKeys.has(pairKey)
+    ) {
+      continue;
+    }
+
+    seenPairKeys.add(pairKey);
+    pairs.push([leftId, rightId]);
+  }
+
+  return pairs;
+}
+
+function normalizeApprovedClusterMergePair(rawPair: unknown, implicitlyApproved: boolean): [string, string] | null {
+  if (Array.isArray(rawPair) && typeof rawPair[0] === "string" && typeof rawPair[1] === "string") {
+    return [rawPair[0], rawPair[1]];
+  }
+
+  if (!rawPair || typeof rawPair !== "object") {
+    return null;
+  }
+
+  const pair = rawPair as Record<string, unknown>;
+  if (!implicitlyApproved && pair.approved !== true) {
+    return null;
+  }
+
+  const leftId = pair.leftId ?? pair.leftClusterId ?? pair.sourceId ?? getClusterIdFromUnknown(pair.left);
+  const rightId = pair.rightId ?? pair.rightClusterId ?? pair.targetId ?? getClusterIdFromUnknown(pair.right);
+
+  return typeof leftId === "string" && typeof rightId === "string" ? [leftId, rightId] : null;
+}
+
+function getClusterIdFromUnknown(value: unknown) {
+  return value && typeof value === "object" && "id" in value && typeof value.id === "string" ? value.id : null;
+}
+
+function buildClusterMergeGroupsFromApprovedPairs(
+  approvedPairs: Array<[string, string]>,
+  metadata: ClusterMergeInputMetadata,
+) {
+  const adjacency = new Map<string, Set<string>>();
+
+  for (const [leftId, rightId] of approvedPairs) {
+    if (!adjacency.has(leftId)) {
+      adjacency.set(leftId, new Set());
+    }
+    if (!adjacency.has(rightId)) {
+      adjacency.set(rightId, new Set());
+    }
+    adjacency.get(leftId)!.add(rightId);
+    adjacency.get(rightId)!.add(leftId);
+  }
+
+  const visited = new Set<string>();
+  const groups: string[][] = [];
+
+  for (const clusterId of adjacency.keys()) {
+    if (visited.has(clusterId)) {
+      continue;
+    }
+
+    const component: string[] = [];
+    const stack = [clusterId];
+    visited.add(clusterId);
+
+    while (stack.length > 0) {
+      const currentId = stack.pop()!;
+      component.push(currentId);
+
+      for (const nextId of adjacency.get(currentId) ?? []) {
+        if (!visited.has(nextId)) {
+          visited.add(nextId);
+          stack.push(nextId);
+        }
+      }
+    }
+
+    if (component.length < 2) {
+      continue;
+    }
+
+    const targetId = [...component].sort((leftId, rightId) => {
+      const itemCountDiff = (metadata.itemCounts.get(rightId) ?? 0) - (metadata.itemCounts.get(leftId) ?? 0);
+      return itemCountDiff || leftId.localeCompare(rightId);
+    })[0]!;
+    const directSources = [...(adjacency.get(targetId) ?? [])].sort((leftId, rightId) => {
+      const itemCountDiff = (metadata.itemCounts.get(rightId) ?? 0) - (metadata.itemCounts.get(leftId) ?? 0);
+      return itemCountDiff || leftId.localeCompare(rightId);
+    });
+
+    if (directSources.length > 0) {
+      groups.push([targetId, ...directSources]);
+    }
+  }
+
+  return groups;
+}
+
+function parseClusterMergeInputMetadata(clustersJson: string): ClusterMergeInputMetadata {
+  const parsed = JSON.parse(clustersJson) as unknown;
+  const validIds = new Set<string>();
+  const allowedPairKeys = new Set<string>();
+  const itemCounts = new Map<string, number>();
+
+  const addCluster = (entry: unknown) => {
+    if (!entry || typeof entry !== "object" || !("id" in entry) || typeof entry.id !== "string") {
+      return null;
+    }
+
+    validIds.add(entry.id);
+    if ("itemCount" in entry && typeof entry.itemCount === "number") {
+      itemCounts.set(entry.id, entry.itemCount);
+    }
+
+    return entry.id;
+  };
+
+  const addPair = (leftId: unknown, rightId: unknown) => {
+    if (typeof leftId === "string" && typeof rightId === "string" && leftId !== rightId) {
+      validIds.add(leftId);
+      validIds.add(rightId);
+      allowedPairKeys.add(buildClusterMergePairKey(leftId, rightId));
+    }
+  };
+
+  if (Array.isArray(parsed)) {
+    for (const entry of parsed) {
+      addCluster(entry);
+    }
+    return { validIds: [...validIds], allowedPairKeys, itemCounts };
+  }
+
+  if (parsed && typeof parsed === "object") {
+    if ("clusters" in parsed && Array.isArray(parsed.clusters)) {
+      for (const entry of parsed.clusters) {
+        addCluster(entry);
+      }
+    }
+
+    if ("allowedPairs" in parsed && Array.isArray(parsed.allowedPairs)) {
+      for (const pair of parsed.allowedPairs) {
+        if (pair && typeof pair === "object") {
+          addPair("leftId" in pair ? pair.leftId : null, "rightId" in pair ? pair.rightId : null);
+        }
+      }
+    }
+
+    if ("pairs" in parsed && Array.isArray(parsed.pairs)) {
+      for (const pair of parsed.pairs) {
+        if (!pair || typeof pair !== "object") {
+          continue;
+        }
+
+        const leftId = "left" in pair ? addCluster(pair.left) : null;
+        const rightId = "right" in pair ? addCluster(pair.right) : null;
+        addPair(leftId, rightId);
+      }
+    }
+  }
+
+  return { validIds: [...validIds], allowedPairKeys, itemCounts };
 }
 
 function parseClusterMatchCandidateId(rawContent: string, candidateIds: string[]): string | null {
@@ -820,8 +1027,7 @@ export function createAiProvider(
       );
     },
     async mergeClusters(clustersJson) {
-      const parsed = JSON.parse(clustersJson) as Array<{ id: string }>;
-      const validIds = parsed.map((c) => c.id);
+      const metadata = parseClusterMergeInputMetadata(clustersJson);
       const output = await completeTextWithCircuitBreaker(
         clusterMergeConfig,
         renderPromptTemplate(clusterMergeConfig.promptTemplate, {
@@ -836,7 +1042,7 @@ export function createAiProvider(
         return [];
       }
 
-      return parseMergeGroups(output, validIds);
+      return parseMergeGroups(output, metadata);
     },
     async generateDailyReport(input) {
       return completeTextWithCircuitBreaker(

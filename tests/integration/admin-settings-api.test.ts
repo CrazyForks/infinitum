@@ -5,6 +5,7 @@ const getAdminSettings = vi.fn();
 const createModelApiConfig = vi.fn();
 const createPromptConfig = vi.fn();
 const getModelApiConfig = vi.fn();
+const updatePromptConfig = vi.fn();
 
 vi.mock("@/lib/admin/session", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/admin/session")>();
@@ -24,6 +25,7 @@ vi.mock("@/lib/settings/service", async (importOriginal) => {
     createModelApiConfig,
     createPromptConfig,
     getModelApiConfig,
+    updatePromptConfig,
   };
 });
 
@@ -199,6 +201,91 @@ describe("/api/admin/settings", () => {
       maxTokens: null,
       topP: null,
       modelApiConfigId: "model-1",
+      isEnabled: true,
+      isDefault: true,
+    });
+  });
+
+  it("accepts cluster merge prompt configs", async () => {
+    requireAdmin.mockResolvedValue(undefined);
+    createPromptConfig.mockResolvedValue({ id: "prompt-merge" });
+
+    const { POST } = await import("@/app/api/admin/settings/prompt-configs/route");
+    const response = await POST(
+      new Request("http://localhost/api/admin/settings/prompt-configs", {
+        method: "POST",
+        body: JSON.stringify({
+          name: "默认聚合合并提示词",
+          type: "cluster_merge",
+          prompt: "候选聚合 Pair JSON：{{clustersJson}}",
+          systemPrompt: "聚合合并系统提示词",
+          temperature: 0,
+          maxTokens: 2000,
+          topP: null,
+          modelApiConfigId: null,
+          isEnabled: true,
+          isDefault: true,
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    expect(createPromptConfig).toHaveBeenCalledWith({
+      name: "默认聚合合并提示词",
+      type: "cluster_merge",
+      prompt: "候选聚合 Pair JSON：{{clustersJson}}",
+      systemPrompt: "聚合合并系统提示词",
+      temperature: 0,
+      maxTokens: 2000,
+      topP: null,
+      modelApiConfigId: null,
+      isEnabled: true,
+      isDefault: true,
+    });
+  });
+
+  it("updates cluster merge prompt configs", async () => {
+    requireAdmin.mockResolvedValue(undefined);
+    updatePromptConfig.mockResolvedValue({ id: "prompt-merge" });
+
+    const { PUT } = await import("@/app/api/admin/settings/prompt-configs/[id]/route");
+    const response = await PUT(
+      new Request("http://localhost/api/admin/settings/prompt-configs/prompt-merge", {
+        method: "PUT",
+        body: JSON.stringify({
+          name: "默认聚合合并提示词",
+          type: "cluster_merge",
+          prompt: "候选聚合 Pair JSON：{{clustersJson}}",
+          systemPrompt: "聚合合并系统提示词",
+          temperature: 0,
+          maxTokens: 2000,
+          topP: null,
+          modelApiConfigId: null,
+          isEnabled: true,
+          isDefault: true,
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+      }),
+      {
+        params: Promise.resolve({ id: "prompt-merge" }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(updatePromptConfig).toHaveBeenCalledWith("prompt-merge", {
+      name: "默认聚合合并提示词",
+      type: "cluster_merge",
+      prompt: "候选聚合 Pair JSON：{{clustersJson}}",
+      systemPrompt: "聚合合并系统提示词",
+      temperature: 0,
+      maxTokens: 2000,
+      topP: null,
+      modelApiConfigId: null,
       isEnabled: true,
       isDefault: true,
     });
