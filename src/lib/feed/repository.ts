@@ -2,6 +2,7 @@ import {
   type FetchRun,
   FetchRunStatus,
   type Item,
+  type ModerationReason,
   Prisma,
   type Source,
   type SourceGroup,
@@ -1107,34 +1108,101 @@ export async function listClusterItems(
   return items.map(mapItemToClusterPreview);
 }
 
-export async function listFilteredItems(page = 1, pageSize = 20) {
+export type FilteredItemsQuery = {
+  search?: string | null;
+  sourceName?: string | null;
+  moderationReason?: string | null;
+};
+
+function buildFilteredItemsWhere(filters?: FilteredItemsQuery): Prisma.ItemWhereInput {
+  const search = filters?.search?.trim();
+
+  return {
+    moderationStatus: "filtered",
+    ...(filters?.sourceName ? { source: { is: { name: filters.sourceName } } } : {}),
+    ...(filters?.moderationReason ? { moderationReason: filters.moderationReason as ModerationReason } : {}),
+    ...(search
+      ? {
+          OR: [
+            { originalTitle: { contains: search } },
+            { translatedTitle: { contains: search } },
+            { summaryText: { contains: search } },
+            { rssExcerpt: { contains: search } },
+            { moderationDetail: { contains: search } },
+          ],
+        }
+      : {}),
+  };
+}
+
+export async function listFilteredItems(page = 1, pageSize = 20, filters?: FilteredItemsQuery) {
   const skip = (page - 1) * pageSize;
+  const where = buildFilteredItemsWhere(filters);
   const [items, total] = await Promise.all([
     prisma.item.findMany({
-      where: { moderationStatus: "filtered" },
+      where,
       include: { source: true },
       orderBy: [{ publishedAt: "desc" }, { createdAt: "desc" }],
       take: pageSize,
       skip,
     }),
-    prisma.item.count({ where: { moderationStatus: "filtered" } }),
+    prisma.item.count({ where }),
   ]);
 
   return { items: items.map(mapItemToReviewItem), total, page, pageSize };
+}
+
+export type AdminClusterQueryOptions = {
+  minItemCount?: number | null;
+  status?: "active" | "hidden" | null;
+  latestItemUpdatedAtStart?: Date | null;
+  latestItemUpdatedAtEnd?: Date | null;
+};
+
+function buildAdminClusterWhereClause(options?: AdminClusterQueryOptions) {
+  const clauses: Prisma.Sql[] = [];
+
+  if (typeof options?.minItemCount === "number") {
+    clauses.push(Prisma.sql`cc."itemCount" >= ${options.minItemCount}`);
+  }
+
+  if (options?.status) {
+    clauses.push(Prisma.sql`cc.status = ${options.status}`);
+  }
+
+  return clauses.length > 0
+    ? Prisma.sql`WHERE ${Prisma.join(clauses, " AND ")}`
+    : Prisma.empty;
+}
+
+function buildAdminClusterHavingClause(options?: AdminClusterQueryOptions) {
+  const clauses: Prisma.Sql[] = [];
+  const latestUpdatedAt = Prisma.sql`COALESCE(MAX(latest_items."updatedAt"), MAX(cc."updatedAt"))`;
+
+  if (options?.latestItemUpdatedAtStart) {
+    clauses.push(Prisma.sql`${latestUpdatedAt} >= ${options.latestItemUpdatedAtStart.getTime()}`);
+  }
+
+  if (options?.latestItemUpdatedAtEnd) {
+    clauses.push(Prisma.sql`${latestUpdatedAt} <= ${options.latestItemUpdatedAtEnd.getTime()}`);
+  }
+
+  return clauses.length > 0
+    ? Prisma.sql`HAVING ${Prisma.join(clauses, " AND ")}`
+    : Prisma.empty;
 }
 
 export async function listAdminClusters(
   page = 1,
   pageSize = 20,
   search?: string | null,
-  options?: { minItemCount?: number | null },
+  options?: AdminClusterQueryOptions,
 ) {
   const skip = (page - 1) * pageSize;
   const searchTerms = getDatabaseSearchTerms(search);
-  const minItemCount = options?.minItemCount;
   const searchCte = buildAdminClusterSearchCte(searchTerms);
-  const minItemCountClause =
-    typeof minItemCount === "number" ? Prisma.sql`WHERE cc."itemCount" >= ${minItemCount}` : Prisma.empty;
+  const whereClause = buildAdminClusterWhereClause(options);
+  const havingClause = buildAdminClusterHavingClause(options);
   const itemUpdatedJoin = Prisma.sql`
     LEFT JOIN "items" latest_items ON latest_items."clusterId" = cc.id
       AND latest_items.status = ${"processed"}
@@ -1152,18 +1220,24 @@ export async function listAdminClusters(
         FROM "content_clusters" cc
         INNER JOIN matched_clusters mc ON mc.id = cc.id
         ${itemUpdatedJoin}
-        ${minItemCountClause}
+        ${whereClause}
         GROUP BY cc.id
+        ${havingClause}
         ${orderByLatestItemUpdatedAt}
         LIMIT ${pageSize}
         OFFSET ${skip}
       `),
       prisma.$queryRaw<CountRow[]>(Prisma.sql`
         ${searchCte}
-        SELECT COUNT(*) AS total
-        FROM "content_clusters" cc
-        INNER JOIN matched_clusters mc ON mc.id = cc.id
-        ${minItemCountClause}
+        SELECT COUNT(*) AS total FROM (
+          SELECT cc.id
+          FROM "content_clusters" cc
+          INNER JOIN matched_clusters mc ON mc.id = cc.id
+          ${itemUpdatedJoin}
+          ${whereClause}
+          GROUP BY cc.id
+          ${havingClause}
+        ) matched_admin_clusters
       `),
     ]);
     const ids = idRows.map((row) => row.id);
@@ -1207,22 +1281,28 @@ export async function listAdminClusters(
     };
   }
 
-  const where: Prisma.ContentClusterWhereInput = {
-    ...(typeof minItemCount === "number" ? { itemCount: { gte: minItemCount } } : {}),
-  };
-
-  const [idRows, total] = await Promise.all([
+  const [idRows, totalRows] = await Promise.all([
     prisma.$queryRaw<IdRow[]>(Prisma.sql`
       SELECT cc.id
       FROM "content_clusters" cc
       ${itemUpdatedJoin}
-      ${minItemCountClause}
+      ${whereClause}
       GROUP BY cc.id
+      ${havingClause}
       ${orderByLatestItemUpdatedAt}
       LIMIT ${pageSize}
       OFFSET ${skip}
     `),
-    prisma.contentCluster.count({ where }),
+    prisma.$queryRaw<CountRow[]>(Prisma.sql`
+      SELECT COUNT(*) AS total FROM (
+        SELECT cc.id
+        FROM "content_clusters" cc
+        ${itemUpdatedJoin}
+        ${whereClause}
+        GROUP BY cc.id
+        ${havingClause}
+      ) matched_admin_clusters
+    `),
   ]);
   const ids = idRows.map((row) => row.id);
   const order = new Map(ids.map((id, index) => [id, index]));
@@ -1259,7 +1339,7 @@ export async function listAdminClusters(
     .map((cluster) => mapClusterToAdminDto(cluster, latestItemUpdatedAtByCluster.get(cluster.id)));
   return {
     clusters: mappedClusters,
-    total,
+    total: toNumber(totalRows[0]?.total ?? BigInt(0)),
     page,
     pageSize,
   };

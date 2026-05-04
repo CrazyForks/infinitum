@@ -218,18 +218,18 @@ export function SourceMonitorPanel({ initialSnapshot, hideStats = false }: Sourc
 
   const inactivityFilterOptions = useMemo(
     () => [
-      { value: "all", label: `全部（${snapshot?.totalEnabledSourceCount ?? 0}）` },
+      { value: "all", label: "全部" },
       ...(snapshot?.inactivityBuckets ?? []).map((bucket) => ({
         value: bucket.key,
-        label: `${bucket.label}无更新（${bucket.count}）`,
+        label: `${bucket.label}无更新`,
       })),
     ],
-    [snapshot?.totalEnabledSourceCount, snapshot?.inactivityBuckets],
+    [snapshot?.inactivityBuckets],
   );
   const groupFilterOptions = useMemo(
     () => (snapshot?.groups ?? []).map((group) => ({
       value: group.value,
-      label: `${group.label}（${group.count}）`,
+      label: group.label,
     })),
     [snapshot?.groups],
   );

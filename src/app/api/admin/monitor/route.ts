@@ -1,6 +1,22 @@
 import { adminErrorResponse } from "@/lib/admin/http";
 import { requireAdmin } from "@/lib/admin/session";
 import { getBackgroundTaskMonitorSnapshot } from "@/lib/tasks/service";
+import type {
+  BackgroundTaskRunKind,
+  BackgroundTaskRunStatus,
+} from "@/lib/tasks/types";
+
+const TASK_STATUSES = new Set(["queued", "running", "succeeded", "failed", "partial", "cancelled"]);
+const TASK_KINDS = new Set([
+  "ingestion",
+  "item_regenerate_translation",
+  "item_regenerate_summary",
+  "item_reanalyze",
+  "cluster_regenerate_summary",
+  "daily_report_generate",
+  "item_cleanup",
+]);
+const TASK_TIME_RANGES = new Set(["today", "week", "month"]);
 
 export async function GET(request: Request) {
   try {
@@ -8,8 +24,19 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const page = Math.max(1, Number(searchParams.get("page")) || 1);
     const pageSize = Math.min(100, Math.max(1, Number(searchParams.get("pageSize")) || 20));
+    const status = searchParams.get("status")?.trim() ?? "";
+    const kind = searchParams.get("kind")?.trim() ?? "";
+    const timeRange = searchParams.get("timeRange")?.trim() ?? "";
 
-    return Response.json(await getBackgroundTaskMonitorSnapshot(new Date(), { page, pageSize }));
+    return Response.json(
+      await getBackgroundTaskMonitorSnapshot(new Date(), {
+        page,
+        pageSize,
+        status: TASK_STATUSES.has(status) ? (status as BackgroundTaskRunStatus) : null,
+        kind: TASK_KINDS.has(kind) ? (kind as BackgroundTaskRunKind) : null,
+        timeRange: TASK_TIME_RANGES.has(timeRange) ? (timeRange as "today" | "week" | "month") : null,
+      }),
+    );
   } catch (error) {
     return adminErrorResponse(error);
   }

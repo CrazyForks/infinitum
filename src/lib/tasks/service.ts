@@ -1,3 +1,5 @@
+import { Prisma } from "@prisma/client";
+
 import {
   claimTaskRun,
   createTaskRun,
@@ -40,6 +42,7 @@ import {
   type TaskRunSnapshot,
   type TaskScheduleSnapshot,
   type BackgroundTaskRunKind,
+  type BackgroundTaskRunStatus,
 } from "@/lib/tasks/types";
 import { prisma } from "@/lib/db";
 
@@ -703,25 +706,39 @@ export async function requestTaskRunCancellation(id: string) {
 
 export async function getBackgroundTaskMonitorSnapshot(
   now = new Date(),
-  opts?: { page?: number; pageSize?: number },
+  opts?: {
+    page?: number;
+    pageSize?: number;
+    status?: BackgroundTaskRunStatus | null;
+    kind?: BackgroundTaskRunKind | null;
+    timeRange?: "today" | "week" | "month" | null;
+  },
 ): Promise<BackgroundTaskMonitorSnapshot> {
   const schedule = await ensureDefaultIngestionSchedule();
   await ensureDefaultDailyReportSchedule();
   const page = opts?.page ?? 1;
   const pageSize = opts?.pageSize ?? 20;
   const skip = (page - 1) * pageSize;
+  const where = buildBackgroundTaskMonitorWhere(now, opts);
+  const runningStatus = getRunningTaskStatusFilter(opts?.status);
 
   const [runningTasks, recentTasks, recentTotal] = await Promise.all([
+    runningStatus
+      ? prisma.backgroundTaskRun.findMany({
+          where: {
+            ...where,
+            status: runningStatus,
+          },
+          orderBy: { createdAt: "desc" },
+        })
+      : Promise.resolve([]),
     prisma.backgroundTaskRun.findMany({
-      where: { status: { in: ["queued", "running"] } },
-      orderBy: { createdAt: "desc" },
-    }),
-    prisma.backgroundTaskRun.findMany({
+      where,
       take: pageSize,
       skip,
       orderBy: { createdAt: "desc" },
     }),
-    prisma.backgroundTaskRun.count(),
+    prisma.backgroundTaskRun.count({ where }),
   ]);
 
   return {
@@ -731,6 +748,50 @@ export async function getBackgroundTaskMonitorSnapshot(
     recentTotal,
     page,
     pageSize,
+  };
+}
+
+function getRunningTaskStatusFilter(status?: BackgroundTaskRunStatus | null) {
+  if (!status) {
+    return { in: ["queued", "running"] } satisfies Prisma.EnumBackgroundTaskStatusFilter;
+  }
+
+  return status === "queued" || status === "running" ? status : null;
+}
+
+function getLocalDayStart(value: Date) {
+  return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+}
+
+function getTaskMonitorStartedAtRange(now: Date, timeRange?: "today" | "week" | "month" | null) {
+  if (!timeRange) {
+    return null;
+  }
+
+  const start = getLocalDayStart(now);
+  if (timeRange === "week") {
+    start.setDate(start.getDate() - 6);
+  } else if (timeRange === "month") {
+    start.setDate(start.getDate() - 29);
+  }
+
+  return { gte: start };
+}
+
+function buildBackgroundTaskMonitorWhere(
+  now: Date,
+  opts?: {
+    status?: BackgroundTaskRunStatus | null;
+    kind?: BackgroundTaskRunKind | null;
+    timeRange?: "today" | "week" | "month" | null;
+  },
+): Prisma.BackgroundTaskRunWhereInput {
+  const startedAt = getTaskMonitorStartedAtRange(now, opts?.timeRange);
+
+  return {
+    ...(opts?.status ? { status: opts.status } : {}),
+    ...(opts?.kind ? { kind: opts.kind } : {}),
+    ...(startedAt ? { startedAt } : {}),
   };
 }
 

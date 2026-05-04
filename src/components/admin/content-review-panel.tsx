@@ -108,40 +108,6 @@ function getClusterLatestItemUpdatedAt(cluster: ClusterDTO) {
   return cluster.latestItemUpdatedAt ?? cluster.latestPublishedAt;
 }
 
-function getLocalDateString(date: Date): string {
-  // Use browser's local timezone and return YYYY-MM-DD format
-  return date.toLocaleDateString("zh-CN", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
-}
-
-function isWithinTimeRange(dateValue: string, timeRange: TimeRangeFilter): boolean {
-  if (!timeRange) return true;
-
-  const date = new Date(dateValue);
-  const now = new Date();
-
-  // Get local timezone dates
-  const dateLocalDate = getLocalDateString(date);
-  const nowLocalDate = getLocalDateString(now);
-
-  // Parse dates for comparison
-  const [dateYear, dateMonth, dateDay] = dateLocalDate.split("/").map(Number);
-  const [nowYear, nowMonth, nowDay] = nowLocalDate.split("/").map(Number);
-
-  // Calculate days difference based on local dates
-  const dateLocalTime = new Date(dateYear, dateMonth - 1, dateDay).getTime();
-  const nowLocalTime = new Date(nowYear, nowMonth - 1, nowDay).getTime();
-  const diffDays = (nowLocalTime - dateLocalTime) / (1000 * 60 * 60 * 24);
-
-  if (timeRange === "today") return diffDays === 0;
-  if (timeRange === "week") return diffDays >= 0 && diffDays <= 6;
-  if (timeRange === "month") return diffDays >= 0 && diffDays <= 29;
-  return true;
-}
-
 function getReviewReasonLabel(reason: ReviewItemDTO["moderationReason"]) {
   if (!reason) {
     return "待复核";
@@ -474,6 +440,7 @@ function ContentReviewContent({
   const [filteredItems, setFilteredItems] = useState<ReviewItemDTO[]>([]);
   const [clusters, setClusters] = useState<ClusterDTO[]>([]);
   const [filteredSearch, setFilteredSearch] = useState("");
+  const [debouncedFilteredSearch, setDebouncedFilteredSearch] = useState("");
   const [filteredSource, setFilteredSource] = useState("");
   const [filteredReason, setFilteredReason] = useState("");
   const [clusterSearch, setClusterSearch] = useState("");
@@ -528,7 +495,11 @@ function ContentReviewContent({
     startTransition(async () => {
       try {
         if (activeTab === "filtered") {
-          const result = await fetchFilteredReviewItems(page, pageSize);
+          const result = await fetchFilteredReviewItems(page, pageSize, {
+            search: debouncedFilteredSearch,
+            sourceName: filteredSource,
+            reason: filteredReason,
+          });
 
           if (cancelled) return;
           setFilteredItems(result.items);
@@ -536,6 +507,8 @@ function ContentReviewContent({
         } else {
           const result = await fetchReviewClusters(page, pageSize, debouncedClusterSearch, {
             minItemCount: 2,
+            status: clusterStatus,
+            timeRange: clusterTimeRange,
           });
 
           if (cancelled) return;
@@ -552,7 +525,18 @@ function ContentReviewContent({
     return () => {
       cancelled = true;
     };
-  }, [activeTab, page, pageSize, debouncedClusterSearch, showToast]);
+  }, [
+    activeTab,
+    page,
+    pageSize,
+    debouncedFilteredSearch,
+    filteredSource,
+    filteredReason,
+    debouncedClusterSearch,
+    clusterStatus,
+    clusterTimeRange,
+    showToast,
+  ]);
 
   useEffect(() => {
     const cleanup = fetchData();
@@ -571,6 +555,19 @@ function ContentReviewContent({
 
     return () => window.clearTimeout(timer);
   }, [activeTab, clusterSearch]);
+
+  useEffect(() => {
+    if (activeTab !== "filtered") {
+      return;
+    }
+
+    const timer = window.setTimeout(
+      () => setDebouncedFilteredSearch(filteredSearch),
+      filteredSearch.trim() ? ADMIN_CLUSTER_SEARCH_DEBOUNCE_MS : 0,
+    );
+
+    return () => window.clearTimeout(timer);
+  }, [activeTab, filteredSearch]);
 
   useEffect(() => {
     if (!isMergeModalOpen) {
@@ -657,27 +654,8 @@ function ContentReviewContent({
     []
   );
 
-  const visibleFilteredItems = useMemo(() => {
-    const keyword = filteredSearch.trim().toLowerCase();
-    return filteredItems.filter((item) => {
-      const matchesKeyword =
-        !keyword ||
-        item.title.toLowerCase().includes(keyword) ||
-        (item.summary ?? "").toLowerCase().includes(keyword) ||
-        (item.moderationDetail ?? "").toLowerCase().includes(keyword);
-      const matchesSource = !filteredSource || item.sourceName === filteredSource;
-      const matchesReason = !filteredReason || item.moderationReason === filteredReason;
-      return matchesKeyword && matchesSource && matchesReason;
-    });
-  }, [filteredItems, filteredSearch, filteredSource, filteredReason]);
-
-  const visibleClusters = useMemo(() => {
-    return clusters.filter((cluster) => {
-      const matchesStatus = !clusterStatus || cluster.status === clusterStatus;
-      const matchesTimeRange = isWithinTimeRange(getClusterLatestItemUpdatedAt(cluster), clusterTimeRange);
-      return matchesStatus && matchesTimeRange;
-    });
-  }, [clusters, clusterStatus, clusterTimeRange]);
+  const visibleFilteredItems = filteredItems;
+  const visibleClusters = clusters;
 
   // Available clusters for merge (exclude current cluster and filter by search)
   const availableClustersForMerge = useMemo(() => {
@@ -732,6 +710,7 @@ function ContentReviewContent({
   const handleClearFilters = () => {
     if (activeTab === "filtered") {
       setFilteredSearch("");
+      setDebouncedFilteredSearch("");
       setFilteredSource("");
       setFilteredReason("");
     } else {

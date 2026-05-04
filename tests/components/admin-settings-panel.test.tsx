@@ -167,6 +167,88 @@ function renderWithProviders(node: ReactNode) {
   return render(<ToastProvider>{node}</ToastProvider>);
 }
 
+type AdminSourceFixture = AdminSettingsSnapshot["sources"][number];
+
+function getFetchUrl(input: RequestInfo | URL) {
+  if (typeof input === "string") {
+    return input;
+  }
+
+  if (input instanceof Request) {
+    return input.url;
+  }
+
+  return input.toString();
+}
+
+function filterSourceFixtures(sources: AdminSourceFixture[], searchParams: URLSearchParams) {
+  const search = searchParams.get("search")?.trim().toLowerCase() ?? "";
+  const groupId = searchParams.get("groupId") ?? "";
+  const enabled = searchParams.get("enabled") ?? "";
+
+  return sources.filter((source) => {
+    if (
+      search &&
+      ![
+        source.name,
+        source.rssUrl,
+        source.siteUrl,
+        source.groupName ?? "未分组",
+      ].some((value) => value.toLowerCase().includes(search))
+    ) {
+      return false;
+    }
+
+    if (groupId === "__ungrouped__" && source.groupId !== null) {
+      return false;
+    }
+    if (groupId && groupId !== "__ungrouped__" && source.groupId !== groupId) {
+      return false;
+    }
+    if (enabled === "enabled" && !source.enabled) {
+      return false;
+    }
+    if (enabled === "disabled" && source.enabled) {
+      return false;
+    }
+
+    return true;
+  });
+}
+
+function createSourceSettingsFetchMock(
+  sources: AdminSourceFixture[],
+  handler?: (url: string, init?: RequestInit) => Response | undefined | Promise<Response | undefined>,
+) {
+  return vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
+    const url = getFetchUrl(input);
+    const method = init?.method ?? "GET";
+    const parsedUrl = new URL(url, "http://localhost");
+
+    if (method === "GET" && parsedUrl.pathname === "/api/admin/settings/sources") {
+      const page = Math.max(1, Number(parsedUrl.searchParams.get("page")) || 1);
+      const pageSize = Math.min(1000, Math.max(1, Number(parsedUrl.searchParams.get("pageSize")) || 10));
+      const filteredSources = filterSourceFixtures(sources, parsedUrl.searchParams);
+      const totalPages = Math.max(1, Math.ceil(filteredSources.length / pageSize));
+      const safePage = Math.min(page, totalPages);
+      const start = (safePage - 1) * pageSize;
+
+      return new Response(
+        JSON.stringify({
+          sources: filteredSources.slice(start, start + pageSize),
+          total: filteredSources.length,
+          totalPages,
+          page: safePage,
+          pageSize,
+        }),
+      );
+    }
+
+    const handled = await handler?.(url, init);
+    return handled ?? new Response(JSON.stringify({ ok: true }));
+  });
+}
+
 describe("AdminSettingsPanel", () => {
   it("renders new AI tabs and defaults to model api without the basic tab", () => {
     renderWithProviders(<AdminSettingsPanel initialSettings={buildInitialSettings()} />);
@@ -465,13 +547,55 @@ describe("AdminSettingsPanel", () => {
     });
   });
 
+  it("shows the real placeholders for prompt types with custom input variables", async () => {
+    const user = userEvent.setup();
+
+    renderWithProviders(
+      <AdminSettingsPanel
+        initialSettings={buildInitialSettings()}
+        activeSection="ai-prompt"
+        initialPromptType="cluster_merge"
+      />,
+    );
+
+    await user.click(screen.getAllByRole("button", { name: /创建配置/i })[0]);
+    let dialog = screen.getByRole("dialog", { name: "创建新提示词配置" });
+    expect(within(dialog).getByText(/可使用占位符：\s+\{\{clustersJson\}\}/)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "取消" }));
+
+    await user.click(screen.getByRole("button", { name: "AI 日报" }));
+    await user.click(screen.getAllByRole("button", { name: /创建配置/i })[0]);
+    dialog = screen.getByRole("dialog", { name: "创建新提示词配置" });
+    expect(within(dialog).getByText(/可使用占位符：\s+\{\{date\}\} \/ \{\{timezone\}\} \/ \{\{articlesJson\}\}/)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "取消" }));
+
+    await user.click(screen.getByRole("button", { name: "日报微调对话" }));
+    await user.click(screen.getAllByRole("button", { name: /创建配置/i })[0]);
+    dialog = screen.getByRole("dialog", { name: "创建新提示词配置" });
+    expect(
+      within(dialog).getByText(
+        /可使用占位符：\s+\{\{date\}\} \/ \{\{timezone\}\} \/ \{\{currentContentJson\}\} \/ \{\{sourceRegistryJson\}\} \/ \{\{messagesJson\}\} \/ \{\{instruction\}\}/,
+      ),
+    ).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "取消" }));
+
+    await user.click(screen.getByRole("button", { name: "日报微调生成" }));
+    await user.click(screen.getAllByRole("button", { name: /创建配置/i })[0]);
+    dialog = screen.getByRole("dialog", { name: "创建新提示词配置" });
+    expect(
+      within(dialog).getByText(
+        /可使用占位符：\s+\{\{date\}\} \/ \{\{timezone\}\} \/ \{\{currentContentJson\}\} \/ \{\{sourceRegistryJson\}\} \/ \{\{messagesJson\}\} \/ \{\{instruction\}\}/,
+      ),
+    ).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "取消" }));
+  });
+
   it("uses the normalized RSS URL returned by resolve when creating a source", async () => {
     const user = userEvent.setup();
     const refreshSpy = vi.fn();
-    const fetchMock = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(
-        new Response(
+    const fetchMock = createSourceSettingsFetchMock([], (url) => {
+      if (url === "/api/admin/settings/sources/resolve") {
+        return new Response(
           JSON.stringify({
             source: {
               name: "Resolved Feed",
@@ -480,9 +604,11 @@ describe("AdminSettingsPanel", () => {
               suggestedAiParsingEnabled: false,
             },
           }),
-        ),
-      )
-      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true })));
+        );
+      }
+
+      return undefined;
+    });
 
     vi.stubGlobal("fetch", fetchMock);
 
@@ -538,26 +664,28 @@ describe("AdminSettingsPanel", () => {
 
   it("filters the source list by name, group and enabled status", async () => {
     const user = userEvent.setup();
+    const sources = [
+      buildInitialSettings().sources[0],
+      {
+        id: "source-2",
+        name: "Infra Feed",
+        rssUrl: "https://infra.example.com/rss.xml",
+        siteUrl: "https://infra.example.com",
+        enabled: false,
+        aiParsingEnabled: false,
+        aggregationEnabled: false,
+        groupId: null,
+        groupName: null,
+        lastItemCreatedAt: null,
+      },
+    ];
+    vi.stubGlobal("fetch", createSourceSettingsFetchMock(sources));
 
     renderWithProviders(
       <AdminSettingsPanel
         initialSettings={{
           ...buildInitialSettings(),
-          sources: [
-            buildInitialSettings().sources[0],
-            {
-              id: "source-2",
-              name: "Infra Feed",
-              rssUrl: "https://infra.example.com/rss.xml",
-              siteUrl: "https://infra.example.com",
-              enabled: false,
-              aiParsingEnabled: false,
-              aggregationEnabled: false,
-              groupId: null,
-              groupName: null,
-              lastItemCreatedAt: null,
-            },
-          ],
+          sources,
         }}
       />,
     );
@@ -565,23 +693,29 @@ describe("AdminSettingsPanel", () => {
     await user.click(screen.getByRole("tab", { name: "信息源" }));
     const sourcesPanel = screen.getByRole("tabpanel");
 
-    expect(screen.getByText("Existing Source")).toBeInTheDocument();
+    expect(await screen.findByText("Existing Source")).toBeInTheDocument();
     expect(screen.getByText("Infra Feed")).toBeInTheDocument();
     expect(screen.queryByText("https://example.com/feed.xml")).not.toBeInTheDocument();
     expect(screen.queryByText("ID：source-1")).not.toBeInTheDocument();
     expect(within(sourcesPanel).getByText("站点信息")).toBeInTheDocument();
 
     await user.type(within(sourcesPanel).getByLabelText("RSS源名称"), "Infra");
-    expect(screen.queryByText("Existing Source")).not.toBeInTheDocument();
-    expect(screen.getByText("Infra Feed")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByText("Existing Source")).not.toBeInTheDocument();
+      expect(screen.getByText("Infra Feed")).toBeInTheDocument();
+    });
 
     await user.clear(within(sourcesPanel).getByLabelText("RSS源名称"));
     await user.selectOptions(within(sourcesPanel).getByLabelText("是否启用"), "enabled");
-    expect(screen.getByText("Existing Source")).toBeInTheDocument();
-    expect(screen.queryByText("Infra Feed")).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("Existing Source")).toBeInTheDocument();
+      expect(screen.queryByText("Infra Feed")).not.toBeInTheDocument();
+    });
 
     await user.selectOptions(within(sourcesPanel).getByLabelText("分组"), "__ungrouped__");
-    expect(screen.queryByText("Existing Source")).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByText("Existing Source")).not.toBeInTheDocument();
+    });
   });
 
   it("exports OPML with source status and AI parsing metadata", async () => {
@@ -591,11 +725,16 @@ describe("AdminSettingsPanel", () => {
     const click = vi.fn();
     const appendChild = vi.spyOn(document.body, "appendChild");
 
-    vi.stubGlobal("URL", {
-      ...URL,
-      createObjectURL: createObjectUrl,
-      revokeObjectURL: revokeObjectUrl,
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: createObjectUrl,
     });
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      value: revokeObjectUrl,
+    });
+
+    vi.stubGlobal("fetch", createSourceSettingsFetchMock(buildInitialSettings().sources));
 
     renderWithProviders(<AdminSettingsPanel initialSettings={buildInitialSettings()} />);
 
@@ -609,6 +748,9 @@ describe("AdminSettingsPanel", () => {
     });
 
     await user.click(screen.getByRole("tab", { name: "信息源" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "导出 OPML" })).not.toBeDisabled();
+    });
     await user.click(screen.getByRole("button", { name: "导出 OPML" }));
 
     expect(createObjectUrl).toHaveBeenCalledTimes(1);
@@ -627,9 +769,7 @@ describe("AdminSettingsPanel", () => {
   it("requires confirmation before deleting a source", async () => {
     const user = userEvent.setup();
     const refreshSpy = vi.fn();
-    const fetchMock = vi
-      .fn<typeof fetch>()
-      .mockResolvedValue(new Response(JSON.stringify({ ok: true })));
+    const fetchMock = createSourceSettingsFetchMock(buildInitialSettings().sources);
 
     vi.stubGlobal("fetch", fetchMock);
 
@@ -644,11 +784,17 @@ describe("AdminSettingsPanel", () => {
 
     const deleteDialog = screen.getByRole("dialog", { name: "确认删除信息源" });
     expect(within(deleteDialog).getByText(/Existing Source/)).toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/admin/settings/sources/source-1",
+      expect.objectContaining({ method: "DELETE" }),
+    );
 
     await user.click(within(deleteDialog).getByRole("button", { name: "取消" }));
     expect(screen.queryByRole("dialog", { name: "确认删除信息源" })).not.toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/admin/settings/sources/source-1",
+      expect.objectContaining({ method: "DELETE" }),
+    );
 
     await user.click(within(sourcesPanel).getByTitle("删除"));
     await user.click(
@@ -731,7 +877,7 @@ describe("AdminSettingsPanel", () => {
       groupName: null,
       lastItemCreatedAt: null,
     };
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ ok: true })));
+    const fetchMock = createSourceSettingsFetchMock([...initialSettings.sources, targetSource]);
 
     vi.stubGlobal("fetch", fetchMock);
 
@@ -751,8 +897,10 @@ describe("AdminSettingsPanel", () => {
     const dialog = await screen.findByRole("dialog", { name: "关联信息源：Core" });
     await user.type(within(dialog).getByLabelText("搜索信息源"), "Other");
 
-    expect(within(dialog).getByText("Other Source")).toBeInTheDocument();
-    expect(within(dialog).getByText("当前分组：未分组")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(within(dialog).getByText("Other Source")).toBeInTheDocument();
+      expect(within(dialog).getByText("当前分组：未分组")).toBeInTheDocument();
+    });
 
     await user.click(within(dialog).getByRole("button", { name: "关联到 Core" }));
 
@@ -792,7 +940,7 @@ describe("AdminSettingsPanel", () => {
     const user = userEvent.setup();
     const refreshSpy = vi.fn();
     const initialSettings = buildInitialSettings();
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ ok: true })));
+    const fetchMock = createSourceSettingsFetchMock(initialSettings.sources);
 
     vi.stubGlobal("fetch", fetchMock);
 

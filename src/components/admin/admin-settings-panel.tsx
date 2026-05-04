@@ -1111,25 +1111,29 @@ export function AdminSettingsPanel({
               <div className="max-h-96 space-y-2 overflow-y-auto rounded-sm border border-[color:var(--line)] p-2">
                 {groupLinkSourceList.length ? (
                   groupLinkSourceList.map((source) => {
-                    const isLinked = source.groupId === sourceGroupLinkTarget?.id;
+                    const displaySource = {
+                      ...source,
+                      ...(sourceGroupOverrides[source.id] ?? {}),
+                    };
+                    const isLinked = displaySource.groupId === sourceGroupLinkTarget?.id;
 
                     return (
                       <div
-                        key={source.id}
+                        key={displaySource.id}
                         className="flex flex-col gap-3 rounded-sm border border-[color:var(--line)] bg-[var(--surface)] px-3 py-3 sm:flex-row sm:items-center sm:justify-between"
                       >
                         <div className="min-w-0">
-                          <div className="truncate text-sm font-semibold text-[var(--text-1)]">{source.name}</div>
-                          <div className="mt-1 truncate text-xs text-[var(--text-3)]">{source.rssUrl}</div>
+                          <div className="truncate text-sm font-semibold text-[var(--text-1)]">{displaySource.name}</div>
+                          <div className="mt-1 truncate text-xs text-[var(--text-3)]">{displaySource.rssUrl}</div>
                           <div className="mt-1 text-xs text-[var(--text-2)]">
-                            当前分组：{source.groupName ?? "未分组"}
+                            当前分组：{displaySource.groupName ?? "未分组"}
                           </div>
                         </div>
                         <Button
                           variant={isLinked ? "secondary" : "primary"}
                           size="sm"
                           disabled={isPending}
-                          onClick={() => openSourceGroupAssociationConfirm(source, isLinked ? null : sourceGroupLinkTarget?.id ?? null)}
+                          onClick={() => openSourceGroupAssociationConfirm(displaySource, isLinked ? null : sourceGroupLinkTarget?.id ?? null)}
                         >
                           {isLinked ? "取消关联" : `关联到 ${sourceGroupLinkTarget?.name ?? ""}`}
                         </Button>

@@ -92,6 +92,31 @@ const codeClassName = "rounded bg-[var(--bg-muted)] px-2 py-1 text-xs";
 const checkboxInputClassName =
   "h-4 w-4 rounded border-[color:var(--line)] text-[var(--accent)] focus:ring-[rgba(59,130,246,0.35)]";
 
+const PROMPT_PLACEHOLDERS_BY_TYPE: Record<PromptConfigType, string[]> = {
+  item_summary: ["{{title}}", "{{sourceName}}", "{{inputText}}"],
+  item_analysis: ["{{title}}", "{{sourceName}}", "{{translateTitle}}", "{{inputText}}"],
+  cluster_summary: ["{{title}}", "{{inputText}}"],
+  cluster_match: ["{{title}}", "{{inputText}}", "{{candidatesJson}}"],
+  cluster_merge: ["{{clustersJson}}"],
+  daily_report: ["{{date}}", "{{timezone}}", "{{articlesJson}}"],
+  daily_report_refinement_chat: [
+    "{{date}}",
+    "{{timezone}}",
+    "{{currentContentJson}}",
+    "{{sourceRegistryJson}}",
+    "{{messagesJson}}",
+    "{{instruction}}",
+  ],
+  daily_report_refinement_generate: [
+    "{{date}}",
+    "{{timezone}}",
+    "{{currentContentJson}}",
+    "{{sourceRegistryJson}}",
+    "{{messagesJson}}",
+    "{{instruction}}",
+  ],
+};
+
 function toNullableNumber(value: string) {
   const normalized = value.trim();
   if (!normalized) {
@@ -1171,14 +1196,8 @@ export function AiSettingsPanel({ initialSettings, mode, initialPromptType = "it
             }
           />
           <p className="text-xs text-[var(--text-3)]">
-            可使用占位符：
-            {promptForm.type === "item_summary"
-              ? " {{title}} / {{sourceName}} / {{inputText}}"
-              : promptForm.type === "item_analysis"
-              ? " {{title}} / {{sourceName}} / {{translateTitle}} / {{inputText}}"
-              : promptForm.type === "cluster_summary"
-                ? " {{title}} / {{inputText}}"
-                : " {{title}} / {{inputText}} / {{candidatesJson}}"}
+            可使用占位符：{" "}
+            {PROMPT_PLACEHOLDERS_BY_TYPE[promptForm.type].join(" / ")}
           </p>
         </FormBlock>
 

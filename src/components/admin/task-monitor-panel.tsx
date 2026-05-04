@@ -569,6 +569,15 @@ export function TaskMonitorPanel({
       const params = new URLSearchParams();
       params.set("page", String(page));
       params.set("pageSize", String(pageSize));
+      if (statusFilter) {
+        params.set("status", statusFilter);
+      }
+      if (kindFilter) {
+        params.set("kind", kindFilter);
+      }
+      if (timeRangeFilter) {
+        params.set("timeRange", timeRangeFilter);
+      }
 
       const response = await fetch(`/api/admin/monitor?${params.toString()}`);
       const payload = (await response.json()) as BackgroundTaskMonitorSnapshot | { error?: string };
@@ -591,7 +600,7 @@ export function TaskMonitorPanel({
     } finally {
       setIsRefreshingSnapshot(false);
     }
-  }, [page, pageSize, showToast]);
+  }, [kindFilter, page, pageSize, showToast, statusFilter, timeRangeFilter]);
 
   // Fetch on mount and whenever page/filter state changes
   useEffect(() => {

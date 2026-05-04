@@ -58,8 +58,31 @@ async function parseJsonResponse<T extends { error?: string }>(
   return payload;
 }
 
-export async function fetchFilteredReviewItems(page = 1, pageSize = 10) {
-  const response = await fetch(`/api/admin/items?moderationStatus=filtered&page=${page}&pageSize=${pageSize}`);
+export async function fetchFilteredReviewItems(
+  page = 1,
+  pageSize = 10,
+  filters?: { search?: string; sourceName?: string; reason?: string },
+) {
+  const params = new URLSearchParams({
+    moderationStatus: "filtered",
+    page: String(page),
+    pageSize: String(pageSize),
+  });
+  const normalizedSearch = filters?.search?.trim();
+  const normalizedSourceName = filters?.sourceName?.trim();
+  const normalizedReason = filters?.reason?.trim();
+
+  if (normalizedSearch) {
+    params.set("search", normalizedSearch);
+  }
+  if (normalizedSourceName) {
+    params.set("sourceName", normalizedSourceName);
+  }
+  if (normalizedReason) {
+    params.set("reason", normalizedReason);
+  }
+
+  const response = await fetch(`/api/admin/items?${params.toString()}`);
   const payload = await parseJsonResponse<CollectionPayload>(response, "审核数据加载失败。");
   return { items: payload.items ?? [], total: payload.total ?? 0 };
 }
@@ -68,7 +91,11 @@ export async function fetchReviewClusters(
   page = 1,
   pageSize = 10,
   search = "",
-  options?: { minItemCount?: number | null },
+  options?: {
+    minItemCount?: number | null;
+    status?: string;
+    timeRange?: string;
+  },
 ) {
   const params = new URLSearchParams({
     page: String(page),
@@ -80,6 +107,12 @@ export async function fetchReviewClusters(
   }
   if (typeof options?.minItemCount === "number") {
     params.set("minItemCount", String(options.minItemCount));
+  }
+  if (options?.status) {
+    params.set("status", options.status);
+  }
+  if (options?.timeRange) {
+    params.set("timeRange", options.timeRange);
   }
 
   const response = await fetch(`/api/admin/clusters?${params.toString()}`);

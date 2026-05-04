@@ -182,6 +182,10 @@ describe("ContentReviewPanel", () => {
         return new Response(JSON.stringify({ items: [createFilteredItem()], total: 1 }));
       }
 
+      if (url === "/api/admin/items?moderationStatus=filtered&page=1&pageSize=10&search=%E4%B8%8D%E5%AD%98%E5%9C%A8%E7%9A%84%E5%85%B3%E9%94%AE%E8%AF%8D") {
+        return new Response(JSON.stringify({ items: [], total: 0 }));
+      }
+
       if (url === "/api/admin/clusters?page=1&pageSize=10&minItemCount=2") {
         return new Response(JSON.stringify({ clusters: [], total: 0 }));
       }
@@ -201,6 +205,9 @@ describe("ContentReviewPanel", () => {
     await user.type(screen.getByLabelText("审核关键词"), "不存在的关键词");
 
     await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/admin/items?moderationStatus=filtered&page=1&pageSize=10&search=%E4%B8%8D%E5%AD%98%E5%9C%A8%E7%9A%84%E5%85%B3%E9%94%AE%E8%AF%8D",
+      );
       expect(screen.getByText("暂无匹配内容")).toBeInTheDocument();
     });
   });
