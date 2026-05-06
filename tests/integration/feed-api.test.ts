@@ -588,14 +588,19 @@ describe("/api/feed", () => {
       });
 
       const { GET } = await import("@/app/api/feed/route");
-      const [defaultResponse, aiResponse] = await Promise.all([
+      const [defaultResponse, aiResponse, researchResponse] = await Promise.all([
         GET(new Request("http://localhost/api/feed?range=all")),
         GET(new Request(`http://localhost/api/feed?range=all&groupId=${aiGroup.id}`)),
+        GET(new Request(`http://localhost/api/feed?range=all&groupId=${researchGroup.id}`)),
       ]);
       const defaultJson = await defaultResponse.json();
       const aiJson = await aiResponse.json();
+      const researchJson = await researchResponse.json();
       const defaultCluster = defaultJson.items.find((item: { id: string }) => item.id === "cluster-dominant-group");
-      const filteredCluster = aiJson.items.find((item: { id: string }) => item.id === "cluster-dominant-group");
+      const aiFilteredCluster = aiJson.items.find((item: { id: string }) => item.id === "cluster-dominant-group");
+      const researchFilteredCluster = researchJson.items.find(
+        (item: { id: string }) => item.id === "cluster-dominant-group",
+      );
 
       expect(defaultCluster).toMatchObject({
         type: "cluster",
@@ -604,11 +609,12 @@ describe("/api/feed", () => {
           name: "研究",
         },
       });
-      expect(filteredCluster).toMatchObject({
+      expect(aiFilteredCluster).toBeUndefined();
+      expect(researchFilteredCluster).toMatchObject({
         type: "cluster",
         group: {
-          id: aiGroup.id,
-          name: "AI",
+          id: researchGroup.id,
+          name: "研究",
         },
       });
       expect(defaultJson.items.find((item: { id: string }) => item.id === "item-timezone-created")).toMatchObject({
@@ -617,6 +623,130 @@ describe("/api/feed", () => {
           name: "AI",
         },
       });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("counts cross-group clusters only under their dominant group", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-10T12:00:00.000Z"));
+
+    try {
+      const [aiGroup, researchGroup] = await Promise.all([
+        prisma.sourceGroup.create({ data: { id: "group-count-ai", name: "AI", sortOrder: 1 } }),
+        prisma.sourceGroup.create({ data: { id: "group-count-research", name: "研究", sortOrder: 2 } }),
+      ]);
+      const baseSource = await prisma.source.findFirstOrThrow({
+        where: { rssUrl: "https://api.example.com/feed.xml" },
+      });
+      await prisma.source.update({
+        where: { id: baseSource.id },
+        data: { groupId: aiGroup.id },
+      });
+      const researchSource = await prisma.source.create({
+        data: {
+          id: "source-count-research",
+          name: "Research Count Feed",
+          rssUrl: "https://research-count.example.com/feed.xml",
+          siteUrl: "https://research-count.example.com",
+          groupId: researchGroup.id,
+          enabled: true,
+          aiParsingEnabled: true,
+        },
+      });
+      await prisma.contentCluster.create({
+        data: {
+          id: "cluster-cross-group-count",
+          kind: "topic",
+          title: "Cross Group Count Cluster",
+          summary: "Cross group count summary",
+          score: 80,
+          itemCount: 3,
+          latestPublishedAt: new Date("2026-04-10T11:00:00.000Z"),
+          status: "active",
+          fingerprint: "cross-group-count-cluster",
+        },
+      });
+      await prisma.item.createMany({
+        data: [
+          {
+            id: "cross-count-ai-1",
+            sourceId: baseSource.id,
+            clusterId: "cluster-cross-group-count",
+            originalUrl: "https://api.example.com/cross-count-ai-1",
+            canonicalUrl: "https://api.example.com/cross-count-ai-1",
+            urlHash: "hash-cross-count-ai-1",
+            dedupeSignature: "cross count ai 1",
+            originalTitle: "Cross Count AI 1",
+            publishedAt: new Date("2026-04-10T11:00:00.000Z"),
+            summaryText: "AI 1",
+            status: "processed",
+            moderationStatus: "allowed",
+            qualityScore: 81,
+            qualityRationale: "测试",
+            language: "en",
+            createdAt: new Date("2026-04-10T11:00:00.000Z"),
+          },
+          {
+            id: "cross-count-ai-2",
+            sourceId: baseSource.id,
+            clusterId: "cluster-cross-group-count",
+            originalUrl: "https://api.example.com/cross-count-ai-2",
+            canonicalUrl: "https://api.example.com/cross-count-ai-2",
+            urlHash: "hash-cross-count-ai-2",
+            dedupeSignature: "cross count ai 2",
+            originalTitle: "Cross Count AI 2",
+            publishedAt: new Date("2026-04-10T10:59:00.000Z"),
+            summaryText: "AI 2",
+            status: "processed",
+            moderationStatus: "allowed",
+            qualityScore: 80,
+            qualityRationale: "测试",
+            language: "en",
+            createdAt: new Date("2026-04-10T10:59:00.000Z"),
+          },
+          {
+            id: "cross-count-research-1",
+            sourceId: researchSource.id,
+            clusterId: "cluster-cross-group-count",
+            originalUrl: "https://research-count.example.com/cross-count-research-1",
+            canonicalUrl: "https://research-count.example.com/cross-count-research-1",
+            urlHash: "hash-cross-count-research-1",
+            dedupeSignature: "cross count research 1",
+            originalTitle: "Cross Count Research 1",
+            publishedAt: new Date("2026-04-10T10:58:00.000Z"),
+            summaryText: "Research 1",
+            status: "processed",
+            moderationStatus: "allowed",
+            qualityScore: 82,
+            qualityRationale: "测试",
+            language: "en",
+            createdAt: new Date("2026-04-10T10:58:00.000Z"),
+          },
+        ],
+      });
+
+      const { GET } = await import("@/app/api/feed/route");
+      const [defaultResponse, aiResponse, researchResponse] = await Promise.all([
+        GET(new Request("http://localhost/api/feed?range=today&title=Cross%20Count")),
+        GET(new Request(`http://localhost/api/feed?range=today&title=Cross%20Count&groupId=${aiGroup.id}`)),
+        GET(new Request(`http://localhost/api/feed?range=today&title=Cross%20Count&groupId=${researchGroup.id}`)),
+      ]);
+      const defaultJson = await defaultResponse.json();
+      const aiJson = await aiResponse.json();
+      const researchJson = await researchResponse.json();
+      const aiOption = defaultJson.groups.find((group: { id: string }) => group.id === aiGroup.id);
+      const researchOption = defaultJson.groups.find((group: { id: string }) => group.id === researchGroup.id);
+
+      expect(defaultJson.pagination.total).toBe(1);
+      expect(aiJson.pagination.total).toBe(1);
+      expect(researchJson.pagination.total).toBe(0);
+      expect(aiOption).toMatchObject({
+        id: aiGroup.id,
+        count: 1,
+      });
+      expect(researchOption).toBeUndefined();
     } finally {
       vi.useRealTimers();
     }

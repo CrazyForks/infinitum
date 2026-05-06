@@ -612,10 +612,6 @@ function buildFeedEntryCandidatesCte(
     Prisma.sql`(i."clusterId" IS NULL OR c.status = ${"active"})`,
   ];
 
-  if (filters.groupId) {
-    nonTimeWhereClauses.push(Prisma.sql`s."groupId" = ${filters.groupId}`);
-  }
-
   if (filters.sourceId) {
     nonTimeWhereClauses.push(Prisma.sql`s.id = ${filters.sourceId}`);
   }
@@ -683,6 +679,7 @@ function buildFeedEntryCandidatesCte(
         i."qualityScore" AS "qualityScore",
         i."originalTitle" AS "originalTitle",
         i."translatedTitle" AS "translatedTitle",
+        s."groupId" AS "sourceGroupId",
         c.title AS "clusterTitle",
         c.summary AS "clusterSummary"
       FROM "items" i
@@ -700,6 +697,31 @@ function buildFeedEntryCandidatesCte(
       WHERE ${Prisma.join([...nonTimeWhereClauses, Prisma.sql`i."clusterId" IS NOT NULL`], " AND ")}
       GROUP BY i."clusterId"
     ),
+    cluster_group_counts AS (
+      SELECT
+        fi."clusterId",
+        fi."sourceGroupId" AS "groupId",
+        COUNT(*) AS count,
+        MIN(fi."createdAt") AS "firstCreatedAt"
+      FROM filtered_items fi
+      WHERE fi."clusterId" IS NOT NULL
+        AND fi."sourceGroupId" IS NOT NULL
+      GROUP BY fi."clusterId", fi."sourceGroupId"
+    ),
+    cluster_dominant_groups AS (
+      SELECT "clusterId", "groupId"
+      FROM (
+        SELECT
+          cgc."clusterId",
+          cgc."groupId",
+          ROW_NUMBER() OVER (
+            PARTITION BY cgc."clusterId"
+            ORDER BY cgc.count DESC, cgc."firstCreatedAt" ASC, cgc."groupId" ASC
+          ) AS rn
+        FROM cluster_group_counts cgc
+      )
+      WHERE rn = 1
+    ),
     cluster_groups AS (
       SELECT
         fi."clusterId" AS id,
@@ -711,6 +733,7 @@ function buildFeedEntryCandidatesCte(
         ${clusterItemCount} AS "itemCount",
         ${clusterSourceCount} AS "sourceCount",
         MAX(COALESCE(ctc.total_count, 0)) AS "totalItemCount",
+        MIN(cdg."groupId") AS "entryGroupId",
         ${clusterUpvotes} AS upvotes,
         ${clusterDownvotes} AS downvotes,
         -- 综合推荐评分 = AI锚点分 + 有限反馈微调 + 来源/条目聚合加权
@@ -724,6 +747,7 @@ function buildFeedEntryCandidatesCte(
       FROM filtered_items fi
       INNER JOIN "content_clusters" cc ON cc.id = fi."clusterId"
       LEFT JOIN cluster_total_counts ctc ON ctc."clusterId" = fi."clusterId"
+      LEFT JOIN cluster_dominant_groups cdg ON cdg."clusterId" = fi."clusterId"
       WHERE fi."clusterId" IS NOT NULL
       GROUP BY fi."clusterId"
     ),
@@ -739,6 +763,7 @@ function buildFeedEntryCandidatesCte(
         fi."qualityScore" AS score,
         1 AS "sourceCount",
         1 AS "itemCount",
+        fi."sourceGroupId" AS "entryGroupId",
         COALESCE(cg.upvotes, 0) AS upvotes,
         COALESCE(cg.downvotes, 0) AS downvotes,
         -- 综合推荐评分 = AI锚点分 + 有限反馈微调，单条来源/条目加权为 0
@@ -766,18 +791,24 @@ function buildFeedEntryCandidatesCte(
         cg."sourceCount" AS "sourceCount",
         cg."itemCount" AS "itemCount",
         cg."totalItemCount" AS "totalItemCount",
+        cg."entryGroupId" AS "entryGroupId",
         cg.upvotes AS upvotes,
         cg.downvotes AS downvotes,
         cg."recommendScore" AS "recommendScore"
       FROM cluster_groups cg
       WHERE cg."totalItemCount" > 1
     ),
-    entry_candidates AS (
-      SELECT id, type, NULL AS "clusterId", title, summary, "latestPublishedAt", "createdAt", score, "sourceCount", "itemCount", "totalItemCount", upvotes, downvotes, "recommendScore"
+    all_entry_candidates AS (
+      SELECT id, type, NULL AS "clusterId", title, summary, "latestPublishedAt", "createdAt", score, "sourceCount", "itemCount", "totalItemCount", "entryGroupId", upvotes, downvotes, "recommendScore"
       FROM cluster_entries
       UNION ALL
-      SELECT id, type, "clusterId", title, summary, "latestPublishedAt", "createdAt", score, "sourceCount", "itemCount", CAST(1 AS INTEGER) AS "totalItemCount", upvotes, downvotes, "recommendScore"
+      SELECT id, type, "clusterId", title, summary, "latestPublishedAt", "createdAt", score, "sourceCount", "itemCount", CAST(1 AS INTEGER) AS "totalItemCount", "entryGroupId", upvotes, downvotes, "recommendScore"
       FROM single_entries
+    ),
+    entry_candidates AS (
+      SELECT *
+      FROM all_entry_candidates
+      ${filters.groupId ? Prisma.sql`WHERE "entryGroupId" = ${filters.groupId}` : Prisma.empty}
     )
   `;
 }
@@ -843,52 +874,20 @@ async function listFeedGroupCounts(
     ...filters,
     groupId: null,
   };
-  const entryCandidatesCte = buildFeedEntryCandidatesCte(effectiveFilters, null);
+  const searchTerm = sanitizeFts5Query(filters.title);
+  const entryCandidatesCte = buildFeedEntryCandidatesCte(effectiveFilters, searchTerm);
   const [groupRows, totalRows] = await Promise.all([
     prisma.$queryRaw<FeedGroupCountRow[]>(Prisma.sql`
-      ${entryCandidatesCte},
-      single_entry_groups AS (
-        SELECT s."groupId" AS group_id
-        FROM single_entries se
-        INNER JOIN "items" i ON i.id = se.id
-        INNER JOIN "sources" s ON s.id = i."sourceId"
-        WHERE s."groupId" IS NOT NULL
-      ),
-      cluster_items_by_group AS (
-        SELECT
-          ce.id AS cluster_id,
-          s."groupId" AS group_id,
-          COUNT(*) AS cnt
-        FROM cluster_entries ce
-        INNER JOIN "items" i ON i."clusterId" = ce.id
-        INNER JOIN "sources" s ON s.id = i."sourceId"
-        WHERE s."groupId" IS NOT NULL
-        GROUP BY ce.id, s."groupId"
-      ),
-      cluster_dominant_group AS (
-        SELECT cluster_id, group_id
-        FROM (
-          SELECT
-            cluster_id,
-            group_id,
-            ROW_NUMBER() OVER (PARTITION BY cluster_id ORDER BY cnt DESC) AS rn
-          FROM cluster_items_by_group
-        )
-        WHERE rn = 1
-      ),
-      all_entry_groups AS (
-        SELECT group_id FROM single_entry_groups
-        UNION ALL
-        SELECT group_id FROM cluster_dominant_group
-      )
+      ${entryCandidatesCte}
       SELECT
-        aeg.group_id AS id,
+        ec."entryGroupId" AS id,
         g.name AS name,
         g."sortOrder" AS "sortOrder",
         COUNT(*) AS count
-      FROM all_entry_groups aeg
-      INNER JOIN "source_groups" g ON g.id = aeg.group_id
-      GROUP BY aeg.group_id
+      FROM entry_candidates ec
+      INNER JOIN "source_groups" g ON g.id = ec."entryGroupId"
+      WHERE ec."entryGroupId" IS NOT NULL
+      GROUP BY ec."entryGroupId"
       ORDER BY g."sortOrder" ASC, g.name ASC
     `),
     prisma.$queryRaw<CountRow[]>(Prisma.sql`
@@ -977,7 +976,7 @@ export async function listFeedItems(
       : Promise.resolve([]),
     clusterIds.length > 0
       ? prisma.item.findMany({
-          where: buildItemWhere(filters, clusterIds),
+          where: buildItemWhere({ ...filters, groupId: null }, clusterIds),
           include: {
             source: {
               include: {
