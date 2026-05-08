@@ -1,17 +1,8 @@
-import { buildRssFeed, escapeXml } from "@/lib/feed/rss";
+import { buildRssFeed, renderRssDescriptionHtml } from "@/lib/feed/rss";
 import { listDailyReports } from "@/lib/daily-report/repository";
 import { resolvePublicOrigin, resolvePublicRequestUrl } from "@/lib/http/public-origin";
 
 export const revalidate = 300;
-
-function stripInlineMarkdown(value: string) {
-  return value
-    .replace(/\*\*([^*\n]+)\*\*/g, "$1")
-    .replace(/__([^_\n]+)__/g, "$1")
-    .replace(/\*([^*\n]+)\*/g, "$1")
-    .replace(/_([^_\n]+)_/g, "$1")
-    .trim();
-}
 
 export async function GET(request: Request) {
   const baseUrl = resolvePublicOrigin(request);
@@ -25,7 +16,7 @@ export async function GET(request: Request) {
 
   const items = reports.map((report) => ({
     title: report.title,
-    description: escapeXml(stripInlineMarkdown(report.openingSummary)),
+    description: renderRssDescriptionHtml(report.openingSummary),
     link: `${baseUrl}/daily/${report.date}`,
     pubDate: report.publishedAt ?? report.generatedAt,
     guid: `daily:${report.date}`,

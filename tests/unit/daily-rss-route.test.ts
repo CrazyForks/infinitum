@@ -16,7 +16,7 @@ describe("/api/daily/rss", () => {
             timezone: "Asia/Shanghai",
             status: "published",
             title: "2026-04-26 AI 日报",
-            openingSummary: "今日摘要",
+            openingSummary: "今日 **摘要**，详见 [原文](https://example.com/post)。",
             sourceCount: 3,
             generatedAt: "2026-04-26T00:30:00.000Z",
             publishedAt: "2026-04-26T01:00:00.000Z",
@@ -45,5 +45,7 @@ describe("/api/daily/rss", () => {
       '<atom:link href="https://news.example.com/api/daily/rss?preview=1" rel="self" type="application/rss+xml" />',
     );
     expect(xml).toContain("<link>https://news.example.com/daily/2026-04-26</link>");
+    expect(xml).toContain('<description><![CDATA[<p>今日 <strong>摘要</strong>，详见 <a href="https://example.com/post"');
+    expect(xml).not.toContain("**摘要**");
   });
 });

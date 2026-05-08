@@ -38,8 +38,7 @@ function renderInline(markdown: string) {
       if (!isSafeUrl(href)) {
         return label;
       }
-      const safeHref = escapeHtml(href);
-      return `<a href="${safeHref}" target="_blank" rel="${LINK_REL_TOKENS}">${label}</a>`;
+      return `<a href="${href}" target="_blank" rel="${LINK_REL_TOKENS}">${label}</a>`;
     });
 }
 

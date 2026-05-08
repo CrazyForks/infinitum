@@ -1,4 +1,5 @@
 import type { FeedClusterPreviewItemDTO, FeedEntryDTO } from "@/lib/feed/types";
+import { renderSafeMarkdown } from "@/lib/markdown/safe-html";
 
 export const DEFAULT_RSS_FEED_PAGE_SIZE = 100;
 
@@ -30,6 +31,15 @@ export function escapeXml(unsafe: string): string {
     .replace(/'/g, "&apos;");
 }
 
+function wrapCdata(value: string): string {
+  return `<![CDATA[${value.replaceAll("]]>", "]]]]><![CDATA[>")}]]>`;
+}
+
+export function renderRssDescriptionHtml(markdown: string): string {
+  const trimmed = markdown.trim();
+  return trimmed ? renderSafeMarkdown(trimmed) : "";
+}
+
 function buildClusterDescription(
   clusterSummary: string,
   items: FeedClusterPreviewItemDTO[],
@@ -38,7 +48,7 @@ function buildClusterDescription(
   const parts: string[] = [];
 
   if (clusterSummary) {
-    parts.push(`<p>${escapeXml(clusterSummary)}</p>`);
+    parts.push(renderRssDescriptionHtml(clusterSummary));
   }
 
   // 相关文章列表
@@ -73,7 +83,7 @@ export function buildRssFeed(feed: RssFeed): string {
 
       return `  <item>
     <title>${escapeXml(item.title)}</title>
-    <description>${item.description}</description>
+    <description>${wrapCdata(item.description)}</description>
     <link>${escapeXml(item.link)}</link>
     <pubDate>${new Date(item.pubDate).toUTCString()}</pubDate>
     <guid isPermaLink="false">${escapeXml(item.guid)}</guid>${sourceMeta}${authorMeta}
@@ -104,7 +114,7 @@ export function mapFeedEntriesToRssItems(
       // 单条内容
       return {
         title: entry.title,
-        description: escapeXml(entry.summary),
+        description: renderRssDescriptionHtml(entry.summary),
         link: entry.originalUrl,
         pubDate: entry.createdAt, // 使用系统收录时间
         guid: entry.id,

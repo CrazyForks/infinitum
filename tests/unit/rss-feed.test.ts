@@ -60,6 +60,46 @@ describe("rss feed renderer", () => {
     expect(item?.description).not.toContain("聚合摘要：");
   });
 
+  it("renders markdown summaries as html inside rss descriptions", () => {
+    const [item] = mapFeedEntriesToRssItems(
+      [
+        {
+          id: "item-1",
+          type: "single",
+          clusterId: "cluster-1",
+          title: "OpenAI 发布新工具",
+          originalUrl: "https://example.com/1",
+          publishedAt: "2026-04-25T10:00:00.000Z",
+          createdAt: "2026-04-25T10:00:00.000Z",
+          latestPublishedAt: "2026-04-25T10:00:00.000Z",
+          sourceName: "Example",
+          author: null,
+          summary: "OpenAI 发布 **新工具**，详见 [公告](https://example.com/post?x=1&y=2)。",
+          score: 80,
+          sourceCount: 1,
+          itemCount: 1,
+          upvotes: 0,
+          downvotes: 0,
+          userVote: null,
+        },
+      ],
+      "https://example.com",
+    );
+
+    const rss = buildRssFeed({
+      title: "Infinitum 资讯聚合",
+      description: "最新资讯聚合 RSS 订阅",
+      link: "https://example.com",
+      lastBuildDate: "2026-04-25T00:00:00.000Z",
+      items: item ? [item] : [],
+    });
+
+    expect(item?.description).toContain("<strong>新工具</strong>");
+    expect(item?.description).toContain('<a href="https://example.com/post?x=1&amp;y=2"');
+    expect(rss).toContain("<description><![CDATA[<p>OpenAI 发布 <strong>新工具</strong>");
+    expect(rss).not.toContain("**新工具**");
+  });
+
   it("resolves the public origin from forwarded proxy headers", () => {
     const request = new Request("https://0.0.0.0:3000/api/feed/rss?range=today", {
       headers: {
