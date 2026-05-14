@@ -76,6 +76,25 @@ type FeedGroupCountRow = {
   count: bigint;
 };
 
+type ClusterScoreStats = {
+  aiScore: number;
+  itemCount: number;
+  sourceCount: number;
+  upvotes: number;
+  downvotes: number;
+  recommendScore: number;
+};
+
+type ClusterScoreStatsRow = {
+  clusterId: string;
+  aiScore: number | bigint;
+  itemCount: number | bigint;
+  sourceCount: number | bigint;
+  upvotes: number | bigint;
+  downvotes: number | bigint;
+  recommendScore: number | bigint;
+};
+
 export async function syncSources(sourceConfigs: SourceConfig[]) {
   for (const source of sourceConfigs) {
     await prisma.source.upsert({
@@ -548,28 +567,82 @@ function toIsoString(value: Date | string) {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 }
 
-function mapClusterToAdminDto(cluster: ClusterWithPreviewItems, latestItemUpdatedAt?: Date | null) {
-  const clusterWithVotes = cluster as typeof cluster & { upvotes: number; downvotes: number };
-  const sourceCount = new Set(cluster.items.map((item) => item.sourceId)).size;
-  const recommendScore = calculateRecommendScore(
-    cluster.score,
-    clusterWithVotes.upvotes ?? 0,
-    clusterWithVotes.downvotes ?? 0,
-    sourceCount,
-    cluster.items.length,
-  );
+function mapClusterToAdminDto(
+  cluster: ClusterWithPreviewItems,
+  latestItemUpdatedAt?: Date | null,
+  scoreStats?: ClusterScoreStats,
+) {
+  const itemCount = scoreStats?.itemCount ?? cluster.items.length;
+  const sourceCount = scoreStats?.sourceCount ?? new Set(cluster.items.map((item) => item.sourceId)).size;
+  const aiScore =
+    scoreStats?.aiScore ??
+    (cluster.items.length > 0
+      ? Math.round(cluster.items.reduce((sum, item) => sum + item.qualityScore, 0) / cluster.items.length)
+      : cluster.score);
+  const upvotes = scoreStats?.upvotes ?? cluster.upvotes;
+  const downvotes = scoreStats?.downvotes ?? cluster.downvotes;
+  const recommendScore =
+    scoreStats?.recommendScore ?? calculateRecommendScore(aiScore, upvotes, downvotes, sourceCount, itemCount);
 
   return {
     id: cluster.id,
     title: cluster.title,
     summary: cluster.summary,
     score: recommendScore,
-    itemCount: cluster.itemCount,
+    itemCount: scoreStats?.itemCount ?? cluster.itemCount,
     latestPublishedAt: cluster.latestPublishedAt.toISOString(),
     latestItemUpdatedAt: (latestItemUpdatedAt ?? cluster.updatedAt).toISOString(),
     status: cluster.status,
     items: cluster.items.slice(0, 5).map(mapItemToClusterPreview),
   } satisfies ClusterDTO;
+}
+
+async function getClusterScoreStatsByCluster(clusterIds: string[]) {
+  if (clusterIds.length === 0) {
+    return new Map<string, ClusterScoreStats>();
+  }
+
+  const clusterAiScore = Prisma.sql`CAST(ROUND(AVG(i."qualityScore")) AS INTEGER)`;
+  const clusterItemCount = Prisma.sql`COUNT(*)`;
+  const clusterSourceCount = Prisma.sql`COUNT(DISTINCT i."sourceId")`;
+  const clusterUpvotes = Prisma.sql`COALESCE(MIN(cc.upvotes), 0)`;
+  const clusterDownvotes = Prisma.sql`COALESCE(MIN(cc.downvotes), 0)`;
+  const rows = await prisma.$queryRaw<ClusterScoreStatsRow[]>(Prisma.sql`
+    SELECT
+      i."clusterId" AS "clusterId",
+      ${clusterAiScore} AS "aiScore",
+      ${clusterItemCount} AS "itemCount",
+      ${clusterSourceCount} AS "sourceCount",
+      ${clusterUpvotes} AS upvotes,
+      ${clusterDownvotes} AS downvotes,
+      ${buildRecommendScoreSql({
+        aiScore: clusterAiScore,
+        upvotes: clusterUpvotes,
+        downvotes: clusterDownvotes,
+        sourceCount: clusterSourceCount,
+        itemCount: clusterItemCount,
+      })} AS "recommendScore"
+    FROM "items" i
+    INNER JOIN "content_clusters" cc ON cc.id = i."clusterId"
+    WHERE i."clusterId" IN (${Prisma.join(clusterIds)})
+      AND i.status = ${"processed"}
+      AND i."moderationStatus" IN (${Prisma.join([...DISPLAYABLE_MODERATION_STATUSES])})
+    GROUP BY i."clusterId"
+  `);
+
+  return new Map(
+    rows.map((row) => [
+      row.clusterId,
+      {
+        aiScore: toNumber(row.aiScore),
+        itemCount: toNumber(row.itemCount),
+        sourceCount: toNumber(row.sourceCount),
+        upvotes: toNumber(row.upvotes),
+        downvotes: toNumber(row.downvotes),
+        recommendScore: toNumber(row.recommendScore),
+      },
+    ]),
+  );
 }
 
 async function getLatestItemUpdatedAtByCluster(clusterIds: string[]) {
@@ -661,9 +734,9 @@ function buildFeedEntryCandidatesCte(
     whereClauses.push(Prisma.sql`i."publishedAt" <= ${filters.publishedRangeEnd.getTime()}`);
   }
 
-  const clusterAiScore = Prisma.sql`CAST(ROUND(AVG(fi."qualityScore")) AS INTEGER)`;
+  const clusterAiScore = Prisma.sql`CAST(ROUND(AVG(csi."qualityScore")) AS INTEGER)`;
   const clusterItemCount = Prisma.sql`COUNT(*)`;
-  const clusterSourceCount = Prisma.sql`COUNT(DISTINCT fi."sourceId")`;
+  const clusterSourceCount = Prisma.sql`COUNT(DISTINCT csi."sourceId")`;
   const clusterUpvotes = Prisma.sql`COALESCE(MIN(cc.upvotes), 0)`;
   const clusterDownvotes = Prisma.sql`COALESCE(MIN(cc.downvotes), 0)`;
   const singleUpvotes = Prisma.sql`COALESCE(cg.upvotes, 0)`;
@@ -687,15 +760,35 @@ function buildFeedEntryCandidatesCte(
       LEFT JOIN "content_clusters" c ON c.id = i."clusterId"
       WHERE ${Prisma.join(whereClauses, " AND ")}
     ),
-    cluster_total_counts AS (
+    cluster_score_items AS (
       SELECT
-        i."clusterId",
-        COUNT(*) AS total_count
+        i."clusterId" AS "clusterId",
+        i."sourceId" AS "sourceId",
+        i."qualityScore" AS "qualityScore"
       FROM "items" i
       INNER JOIN "sources" s ON s.id = i."sourceId"
       LEFT JOIN "content_clusters" c ON c.id = i."clusterId"
       WHERE ${Prisma.join([...nonTimeWhereClauses, Prisma.sql`i."clusterId" IS NOT NULL`], " AND ")}
-      GROUP BY i."clusterId"
+    ),
+    cluster_score_groups AS (
+      SELECT
+        csi."clusterId" AS id,
+        ${clusterAiScore} AS score,
+        ${clusterItemCount} AS "totalItemCount",
+        ${clusterSourceCount} AS "sourceCount",
+        ${clusterUpvotes} AS upvotes,
+        ${clusterDownvotes} AS downvotes,
+        -- 综合推荐评分 = AI锚点分 + 有限反馈微调 + 来源/条目聚合加权
+        ${buildRecommendScoreSql({
+          aiScore: clusterAiScore,
+          upvotes: clusterUpvotes,
+          downvotes: clusterDownvotes,
+          sourceCount: clusterSourceCount,
+          itemCount: clusterItemCount,
+        })} AS "recommendScore"
+      FROM cluster_score_items csi
+      INNER JOIN "content_clusters" cc ON cc.id = csi."clusterId"
+      GROUP BY csi."clusterId"
     ),
     cluster_group_counts AS (
       SELECT
@@ -729,24 +822,17 @@ function buildFeedEntryCandidatesCte(
         MIN(fi."clusterSummary") AS summary,
         MAX(fi."publishedAt") AS "latestPublishedAt",
         MAX(fi."createdAt") AS "createdAt",
-        ${clusterAiScore} AS score,
-        ${clusterItemCount} AS "itemCount",
-        ${clusterSourceCount} AS "sourceCount",
-        MAX(COALESCE(ctc.total_count, 0)) AS "totalItemCount",
+        MAX(COALESCE(csg.score, 0)) AS score,
+        COUNT(*) AS "itemCount",
+        MAX(COALESCE(csg."sourceCount", 0)) AS "sourceCount",
+        MAX(COALESCE(csg."totalItemCount", 0)) AS "totalItemCount",
         MIN(cdg."groupId") AS "entryGroupId",
-        ${clusterUpvotes} AS upvotes,
-        ${clusterDownvotes} AS downvotes,
-        -- 综合推荐评分 = AI锚点分 + 有限反馈微调 + 来源/条目聚合加权
-        ${buildRecommendScoreSql({
-          aiScore: clusterAiScore,
-          upvotes: clusterUpvotes,
-          downvotes: clusterDownvotes,
-          sourceCount: clusterSourceCount,
-          itemCount: clusterItemCount,
-        })} AS "recommendScore"
+        MAX(COALESCE(csg.upvotes, 0)) AS upvotes,
+        MAX(COALESCE(csg.downvotes, 0)) AS downvotes,
+        MAX(COALESCE(csg."recommendScore", 0)) AS "recommendScore"
       FROM filtered_items fi
       INNER JOIN "content_clusters" cc ON cc.id = fi."clusterId"
-      LEFT JOIN cluster_total_counts ctc ON ctc."clusterId" = fi."clusterId"
+      LEFT JOIN cluster_score_groups csg ON csg.id = fi."clusterId"
       LEFT JOIN cluster_dominant_groups cdg ON cdg."clusterId" = fi."clusterId"
       WHERE fi."clusterId" IS NOT NULL
       GROUP BY fi."clusterId"
@@ -1242,7 +1328,7 @@ export async function listAdminClusters(
     ]);
     const ids = idRows.map((row) => row.id);
     const order = new Map(ids.map((id, index) => [id, index]));
-    const [clusters, latestItemUpdatedAtByCluster] = await Promise.all([
+    const [clusters, latestItemUpdatedAtByCluster, scoreStatsByCluster] = await Promise.all([
       ids.length > 0
         ? prisma.contentCluster.findMany({
             where: { id: { in: ids } },
@@ -1268,10 +1354,13 @@ export async function listAdminClusters(
           })
         : [],
       getLatestItemUpdatedAtByCluster(ids),
+      getClusterScoreStatsByCluster(ids),
     ]);
     const mappedClusters = clusters
       .sort((left, right) => (order.get(left.id) ?? 0) - (order.get(right.id) ?? 0))
-      .map((cluster) => mapClusterToAdminDto(cluster, latestItemUpdatedAtByCluster.get(cluster.id)));
+      .map((cluster) =>
+        mapClusterToAdminDto(cluster, latestItemUpdatedAtByCluster.get(cluster.id), scoreStatsByCluster.get(cluster.id)),
+      );
 
     return {
       clusters: mappedClusters,
@@ -1306,7 +1395,7 @@ export async function listAdminClusters(
   ]);
   const ids = idRows.map((row) => row.id);
   const order = new Map(ids.map((id, index) => [id, index]));
-  const [clusters, latestItemUpdatedAtByCluster] = await Promise.all([
+  const [clusters, latestItemUpdatedAtByCluster, scoreStatsByCluster] = await Promise.all([
     ids.length > 0
       ? prisma.contentCluster.findMany({
           where: { id: { in: ids } },
@@ -1332,11 +1421,14 @@ export async function listAdminClusters(
         })
       : [],
     getLatestItemUpdatedAtByCluster(ids),
+    getClusterScoreStatsByCluster(ids),
   ]);
 
   const mappedClusters = clusters
     .sort((left, right) => (order.get(left.id) ?? 0) - (order.get(right.id) ?? 0))
-    .map((cluster) => mapClusterToAdminDto(cluster, latestItemUpdatedAtByCluster.get(cluster.id)));
+    .map((cluster) =>
+      mapClusterToAdminDto(cluster, latestItemUpdatedAtByCluster.get(cluster.id), scoreStatsByCluster.get(cluster.id)),
+    );
   return {
     clusters: mappedClusters,
     total: toNumber(totalRows[0]?.total ?? BigInt(0)),

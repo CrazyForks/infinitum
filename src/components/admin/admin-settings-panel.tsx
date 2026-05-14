@@ -147,6 +147,18 @@ function getInitialSourceFilterValue(key: string) {
   return new URLSearchParams(window.location.search).get(key) ?? "";
 }
 
+function normalizeSourceEnabledFilter(value: string | null | undefined) {
+  if (value === "true" || value === "enabled") {
+    return "true";
+  }
+
+  if (value === "false" || value === "disabled") {
+    return "false";
+  }
+
+  return "";
+}
+
 function getInitialSourceFilterNumber(key: string, fallback: number) {
   const value = Number.parseInt(getInitialSourceFilterValue(key), 10);
   return Number.isInteger(value) && value > 0 ? value : fallback;
@@ -214,7 +226,9 @@ export function AdminSettingsPanel({
   const [sourceDeleteTarget, setSourceDeleteTarget] = useState<AdminSource | null>(null);
   const [sourceNameFilter, setSourceNameFilter] = useState(() => getInitialSourceFilterValue(sourceFilterQueryKeys.name));
   const [sourceGroupFilter, setSourceGroupFilter] = useState(() => getInitialSourceFilterValue(sourceFilterQueryKeys.group));
-  const [sourceEnabledFilter, setSourceEnabledFilter] = useState(() => getInitialSourceFilterValue(sourceFilterQueryKeys.enabled));
+  const [sourceEnabledFilter, setSourceEnabledFilter] = useState(() =>
+    normalizeSourceEnabledFilter(getInitialSourceFilterValue(sourceFilterQueryKeys.enabled)),
+  );
   const [sourcePage, setSourcePage] = useState(() => getInitialSourceFilterNumber(sourceFilterQueryKeys.page, 1));
   const [sourcePageSize, setSourcePageSize] = useState(() => getInitialSourceFilterNumber(sourceFilterQueryKeys.pageSize, 10));
   const [sourceForm, setSourceForm] = useState({
@@ -286,6 +300,7 @@ export function AdminSettingsPanel({
   const [paginatedSourceList, setPaginatedSourceList] = useState<AdminSource[]>([]);
   const [sourceTotal, setSourceTotal] = useState(0);
   const [sourceTotalPages, setSourceTotalPages] = useState(1);
+  const [sourceListRefreshKey, setSourceListRefreshKey] = useState(0);
   const sourceFetchIdRef = useRef(0);
 
   useEffect(() => {
@@ -314,7 +329,7 @@ export function AdminSettingsPanel({
         if (data.page !== sourcePage) setSourcePage(data.page);
       })
       .catch(() => { /* ignore */ });
-  }, [activeSection, sourcePage, sourcePageSize, sourceNameFilter, sourceGroupFilter, sourceEnabledFilter, sourceGroupOverrides]);
+  }, [activeSection, sourcePage, sourcePageSize, sourceNameFilter, sourceGroupFilter, sourceEnabledFilter, sourceGroupOverrides, sourceListRefreshKey]);
 
   // Lighter-weight search for the group-linking modal — fetches with a larger
   // page size since the modal needs instant client-side filtering.
@@ -356,7 +371,7 @@ export function AdminSettingsPanel({
     const values = {
       name: next.name ?? sourceNameFilter,
       group: next.group ?? sourceGroupFilter,
-      enabled: next.enabled ?? sourceEnabledFilter,
+      enabled: normalizeSourceEnabledFilter(next.enabled ?? sourceEnabledFilter),
       page: next.page ?? sourcePage,
       pageSize: next.pageSize ?? sourcePageSize,
     };
@@ -386,12 +401,14 @@ export function AdminSettingsPanel({
     body: unknown,
     successMessage: string,
     reload = false,
+    onSuccess?: () => void,
   ) => {
     startTransition(async () => {
       try {
         await submitAdminSettingsAction(url, method, body);
 
         showToast(successMessage, "success");
+        onSuccess?.();
 
         if (reload) {
           triggerRefresh();
@@ -656,6 +673,11 @@ export function AdminSettingsPanel({
       ...sourceForm,
       groupId: sourceForm.groupId || null,
     };
+    const refreshCurrentSourceList = () => {
+      setSourceModalMode(null);
+      setEditingSourceId(null);
+      setSourceListRefreshKey((current) => current + 1);
+    };
 
     if (sourceModalMode === "edit" && editingSourceId) {
       submitJson(
@@ -663,7 +685,8 @@ export function AdminSettingsPanel({
         "PATCH",
         payload,
         "信息源已更新。",
-        true,
+        false,
+        refreshCurrentSourceList,
       );
       return;
     }
@@ -673,7 +696,8 @@ export function AdminSettingsPanel({
       "POST",
       payload,
       "信息源已创建。",
-      true,
+      false,
+      refreshCurrentSourceList,
     );
   };
 
@@ -687,9 +711,12 @@ export function AdminSettingsPanel({
       "DELETE",
       {},
       "信息源已删除。",
-      true,
+      false,
+      () => {
+        setSourceDeleteTarget(null);
+        setSourceListRefreshKey((current) => current + 1);
+      },
     );
-    setSourceDeleteTarget(null);
   };
 
   const saveTaskSchedule = () => {
@@ -1262,15 +1289,16 @@ export function AdminSettingsPanel({
                 ariaLabel="是否启用"
                 value={sourceEnabledFilter}
                 onChange={(value) => {
-                  setSourceEnabledFilter(value);
+                  const normalized = normalizeSourceEnabledFilter(value);
+                  setSourceEnabledFilter(normalized);
                   setSourcePage(1);
-                  updateSourceFilterUrl({ enabled: value, page: 1 });
+                  updateSourceFilterUrl({ enabled: normalized, page: 1 });
                 }}
                 showSearch={false}
                 options={[
                   { value: "", label: "全部" },
-                  { value: "enabled", label: "已启用" },
-                  { value: "disabled", label: "已停用" },
+                  { value: "true", label: "已启用" },
+                  { value: "false", label: "已停用" },
                 ]}
               />
             </div>
@@ -1968,6 +1996,7 @@ function GroupRow({
     body: unknown,
     successMessage: string,
     reload?: boolean,
+    onSuccess?: () => void,
   ) => void;
   onOpenSourceLink: (group: AdminSettingsSnapshot["groups"][number]) => void;
 }) {

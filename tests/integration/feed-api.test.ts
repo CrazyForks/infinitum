@@ -313,7 +313,7 @@ describe("/api/feed", () => {
             summaryText: "旧摘要",
             status: "processed",
             moderationStatus: "allowed",
-            qualityScore: 80,
+            qualityScore: 50,
             qualityRationale: "时间范围测试",
             language: "en",
             createdAt: new Date("2026-04-08T11:05:00.000Z"),
@@ -331,6 +331,7 @@ describe("/api/feed", () => {
         id: "cluster-temporal",
         title: "Temporal Cluster",
         itemCount: 2,
+        score: 64,
         hasMoreItems: true,
       });
       expect(json.items[0].itemsPreview).toHaveLength(1);

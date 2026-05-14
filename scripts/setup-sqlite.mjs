@@ -20,6 +20,7 @@ const testHoldMs = Number.parseInt(process.env.SQLITE_SETUP_LOCK_HOLD_MS || "0",
 const sqliteBusyTimeoutMs = Number.parseInt(process.env.SQLITE_BUSY_TIMEOUT_MS || "10000", 10);
 const sleepBuffer = new SharedArrayBuffer(4);
 const sleepView = new Int32Array(sleepBuffer);
+const adminClusterItemsIndexName = "items_clusterId_status_moderationStatus_updatedAt_idx";
 
 const sqliteRuntimePragmas = [
   "PRAGMA journal_mode = WAL;",
@@ -101,10 +102,35 @@ function ftsTableExists(tableName) {
   return result === "1";
 }
 
+function indexStatsExist(indexName) {
+  if (!ftsTableExists("sqlite_stat1")) {
+    return false;
+  }
+
+  const result = execFileSync(
+    "sqlite3",
+    [dbPath, `SELECT COUNT(*) FROM sqlite_stat1 WHERE idx = '${indexName}'`],
+    {
+      encoding: "utf8",
+    },
+  ).trim();
+
+  return Number(result) > 0;
+}
+
 function applyIncrementalMigrations() {
   runSqlite([dbPath], {
-    input: `CREATE INDEX IF NOT EXISTS "items_status_moderationStatus_updatedAt_idx" ON "items"("status", "moderationStatus", "updatedAt");\n`,
+    input: [
+      `CREATE INDEX IF NOT EXISTS "items_status_moderationStatus_updatedAt_idx" ON "items"("status", "moderationStatus", "updatedAt");`,
+      `CREATE INDEX IF NOT EXISTS "${adminClusterItemsIndexName}" ON "items"("clusterId", "status", "moderationStatus", "updatedAt");`,
+    ].join("\n"),
   });
+
+  if (!indexStatsExist(adminClusterItemsIndexName)) {
+    runSqlite([dbPath], {
+      input: `ANALYZE "items";\n`,
+    });
+  }
 
   if (!columnExists("source_groups", "sortOrder")) {
     runSqlite([dbPath], {

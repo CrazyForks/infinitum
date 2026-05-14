@@ -185,6 +185,8 @@ function filterSourceFixtures(sources: AdminSourceFixture[], searchParams: URLSe
   const search = searchParams.get("search")?.trim().toLowerCase() ?? "";
   const groupId = searchParams.get("groupId") ?? "";
   const enabled = searchParams.get("enabled") ?? "";
+  const normalizedEnabled =
+    enabled === "enabled" ? "true" : enabled === "disabled" ? "false" : enabled;
 
   return sources.filter((source) => {
     if (
@@ -205,10 +207,10 @@ function filterSourceFixtures(sources: AdminSourceFixture[], searchParams: URLSe
     if (groupId && groupId !== "__ungrouped__" && source.groupId !== groupId) {
       return false;
     }
-    if (enabled === "enabled" && !source.enabled) {
+    if (normalizedEnabled === "true" && !source.enabled) {
       return false;
     }
-    if (enabled === "disabled" && source.enabled) {
+    if (normalizedEnabled === "false" && source.enabled) {
       return false;
     }
 
@@ -658,8 +660,9 @@ describe("AdminSettingsPanel", () => {
     });
 
     await waitFor(() => {
-      expect(refreshSpy).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole("dialog", { name: "新建信息源" })).not.toBeInTheDocument();
     });
+    expect(refreshSpy).not.toHaveBeenCalled();
   });
 
   it("filters the source list by name, group and enabled status", async () => {
@@ -679,7 +682,8 @@ describe("AdminSettingsPanel", () => {
         lastItemCreatedAt: null,
       },
     ];
-    vi.stubGlobal("fetch", createSourceSettingsFetchMock(sources));
+    const fetchMock = createSourceSettingsFetchMock(sources);
+    vi.stubGlobal("fetch", fetchMock);
 
     renderWithProviders(
       <AdminSettingsPanel
@@ -706,16 +710,99 @@ describe("AdminSettingsPanel", () => {
     });
 
     await user.clear(within(sourcesPanel).getByLabelText("RSS源名称"));
-    await user.selectOptions(within(sourcesPanel).getByLabelText("是否启用"), "enabled");
+    await user.selectOptions(within(sourcesPanel).getByLabelText("是否启用"), "true");
     await waitFor(() => {
       expect(screen.getByText("Existing Source")).toBeInTheDocument();
       expect(screen.queryByText("Infra Feed")).not.toBeInTheDocument();
     });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/settings/sources?page=1&pageSize=10&enabled=true",
+    );
 
     await user.selectOptions(within(sourcesPanel).getByLabelText("分组"), "__ungrouped__");
     await waitFor(() => {
       expect(screen.queryByText("Existing Source")).not.toBeInTheDocument();
     });
+  });
+
+  it("refreshes the current source query after editing a source", async () => {
+    const user = userEvent.setup();
+    const refreshSpy = vi.fn();
+    const sources = [
+      buildInitialSettings().sources[0],
+      {
+        id: "source-2",
+        name: "Infra Feed",
+        rssUrl: "https://infra.example.com/rss.xml",
+        siteUrl: "https://infra.example.com",
+        enabled: false,
+        aiParsingEnabled: false,
+        aggregationEnabled: false,
+        groupId: null,
+        groupName: null,
+        lastItemCreatedAt: null,
+      },
+    ];
+    const fetchMock = createSourceSettingsFetchMock(sources);
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderWithProviders(
+      <AdminSettingsPanel
+        onRefresh={refreshSpy}
+        initialSettings={{
+          ...buildInitialSettings(),
+          sources,
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole("tab", { name: "信息源" }));
+    const sourcesPanel = screen.getByRole("tabpanel");
+    await user.type(within(sourcesPanel).getByLabelText("RSS源名称"), "Infra");
+    await user.selectOptions(within(sourcesPanel).getByLabelText("是否启用"), "false");
+
+    await waitFor(() => {
+      expect(screen.getByText("Infra Feed")).toBeInTheDocument();
+      expect(screen.queryByText("Existing Source")).not.toBeInTheDocument();
+    });
+
+    await user.click(within(sourcesPanel).getByTitle("编辑"));
+    const dialog = screen.getByRole("dialog", { name: "编辑信息源" });
+    await user.clear(within(dialog).getByLabelText("名称"));
+    await user.type(within(dialog).getByLabelText("名称"), "Infra Feed Updated");
+    await user.click(within(dialog).getByRole("button", { name: "保存" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/admin/settings/sources/source-2", {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          name: "Infra Feed Updated",
+          rssUrl: "https://infra.example.com/rss.xml",
+          siteUrl: "https://infra.example.com",
+          enabled: false,
+          aiParsingEnabled: false,
+          aggregationEnabled: false,
+          groupId: null,
+        }),
+      });
+    });
+
+    await waitFor(() => {
+      const sourceListFetchUrls = fetchMock.mock.calls
+        .filter(([input, init]) => {
+          const parsedUrl = new URL(getFetchUrl(input), "http://localhost");
+          return (init?.method ?? "GET") === "GET" && parsedUrl.pathname === "/api/admin/settings/sources";
+        })
+        .map(([input]) => getFetchUrl(input));
+      expect(sourceListFetchUrls[sourceListFetchUrls.length - 1]).toBe(
+        "/api/admin/settings/sources?page=1&pageSize=10&search=Infra&enabled=false",
+      );
+    });
+    expect(screen.queryByRole("dialog", { name: "编辑信息源" })).not.toBeInTheDocument();
+    expect(refreshSpy).not.toHaveBeenCalled();
   });
 
   it("exports OPML with source status and AI parsing metadata", async () => {
@@ -814,8 +901,9 @@ describe("AdminSettingsPanel", () => {
     });
 
     await waitFor(() => {
-      expect(refreshSpy).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole("dialog", { name: "确认删除信息源" })).not.toBeInTheDocument();
     });
+    expect(refreshSpy).not.toHaveBeenCalled();
   });
 
   it("renders the Lumina-like group management list and creates a group from the header action", async () => {

@@ -20,6 +20,18 @@ function parseOptionalInt(value: string | null, fallback: number) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function parseEnabledFilter(value: string | null) {
+  if (value === "true" || value === "enabled") {
+    return true;
+  }
+
+  if (value === "false" || value === "disabled") {
+    return false;
+  }
+
+  return null;
+}
+
 export async function GET(request: Request) {
   try {
     await requireAdmin();
@@ -27,12 +39,11 @@ export async function GET(request: Request) {
     const page = parseOptionalInt(searchParams.get("page"), 1);
     const pageSize = Math.min(100, parseOptionalInt(searchParams.get("pageSize"), 20));
     const search = searchParams.get("search")?.trim() ?? "";
-    const enabled = searchParams.get("enabled");
+    const enabled = parseEnabledFilter(searchParams.get("enabled"));
     const groupId = searchParams.get("groupId");
 
     const where: Record<string, unknown> = {};
-    if (enabled === "true") where.enabled = true;
-    else if (enabled === "false") where.enabled = false;
+    if (enabled !== null) where.enabled = enabled;
 
     if (groupId === "__ungrouped__") {
       where.groupId = null;

@@ -23,6 +23,14 @@ const navItems = [
 
 type ThemePreference = "light" | "dark" | "system";
 
+function getThemeStorage() {
+  try {
+    return typeof window !== "undefined" && window.localStorage ? window.localStorage : null;
+  } catch {
+    return null;
+  }
+}
+
 export function GlobalHeader({ activeNav, isAdmin: initialIsAdmin, resolveAdminClient = false, showShadow = true, rssHref }: GlobalHeaderProps) {
   const router = useRouter();
   const isAdmin = useClientAdminSession(initialIsAdmin, resolveAdminClient);
@@ -45,7 +53,7 @@ export function GlobalHeader({ activeNav, isAdmin: initialIsAdmin, resolveAdminC
   const activeTheme = themeOptions.find((option) => option.value === theme) ?? themeOptions[2];
 
   useEffect(() => {
-    const stored = localStorage.getItem("theme");
+    const stored = getThemeStorage()?.getItem("theme");
     const initial = stored === "light" || stored === "dark" || stored === "system" ? stored : "system";
 
     setTheme(initial);
@@ -71,7 +79,7 @@ export function GlobalHeader({ activeNav, isAdmin: initialIsAdmin, resolveAdminC
 
   const applyTheme = (nextTheme: ThemePreference) => {
     setTheme(nextTheme);
-    localStorage.setItem("theme", nextTheme);
+    getThemeStorage()?.setItem("theme", nextTheme);
     if (nextTheme === "system") {
       document.documentElement.removeAttribute("data-theme");
     } else {

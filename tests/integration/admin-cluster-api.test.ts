@@ -154,6 +154,24 @@ describe("/api/admin/clusters", () => {
     });
   });
 
+  it("uses the same aggregate recommendation score as the public feed", async () => {
+    requireAdmin.mockResolvedValue(undefined);
+    await prisma.contentCluster.update({
+      where: { id: "cluster-1" },
+      data: { score: 100 },
+    });
+
+    const { GET } = await import("@/app/api/admin/clusters/route");
+    const response = await GET(new Request("http://localhost/api/admin/clusters?minItemCount=2"));
+    const json = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(json.clusters[0]).toMatchObject({
+      id: "cluster-1",
+      score: 79,
+    });
+  });
+
   it("orders admin clusters by latest child item update time", async () => {
     requireAdmin.mockResolvedValue(undefined);
     const source = await prisma.source.findFirstOrThrow({ where: { name: "Cluster Feed" } });
