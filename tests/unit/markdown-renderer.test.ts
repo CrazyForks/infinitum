@@ -17,4 +17,19 @@ describe("safe markdown renderer", () => {
     expect(html).toContain('href="https://example.com/post?x=1&amp;y=2"');
     expect(html).not.toContain("&amp;amp;");
   });
+
+  it("renders links whose labels contain brackets", () => {
+    const html = renderSafeMarkdown("[[相关特性汇总] 谷歌发布 Android 17](https://example.com/post)");
+
+    expect(html).toContain('href="https://example.com/post"');
+    expect(html).toContain(">[相关特性汇总] 谷歌发布 Android 17</a>");
+    expect(html).not.toContain("(https://example.com/post)");
+  });
+
+  it("renders links with escaped brackets in labels", () => {
+    const html = renderSafeMarkdown("[\\[相关特性汇总\\] 谷歌发布 Android 17](https://example.com/post)");
+
+    expect(html).toContain('href="https://example.com/post"');
+    expect(html).toContain(">[相关特性汇总] 谷歌发布 Android 17</a>");
+  });
 });

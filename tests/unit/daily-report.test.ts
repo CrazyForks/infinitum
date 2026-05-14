@@ -223,4 +223,25 @@ describe("daily report utilities", () => {
     expect(markdown).toContain("[OpenAI 发布新模型 来源 B](https://example.com/a-2)");
     expect(markdown).toContain("[开发者工具更新](https://example.com/b)");
   });
+
+  it("escapes markdown control characters in source link titles", () => {
+    const markdown = renderDailyReportMarkdown(content, candidates, "2026-04-24 AI 日报", [
+      {
+        sourceNumber: 1,
+        title: "[相关]*特性*_汇总_ `AI` (v1)! #1 + A-B | <tag>",
+        url: "https://example.com/a",
+        sourceName: "Source A",
+      },
+      {
+        sourceNumber: 2,
+        title: "开发者工具更新",
+        url: "https://example.com/b",
+        sourceName: "Source B",
+      },
+    ]);
+
+    expect(markdown).toContain(
+      "[\\[相关\\]\\*特性\\*\\_汇总\\_ \\`AI\\` \\(v1\\)\\! \\#1 \\+ A\\-B \\| \\<tag\\>](https://example.com/a)",
+    );
+  });
 });

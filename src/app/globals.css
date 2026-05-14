@@ -231,10 +231,14 @@ main {
   margin-bottom: 0;
 }
 
-.article-prose p,
-.article-prose li {
+.article-prose p {
   text-align: justify;
   text-justify: inter-ideograph;
+}
+
+.article-prose li {
+  text-align: start;
+  text-justify: auto;
 }
 
 .article-prose p {

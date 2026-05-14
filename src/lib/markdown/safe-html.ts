@@ -26,7 +26,7 @@ function isSafeUrl(value: string) {
   }
 }
 
-function renderInline(markdown: string) {
+function renderBasicInline(markdown: string) {
   const escaped = escapeHtml(markdown);
   return escaped
     .replace(/`([^`]+)`/g, "<code>$1</code>")
@@ -34,12 +34,100 @@ function renderInline(markdown: string) {
     .replace(/__([^_\n]+)__/g, "<strong>$1</strong>")
     .replace(/\*([^*\n]+)\*/g, "<em>$1</em>")
     .replace(/_([^_\n]+)_/g, "<em>$1</em>")
-    .replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, (_match, label: string, href: string) => {
-      if (!isSafeUrl(href)) {
-        return label;
+    .replace(/\\([\\[\]()`*_])/g, "$1");
+}
+
+function findLinkLabelEnd(markdown: string, start: number) {
+  let depth = 1;
+  for (let index = start + 1; index < markdown.length; index += 1) {
+    const char = markdown[index];
+    if (char === "\\" && index + 1 < markdown.length) {
+      index += 1;
+      continue;
+    }
+    if (char === "[") {
+      depth += 1;
+      continue;
+    }
+    if (char === "]") {
+      depth -= 1;
+      if (depth === 0) {
+        return index;
       }
-      return `<a href="${href}" target="_blank" rel="${LINK_REL_TOKENS}">${label}</a>`;
-    });
+    }
+  }
+  return -1;
+}
+
+function findLinkHrefEnd(markdown: string, start: number) {
+  let depth = 0;
+  for (let index = start; index < markdown.length; index += 1) {
+    const char = markdown[index];
+    if (char === "\\" && index + 1 < markdown.length) {
+      index += 1;
+      continue;
+    }
+    if (char === "(") {
+      depth += 1;
+      continue;
+    }
+    if (char === ")") {
+      if (depth === 0) {
+        return index;
+      }
+      depth -= 1;
+    }
+  }
+  return -1;
+}
+
+function parseInlineLink(markdown: string, start: number) {
+  const labelEnd = findLinkLabelEnd(markdown, start);
+  if (labelEnd < 0 || markdown[labelEnd + 1] !== "(") {
+    return null;
+  }
+
+  const hrefStart = labelEnd + 2;
+  const hrefEnd = findLinkHrefEnd(markdown, hrefStart);
+  if (hrefEnd < 0) {
+    return null;
+  }
+
+  return {
+    end: hrefEnd,
+    href: markdown.slice(hrefStart, hrefEnd).trim(),
+    label: markdown.slice(start + 1, labelEnd),
+  };
+}
+
+function renderInline(markdown: string) {
+  let html = "";
+  let cursor = 0;
+
+  while (cursor < markdown.length) {
+    const linkStart = markdown.indexOf("[", cursor);
+    if (linkStart < 0) {
+      html += renderBasicInline(markdown.slice(cursor));
+      break;
+    }
+
+    const link = parseInlineLink(markdown, linkStart);
+    if (!link) {
+      html += renderBasicInline(markdown.slice(cursor, linkStart + 1));
+      cursor = linkStart + 1;
+      continue;
+    }
+
+    html += renderBasicInline(markdown.slice(cursor, linkStart));
+    if (link.href && !/\s/.test(link.href) && isSafeUrl(link.href)) {
+      html += `<a href="${escapeHtml(link.href)}" target="_blank" rel="${LINK_REL_TOKENS}">${renderBasicInline(link.label)}</a>`;
+    } else {
+      html += renderBasicInline(link.label);
+    }
+    cursor = link.end + 1;
+  }
+
+  return html;
 }
 
 function flushParagraph(lines: string[], html: string[]) {

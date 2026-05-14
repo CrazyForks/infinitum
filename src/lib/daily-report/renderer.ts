@@ -17,10 +17,14 @@ function escapeMarkdown(value: string) {
   return value.replace(/\r/g, "").trim();
 }
 
+function escapeMarkdownLinkLabel(value: string) {
+  return escapeMarkdown(value).replace(/([\\`*_{}\[\]<>()#+\-.!|])/g, "\\$1");
+}
+
 function formatSources(sourceIds: number[], sourcesByNumber: Map<number, DailyReportMarkdownSource[]>) {
   return sourceIds
     .flatMap((id) => sourcesByNumber.get(id) ?? [])
-    .map((source) => `- [${escapeMarkdown(source.title)}](${escapeMarkdown(source.url)})（${escapeMarkdown(source.sourceName)}）`);
+    .map((source) => `- [${escapeMarkdownLinkLabel(source.title)}](${escapeMarkdown(source.url)})（${escapeMarkdown(source.sourceName)}）`);
 }
 
 export function renderDailyReportMarkdown(
