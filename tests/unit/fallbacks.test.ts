@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   getDisplaySummary,
   getDisplayTitle,
+  normalizeDisplaySummary,
   shouldTranslateTitle,
 } from "@/lib/feed/presentation";
 
@@ -34,5 +35,12 @@ describe("feed presentation fallbacks", () => {
     expect(getDisplaySummary("<p>AI summary</p>", null, null)).toBe("AI summary");
     expect(getDisplaySummary(null, "<p>RSS excerpt</p>", null)).toBe("RSS excerpt");
     expect(getDisplaySummary(null, null, "<div>Body preview</div>")).toBe("Body preview");
+  });
+
+  it("strips common summary labels before display", () => {
+    expect(normalizeDisplaySummary("摘要：真正的摘要正文")).toBe("真正的摘要正文");
+    expect(normalizeDisplaySummary("**摘要：**真正的摘要正文")).toBe("真正的摘要正文");
+    expect(normalizeDisplaySummary("聚合摘要: 共同事件摘要")).toBe("共同事件摘要");
+    expect(getDisplaySummary("摘要：AI summary", "RSS excerpt", "Long full text")).toBe("AI summary");
   });
 });

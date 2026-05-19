@@ -9,7 +9,7 @@ import {
 } from "@prisma/client";
 
 import { prisma } from "@/lib/db";
-import { getDisplaySummary, getDisplayTitle, shouldTranslateTitle } from "@/lib/feed/presentation";
+import { getDisplaySummary, getDisplayTitle, normalizeDisplaySummary, shouldTranslateTitle } from "@/lib/feed/presentation";
 import { buildRecommendScoreSql, calculateRecommendScore } from "@/lib/feed/recommend-score";
 import { toGroupBadge, type GroupBadge } from "@/lib/groups/badge";
 import { getDatabaseSearchTerms } from "@/lib/utils/search";
@@ -587,7 +587,7 @@ function mapClusterToAdminDto(
   return {
     id: cluster.id,
     title: cluster.title,
-    summary: cluster.summary,
+    summary: normalizeDisplaySummary(cluster.summary),
     score: recommendScore,
     itemCount: scoreStats?.itemCount ?? cluster.itemCount,
     latestPublishedAt: cluster.latestPublishedAt.toISOString(),
@@ -1137,7 +1137,7 @@ export async function listFeedItems(
         id: row.id,
         type: "cluster",
         title: row.title,
-        summary: row.summary ?? "",
+        summary: normalizeDisplaySummary(row.summary),
         group: selectDominantGroupBadge(clusterItemsForEntry, selectedGroup),
         publishedAt: toIsoString(row.latestPublishedAt),
         createdAt: toIsoString(row.createdAt),

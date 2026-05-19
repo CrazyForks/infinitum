@@ -3,6 +3,7 @@ const CJK_PATTERN = /[\u3400-\u9FFF]/;
 const HTML_TAG_PATTERN = /<[^>]+>/g;
 const HTML_ENTITY_PATTERN = /&nbsp;|&#160;/gi;
 const MULTI_SPACE_PATTERN = /\s+/g;
+const SUMMARY_PREFIX_PATTERN = /^\s*(?:\*\*)?\s*(?:聚合摘要|内容摘要|文章摘要|摘要|summary)\s*(?:\*\*)?\s*[:：]\s*(?:\*\*)?\s*/i;
 
 export function stripHtmlTags(value: string | null | undefined): string {
   if (!value) {
@@ -35,5 +36,9 @@ export function getDisplaySummary(
   rssExcerpt: string | null,
   fallbackBody: string | null,
 ): string {
-  return stripHtmlTags(summaryText) || stripHtmlTags(rssExcerpt) || stripHtmlTags(fallbackBody) || "暂无摘要";
+  return normalizeDisplaySummary(summaryText) || normalizeDisplaySummary(rssExcerpt) || normalizeDisplaySummary(fallbackBody) || "暂无摘要";
+}
+
+export function normalizeDisplaySummary(value: string | null | undefined): string {
+  return stripHtmlTags(value).replace(SUMMARY_PREFIX_PATTERN, "").trim();
 }

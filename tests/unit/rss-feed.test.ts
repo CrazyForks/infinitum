@@ -29,7 +29,7 @@ describe("rss feed renderer", () => {
           id: "cluster-1",
           type: "cluster",
           title: "OpenAI 发布新工具",
-          summary: "OpenAI 发布面向开发者的新工具。",
+          summary: "聚合摘要：OpenAI 发布面向开发者的新工具。",
           publishedAt: "2026-04-25T10:00:00.000Z",
           createdAt: "2026-04-25T10:00:00.000Z",
           latestPublishedAt: "2026-04-25T10:00:00.000Z",

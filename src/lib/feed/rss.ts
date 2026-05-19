@@ -1,4 +1,5 @@
 import type { FeedClusterPreviewItemDTO, FeedEntryDTO } from "@/lib/feed/types";
+import { normalizeDisplaySummary } from "@/lib/feed/presentation";
 import { renderSafeMarkdown } from "@/lib/markdown/safe-html";
 
 export const DEFAULT_RSS_FEED_PAGE_SIZE = 100;
@@ -36,7 +37,7 @@ function wrapCdata(value: string): string {
 }
 
 export function renderRssDescriptionHtml(markdown: string): string {
-  const trimmed = markdown.trim();
+  const trimmed = normalizeDisplaySummary(markdown);
   return trimmed ? renderSafeMarkdown(trimmed) : "";
 }
 
