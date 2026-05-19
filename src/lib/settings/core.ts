@@ -128,6 +128,7 @@ export type SaveModelApiConfigInput = {
   apiKeyMode?: "replace" | "clear" | "keep";
   modelName: string;
   ingestionItemConcurrency: number;
+  customHeaders?: Record<string, string>;
   isEnabled: boolean;
   isDefault: boolean;
 };
@@ -251,12 +252,27 @@ export function toSourceConfig(source: {
   };
 }
 
+function parseCustomHeaders(raw: string): Record<string, string> {
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return Object.fromEntries(
+        Object.entries(parsed).filter(([, v]) => typeof v === "string"),
+      ) as Record<string, string>;
+    }
+  } catch {
+    // fall through
+  }
+  return {};
+}
+
 export function serializeAdminModelApiConfig(config: {
   id: string;
   name: string;
   baseUrl: string;
   modelName: string;
   ingestionItemConcurrency: number;
+  customHeaders: string;
   apiKey: string;
   isEnabled: boolean;
   isDefault: boolean;
@@ -269,6 +285,7 @@ export function serializeAdminModelApiConfig(config: {
     baseUrl: config.baseUrl,
     modelName: config.modelName,
     ingestionItemConcurrency: config.ingestionItemConcurrency,
+    customHeaders: parseCustomHeaders(config.customHeaders),
     apiKeyMasked: maskApiKey(config.apiKey),
     hasApiKey: Boolean(config.apiKey),
     isEnabled: config.isEnabled,
@@ -282,11 +299,13 @@ export function serializeRuntimeModelApi(config: {
   apiKey: string;
   baseUrl: string;
   modelName: string;
+  customHeaders?: string;
 }): RuntimeConfig["modelApi"] {
   return {
     apiKey: config.apiKey,
     baseURL: config.baseUrl,
     model: config.modelName,
+    customHeaders: parseCustomHeaders(config.customHeaders ?? ""),
   };
 }
 
@@ -737,6 +756,7 @@ export function serializeSelectedPromptConfig(
       apiKey: string;
       baseUrl: string;
       modelName: string;
+      customHeaders?: string;
       isEnabled: boolean;
     } | null;
   },

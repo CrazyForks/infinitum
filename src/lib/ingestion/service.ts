@@ -138,7 +138,7 @@ async function resolveRunOptions(options?: Partial<RunIngestionOptions>): Promis
     aiProvider:
       options?.aiProvider ??
       createAiProvider(
-        runtimeConfig?.modelApi ?? { apiKey: "", baseURL: "", model: "gpt-4.1-mini" },
+        runtimeConfig?.modelApi ?? { apiKey: "", baseURL: "", model: "gpt-4.1-mini", customHeaders: {} },
         runtimeConfig?.selectedPromptConfigs
           ? {
               itemSummary: runtimeConfig.selectedPromptConfigs.itemSummary,

@@ -171,6 +171,7 @@ function getClient(config: RuntimeConfig["modelApi"]): OpenAICompatibleClient | 
   return new OpenAI({
     apiKey,
     baseURL: config.baseURL || undefined,
+    defaultHeaders: config.customHeaders,
   }) as unknown as OpenAICompatibleClient;
 }
 
@@ -904,6 +905,7 @@ export function createAiProvider(
 
       return output;
     } catch (error) {
+      console.error("[AI Provider] completeText failed:", error);
       if (isDefaultModel || !isSameModelApiConfig(selectedConfig, executionConfig)) {
         throw error;
       }

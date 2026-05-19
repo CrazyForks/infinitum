@@ -286,6 +286,12 @@ function applyIncrementalMigrations() {
     });
   }
 
+  if (!columnExists("model_api_configs", "customHeaders")) {
+    runSqlite([dbPath], {
+      input: `ALTER TABLE "model_api_configs" ADD COLUMN "customHeaders" TEXT NOT NULL DEFAULT '';\n`,
+    });
+  }
+
   runSqlite([dbPath], {
     input: [
       `CREATE INDEX IF NOT EXISTS "daily_report_sources_dailyReportId_sourceNumber_idx" ON "daily_report_sources"("dailyReportId", "sourceNumber");`,

@@ -55,6 +55,8 @@ type AiSettingsPanelProps = {
   initialPromptType?: PromptConfigType;
 };
 
+type HeaderEntry = { key: string; value: string };
+
 type ModelFormState = {
   name: string;
   baseUrl: string;
@@ -62,6 +64,7 @@ type ModelFormState = {
   apiKeyMode: "replace" | "clear" | "keep";
   modelName: string;
   ingestionItemConcurrency: string;
+  customHeaders: HeaderEntry[];
   isEnabled: boolean;
   isDefault: boolean;
 };
@@ -135,6 +138,7 @@ function buildEmptyModelForm(): ModelFormState {
     apiKeyMode: "replace",
     modelName: "gpt-4.1-mini",
     ingestionItemConcurrency: "3",
+    customHeaders: [],
     isEnabled: true,
     isDefault: false,
   };
@@ -285,6 +289,10 @@ export function AiSettingsPanel({ initialSettings, mode, initialPromptType = "it
       apiKeyMode: "keep",
       modelName: config.modelName,
       ingestionItemConcurrency: String(config.ingestionItemConcurrency),
+      customHeaders: Object.entries(config.customHeaders ?? {}).map(([key, value]) => ({
+        key,
+        value,
+      })),
       isEnabled: config.isEnabled,
       isDefault: config.isDefault,
     });
@@ -349,6 +357,12 @@ export function AiSettingsPanel({ initialSettings, mode, initialPromptType = "it
 
     setModelSaving(true);
     try {
+      const customHeaders = Object.fromEntries(
+        modelForm.customHeaders
+          .filter((h) => h.key.trim())
+          .map((h) => [h.key.trim(), h.value]),
+      );
+
       const payload = {
         name: modelForm.name,
         baseUrl: modelForm.baseUrl,
@@ -359,6 +373,7 @@ export function AiSettingsPanel({ initialSettings, mode, initialPromptType = "it
         apiKeyMode: modelForm.apiKeyMode,
         modelName: modelForm.modelName,
         ingestionItemConcurrency: Number(ingestionItemConcurrency),
+        customHeaders,
         isEnabled: modelForm.isEnabled,
         isDefault: modelForm.isDefault,
       };
@@ -618,6 +633,16 @@ export function AiSettingsPanel({ initialSettings, mode, initialPromptType = "it
                             <span className="font-medium">API密钥：</span>
                             <code className={codeClassName}>{config.apiKeyMasked || "未配置"}</code>
                           </div>
+                          {Object.keys(config.customHeaders ?? {}).length > 0 ? (
+                            <div>
+                              <span className="font-medium">自定义请求头：</span>
+                              {Object.entries(config.customHeaders ?? {}).map(([k, v]) => (
+                                <code key={k} className={codeClassName}>
+                                  {k}: {v}
+                                </code>
+                              ))}
+                            </div>
+                          ) : null}
                         </div>
                       </div>
 
@@ -878,6 +903,63 @@ export function AiSettingsPanel({ initialSettings, mode, initialPromptType = "it
             <p className="text-xs text-[var(--text-3)]">
               当前配置被设为默认模型时，将使用这里的并发数作为抓取分析并发。
             </p>
+          </FormBlock>
+
+          <FormBlock label="自定义请求头">
+            <div className="space-y-2">
+              {modelForm.customHeaders.map((entry, index) => (
+                <div key={index} className="flex items-center gap-2">
+                  <TextInput
+                    placeholder="Header 名称"
+                    value={entry.key}
+                    onChange={(event) =>
+                      setModelForm((current) => {
+                        const next = [...current.customHeaders];
+                        next[index] = { ...next[index], key: event.target.value };
+                        return { ...current, customHeaders: next };
+                      })
+                    }
+                    className="flex-1"
+                  />
+                  <TextInput
+                    placeholder="Header 值"
+                    value={entry.value}
+                    onChange={(event) =>
+                      setModelForm((current) => {
+                        const next = [...current.customHeaders];
+                        next[index] = { ...next[index], value: event.target.value };
+                        return { ...current, customHeaders: next };
+                      })
+                    }
+                    className="flex-1"
+                  />
+                  <Button
+                    onClick={() =>
+                      setModelForm((current) => ({
+                        ...current,
+                        customHeaders: current.customHeaders.filter((_, i) => i !== index),
+                      }))
+                    }
+                    variant="secondary"
+                    size="sm"
+                  >
+                    删除
+                  </Button>
+                </div>
+              ))}
+              <Button
+                onClick={() =>
+                  setModelForm((current) => ({
+                    ...current,
+                    customHeaders: [...current.customHeaders, { key: "", value: "" }],
+                  }))
+                }
+                variant="secondary"
+                size="sm"
+              >
+                + 添加请求头
+              </Button>
+            </div>
           </FormBlock>
 
           <div className="flex items-center gap-4">

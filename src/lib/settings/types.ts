@@ -17,6 +17,7 @@ export type AdminModelApiConfig = {
   baseUrl: string;
   modelName: string;
   ingestionItemConcurrency: number;
+  customHeaders?: Record<string, string>;
   apiKeyMasked: string;
   hasApiKey: boolean;
   isEnabled: boolean;

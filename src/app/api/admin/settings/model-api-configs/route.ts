@@ -14,6 +14,7 @@ const modelApiConfigSchema = z.object({
   apiKeyMode: z.enum(["replace", "clear", "keep"]).default("replace"),
   modelName: z.string().min(1),
   ingestionItemConcurrency: z.number().int().min(1).max(10),
+  customHeaders: z.record(z.string(), z.string()).default({}),
   isEnabled: z.boolean(),
   isDefault: z.boolean(),
 });

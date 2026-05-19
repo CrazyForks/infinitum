@@ -418,6 +418,7 @@ model ModelApiConfig {
   apiKey               String   @default("")
   modelName            String
   ingestionItemConcurrency Int    @default(3)
+  customHeaders        String   @default("")
   isEnabled            Boolean  @default(true)
   isDefault            Boolean  @default(false)
   createdAt            DateTime @default(now())

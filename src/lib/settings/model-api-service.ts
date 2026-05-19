@@ -58,6 +58,7 @@ export async function createModelApiConfig(input: SaveModelApiConfigInput) {
         apiKey: input.apiKey.trim(),
         modelName: normalizeText(input.modelName),
         ingestionItemConcurrency: input.ingestionItemConcurrency,
+        customHeaders: JSON.stringify(input.customHeaders ?? {}),
         isEnabled: input.isEnabled,
         isDefault: input.isDefault,
       },
@@ -111,6 +112,7 @@ export async function updateModelApiConfig(id: string, input: SaveModelApiConfig
         apiKey: nextApiKey,
         modelName: normalizeText(input.modelName),
         ingestionItemConcurrency: input.ingestionItemConcurrency,
+        customHeaders: JSON.stringify(input.customHeaders ?? {}),
         isEnabled: input.isEnabled,
         isDefault: input.isDefault,
       },
@@ -157,12 +159,24 @@ export async function fetchModelApiModels(input: FetchModelApiModelsInput) {
     throw new Error("请先填写 API 地址与密钥。");
   }
 
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${apiKey}`,
+    "Content-Type": "application/json",
+  };
+
+  if (input.configId) {
+    const existingConfig = await prisma.modelApiConfig.findUnique({
+      where: { id: input.configId },
+    });
+    const customHeaders = existingConfig?.customHeaders
+      ? (JSON.parse(existingConfig.customHeaders) as Record<string, string>)
+      : {};
+    Object.assign(headers, customHeaders);
+  }
+
   const response = await fetch(`${baseUrl.replace(/\/+$/, "")}/models`, {
     method: "GET",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
+    headers,
   });
 
   const rawResponse = await response.text();
@@ -231,11 +245,16 @@ export async function testModelApiConfig(
     };
   }
 
+  const customHeaders = config.customHeaders
+    ? (JSON.parse(config.customHeaders) as Record<string, string>)
+    : {};
+
   const response = await fetch(`${config.baseUrl.replace(/\/+$/, "")}/chat/completions`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${config.apiKey}`,
       "Content-Type": "application/json",
+      ...customHeaders,
     },
     body: JSON.stringify({
       model: config.modelName,

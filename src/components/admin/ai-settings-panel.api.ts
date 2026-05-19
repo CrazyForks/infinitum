@@ -12,6 +12,7 @@ export type ModelApiConfigPayload = {
   apiKeyMode: "replace" | "clear" | "keep";
   modelName: string;
   ingestionItemConcurrency: number;
+  customHeaders: Record<string, string>;
   isEnabled: boolean;
   isDefault: boolean;
 };
