@@ -18,7 +18,7 @@ function escapeMarkdown(value: string) {
 }
 
 function escapeMarkdownLinkLabel(value: string) {
-  return escapeMarkdown(value).replace(/([\\`*_{}\[\]<>()#+\-.!|])/g, "\\$1");
+  return escapeMarkdown(value).replace(/([\\`*_\[\]()])/g, "\\$1");
 }
 
 function formatSources(sourceIds: number[], sourcesByNumber: Map<number, DailyReportMarkdownSource[]>) {

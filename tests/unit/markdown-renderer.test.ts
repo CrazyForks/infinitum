@@ -32,4 +32,16 @@ describe("safe markdown renderer", () => {
     expect(html).toContain('href="https://example.com/post"');
     expect(html).toContain(">[相关特性汇总] 谷歌发布 Android 17</a>");
   });
+
+  it("hides existing CommonMark punctuation escapes in link labels", () => {
+    const html = renderSafeMarkdown(
+      "[Cursor 发布 Composer2\\.5\\.5 编码模型\\! 低成本并肩 GPT\\-5\\+ \\#1 \\| \\<tag\\>](https://example.com/post)",
+    );
+
+    expect(html).toContain('href="https://example.com/post"');
+    expect(html).toContain(">Cursor 发布 Composer2.5.5 编码模型! 低成本并肩 GPT-5+ #1 | &lt;tag&gt;</a>");
+    expect(html).not.toContain("\\.");
+    expect(html).not.toContain("\\!");
+    expect(html).not.toContain("\\-");
+  });
 });

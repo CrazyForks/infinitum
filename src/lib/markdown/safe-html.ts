@@ -34,7 +34,7 @@ function renderBasicInline(markdown: string) {
     .replace(/__([^_\n]+)__/g, "<strong>$1</strong>")
     .replace(/\*([^*\n]+)\*/g, "<em>$1</em>")
     .replace(/_([^_\n]+)_/g, "<em>$1</em>")
-    .replace(/\\([\\[\]()`*_])/g, "$1");
+    .replace(/\\([!"#$%&'()*+,\-./:;=?@[\\\]^_`{|}~])/g, "$1");
 }
 
 function findLinkLabelEnd(markdown: string, start: number) {

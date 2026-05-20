@@ -224,7 +224,7 @@ describe("daily report utilities", () => {
     expect(markdown).toContain("[开发者工具更新](https://example.com/b)");
   });
 
-  it("escapes markdown control characters in source link titles", () => {
+  it("escapes only link-breaking markdown characters in source link titles", () => {
     const markdown = renderDailyReportMarkdown(content, candidates, "2026-04-24 AI 日报", [
       {
         sourceNumber: 1,
@@ -241,7 +241,7 @@ describe("daily report utilities", () => {
     ]);
 
     expect(markdown).toContain(
-      "[\\[相关\\]\\*特性\\*\\_汇总\\_ \\`AI\\` \\(v1\\)\\! \\#1 \\+ A\\-B \\| \\<tag\\>](https://example.com/a)",
+      "[\\[相关\\]\\*特性\\*\\_汇总\\_ \\`AI\\` \\(v1\\)! #1 + A-B | <tag>](https://example.com/a)",
     );
   });
 });
