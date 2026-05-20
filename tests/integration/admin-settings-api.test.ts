@@ -160,6 +160,7 @@ describe("/api/admin/settings", () => {
       apiKeyMode: "replace",
       modelName: "gpt-4.1-mini",
       ingestionItemConcurrency: 4,
+      customHeaders: {},
       isEnabled: true,
       isDefault: true,
     });

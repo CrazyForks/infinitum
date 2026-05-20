@@ -103,6 +103,7 @@ function normalizeUrl(url: string): string {
 }
 
 function appendIssue(issues: string[], error: unknown, fallbackMessage: string) {
+  console.error(`[Item Processor] ${fallbackMessage}:`, error);
   issues.push(error instanceof Error ? error.message : fallbackMessage);
 }
 

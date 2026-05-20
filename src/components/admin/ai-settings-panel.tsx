@@ -22,6 +22,7 @@ import {
   IconEye,
   IconList,
   IconLink,
+  IconPlus,
   IconRefresh,
   IconTrash,
 } from "@/components/ui/icons";
@@ -55,6 +56,8 @@ type AiSettingsPanelProps = {
   initialPromptType?: PromptConfigType;
 };
 
+type HeaderEntry = { key: string; value: string };
+
 type ModelFormState = {
   name: string;
   baseUrl: string;
@@ -62,6 +65,7 @@ type ModelFormState = {
   apiKeyMode: "replace" | "clear" | "keep";
   modelName: string;
   ingestionItemConcurrency: string;
+  customHeaders: HeaderEntry[];
   isEnabled: boolean;
   isDefault: boolean;
 };
@@ -135,9 +139,22 @@ function buildEmptyModelForm(): ModelFormState {
     apiKeyMode: "replace",
     modelName: "gpt-4.1-mini",
     ingestionItemConcurrency: "3",
+    customHeaders: [],
     isEnabled: true,
     isDefault: false,
   };
+}
+
+function buildCustomHeadersPayload(entries: HeaderEntry[]) {
+  return Object.fromEntries(
+    entries
+      .filter((header) => header.key.trim())
+      .map((header) => [header.key.trim(), header.value]),
+  );
+}
+
+function maskHeaderValue(value: string) {
+  return value ? "••••••••" : "空值";
 }
 
 function buildEmptyPromptForm(type: PromptConfigType): PromptFormState {
@@ -285,6 +302,10 @@ export function AiSettingsPanel({ initialSettings, mode, initialPromptType = "it
       apiKeyMode: "keep",
       modelName: config.modelName,
       ingestionItemConcurrency: String(config.ingestionItemConcurrency),
+      customHeaders: Object.entries(config.customHeaders ?? {}).map(([key, value]) => ({
+        key,
+        value,
+      })),
       isEnabled: config.isEnabled,
       isDefault: config.isDefault,
     });
@@ -319,6 +340,7 @@ export function AiSettingsPanel({ initialSettings, mode, initialPromptType = "it
             : modelForm.apiKey,
         configId: editingModelConfig?.id,
         apiKeyMode: modelForm.apiKeyMode,
+        customHeaders: buildCustomHeadersPayload(modelForm.customHeaders),
       });
 
       if (!payload.success) {
@@ -349,6 +371,8 @@ export function AiSettingsPanel({ initialSettings, mode, initialPromptType = "it
 
     setModelSaving(true);
     try {
+      const customHeaders = buildCustomHeadersPayload(modelForm.customHeaders);
+
       const payload = {
         name: modelForm.name,
         baseUrl: modelForm.baseUrl,
@@ -359,6 +383,7 @@ export function AiSettingsPanel({ initialSettings, mode, initialPromptType = "it
         apiKeyMode: modelForm.apiKeyMode,
         modelName: modelForm.modelName,
         ingestionItemConcurrency: Number(ingestionItemConcurrency),
+        customHeaders,
         isEnabled: modelForm.isEnabled,
         isDefault: modelForm.isDefault,
       };
@@ -618,6 +643,16 @@ export function AiSettingsPanel({ initialSettings, mode, initialPromptType = "it
                             <span className="font-medium">API密钥：</span>
                             <code className={codeClassName}>{config.apiKeyMasked || "未配置"}</code>
                           </div>
+                          {Object.keys(config.customHeaders ?? {}).length > 0 ? (
+                            <div>
+                              <span className="font-medium">自定义请求头：</span>
+                              {Object.entries(config.customHeaders ?? {}).map(([k, v]) => (
+                                <code key={k} className={codeClassName}>
+                                  {k}: {maskHeaderValue(v)}
+                                </code>
+                              ))}
+                            </div>
+                          ) : null}
                         </div>
                       </div>
 
@@ -879,6 +914,70 @@ export function AiSettingsPanel({ initialSettings, mode, initialPromptType = "it
               当前配置被设为默认模型时，将使用这里的并发数作为抓取分析并发。
             </p>
           </FormBlock>
+
+          <div className="space-y-2">
+            <span className={labelClassName}>自定义请求头</span>
+            <div className="space-y-2">
+              {modelForm.customHeaders.map((entry, index) => (
+                <div key={index} className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+                  <TextInput
+                    aria-label={`请求头名称 ${index + 1}`}
+                    placeholder="Header 名称"
+                    value={entry.key}
+                    onChange={(event) =>
+                      setModelForm((current) => {
+                        const next = [...current.customHeaders];
+                        next[index] = { ...next[index], key: event.target.value };
+                        return { ...current, customHeaders: next };
+                      })
+                    }
+                    className="flex-1"
+                  />
+                  <TextInput
+                    aria-label={`请求头值 ${index + 1}`}
+                    placeholder="Header 值"
+                    value={entry.value}
+                    onChange={(event) =>
+                      setModelForm((current) => {
+                        const next = [...current.customHeaders];
+                        next[index] = { ...next[index], value: event.target.value };
+                        return { ...current, customHeaders: next };
+                      })
+                    }
+                    className="flex-1"
+                  />
+                  <IconButton
+                    onClick={() =>
+                      setModelForm((current) => ({
+                        ...current,
+                        customHeaders: current.customHeaders.filter((_, i) => i !== index),
+                      }))
+                    }
+                    variant="secondary"
+                    size="sm"
+                    title="删除请求头"
+                    className="h-9 w-9"
+                  >
+                    <IconTrash className="h-4 w-4" />
+                  </IconButton>
+                </div>
+              ))}
+              <Button
+                onClick={() =>
+                  setModelForm((current) => ({
+                    ...current,
+                    customHeaders: [...current.customHeaders, { key: "", value: "" }],
+                  }))
+                }
+                variant="secondary"
+                size="sm"
+                className="gap-1"
+              >
+                <IconPlus className="h-4 w-4" />
+                添加请求头
+              </Button>
+            </div>
+          </div>
 
           <div className="flex items-center gap-4">
             <label className="flex flex-wrap items-center gap-2">

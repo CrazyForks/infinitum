@@ -128,6 +128,7 @@ export type SaveModelApiConfigInput = {
   apiKeyMode?: "replace" | "clear" | "keep";
   modelName: string;
   ingestionItemConcurrency: number;
+  customHeaders?: Record<string, string>;
   isEnabled: boolean;
   isDefault: boolean;
 };
@@ -137,6 +138,7 @@ export type FetchModelApiModelsInput = {
   apiKey?: string;
   configId?: string;
   apiKeyMode?: "replace" | "clear" | "keep";
+  customHeaders?: Record<string, string>;
 };
 
 export type SavePromptConfigInput = {
@@ -251,12 +253,33 @@ export function toSourceConfig(source: {
   };
 }
 
+export function normalizeCustomHeaders(input?: Record<string, string> | null): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(input ?? {})
+      .map(([key, value]) => [normalizeText(key), value] as const)
+      .filter(([key, value]) => key && typeof value === "string"),
+  );
+}
+
+export function parseCustomHeaders(raw?: string | null): Record<string, string> {
+  try {
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return normalizeCustomHeaders(parsed as Record<string, string>);
+    }
+  } catch {
+    // fall through
+  }
+  return {};
+}
+
 export function serializeAdminModelApiConfig(config: {
   id: string;
   name: string;
   baseUrl: string;
   modelName: string;
   ingestionItemConcurrency: number;
+  customHeaders: string;
   apiKey: string;
   isEnabled: boolean;
   isDefault: boolean;
@@ -269,6 +292,7 @@ export function serializeAdminModelApiConfig(config: {
     baseUrl: config.baseUrl,
     modelName: config.modelName,
     ingestionItemConcurrency: config.ingestionItemConcurrency,
+    customHeaders: parseCustomHeaders(config.customHeaders),
     apiKeyMasked: maskApiKey(config.apiKey),
     hasApiKey: Boolean(config.apiKey),
     isEnabled: config.isEnabled,
@@ -282,11 +306,13 @@ export function serializeRuntimeModelApi(config: {
   apiKey: string;
   baseUrl: string;
   modelName: string;
+  customHeaders?: string;
 }): RuntimeConfig["modelApi"] {
   return {
     apiKey: config.apiKey,
     baseURL: config.baseUrl,
     model: config.modelName,
+    customHeaders: parseCustomHeaders(config.customHeaders ?? ""),
   };
 }
 
@@ -737,6 +763,7 @@ export function serializeSelectedPromptConfig(
       apiKey: string;
       baseUrl: string;
       modelName: string;
+      customHeaders?: string;
       isEnabled: boolean;
     } | null;
   },

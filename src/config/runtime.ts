@@ -30,6 +30,7 @@ export type RuntimeConfig = {
     apiKey: string;
     baseURL: string;
     model: string;
+    customHeaders?: Record<string, string>;
   };
   prompts: {
     itemSummary: string;
@@ -132,6 +133,7 @@ export function getRuntimeConfig(): RuntimeConfig {
       apiKey: "",
       baseURL: "",
       model: "gpt-4.1-mini",
+      customHeaders: {},
     },
     prompts: {
       itemSummary: DEFAULT_ITEM_SUMMARY_PROMPT,

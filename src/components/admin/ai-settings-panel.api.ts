@@ -12,6 +12,7 @@ export type ModelApiConfigPayload = {
   apiKeyMode: "replace" | "clear" | "keep";
   modelName: string;
   ingestionItemConcurrency: number;
+  customHeaders: Record<string, string>;
   isEnabled: boolean;
   isDefault: boolean;
 };
@@ -65,6 +66,7 @@ export function fetchModelApiConfigModels(input: {
   apiKey: string;
   configId?: string;
   apiKeyMode: "replace" | "clear" | "keep";
+  customHeaders: Record<string, string>;
 }) {
   return requestAiSettingsJson<{
     success: boolean;

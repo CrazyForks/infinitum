@@ -9,6 +9,7 @@ const fetchModelsSchema = z.object({
   apiKey: z.string().optional(),
   configId: z.string().optional(),
   apiKeyMode: z.enum(["replace", "clear", "keep"]).optional(),
+  customHeaders: z.record(z.string(), z.string()).default({}),
 });
 
 export async function POST(request: Request) {
