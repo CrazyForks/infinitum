@@ -138,6 +138,7 @@ export type FetchModelApiModelsInput = {
   apiKey?: string;
   configId?: string;
   apiKeyMode?: "replace" | "clear" | "keep";
+  customHeaders?: Record<string, string>;
 };
 
 export type SavePromptConfigInput = {
@@ -252,13 +253,19 @@ export function toSourceConfig(source: {
   };
 }
 
-function parseCustomHeaders(raw: string): Record<string, string> {
+export function normalizeCustomHeaders(input?: Record<string, string> | null): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(input ?? {})
+      .map(([key, value]) => [normalizeText(key), value] as const)
+      .filter(([key, value]) => key && typeof value === "string"),
+  );
+}
+
+export function parseCustomHeaders(raw?: string | null): Record<string, string> {
   try {
-    const parsed = JSON.parse(raw);
+    const parsed = raw ? JSON.parse(raw) : null;
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return Object.fromEntries(
-        Object.entries(parsed).filter(([, v]) => typeof v === "string"),
-      ) as Record<string, string>;
+      return normalizeCustomHeaders(parsed as Record<string, string>);
     }
   } catch {
     // fall through

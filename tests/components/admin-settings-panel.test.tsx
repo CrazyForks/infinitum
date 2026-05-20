@@ -31,6 +31,9 @@ function buildInitialSettings(): AdminSettingsSnapshot {
         baseUrl: "https://example.com/v1",
         modelName: "gpt-4.1-mini",
         ingestionItemConcurrency: 3,
+        customHeaders: {
+          "User-Agent": "KimiCLI/1.44",
+        },
         apiKeyMasked: "••••••••••••",
         hasApiKey: true,
         isEnabled: true,
@@ -332,6 +335,9 @@ describe("AdminSettingsPanel", () => {
     await user.type(screen.getByLabelText(/API密钥/), "sk-test-9876");
     await user.clear(screen.getByLabelText(/抓取并发数/));
     await user.type(screen.getByLabelText(/抓取并发数/), "4");
+    await user.click(screen.getByRole("button", { name: "添加请求头" }));
+    await user.type(screen.getByLabelText("请求头名称 1"), "User-Agent");
+    await user.type(screen.getByLabelText("请求头值 1"), "KimiCLI/1.44");
     await user.click(screen.getByRole("button", { name: "创建" }));
 
     await waitFor(() => {
@@ -347,9 +353,52 @@ describe("AdminSettingsPanel", () => {
           apiKeyMode: "replace",
           modelName: "gpt-4.1-mini",
           ingestionItemConcurrency: 4,
-          customHeaders: {},
+          customHeaders: {
+            "User-Agent": "KimiCLI/1.44",
+          },
           isEnabled: true,
           isDefault: false,
+        }),
+      });
+    });
+  });
+
+  it("fetches model options with unsaved custom headers", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          models: ["moonshot-v1"],
+        }),
+      ),
+    );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderWithProviders(<AdminSettingsPanel initialSettings={buildInitialSettings()} />);
+
+    await user.click(screen.getByRole("button", { name: /\+ 创建配置/i }));
+    await user.clear(screen.getByLabelText(/API密钥/));
+    await user.type(screen.getByLabelText(/API密钥/), "sk-test-9876");
+    await user.click(screen.getByRole("button", { name: "添加请求头" }));
+    await user.type(screen.getByLabelText("请求头名称 1"), "User-Agent");
+    await user.type(screen.getByLabelText("请求头值 1"), "KimiCLI/1.44");
+    await user.click(screen.getByTitle("拉取模型"));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/admin/settings/model-api-configs/models", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          baseUrl: "https://api.openai.com/v1",
+          apiKey: "sk-test-9876",
+          apiKeyMode: "replace",
+          customHeaders: {
+            "User-Agent": "KimiCLI/1.44",
+          },
         }),
       });
     });
@@ -400,12 +449,21 @@ describe("AdminSettingsPanel", () => {
           apiKeyMode: "keep",
           modelName: "gpt-4.1-mini",
           ingestionItemConcurrency: 5,
-          customHeaders: {},
+          customHeaders: {
+            "User-Agent": "KimiCLI/1.44",
+          },
           isEnabled: true,
           isDefault: true,
         }),
       });
     });
+  });
+
+  it("masks custom header values in the model config list", () => {
+    renderWithProviders(<AdminSettingsPanel initialSettings={buildInitialSettings()} />);
+
+    expect(screen.getByText("User-Agent: ••••••••")).toBeInTheDocument();
+    expect(screen.queryByText("KimiCLI/1.44")).not.toBeInTheDocument();
   });
 
   it("copies the raw model api key from the edit modal", async () => {

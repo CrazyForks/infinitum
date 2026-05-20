@@ -2,6 +2,8 @@ import { prisma } from "@/lib/db";
 import {
   ensureRuntimeConfigSeeded,
   type FetchModelApiModelsInput,
+  normalizeCustomHeaders,
+  parseCustomHeaders,
   type SaveModelApiConfigInput,
   serializeAdminModelApiConfig,
   validateModelApiInput,
@@ -58,7 +60,7 @@ export async function createModelApiConfig(input: SaveModelApiConfigInput) {
         apiKey: input.apiKey.trim(),
         modelName: normalizeText(input.modelName),
         ingestionItemConcurrency: input.ingestionItemConcurrency,
-        customHeaders: JSON.stringify(input.customHeaders ?? {}),
+        customHeaders: JSON.stringify(normalizeCustomHeaders(input.customHeaders)),
         isEnabled: input.isEnabled,
         isDefault: input.isDefault,
       },
@@ -112,7 +114,7 @@ export async function updateModelApiConfig(id: string, input: SaveModelApiConfig
         apiKey: nextApiKey,
         modelName: normalizeText(input.modelName),
         ingestionItemConcurrency: input.ingestionItemConcurrency,
-        customHeaders: JSON.stringify(input.customHeaders ?? {}),
+        customHeaders: JSON.stringify(normalizeCustomHeaders(input.customHeaders)),
         isEnabled: input.isEnabled,
         isDefault: input.isDefault,
       },
@@ -168,11 +170,9 @@ export async function fetchModelApiModels(input: FetchModelApiModelsInput) {
     const existingConfig = await prisma.modelApiConfig.findUnique({
       where: { id: input.configId },
     });
-    const customHeaders = existingConfig?.customHeaders
-      ? (JSON.parse(existingConfig.customHeaders) as Record<string, string>)
-      : {};
-    Object.assign(headers, customHeaders);
+    Object.assign(headers, parseCustomHeaders(existingConfig?.customHeaders));
   }
+  Object.assign(headers, normalizeCustomHeaders(input.customHeaders));
 
   const response = await fetch(`${baseUrl.replace(/\/+$/, "")}/models`, {
     method: "GET",
@@ -245,9 +245,7 @@ export async function testModelApiConfig(
     };
   }
 
-  const customHeaders = config.customHeaders
-    ? (JSON.parse(config.customHeaders) as Record<string, string>)
-    : {};
+  const customHeaders = parseCustomHeaders(config.customHeaders);
 
   const response = await fetch(`${config.baseUrl.replace(/\/+$/, "")}/chat/completions`, {
     method: "POST",

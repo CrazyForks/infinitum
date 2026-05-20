@@ -66,6 +66,7 @@ export function fetchModelApiConfigModels(input: {
   apiKey: string;
   configId?: string;
   apiKeyMode: "replace" | "clear" | "keep";
+  customHeaders: Record<string, string>;
 }) {
   return requestAiSettingsJson<{
     success: boolean;

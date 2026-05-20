@@ -22,6 +22,7 @@ import {
   IconEye,
   IconList,
   IconLink,
+  IconPlus,
   IconRefresh,
   IconTrash,
 } from "@/components/ui/icons";
@@ -142,6 +143,18 @@ function buildEmptyModelForm(): ModelFormState {
     isEnabled: true,
     isDefault: false,
   };
+}
+
+function buildCustomHeadersPayload(entries: HeaderEntry[]) {
+  return Object.fromEntries(
+    entries
+      .filter((header) => header.key.trim())
+      .map((header) => [header.key.trim(), header.value]),
+  );
+}
+
+function maskHeaderValue(value: string) {
+  return value ? "••••••••" : "空值";
 }
 
 function buildEmptyPromptForm(type: PromptConfigType): PromptFormState {
@@ -327,6 +340,7 @@ export function AiSettingsPanel({ initialSettings, mode, initialPromptType = "it
             : modelForm.apiKey,
         configId: editingModelConfig?.id,
         apiKeyMode: modelForm.apiKeyMode,
+        customHeaders: buildCustomHeadersPayload(modelForm.customHeaders),
       });
 
       if (!payload.success) {
@@ -357,11 +371,7 @@ export function AiSettingsPanel({ initialSettings, mode, initialPromptType = "it
 
     setModelSaving(true);
     try {
-      const customHeaders = Object.fromEntries(
-        modelForm.customHeaders
-          .filter((h) => h.key.trim())
-          .map((h) => [h.key.trim(), h.value]),
-      );
+      const customHeaders = buildCustomHeadersPayload(modelForm.customHeaders);
 
       const payload = {
         name: modelForm.name,
@@ -638,7 +648,7 @@ export function AiSettingsPanel({ initialSettings, mode, initialPromptType = "it
                               <span className="font-medium">自定义请求头：</span>
                               {Object.entries(config.customHeaders ?? {}).map(([k, v]) => (
                                 <code key={k} className={codeClassName}>
-                                  {k}: {v}
+                                  {k}: {maskHeaderValue(v)}
                                 </code>
                               ))}
                             </div>
@@ -905,11 +915,13 @@ export function AiSettingsPanel({ initialSettings, mode, initialPromptType = "it
             </p>
           </FormBlock>
 
-          <FormBlock label="自定义请求头">
+          <div className="space-y-2">
+            <span className={labelClassName}>自定义请求头</span>
             <div className="space-y-2">
               {modelForm.customHeaders.map((entry, index) => (
-                <div key={index} className="flex items-center gap-2">
+                <div key={index} className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
                   <TextInput
+                    aria-label={`请求头名称 ${index + 1}`}
                     placeholder="Header 名称"
                     value={entry.key}
                     onChange={(event) =>
@@ -922,6 +934,7 @@ export function AiSettingsPanel({ initialSettings, mode, initialPromptType = "it
                     className="flex-1"
                   />
                   <TextInput
+                    aria-label={`请求头值 ${index + 1}`}
                     placeholder="Header 值"
                     value={entry.value}
                     onChange={(event) =>
@@ -933,7 +946,7 @@ export function AiSettingsPanel({ initialSettings, mode, initialPromptType = "it
                     }
                     className="flex-1"
                   />
-                  <Button
+                  <IconButton
                     onClick={() =>
                       setModelForm((current) => ({
                         ...current,
@@ -942,9 +955,11 @@ export function AiSettingsPanel({ initialSettings, mode, initialPromptType = "it
                     }
                     variant="secondary"
                     size="sm"
+                    title="删除请求头"
+                    className="h-9 w-9"
                   >
-                    删除
-                  </Button>
+                    <IconTrash className="h-4 w-4" />
+                  </IconButton>
                 </div>
               ))}
               <Button
@@ -956,11 +971,13 @@ export function AiSettingsPanel({ initialSettings, mode, initialPromptType = "it
                 }
                 variant="secondary"
                 size="sm"
+                className="gap-1"
               >
-                + 添加请求头
+                <IconPlus className="h-4 w-4" />
+                添加请求头
               </Button>
             </div>
-          </FormBlock>
+          </div>
 
           <div className="flex items-center gap-4">
             <label className="flex flex-wrap items-center gap-2">
