@@ -1862,7 +1862,7 @@ export function AdminSettingsPanel({
                 </FormField>
               </div>
 
-              <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+              <div className="mt-4">
                 <FormField label="日报分组范围" htmlFor="daily-report-group-ids">
                   <SelectField
                     id="daily-report-group-ids"
