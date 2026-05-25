@@ -794,8 +794,10 @@ function buildFeedEntryCandidatesCte(
         i."qualityScore" AS "qualityScore"
       FROM "items" i
       INNER JOIN relevant_clusters rc ON rc.id = i."clusterId"
+      INNER JOIN "sources" s ON s.id = i."sourceId"
       WHERE i.status = ${"processed"}
         AND i."moderationStatus" IN (${Prisma.join([...DISPLAYABLE_MODERATION_STATUSES])})
+        AND s.enabled = ${true}
     ),
     cluster_score_groups AS (
       SELECT

@@ -343,6 +343,130 @@ describe("/api/feed", () => {
     }
   });
 
+  it("ignores disabled sources when computing visible cluster stats", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-10T12:00:00.000Z"));
+
+    try {
+      const enabledSource = await prisma.source.findFirstOrThrow({
+        where: { rssUrl: "https://api.example.com/feed.xml" },
+      });
+      const disabledSource = await prisma.source.create({
+        data: {
+          name: "Disabled Feed",
+          rssUrl: "https://disabled.example.com/feed.xml",
+          siteUrl: "https://disabled.example.com",
+          enabled: false,
+          aiParsingEnabled: true,
+        },
+      });
+
+      await prisma.contentCluster.create({
+        data: {
+          id: "cluster-disabled-source",
+          kind: "topic",
+          title: "Disabled Source Cluster",
+          summary: "Disabled source summary",
+          score: 50,
+          itemCount: 3,
+          latestPublishedAt: new Date("2026-04-10T12:00:00.000Z"),
+          status: "active",
+          fingerprint: "disabled-source-cluster",
+        },
+      });
+
+      await prisma.item.createMany({
+        data: [
+          {
+            id: "item-enabled-visible-1",
+            sourceId: enabledSource.id,
+            clusterId: "cluster-disabled-source",
+            originalUrl: "https://api.example.com/enabled-visible-1",
+            canonicalUrl: "https://api.example.com/enabled-visible-1",
+            urlHash: "hash-enabled-visible-1",
+            dedupeSignature: "api feed|enabled visible 1|2026-04-10t12:00:00.000z",
+            originalTitle: "Enabled Visible 1",
+            translatedTitle: "启用来源 1",
+            publishedAt: new Date("2026-04-10T12:00:00.000Z"),
+            summaryText: "启用来源摘要 1",
+            status: "processed",
+            moderationStatus: "allowed",
+            qualityScore: 50,
+            qualityRationale: "可见统计测试",
+            language: "en",
+            createdAt: new Date("2026-04-10T12:00:00.000Z"),
+          },
+          {
+            id: "item-enabled-visible-2",
+            sourceId: enabledSource.id,
+            clusterId: "cluster-disabled-source",
+            originalUrl: "https://api.example.com/enabled-visible-2",
+            canonicalUrl: "https://api.example.com/enabled-visible-2",
+            urlHash: "hash-enabled-visible-2",
+            dedupeSignature: "api feed|enabled visible 2|2026-04-10t11:00:00.000z",
+            originalTitle: "Enabled Visible 2",
+            translatedTitle: "启用来源 2",
+            publishedAt: new Date("2026-04-10T11:00:00.000Z"),
+            summaryText: "启用来源摘要 2",
+            status: "processed",
+            moderationStatus: "allowed",
+            qualityScore: 50,
+            qualityRationale: "可见统计测试",
+            language: "en",
+            createdAt: new Date("2026-04-10T11:00:00.000Z"),
+          },
+          {
+            id: "item-disabled-hidden",
+            sourceId: disabledSource.id,
+            clusterId: "cluster-disabled-source",
+            originalUrl: "https://disabled.example.com/hidden",
+            canonicalUrl: "https://disabled.example.com/hidden",
+            urlHash: "hash-disabled-hidden",
+            dedupeSignature: "disabled feed|hidden|2026-04-10t10:00:00.000z",
+            originalTitle: "Disabled Hidden",
+            translatedTitle: "禁用来源",
+            publishedAt: new Date("2026-04-10T10:00:00.000Z"),
+            summaryText: "禁用来源摘要",
+            status: "processed",
+            moderationStatus: "allowed",
+            qualityScore: 100,
+            qualityRationale: "不应参与前台统计",
+            language: "en",
+            createdAt: new Date("2026-04-10T10:00:00.000Z"),
+          },
+        ],
+      });
+
+      const filters = resolveFeedFilters(
+        {
+          range: "7d",
+          sort: "score_desc",
+          start: null,
+          end: null,
+          groupId: null,
+          sourceId: null,
+          title: null,
+        },
+        new Date("2026-04-10T12:00:00.000Z"),
+      );
+      const result = await listFeedItems(filters, { page: 1, size: 20 });
+      const entry = result.items.find((item) => item.id === "cluster-disabled-source");
+
+      expect(entry).toMatchObject({
+        type: "cluster",
+        itemCount: 2,
+        sourceCount: 1,
+        score: 51,
+      });
+      expect(entry?.type === "cluster" ? entry.itemsPreview.map((item) => item.id) : []).toEqual([
+        "item-enabled-visible-1",
+        "item-enabled-visible-2",
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("supports page and size parameters for feed pagination", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-10T12:00:00.000Z"));
