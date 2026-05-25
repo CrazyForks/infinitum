@@ -11,6 +11,7 @@ const scheduleUpdateSchema = z.object({
   dailyReportOffsetDays: z.number().int().min(0).max(365),
   dailyReportAutoPublish: z.boolean(),
   dailyReportMaxRetries: z.number().int().min(0).max(5),
+  dailyReportGroupIds: z.array(z.string().trim().min(1)).max(100).optional().default([]),
 });
 
 export async function PATCH(request: Request) {

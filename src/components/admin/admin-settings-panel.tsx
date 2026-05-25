@@ -38,6 +38,7 @@ import { IconButton } from "@/components/ui/icon-button";
 import { IconCheck, IconEdit, IconGrip, IconLink, IconPlus, IconTag, IconTrash, IconX } from "@/components/ui/icons";
 import { ModalShell } from "@/components/ui/modal-shell";
 import { PaginationControls } from "@/components/ui/pagination-controls";
+import { SelectField } from "@/components/ui/select-field";
 import { TextArea } from "@/components/ui/text-area";
 import { TextInput } from "@/components/ui/text-input";
 import { useToast } from "@/components/ui/toast";
@@ -82,6 +83,7 @@ const surfaceCardClassName =
   "rounded-[1.1rem] border border-[color:var(--line)] bg-[color-mix(in_srgb,var(--surface)_96%,transparent)] shadow-[var(--shadow-sm)]";
 const checkboxInputClassName =
   "h-4 w-4 rounded border-[color:var(--line-strong)] text-[var(--accent)] focus:ring-[color:var(--accent-soft)]";
+const ALL_DAILY_REPORT_GROUPS_SELECT_VALUE = "__all_daily_report_groups__";
 const settingsNavItems: Array<{
   key: AdminSettingsSection;
   label: string;
@@ -116,6 +118,14 @@ function toIsoDateTimeOrNull(value: string) {
 
   const date = new Date(normalized);
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function areStringArraysEqual(left: string[], right: string[]) {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((value, index) => value === right[index]);
 }
 
 function refreshPage() {
@@ -275,6 +285,9 @@ export function AdminSettingsPanel({
   );
   const [dailyReportMaxRetries, setDailyReportMaxRetries] = useState(
     String(initialSettings.dailyReportSchedule.dailyReportMaxRetries),
+  );
+  const [dailyReportGroupIds, setDailyReportGroupIds] = useState(
+    initialSettings.dailyReportSchedule.dailyReportGroupIds ?? [],
   );
   const [dailyReportScheduleSnapshot, setDailyReportScheduleSnapshot] = useState(
     initialSettings.dailyReportSchedule,
@@ -843,6 +856,7 @@ export function AdminSettingsPanel({
           dailyReportOffsetDays: parsedDailyReportOffsetDays,
           dailyReportAutoPublish,
           dailyReportMaxRetries: parsedDailyReportMaxRetries,
+          dailyReportGroupIds,
         });
 
         setDailyReportScheduleSnapshot(schedule);
@@ -852,6 +866,7 @@ export function AdminSettingsPanel({
         setDailyReportOffsetDays(String(schedule.dailyReportOffsetDays));
         setDailyReportAutoPublish(schedule.dailyReportAutoPublish);
         setDailyReportMaxRetries(String(schedule.dailyReportMaxRetries));
+        setDailyReportGroupIds(schedule.dailyReportGroupIds ?? []);
         showToast("日报任务配置已保存。", "success");
       } catch (error) {
         showToast(error instanceof Error ? error.message : "日报任务配置保存失败。", "error");
@@ -904,7 +919,8 @@ export function AdminSettingsPanel({
     dailyReportCandidateLimit.trim() !== String(dailyReportScheduleSnapshot.dailyReportCandidateLimit) ||
     dailyReportOffsetDays.trim() !== String(dailyReportScheduleSnapshot.dailyReportOffsetDays) ||
     dailyReportMaxRetries.trim() !== String(dailyReportScheduleSnapshot.dailyReportMaxRetries) ||
-    dailyReportAutoPublish !== dailyReportScheduleSnapshot.dailyReportAutoPublish;
+    dailyReportAutoPublish !== dailyReportScheduleSnapshot.dailyReportAutoPublish ||
+    !areStringArraysEqual(dailyReportGroupIds, dailyReportScheduleSnapshot.dailyReportGroupIds ?? []);
   const cleanupScheduleIsDirty =
     cleanupScheduleEnabled !== cleanupScheduleSnapshot.enabled ||
     cleanupScheduleCronExpression.trim() !== cleanupScheduleSnapshot.cronExpression ||
@@ -1842,6 +1858,48 @@ export function AdminSettingsPanel({
                     max={MAX_DAILY_REPORT_CANDIDATE_LIMIT}
                     value={dailyReportCandidateLimit}
                     onChange={(event) => setDailyReportCandidateLimit(event.target.value)}
+                  />
+                </FormField>
+              </div>
+
+              <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+                <FormField label="日报分组范围" htmlFor="daily-report-group-ids">
+                  <SelectField
+                    id="daily-report-group-ids"
+                    aria-label="日报分组范围"
+                    mode="multiple"
+                    allowClear
+                    multiline
+                    className="w-full"
+                    placeholder="全部分组"
+                    value={dailyReportGroupIds.length > 0 ? dailyReportGroupIds : [ALL_DAILY_REPORT_GROUPS_SELECT_VALUE]}
+                    options={[
+                      {
+                        value: ALL_DAILY_REPORT_GROUPS_SELECT_VALUE,
+                        label: "全部分组",
+                      },
+                      ...orderedGroups.map((group) => ({
+                        value: group.id,
+                        label: group.name,
+                      })),
+                    ]}
+                    onChange={(value) => {
+                      const nextIds = Array.isArray(value) ? value.map(String) : [];
+                      if (nextIds.length === 0) {
+                        setDailyReportGroupIds([]);
+                        return;
+                      }
+                      if (nextIds.includes(ALL_DAILY_REPORT_GROUPS_SELECT_VALUE)) {
+                        const concreteIds = nextIds.filter((groupId) => groupId !== ALL_DAILY_REPORT_GROUPS_SELECT_VALUE);
+                        setDailyReportGroupIds(dailyReportGroupIds.length > 0 ? [] : concreteIds);
+                        return;
+                      }
+                      setDailyReportGroupIds(
+                        orderedGroups
+                          .map((group) => group.id)
+                          .filter((groupId) => nextIds.includes(groupId)),
+                      );
+                    }}
                   />
                 </FormField>
               </div>

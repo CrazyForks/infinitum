@@ -124,6 +124,7 @@ export async function saveDefaultDailyReportSchedule(input: {
   dailyReportOffsetDays: number;
   dailyReportAutoPublish: boolean;
   dailyReportMaxRetries: number;
+  dailyReportGroupIds: string[];
 }) {
   const payload = await requestAdminSettingsJson<DailyReportSchedulePayload>(
     "/api/admin/monitor/schedule/daily-report-default",

@@ -131,6 +131,7 @@ export type TaskScheduleSnapshot = {
   dailyReportOffsetDays: number;
   dailyReportAutoPublish: boolean;
   dailyReportMaxRetries: number;
+  dailyReportGroupIds?: string[];
   cleanupRetentionDays: number;
   processingStartAt?: string | null;
   timezone: string;

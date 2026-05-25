@@ -27,7 +27,7 @@ import { normalizeEventSignatureForStorage } from "@/lib/clusters/normalization"
 import { getDisplaySummary, getDisplayTitle } from "@/lib/feed/presentation";
 import { getIngestionRuntimeConfig } from "@/lib/settings/runtime-service";
 import { DEFAULT_DAILY_REPORT_TASK_LABEL, type TaskTimelineNodeSnapshot } from "@/lib/tasks/types";
-import { enqueueTaskRun, ensureDefaultDailyReportSchedule, updateTaskRun } from "@/lib/tasks/service";
+import { enqueueTaskRun, ensureDefaultDailyReportSchedule, parseDailyReportGroupIdsJson, updateTaskRun } from "@/lib/tasks/service";
 
 const MIN_CANDIDATE_COUNT = 2;
 const DAILY_REPORT_RECENT_SOURCE_LOOKBACK_DAYS = 7;
@@ -51,9 +51,10 @@ function buildDailyReportTitle(date: string) {
   return `${date} AI 日报`;
 }
 
-function buildInputHash(date: string, candidates: DailyReportCandidate[]) {
+function buildInputHash(date: string, candidates: DailyReportCandidate[], groupIds: string[] = []) {
   const hash = createHash("sha256");
   hash.update(date);
+  hash.update(JSON.stringify([...groupIds].sort()));
   for (const candidate of candidates) {
     hash.update(JSON.stringify({
       itemId: candidate.itemId,
@@ -250,7 +251,7 @@ function candidateToDailyReportSourceRegistryEntry(
   };
 }
 
-async function listExpandedClusterSourceRegistryEntries(candidates: DailyReportCandidate[]) {
+async function listExpandedClusterSourceRegistryEntries(candidates: DailyReportCandidate[], groupIds: string[] = []) {
   const clusterCandidates = candidates.filter((candidate) => candidate.clusterId);
   const clusterIds = Array.from(new Set(clusterCandidates.map((candidate) => candidate.clusterId!)));
 
@@ -269,6 +270,7 @@ async function listExpandedClusterSourceRegistryEntries(candidates: DailyReportC
       source: {
         is: {
           enabled: true,
+          ...(groupIds.length > 0 ? { groupId: { in: groupIds } } : {}),
         },
       },
     },
@@ -330,11 +332,12 @@ async function listExpandedClusterSourceRegistryEntries(candidates: DailyReportC
 async function buildExpandedDailyReportSourceRegistry(input: {
   candidatesById: Map<number, DailyReportCandidate>;
   sourceRows: Array<{ sourceId: number }>;
+  groupIds?: string[];
 }) {
   const selectedCandidates = Array.from(new Set(input.sourceRows.map((row) => row.sourceId)))
     .map((sourceId) => input.candidatesById.get(sourceId))
     .filter((candidate): candidate is DailyReportCandidate => Boolean(candidate));
-  const expandedClusterEntries = await listExpandedClusterSourceRegistryEntries(selectedCandidates);
+  const expandedClusterEntries = await listExpandedClusterSourceRegistryEntries(selectedCandidates, input.groupIds ?? []);
   const entriesByNumber = new Map<number, DailyReportSourceRegistryEntry[]>();
 
   for (const candidate of selectedCandidates) {
@@ -825,12 +828,13 @@ export async function generateDailyReport(input: {
 }) {
   const { date } = getDailyReportDateRange(input.date);
   const schedule = await ensureDefaultDailyReportSchedule();
+  const dailyReportGroupIds = parseDailyReportGroupIdsJson(schedule.dailyReportGroupIdsJson);
   const candidates = await filterRecentDailyReportDuplicates(
     date,
-    await listDailyReportCandidates(date, schedule.dailyReportCandidateLimit),
+    await listDailyReportCandidates(date, schedule.dailyReportCandidateLimit, dailyReportGroupIds),
   );
   await input.onCandidatesLoaded?.(candidates.length);
-  const inputHash = buildInputHash(date, candidates);
+  const inputHash = buildInputHash(date, candidates, dailyReportGroupIds);
   const existing = await prisma.dailyReport.findUnique({
     where: {
       date_timezone: {
@@ -902,7 +906,11 @@ export async function generateDailyReport(input: {
   const sourceRows = getSectionSourceIds(content);
   const selectedCount = countSelectedDailyReportCandidates(content);
   const candidatesById = new Map(candidates.map((candidate) => [candidate.id, candidate]));
-  const expandedSourcesByNumber = await buildExpandedDailyReportSourceRegistry({ candidatesById, sourceRows });
+  const expandedSourcesByNumber = await buildExpandedDailyReportSourceRegistry({
+    candidatesById,
+    sourceRows,
+    groupIds: dailyReportGroupIds,
+  });
   const title = buildDailyReportTitle(date);
   const renderedMarkdown = renderDailyReportMarkdown(
     content,
@@ -1277,7 +1285,11 @@ export async function searchDailyReportRefinementSources(input: {
     modelName: runtimeConfig.modelApi.model,
   });
   const schedule = await ensureDefaultDailyReportSchedule();
-  const candidates = await listDailyReportCandidates(context.report.date, schedule.dailyReportCandidateLimit);
+  const candidates = await listDailyReportCandidates(
+    context.report.date,
+    schedule.dailyReportCandidateLimit,
+    parseDailyReportGroupIdsJson(schedule.dailyReportGroupIdsJson),
+  );
   const existingSourceKeys = new Set(context.registry.map((entry) => entry.sourceKey));
   const limit = Math.max(1, Math.min(input.limit ?? 10, 20));
   const sources = candidates
@@ -1311,7 +1323,11 @@ export async function addDailyReportRefinementSources(input: {
     modelName: runtimeConfig.modelApi.model,
   });
   const schedule = await ensureDefaultDailyReportSchedule();
-  const candidates = await listDailyReportCandidates(context.report.date, schedule.dailyReportCandidateLimit);
+  const candidates = await listDailyReportCandidates(
+    context.report.date,
+    schedule.dailyReportCandidateLimit,
+    parseDailyReportGroupIdsJson(schedule.dailyReportGroupIdsJson),
+  );
   const candidatesByKey = new Map(candidates.map((candidate) => [buildDailyReportSourceKey(candidate), candidate]));
   const existingSourceKeys = new Set(context.registry.map((entry) => entry.sourceKey));
   const existingSourceNumbers = new Set(context.registry.map((entry) => entry.sourceNumber));

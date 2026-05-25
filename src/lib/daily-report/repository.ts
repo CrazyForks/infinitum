@@ -82,8 +82,9 @@ async function getDailyReportCacheVersion(isAdmin: boolean) {
   ].join(":");
 }
 
-export async function listDailyReportCandidates(date: string, limit = 120) {
+export async function listDailyReportCandidates(date: string, limit = 120, groupIdsInput: string[] = []) {
   const { start, end } = getDailyReportDateRange(date);
+  const groupIds = [...new Set(groupIdsInput.filter(Boolean))];
   const rows = await prisma.item.findMany({
     take: getDailyReportCandidatePoolLimit(limit),
     where: {
@@ -98,6 +99,7 @@ export async function listDailyReportCandidates(date: string, limit = 120) {
       source: {
         is: {
           enabled: true,
+          ...(groupIds.length > 0 ? { groupId: { in: groupIds } } : {}),
         },
       },
       AND: [
@@ -223,26 +225,29 @@ export async function listDailyReportCandidates(date: string, limit = 120) {
   return ranked.map((entry, index): DailyReportCandidate => {
     const item = entry.representative;
     const cluster = item.cluster;
+    const shouldUseClusterDisplay = groupIds.length === 0;
 
     return {
       id: index + 1,
       itemId: item.id,
       clusterId: item.clusterId,
-      title: cluster?.title || getDisplayTitle(item.originalTitle, item.translatedTitle),
+      title: shouldUseClusterDisplay && cluster ? cluster.title : getDisplayTitle(item.originalTitle, item.translatedTitle),
       sourceName: item.source.name,
       url: item.originalUrl,
-      summary: cluster?.summary || getDisplaySummary(item.summaryText, item.rssExcerpt, item.fullText ?? item.rssContent),
+      summary: shouldUseClusterDisplay && cluster
+        ? cluster.summary
+        : getDisplaySummary(item.summaryText, item.rssExcerpt, item.fullText ?? item.rssContent),
       qualityScore: item.qualityScore,
       candidateScore: entry.score,
       sourceCount: entry.sourceIds.size,
       itemCount: entry.itemCount,
       createdAt: item.createdAt.toISOString(),
       publishedAt: item.publishedAt.toISOString(),
-      eventType: cluster?.eventType ?? item.eventType,
-      eventSubject: cluster?.eventSubject ?? item.eventSubject,
-      eventAction: cluster?.eventAction ?? item.eventAction,
-      eventObject: cluster?.eventObject ?? item.eventObject,
-      eventDate: cluster?.eventDate ?? item.eventDate,
+      eventType: shouldUseClusterDisplay ? cluster?.eventType ?? item.eventType : item.eventType ?? cluster?.eventType ?? null,
+      eventSubject: shouldUseClusterDisplay ? cluster?.eventSubject ?? item.eventSubject : item.eventSubject ?? cluster?.eventSubject ?? null,
+      eventAction: shouldUseClusterDisplay ? cluster?.eventAction ?? item.eventAction : item.eventAction ?? cluster?.eventAction ?? null,
+      eventObject: shouldUseClusterDisplay ? cluster?.eventObject ?? item.eventObject : item.eventObject ?? cluster?.eventObject ?? null,
+      eventDate: shouldUseClusterDisplay ? cluster?.eventDate ?? item.eventDate : item.eventDate ?? cluster?.eventDate ?? null,
     };
   });
 }

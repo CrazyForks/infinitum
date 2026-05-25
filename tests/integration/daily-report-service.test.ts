@@ -766,6 +766,117 @@ describe("daily report service", () => {
     expect(titles).not.toContain("仅发布时间命中日报日期");
   });
 
+  it("limits scheduled daily report candidates and expanded cluster sources to selected groups", async () => {
+    const [groupA, groupB] = await Promise.all([
+      prisma.sourceGroup.create({ data: { name: "Scoped A" } }),
+      prisma.sourceGroup.create({ data: { name: "Scoped B" } }),
+    ]);
+    const [sourceA, sourceB] = await Promise.all([
+      prisma.source.create({
+        data: {
+          name: "Scoped Source A",
+          rssUrl: "https://scoped-a.example.com/feed.xml",
+          siteUrl: "https://scoped-a.example.com",
+          groupId: groupA.id,
+        },
+      }),
+      prisma.source.create({
+        data: {
+          name: "Scoped Source B",
+          rssUrl: "https://scoped-b.example.com/feed.xml",
+          siteUrl: "https://scoped-b.example.com",
+          groupId: groupB.id,
+        },
+      }),
+    ]);
+    const cluster = await prisma.contentCluster.create({
+      data: {
+        title: "分组内聚合候选",
+        summary: "分组内聚合候选摘要",
+        score: 90,
+        itemCount: 2,
+        latestPublishedAt: new Date("2026-04-24T03:00:00.000Z"),
+        fingerprint: "daily-report-scoped-cluster",
+      },
+    });
+    await prisma.item.createMany({
+      data: [
+        {
+          sourceId: sourceA.id,
+          clusterId: cluster.id,
+          originalUrl: "https://scoped-a.example.com/cluster",
+          canonicalUrl: "https://scoped-a.example.com/cluster",
+          urlHash: "scoped-a-cluster",
+          dedupeSignature: "scoped-a-cluster",
+          originalTitle: "分组 A 聚合条目",
+          publishedAt: new Date("2026-04-24T01:00:00.000Z"),
+          createdAt: new Date("2026-04-24T01:00:00.000Z"),
+          status: "processed",
+          moderationStatus: "allowed",
+          summaryText: "分组 A 聚合条目摘要",
+          qualityScore: 95,
+        },
+        {
+          sourceId: sourceB.id,
+          clusterId: cluster.id,
+          originalUrl: "https://scoped-b.example.com/cluster",
+          canonicalUrl: "https://scoped-b.example.com/cluster",
+          urlHash: "scoped-b-cluster",
+          dedupeSignature: "scoped-b-cluster",
+          originalTitle: "分组 B 聚合条目",
+          publishedAt: new Date("2026-04-24T02:00:00.000Z"),
+          createdAt: new Date("2026-04-24T02:00:00.000Z"),
+          status: "processed",
+          moderationStatus: "allowed",
+          summaryText: "分组 B 聚合条目摘要",
+          qualityScore: 94,
+        },
+        {
+          sourceId: sourceA.id,
+          originalUrl: "https://scoped-a.example.com/standalone",
+          canonicalUrl: "https://scoped-a.example.com/standalone",
+          urlHash: "scoped-a-standalone",
+          dedupeSignature: "scoped-a-standalone",
+          originalTitle: "分组 A 独立条目",
+          publishedAt: new Date("2026-04-24T03:00:00.000Z"),
+          createdAt: new Date("2026-04-24T03:00:00.000Z"),
+          status: "processed",
+          moderationStatus: "allowed",
+          summaryText: "分组 A 独立条目摘要",
+          qualityScore: 70,
+        },
+      ],
+    });
+    await prisma.taskSchedule.create({
+      data: {
+        key: "daily_report_default",
+        enabled: false,
+        cronExpression: "30 8 * * *",
+        sourceConcurrency: 2,
+        fullTextFetchThreshold: 80,
+        perSourceItemLimit: 20,
+        dailyReportCandidateLimit: 10,
+        dailyReportOffsetDays: 0,
+        dailyReportAutoPublish: false,
+        dailyReportGroupIdsJson: JSON.stringify([groupA.id]),
+        timezone: "Asia/Shanghai",
+        nextRunAt: new Date("2026-04-25T00:30:00.000Z"),
+      },
+    });
+    generateDailyReportMock.mockResolvedValue(buildDailyReportOutput());
+
+    const result = await generateDailyReport({ date: REPORT_DATE, force: true });
+    const articleTitles = getLastGeneratedDailyReportArticles().map((article) => article.title);
+    const savedSources = await prisma.dailyReportSource.findMany({
+      where: { dailyReportId: result.report?.id },
+      orderBy: { title: "asc" },
+    });
+
+    expect(articleTitles).toEqual(["分组 A 聚合条目", "分组 A 独立条目"]);
+    expect(savedSources.map((source) => source.title)).toEqual(["分组 A 独立条目", "分组 A 聚合条目"]);
+    expect(savedSources.map((source) => source.url)).not.toContain("https://scoped-b.example.com/cluster");
+  });
+
   it("filters candidates that match a source from the previous 7 days by cluster", async () => {
     const { cluster } = await createClusteredReportCandidates();
     await createReportCandidates();

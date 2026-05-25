@@ -90,6 +90,7 @@ function buildInitialSettings(): AdminSettingsSnapshot {
       dailyReportOffsetDays: 0,
       dailyReportAutoPublish: false,
       dailyReportMaxRetries: 0,
+      dailyReportGroupIds: [],
       timezone: "Asia/Shanghai",
       lastHeartbeatAt: "2026-04-20T10:00:00.000Z",
       lastRunStartedAt: "2026-04-20T10:00:00.000Z",
@@ -110,6 +111,7 @@ function buildInitialSettings(): AdminSettingsSnapshot {
       dailyReportOffsetDays: 0,
       dailyReportAutoPublish: false,
       dailyReportMaxRetries: 0,
+      dailyReportGroupIds: [],
       timezone: "Asia/Shanghai",
       lastHeartbeatAt: "2026-04-20T10:00:00.000Z",
       lastRunStartedAt: null,
@@ -1252,6 +1254,7 @@ describe("AdminSettingsPanel", () => {
             dailyReportCandidateLimit: 80,
             dailyReportOffsetDays: 1,
             dailyReportAutoPublish: true,
+            dailyReportGroupIds: ["group-1"],
           },
         }),
       ),
@@ -1268,6 +1271,7 @@ describe("AdminSettingsPanel", () => {
     expect(within(taskPanel).queryByText("下次运行")).not.toBeInTheDocument();
     expect(within(taskPanel).getByLabelText("T-")).toHaveValue(0);
     expect(within(taskPanel).getByLabelText("候选内容上限")).toHaveValue(120);
+    expect(within(taskPanel).getByLabelText("日报分组范围")).toHaveValue(["__all_daily_report_groups__"]);
 
     await user.click(within(taskPanel).getByLabelText("启用 AI 日报任务"));
     await user.clear(within(taskPanel).getByLabelText("日报 Cron 表达式"));
@@ -1277,6 +1281,7 @@ describe("AdminSettingsPanel", () => {
     await user.clear(within(taskPanel).getByLabelText("候选内容上限"));
     await user.type(within(taskPanel).getByLabelText("候选内容上限"), "80");
     await user.click(within(taskPanel).getByLabelText("生成后自动发布 AI 日报"));
+    await user.selectOptions(within(taskPanel).getByLabelText("日报分组范围"), ["group-1"]);
     await user.click(within(taskPanel).getAllByRole("button", { name: "保存配置" })[1]!);
 
     await waitFor(() => {
@@ -1292,6 +1297,7 @@ describe("AdminSettingsPanel", () => {
           dailyReportOffsetDays: 1,
           dailyReportAutoPublish: true,
           dailyReportMaxRetries: 0,
+          dailyReportGroupIds: ["group-1"],
         }),
       });
     });

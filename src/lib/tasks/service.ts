@@ -315,6 +315,28 @@ function serializeTaskTimeline(taskTimeline: TaskTimelineNodeSnapshot[] | null) 
   return JSON.stringify(taskTimeline);
 }
 
+export function parseDailyReportGroupIdsJson(value: string | null | undefined) {
+  if (!value) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return [...new Set(parsed.filter((groupId): groupId is string => typeof groupId === "string" && groupId.trim().length > 0))];
+  } catch {
+    return [];
+  }
+}
+
+function serializeDailyReportGroupIds(groupIds: string[]) {
+  return JSON.stringify([...new Set(groupIds.map((groupId) => groupId.trim()).filter(Boolean))]);
+}
+
 function getHeartbeatScheduleKeyForTaskKind(kind: BackgroundTaskRunKind) {
   if (kind === "daily_report_generate") {
     return DEFAULT_DAILY_REPORT_SCHEDULE_KEY;
@@ -463,6 +485,7 @@ export function toTaskScheduleSnapshot(schedule: {
   dailyReportOffsetDays: number | null;
   dailyReportAutoPublish: boolean | null;
   dailyReportMaxRetries: number | null;
+  dailyReportGroupIdsJson?: string | null;
   cleanupRetentionDays: number | null;
   processingStartAt: Date | null;
   timezone: string;
@@ -483,6 +506,7 @@ export function toTaskScheduleSnapshot(schedule: {
     dailyReportOffsetDays: schedule.dailyReportOffsetDays ?? DEFAULT_DAILY_REPORT_OFFSET_DAYS,
     dailyReportAutoPublish: schedule.dailyReportAutoPublish ?? false,
     dailyReportMaxRetries: schedule.dailyReportMaxRetries ?? DEFAULT_DAILY_REPORT_MAX_RETRIES,
+    dailyReportGroupIds: parseDailyReportGroupIdsJson(schedule.dailyReportGroupIdsJson),
     cleanupRetentionDays: schedule.cleanupRetentionDays ?? DEFAULT_CLEANUP_RETENTION_DAYS,
     processingStartAt: schedule.processingStartAt?.toISOString() ?? null,
     timezone: schedule.timezone,
@@ -538,6 +562,7 @@ export async function updateDefaultDailyReportSchedule(input: {
   dailyReportOffsetDays: number;
   dailyReportAutoPublish: boolean;
   dailyReportMaxRetries: number;
+  dailyReportGroupIds?: string[];
 }) {
   const cronExpression = input.cronExpression.trim();
 
@@ -581,6 +606,21 @@ export async function updateDefaultDailyReportSchedule(input: {
     );
   }
 
+  const dailyReportGroupIds = [...new Set((input.dailyReportGroupIds ?? []).map((groupId) => groupId.trim()).filter(Boolean))];
+  if (dailyReportGroupIds.length > 0) {
+    const existingGroupCount = await prisma.sourceGroup.count({
+      where: {
+        id: {
+          in: dailyReportGroupIds,
+        },
+      },
+    });
+
+    if (existingGroupCount !== dailyReportGroupIds.length) {
+      throw new Error("Daily report group scope contains an invalid source group.");
+    }
+  }
+
   const currentSchedule = await ensureDefaultDailyReportSchedule();
   const now = new Date();
   const nextRunAt = computeNextRunAt({
@@ -599,6 +639,7 @@ export async function updateDefaultDailyReportSchedule(input: {
       dailyReportOffsetDays: input.dailyReportOffsetDays,
       dailyReportAutoPublish: input.dailyReportAutoPublish,
       dailyReportMaxRetries: input.dailyReportMaxRetries,
+      dailyReportGroupIdsJson: serializeDailyReportGroupIds(dailyReportGroupIds),
       nextRunAt,
     },
   });

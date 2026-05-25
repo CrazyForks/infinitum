@@ -258,6 +258,7 @@ model TaskSchedule {
   dailyReportOffsetDays Int                @default(0)
   dailyReportAutoPublish Boolean          @default(false)
   dailyReportMaxRetries Int              @default(0)
+  dailyReportGroupIdsJson String          @default("")
   cleanupRetentionDays Int               @default(365)
   processingStartAt DateTime?
   timezone          String

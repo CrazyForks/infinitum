@@ -63,6 +63,7 @@ export type AdminSettingsSnapshot = {
     dailyReportOffsetDays: number;
     dailyReportAutoPublish: boolean;
     dailyReportMaxRetries: number;
+    dailyReportGroupIds?: string[];
     processingStartAt?: string | null;
     cleanupRetentionDays: number;
     timezone: string;
@@ -84,6 +85,7 @@ export type AdminSettingsSnapshot = {
     dailyReportOffsetDays: number;
     dailyReportAutoPublish: boolean;
     dailyReportMaxRetries: number;
+    dailyReportGroupIds: string[];
     processingStartAt?: string | null;
     cleanupRetentionDays: number;
     timezone: string;

@@ -74,6 +74,37 @@ export function SelectField({
     ...style,
   };
 
+  if (isTestEnvironment && isMultiMode) {
+    const nativeOptions = (resolvedOptions as Array<{ label?: unknown; value?: unknown }> | undefined) ?? [];
+    const nativeValue = Array.isArray(resolvedValue) ? resolvedValue.map((entry) => String(entry)) : [];
+
+    return (
+      <select
+        id={props.id}
+        aria-label={props["aria-label"]}
+        className={`${resolvedClassName} select-modern`.trim()}
+        style={resolvedStyle}
+        value={nativeValue}
+        disabled={props.disabled}
+        multiple
+        onChange={(event) => {
+          if (!onChange) {
+            return;
+          }
+
+          const nextValue = Array.from(event.currentTarget.selectedOptions).map((option) => option.value);
+          onChange(nextValue, undefined as never);
+        }}
+      >
+        {nativeOptions.map((option) => (
+          <option key={String(option.value ?? option.label ?? "")} value={String(option.value ?? "")}>
+            {String(option.label ?? option.value ?? "")}
+          </option>
+        ))}
+      </select>
+    );
+  }
+
   if (isTestEnvironment && !isMultiMode) {
     const nativeOptions = (resolvedOptions as Array<{ label?: unknown; value?: unknown }> | undefined) ?? [];
     const nativeValue = resolvedValue == null ? "" : String(resolvedValue);
