@@ -70,6 +70,7 @@ export type IngestionTimelineCounters = {
 export type IngestionTaskStageState = {
   sourceSync: IngestionStageTiming | null;
   itemProcessing: IngestionStageTiming | null;
+  clusterMerge: IngestionStageTiming | null;
   clusterFinalize: IngestionStageTiming | null;
 };
 
@@ -332,12 +333,18 @@ export function buildIngestionTaskTimeline(input: {
     {
       key: "cluster_merge",
       label: "聚合合并",
-      status: counters.clusterMerge.candidates > 0
-        ? (counters.clusterMerge.skipped ? "skipped" : "succeeded")
-        : "skipped",
-      startedAt: null,
-      finishedAt: null,
-      durationMs: null,
+      status: stages.clusterMerge
+        ? stages.clusterMerge.finishedAt
+          ? counters.clusterMerge.candidates > 0
+            ? counters.clusterMerge.failedGroups > 0
+              ? "partial"
+              : counters.clusterMerge.skipped
+                ? "skipped"
+                : "succeeded"
+            : "skipped"
+          : "running"
+        : "pending",
+      ...toNodeTiming(stages.clusterMerge),
       modelName: modelNames.clusterMerge,
       metrics: [
         { label: "基础池", value: counters.clusterMerge.baseClusters },

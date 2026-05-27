@@ -52,6 +52,10 @@ const EVENT_TYPES = new Set<NonNullable<AiEventSignature["eventType"]>>([
   "security",
   "other",
 ]);
+const ITEM_SUMMARY_INPUT_MAX_CHARS = 32_000;
+const ITEM_SUMMARY_TRUNCATED_NOTICE = "\n\n[内容过长，已截断用于摘要。]";
+const HTML_BLOCK_PATTERN = /<(script|style|noscript|svg|canvas|iframe)\b[^>]*>[\s\S]*?<\/\1>/gi;
+const HTML_COMMENT_PATTERN = /<!--[\s\S]*?-->/g;
 
 function getBestContent(item: ParsedFeedItem): string {
   return item["content:encoded"] || item.content || item.contentSnippet || "";
@@ -124,6 +128,25 @@ function buildFallbackSummary(rssExcerpt: string | null, fallbackBody: string | 
   }
 
   return null;
+}
+
+function buildItemSummaryInput(inputText: string): string {
+  const cleaned = stripHtmlTags(
+    inputText
+      .replace(HTML_COMMENT_PATTERN, " ")
+      .replace(HTML_BLOCK_PATTERN, " "),
+  );
+
+  if (!cleaned) {
+    return "";
+  }
+
+  if (cleaned.length <= ITEM_SUMMARY_INPUT_MAX_CHARS) {
+    return cleaned;
+  }
+
+  const maxBodyLength = ITEM_SUMMARY_INPUT_MAX_CHARS - ITEM_SUMMARY_TRUNCATED_NOTICE.length;
+  return `${cleaned.slice(0, maxBodyLength).trimEnd()}${ITEM_SUMMARY_TRUNCATED_NOTICE}`;
 }
 
 async function summarizeItemWithChineseRetry(
@@ -530,7 +553,7 @@ export async function processFeedItem({
     moderationDetail = ruleFilter.detail;
   } else if (aiParsingEnabled) {
     const translateTitle = shouldTranslateTitle(originalTitle);
-    const summarySourceText = fullText || rssContent || rssExcerpt || originalTitle;
+    const summarySourceText = buildItemSummaryInput(fullText || rssContent || rssExcerpt || originalTitle) || originalTitle;
     const canReuseExistingSummary = Boolean(existing && !analysisInputsChanged && hasSucceededSummary(existing));
     const canReuseExistingCompletedAnalysis = Boolean(existing && !analysisInputsChanged && hasSucceededAnalysis(existing));
 

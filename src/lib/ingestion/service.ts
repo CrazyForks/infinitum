@@ -298,6 +298,7 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
   const taskStages: IngestionTaskStageState = {
     sourceSync: null,
     itemProcessing: null,
+    clusterMerge: null,
     clusterFinalize: null,
   };
   let sources: Awaited<ReturnType<typeof syncSources>> = [];
@@ -651,10 +652,18 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
   await throwIfCancellationRequested();
 
   // Cluster merge pass: AI检查7天内聚合组，合并事件一致但未归入同一组的聚合组
-  const mergeResult = await executeClusterMerge(
-    trackedAiProvider,
-    options.now,
-  );
+  let mergeResult: Awaited<ReturnType<typeof executeClusterMerge>>;
+  const clusterMergeStage = stageTracker.startStage("cluster_merge", "聚合合并");
+  taskStages.clusterMerge = clusterMergeStage;
+  await emitTaskProgress("running");
+  try {
+    mergeResult = await executeClusterMerge(
+      trackedAiProvider,
+      options.now,
+    );
+  } finally {
+    stageTracker.finishStage(clusterMergeStage);
+  }
   timelineCounters.clusterMerge = {
     baseClusters: mergeResult.baseClusters,
     candidates: mergeResult.candidates,

@@ -159,6 +159,7 @@ describe("runIngestion", () => {
     expect(stageTimings.map((stageTiming) => stageTiming.key)).toEqual([
       "source_sync",
       "item_processing",
+      "cluster_merge",
       "cluster_finalize",
     ]);
     expect(stageTimings.every((stageTiming) => typeof stageTiming.durationMs === "number" || stageTiming.durationMs === null)).toBe(true);
@@ -202,6 +203,67 @@ describe("runIngestion", () => {
       { label: "摘要失败", value: 0 },
       { label: "已删除", value: 0 },
     ]);
+  });
+
+  it("cleans and caps item summary input before calling the model", async () => {
+    const longHtmlContent = `<style>.hidden{display:none}</style><!-- internal note --><p>${"这是一段很长的正文内容。".repeat(4_000)}</p><script>window.secret=true</script>`;
+    const parser = {
+      parseURL: vi.fn().mockResolvedValue({
+        items: [
+          {
+            title: "Long HTML post",
+            link: "https://example.com/posts/long-html",
+            isoDate: "2026-04-10T09:00:00.000Z",
+            "content:encoded": longHtmlContent,
+            contentSnippet: "Short excerpt",
+          },
+        ],
+      }),
+    };
+    const summarizeItem = vi.fn().mockResolvedValue("清洗后的摘要");
+    const aiProvider = buildAiProviderMock({
+      summarizeItem,
+      enrichContent: vi.fn().mockResolvedValue({
+        translatedTitle: null,
+        moderationStatus: "allowed",
+        moderationReason: null,
+        moderationDetail: null,
+        qualityScore: 82,
+        qualityRationale: "内容完整",
+        eventSignature: buildEventSignature({
+          eventType: "research",
+          eventSubject: "Long HTML post",
+        }),
+      }),
+    });
+
+    await runIngestion({
+      parser,
+      articleFetcher: vi.fn(),
+      aiProvider,
+      sourceConfigs: [
+        {
+          name: "HTML Feed",
+          rssUrl: "https://example.com/html-feed.xml",
+          siteUrl: "https://example.com",
+          enabled: true,
+          aiParsingEnabled: true,
+          aggregationEnabled: false,
+        },
+      ],
+      blacklist: [],
+      fullTextFetchThreshold: Number.MAX_SAFE_INTEGER,
+      now: new Date("2026-04-10T10:30:00.000Z"),
+    });
+
+    expect(summarizeItem).toHaveBeenCalledTimes(1);
+    const summaryInput = summarizeItem.mock.calls[0]?.[0] as string;
+    expect(summaryInput.length).toBe(32_000);
+    expect(summaryInput).toContain("这是一段很长的正文内容");
+    expect(summaryInput).not.toContain("<p>");
+    expect(summaryInput).not.toContain("window.secret");
+    expect(summaryInput).not.toContain("internal note");
+    expect(summaryInput).toContain("[内容过长，已截断用于摘要。]");
   });
 
   it("counts only processing-start eligible items in task progress and timeline", async () => {
