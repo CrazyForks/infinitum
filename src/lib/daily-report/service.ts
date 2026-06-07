@@ -925,6 +925,7 @@ export async function generateDailyReport(input: {
       clusterId: candidate.clusterId,
       title: candidate.title,
       sourceName: candidate.sourceName,
+      url: candidate.url,
       candidateScore: candidate.candidateScore,
       sourceCount: candidate.sourceCount,
       itemCount: candidate.itemCount,

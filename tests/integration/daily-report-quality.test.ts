@@ -294,3 +294,62 @@ describe("daily report quality metrics", () => {
     await getDailyReportQualityMetrics({ days: 9999 });
   });
 });
+
+describe("URL fallback for miss-rate matching", () => {
+  beforeEach(async () => {
+    await prisma.dailyReportRefinementMessage.deleteMany();
+    await prisma.dailyReportRefinementSession.deleteMany();
+    await prisma.dailyReportSource.deleteMany();
+    await prisma.dailyReport.deleteMany();
+    await prisma.item.deleteMany();
+    await prisma.contentCluster.deleteMany();
+    await prisma.source.deleteMany();
+  });
+
+  it("matches candidates and sources by URL when itemId/clusterId are absent", async () => {
+    await prisma.source.create({
+      data: { name: "Source A", rssUrl: "https://a.example/feed.xml", siteUrl: "https://a.example" },
+    });
+
+    const sharedUrl = "https://shared.example/unique-story";
+
+    const snapshot = [
+      { id: 1, itemId: null, clusterId: null, url: sharedUrl, title: "Top 1", sourceName: "Source A", candidateScore: 99, sourceCount: 1, itemCount: 1, eventType: null, eventSubject: null },
+      { id: 2, itemId: null, clusterId: null, url: "https://other.example/different", title: "Top 2", sourceName: "Source A", candidateScore: 90, sourceCount: 1, itemCount: 1, eventType: null, eventSubject: null },
+    ];
+
+    await prisma.dailyReport.create({
+      data: {
+        date: REPORT_DATE_A,
+        timezone: "Asia/Shanghai",
+        status: "published",
+        title: `${REPORT_DATE_A} AI 日报`,
+        openingSummary: "本期日报聚焦行业关键变化,涵盖产品、工具、安全和数据洞察。",
+        closingThought: "整体趋势向工程化收敛。",
+        summaryJson: buildContent({ topCount: 1, changeCount: 1 }),
+        renderedMarkdown: `# ${REPORT_DATE_A} AI 日报`,
+        inputHash: `hash-url-fallback`,
+        candidateSnapshot: JSON.stringify(snapshot),
+        sources: {
+          create: [{
+            sourceNumber: 1,
+            sourceKey: `url:${sharedUrl.toLowerCase()}`,
+            itemId: null,
+            clusterId: null,
+            sourceName: "Source A",
+            title: "Top 1",
+            url: sharedUrl,
+            sourceSummary: "summary",
+            sourcePublishedAt: new Date(`${REPORT_DATE_A}T05:00:00.000Z`),
+            sourceQualityScore: 80,
+          }],
+        },
+      },
+    });
+
+    const metrics = await getDailyReportQualityMetrics({ days: 90 });
+    expect(metrics.missRate.reportsEvaluated).toBe(1);
+    expect(metrics.missRate.avgTop20MissRate).toBe(0.5);
+    expect(metrics.missRate.recentMissed.map((m) => m.title)).toContain("Top 2");
+  });
+});

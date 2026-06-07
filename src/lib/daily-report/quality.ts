@@ -7,6 +7,7 @@ export type CandidateSnapshotEntry = {
   clusterId: string | null;
   title: string;
   sourceName: string;
+  url: string;
   candidateScore: number;
   sourceCount: number;
   itemCount: number;
@@ -97,31 +98,39 @@ function getDateRange(days: number, now = new Date()) {
   };
 }
 
-function parseContentSafely(json: string): DailyReportContent | null {
+function parseContentSafely(json: string, label: string): DailyReportContent | null {
   try {
     return JSON.parse(json) as DailyReportContent;
-  } catch {
+  } catch (error) {
+    console.warn(`[daily-report-quality] failed to parse summaryJson for ${label}:`, error);
     return null;
   }
 }
 
-function parseSnapshotSafely(json: string | null): CandidateSnapshotEntry[] {
+function parseSnapshotSafely(json: string | null, label: string): CandidateSnapshotEntry[] {
   if (!json) return [];
   try {
     const parsed = JSON.parse(json);
     return Array.isArray(parsed) ? parsed as CandidateSnapshotEntry[] : [];
-  } catch {
+  } catch (error) {
+    console.warn(`[daily-report-quality] failed to parse candidateSnapshot for ${label}:`, error);
     return [];
   }
 }
 
+function buildKey(input: { itemId: string | null; clusterId: string | null; url: string | null | undefined }): string | null {
+  if (input.itemId) return `item:${input.itemId}`;
+  if (input.clusterId) return `cluster:${input.clusterId}`;
+  if (input.url) return `url:${input.url.trim().toLowerCase()}`;
+  return null;
+}
 function computeSectionFillRate(reports: ReportWithRelations[]): SectionFillRateBucket[] {
   const buckets: Record<string, { counts: number[]; distribution: Record<number, number> }> = {};
   for (const name of DAILY_REPORT_SECTION_NAMES) {
     buckets[name] = { counts: [], distribution: {} };
   }
   for (const report of reports) {
-    const content = parseContentSafely(report.summaryJson);
+    const content = parseContentSafely(report.summaryJson, `report ${report.date} (${report.id})`);
     if (!content) continue;
     for (const name of DAILY_REPORT_SECTION_NAMES) {
       const count = content.sections[name]?.length ?? 0;
@@ -190,25 +199,24 @@ function computeMissRate(reports: ReportWithRelations[]): MissRateStat {
   let reportsEvaluated = 0;
   let reportsWithSnapshot = 0;
   for (const report of reports) {
-    const candidates = parseSnapshotSafely(report.candidateSnapshot);
+    const candidates = parseSnapshotSafely(report.candidateSnapshot, `report ${report.date} (${report.id})`);
     if (candidates.length === 0) continue;
     reportsWithSnapshot += 1;
     const top20 = [...candidates].sort((a, b) => b.candidateScore - a.candidateScore).slice(0, 20);
     if (top20.length === 0) continue;
     const usedKeys = new Set<string>();
     for (const source of report.sources) {
-      if (source.itemId) usedKeys.add(`item:${source.itemId}`);
-      else if (source.clusterId) usedKeys.add(`cluster:${source.clusterId}`);
-      else usedKeys.add(`url:${source.url.trim().toLowerCase()}`);
+      const key = buildKey({ itemId: source.itemId, clusterId: source.clusterId, url: source.url });
+      if (key) usedKeys.add(key);
     }
     const candidateKeys = new Map<string, CandidateSnapshotEntry>();
     for (const candidate of candidates) {
-      if (candidate.itemId) candidateKeys.set(`item:${candidate.itemId}`, candidate);
-      else if (candidate.clusterId) candidateKeys.set(`cluster:${candidate.clusterId}`, candidate);
+      const key = buildKey({ itemId: candidate.itemId, clusterId: candidate.clusterId, url: candidate.url });
+      if (key) candidateKeys.set(key, candidate);
     }
     let missCount = 0;
     for (const top of top20) {
-      const key = top.itemId ? `item:${top.itemId}` : top.clusterId ? `cluster:${top.clusterId}` : null;
+      const key = buildKey({ itemId: top.itemId, clusterId: top.clusterId, url: top.url });
       if (!key) continue;
       if (!usedKeys.has(key)) {
         missCount += 1;
@@ -248,7 +256,7 @@ function computeDayOverlap(reports: ReportWithRelations[]): DayOverlapStat {
     const curr = sorted[i];
     const prevSourceIds = new Set(
       prev.sources
-        .map((s) => s.itemId ?? s.clusterId ?? `url:${s.url.trim().toLowerCase()}`)
+        .map((s) => buildKey({ itemId: s.itemId, clusterId: s.clusterId, url: s.url }))
         .filter((value): value is string => Boolean(value)),
     );
     const prevClusterIds = new Set(
@@ -256,7 +264,7 @@ function computeDayOverlap(reports: ReportWithRelations[]): DayOverlapStat {
     );
     const currSourceIds = new Set(
       curr.sources
-        .map((s) => s.itemId ?? s.clusterId ?? `url:${s.url.trim().toLowerCase()}`)
+        .map((s) => buildKey({ itemId: s.itemId, clusterId: s.clusterId, url: s.url }))
         .filter((value): value is string => Boolean(value)),
     );
     const currClusterIds = new Set(
