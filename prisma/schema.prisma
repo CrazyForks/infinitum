@@ -317,6 +317,7 @@ model DailyReport {
   inputHash       String
   modelName       String?
   taskRunId       String?
+  candidateSnapshot String?
   errorMessage    String?
   publishedAt     DateTime?
   generatedAt     DateTime          @default(now())

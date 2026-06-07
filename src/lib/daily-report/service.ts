@@ -918,6 +918,20 @@ export async function generateDailyReport(input: {
     title,
     Array.from(expandedSourcesByNumber.values()).flat(),
   );
+  const candidateSnapshot = JSON.stringify(
+    candidates.map((candidate) => ({
+      id: candidate.id,
+      itemId: candidate.itemId,
+      clusterId: candidate.clusterId,
+      title: candidate.title,
+      sourceName: candidate.sourceName,
+      candidateScore: candidate.candidateScore,
+      sourceCount: candidate.sourceCount,
+      itemCount: candidate.itemCount,
+      eventType: candidate.eventType,
+      eventSubject: candidate.eventSubject,
+    })),
+  );
   const shouldAutoPublish = schedule.dailyReportAutoPublish;
   const publishedAt = shouldAutoPublish ? new Date() : null;
 
@@ -939,6 +953,7 @@ export async function generateDailyReport(input: {
         inputHash,
         modelName: runtimeConfig.modelApi.model,
         taskRunId: input.taskRunId ?? null,
+        candidateSnapshot,
         errorMessage: null,
         publishedAt,
         generatedAt: new Date(),
@@ -955,6 +970,7 @@ export async function generateDailyReport(input: {
         inputHash,
         modelName: runtimeConfig.modelApi.model,
         taskRunId: input.taskRunId ?? null,
+        candidateSnapshot,
         publishedAt,
       },
     });
