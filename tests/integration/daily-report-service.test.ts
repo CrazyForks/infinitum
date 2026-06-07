@@ -719,7 +719,7 @@ describe("daily report service", () => {
       sourceCount: 3,
       itemCount: 3,
     });
-    expect(candidates[0]?.candidateScore).toBeGreaterThan(candidates[0]?.qualityScore ?? 0);
+    expect(candidates[0]?.candidateScore).toBeGreaterThan(candidates[1]?.candidateScore ?? 0);
     expect(candidates[1]).toMatchObject({
       clusterId: null,
       title: "单篇高分工具更新",

@@ -35,7 +35,7 @@ export type RecentDailyReportSourceSnapshot = {
 };
 
 function calculateDailyReportCandidateScore(input: { qualityScore: number; sourceCount: number; itemCount: number }) {
-  const aiBaseScore = 50 + (input.qualityScore - 50) * 0.85;
+  const aiBaseScore = 50 + (input.qualityScore - 50) * 0.3;
   const sourceBoost = Math.min(12, Math.max(0, input.sourceCount - 1) * 4);
   const itemBoost = Math.min(6, Math.floor(Math.log2(Math.max(1, input.itemCount))) * 2);
 
