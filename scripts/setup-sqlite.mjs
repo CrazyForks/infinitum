@@ -292,6 +292,12 @@ function applyIncrementalMigrations() {
     });
   }
 
+  if (!columnExists("daily_reports", "candidateSnapshot")) {
+    runSqlite([dbPath], {
+      input: `ALTER TABLE "daily_reports" ADD COLUMN "candidateSnapshot" TEXT;\n`,
+    });
+  }
+
   if (!columnExists("model_api_configs", "customHeaders")) {
     runSqlite([dbPath], {
       input: `ALTER TABLE "model_api_configs" ADD COLUMN "customHeaders" TEXT NOT NULL DEFAULT '';\n`,
