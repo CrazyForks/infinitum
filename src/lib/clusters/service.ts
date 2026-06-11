@@ -35,16 +35,20 @@ import {
 import {
   type ClusterAssignmentCandidate,
   createContentCluster,
+  createParsedEvents,
   deleteCluster,
+  deleteParsedEventsForItem,
   findActiveClusterByFingerprint,
   findActiveClusterByTitle,
   findRecentActiveClusterCandidates,
   getClusterWithItems,
   setItemCluster,
+  setParsedEventCluster,
   updateClusterStatus,
   updateClusterSummary,
 } from "@/lib/clusters/repository";
-import { normalizeEventSignatureForStorage } from "@/lib/clusters/normalization";
+import { normalizeEventSignatureForStorage,
+  normalizeStoredEventType } from "@/lib/clusters/normalization";
 import { prisma } from "@/lib/db";
 import { invalidateFeedCache } from "@/lib/feed/cache";
 import { getDisplayTitle } from "@/lib/feed/presentation";
@@ -367,6 +371,133 @@ export async function assignItemToCluster(
       createdNewCluster,
     } satisfies ClusterAssignmentResult;
   });
+}
+
+export async function assignParsedEventToCluster(
+  parsedEventId: string,
+  options: {
+    eventSignature: AiEventSignature;
+    latestPublishedAt: Date;
+  },
+): Promise<{
+  clusterId: string;
+  fingerprint: string;
+  createdNewCluster: boolean;
+}> {
+  const resolvedEventSignature = normalizeEventSignatureForStorage(options.eventSignature);
+  const fingerprintSeed = buildClusterFingerprintSeed({ eventSignature: resolvedEventSignature });
+  const fingerprint = fingerprintSeed ? normalizeFingerprint(fingerprintSeed) : "";
+  const since = new Date(options.latestPublishedAt.getTime() - CLUSTER_LOOKBACK_MS);
+  const until = new Date(options.latestPublishedAt.getTime() + CLUSTER_LOOKBACK_MS);
+
+  if (!fingerprint || !hasCompleteClusterMatchSignature(resolvedEventSignature)) {
+    return { clusterId: "", fingerprint, createdNewCluster: false };
+  }
+
+  const existing = await findActiveClusterByFingerprint(fingerprint, since, until);
+  let cluster: { id: string };
+  let createdNewCluster = false;
+
+  if (existing) {
+    cluster = existing;
+  } else {
+    cluster = await createContentCluster({
+      fingerprint,
+      title: buildEventDisplayTitle(resolvedEventSignature) || `聚合事件 ${fingerprint.slice(0, 16)}`,
+      summary: "聚合内容拆出的子事件，等待汇总。",
+      score: 50,
+      latestPublishedAt: options.latestPublishedAt,
+      eventType: resolvedEventSignature?.eventType ?? null,
+      eventSubject: resolvedEventSignature?.eventSubject ?? null,
+      eventAction: resolvedEventSignature?.eventAction ?? null,
+      eventObject: resolvedEventSignature?.eventObject ?? null,
+      eventDate: resolvedEventSignature?.eventDate ?? null,
+    });
+    createdNewCluster = true;
+  }
+
+  await setParsedEventCluster(parsedEventId, cluster.id);
+
+  return { clusterId: cluster.id, fingerprint, createdNewCluster };
+}
+
+export async function persistParsedAggregationForItem(
+  item: { id: string; publishedAt: Date },
+  parsedAggregation: {
+    mainEvent: AiEventSignature | null;
+    events: Array<AiEventSignature & { oneLiner: string; qualityScore: number }>;
+  },
+): Promise<{ mainEvent: AiEventSignature | null; assignedEvents: number; createdClusters: number }> {
+  if (!item.id) {
+    return { mainEvent: parsedAggregation.mainEvent, assignedEvents: 0, createdClusters: 0 };
+  }
+  if (parsedAggregation.events.length === 0) {
+    return { mainEvent: parsedAggregation.mainEvent, assignedEvents: 0, createdClusters: 0 };
+  }
+
+  await deleteParsedEventsForItem(item.id);
+
+  const eventsToPersist = parsedAggregation.events.map((event, index) => ({
+    itemId: item.id,
+    eventIndex: index,
+    eventType: event.eventType ?? null,
+    eventSubject: event.eventSubject ?? null,
+    eventAction: event.eventAction ?? null,
+    eventObject: event.eventObject ?? null,
+    eventDate: event.eventDate ?? null,
+    oneLiner: event.oneLiner,
+    qualityScore: event.qualityScore,
+    fingerprint: buildParsedEventFingerprint(event),
+  }));
+
+  const created = await createParsedEvents(eventsToPersist);
+
+  let assignedEvents = 0;
+  let createdClusters = 0;
+  for (const parsedEvent of created) {
+    const signature: AiEventSignature = {
+      eventType: normalizeStoredEventType(parsedEvent.eventType),
+      eventSubject: parsedEvent.eventSubject,
+      eventAction: parsedEvent.eventAction,
+      eventObject: parsedEvent.eventObject,
+      eventDate: parsedEvent.eventDate,
+    };
+    const result = await assignParsedEventToCluster(parsedEvent.id, {
+      eventSignature: signature,
+      latestPublishedAt: item.publishedAt,
+    });
+    if (result.clusterId) {
+      assignedEvents += 1;
+      if (result.createdNewCluster) {
+        createdClusters += 1;
+      }
+    }
+  }
+
+  return {
+    mainEvent: parsedAggregation.mainEvent,
+    assignedEvents,
+    createdClusters,
+  };
+}
+
+export function buildParsedEventFingerprint(event: {
+  eventType?: string | null;
+  eventSubject?: string | null;
+  eventAction?: string | null;
+  eventObject?: string | null;
+  eventDate?: string | null;
+}): string {
+  return [
+    event.eventType ?? "",
+    event.eventSubject ?? "",
+    event.eventAction ?? "",
+    event.eventObject ?? "",
+    event.eventDate ?? "",
+  ]
+    .map((part) => (part ?? "").toLowerCase().replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .join("|");
 }
 
 export async function recomputeCluster(

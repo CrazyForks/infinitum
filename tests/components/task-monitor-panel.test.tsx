@@ -307,6 +307,7 @@ describe("TaskMonitorPanel", () => {
       "聚合摘要重生成",
       "AI 日报生成",
       "文章自动清理",
+      "聚合内容重拆",
     ]);
 
     await user.selectOptions(kindSelect, "item_cleanup");

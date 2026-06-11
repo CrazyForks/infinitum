@@ -106,7 +106,7 @@ describe("admin settings service", () => {
     expect(settings.taskSchedule.sourceConcurrency).toBe(2);
     expect(settings.taskSchedule.fullTextFetchThreshold).toBe(80);
     expect(settings.promptConfigs.find((config) => config.type === "item_summary")?.systemPrompt).toContain(
-      "单条新闻摘要助手",
+      "单条新闻内容助手",
     );
     expect(settings.promptConfigs.find((config) => config.type === "item_summary")).toMatchObject({
       temperature: 0.2,

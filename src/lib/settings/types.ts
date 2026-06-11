@@ -123,6 +123,7 @@ export type AdminSettingsSnapshot = {
     enabled: boolean;
     aiParsingEnabled: boolean;
     aggregationEnabled: boolean;
+    aggregationDetectionEnabled: boolean;
     groupId: string | null;
     groupName: string | null;
     lastItemCreatedAt: string | null;

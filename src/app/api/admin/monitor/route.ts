@@ -15,6 +15,7 @@ const TASK_KINDS = new Set([
   "cluster_regenerate_summary",
   "daily_report_generate",
   "item_cleanup",
+  "item_reparse_aggregations",
 ]);
 const TASK_TIME_RANGES = new Set(["today", "week", "month"]);
 

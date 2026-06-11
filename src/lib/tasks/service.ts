@@ -52,6 +52,7 @@ export const TASK_RUN_CANCELLED_LABEL = "任务已终止";
 const TASK_AI_CALL_BREAKDOWN_LABELS: Record<TaskAiCallBreakdownKey, string> = {
   item_summary: "条目摘要",
   item_analysis: "内容分析",
+  item_aggregation: "聚合拆条",
   cluster_match: "聚合匹配",
   cluster_summary: "聚合摘要",
   cluster_merge: "聚合合并",

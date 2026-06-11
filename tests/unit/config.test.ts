@@ -16,11 +16,10 @@ describe("runtime config defaults", () => {
     expect(defaults.modelApi.baseURL).toBe("");
     expect(defaults.modelApi.model).toBe("gpt-4.1-mini");
     expect(defaults.prompts.itemSummary.length).toBeGreaterThan(0);
-    expect(defaults.prompts.itemSummary).toContain("单条新闻摘要助手");
-    expect(defaults.prompts.itemSummary).toContain("只输出摘要正文");
+    expect(defaults.prompts.itemSummary).toContain("单条新闻内容助手");
+    expect(defaults.prompts.itemSummary).toContain("isAggregation");
     expect(defaults.prompts.itemSummary).toContain("**加粗**");
     expect(defaults.prompts.itemSummary).toContain("*斜体*");
-    expect(defaults.prompts.itemSummary).not.toContain('{"summary"');
     expect(defaults.prompts.itemAnalysis.length).toBeGreaterThan(0);
     expect(defaults.prompts.itemAnalysis).toContain("固定输出格式");
     expect(defaults.prompts.itemAnalysis).toContain("只基于输入标题、来源和摘要判断");

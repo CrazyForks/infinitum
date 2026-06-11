@@ -16,7 +16,8 @@ export type BackgroundTaskRunKind =
   | "item_reanalyze"
   | "cluster_regenerate_summary"
   | "daily_report_generate"
-  | "item_cleanup";
+  | "item_cleanup"
+  | "item_reparse_aggregations";
 
 export type BackgroundTaskRunTrigger = "scheduled" | "manual" | "admin_action";
 
@@ -84,6 +85,7 @@ export type TaskTimelineNodeSnapshot = {
 export type TaskAiCallBreakdownKey =
   | "item_summary"
   | "item_analysis"
+  | "item_aggregation"
   | "cluster_match"
   | "cluster_summary"
   | "cluster_merge"

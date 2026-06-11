@@ -3,7 +3,7 @@ import type { BackgroundTaskRun } from "@prisma/client";
 import { executeClusterSummaryTask } from "@/lib/clusters/service";
 import { executeDailyReportTask } from "@/lib/daily-report/service";
 import { runIngestionTask } from "@/lib/ingestion/service";
-import { executeItemCleanupTask, executeItemReanalyzeTask, executeItemRegenerationTask } from "@/lib/items/service";
+import { executeItemCleanupTask, executeItemReanalyzeTask, executeItemRegenerationTask, executeItemReparseAggregationsTask } from "@/lib/items/service";
 
 export async function executeTaskRun(taskRun: BackgroundTaskRun) {
   switch (taskRun.kind) {
@@ -27,6 +27,9 @@ export async function executeTaskRun(taskRun: BackgroundTaskRun) {
       return;
     case "item_cleanup":
       await executeItemCleanupTask(taskRun);
+      return;
+    case "item_reparse_aggregations":
+      await executeItemReparseAggregationsTask(taskRun);
       return;
   }
 }

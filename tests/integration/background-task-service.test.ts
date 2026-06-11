@@ -495,6 +495,12 @@ describe("background task persistence", () => {
         estimated: 2,
       },
       {
+        key: "item_aggregation",
+        label: "聚合拆条",
+        actual: 0,
+        estimated: 0,
+      },
+      {
         key: "cluster_match",
         label: "聚合匹配",
         actual: 2,

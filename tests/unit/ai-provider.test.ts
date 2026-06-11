@@ -508,8 +508,8 @@ describe("ai provider", () => {
       sourceName: "Example Feed",
     });
 
-    expect(summary).toBe(body);
-    expect(summary).not.toMatch(/\.\.\.$/);
+    expect(summary).toEqual({summary: body, isAggregation: false});
+    expect(summary.summary).not.toMatch(/\.\.\.$/);
   });
 
   it("keeps empty item summary response fallback text untruncated", async () => {
@@ -544,8 +544,8 @@ describe("ai provider", () => {
       sourceName: "Example Feed",
     });
 
-    expect(summary).toBe(body);
-    expect(summary).not.toMatch(/\.\.\.$/);
+    expect(summary).toEqual({summary: body, isAggregation: false});
+    expect(summary.summary).not.toMatch(/\.\.\.$/);
   });
 
   it("retries item summaries with an explicit Chinese-only instruction when the first output is English", async () => {
@@ -590,7 +590,7 @@ describe("ai provider", () => {
       sourceName: "The New Stack",
     });
 
-    expect(summary).toBe("SAS 强调 AI 只是服务企业客户的工具。");
+    expect(summary).toEqual({summary: "SAS 强调 AI 只是服务企业客户的工具。", isAggregation: false});
     expect(create).toHaveBeenCalledTimes(2);
     expect(create.mock.calls[1]?.[0]?.messages?.[1]?.content).toContain("上一次输出不是中文摘要");
   });
@@ -729,11 +729,11 @@ describe("ai provider", () => {
       sourceName: "Example Feed",
     });
 
-    expect(summary).toBe("条目摘要结果");
+    expect(summary).toEqual({summary: "条目摘要结果", isAggregation: false});
     expect(create).toHaveBeenCalledTimes(1);
-    expect(create.mock.calls[0]?.[0]?.messages?.[0]?.content).toContain("新闻摘要助手");
-    expect(create.mock.calls[0]?.[0]?.messages?.[0]?.content).toContain("只输出摘要正文");
-    expect(create.mock.calls[0]?.[0]?.response_format).toBeUndefined();
+    expect(create.mock.calls[0]?.[0]?.messages?.[0]?.content).toContain("单条新闻内容助手");
+    expect(create.mock.calls[0]?.[0]?.messages?.[0]?.content).toContain("isAggregation");
+    expect(create.mock.calls[0]?.[0]?.response_format).toEqual({type: "json_object"});
   });
 
   it("circuit-breaks failing non-default model api configs and falls back to the default model", async () => {
@@ -746,7 +746,7 @@ describe("ai provider", () => {
         choices: [
           {
             message: {
-              content: "默认模型摘要",
+              content: "默认模型摘要",  // still string content from mock — provider parses it
             },
           },
         ],
@@ -780,8 +780,8 @@ describe("ai provider", () => {
 
     await expect(provider.summarizeItem("正文 1", { title: "标题 1" })).rejects.toThrow(/upstream failed/i);
     await expect(provider.summarizeItem("正文 2", { title: "标题 2" })).rejects.toThrow(/upstream failed/i);
-    await expect(provider.summarizeItem("正文 3", { title: "标题 3" })).resolves.toBe("默认模型摘要");
-    await expect(provider.summarizeItem("正文 4", { title: "标题 4" })).resolves.toBe("默认模型摘要");
+    await expect(provider.summarizeItem("正文 3", { title: "标题 3" })).resolves.toEqual({summary: "默认模型摘要", isAggregation: false});
+    await expect(provider.summarizeItem("正文 4", { title: "标题 4" })).resolves.toEqual({summary: "默认模型摘要", isAggregation: false});
 
     expect(create.mock.calls.map((call) => call[0]?.model)).toEqual([
       "custom-model",

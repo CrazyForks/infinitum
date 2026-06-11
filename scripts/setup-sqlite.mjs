@@ -304,6 +304,47 @@ function applyIncrementalMigrations() {
     });
   }
 
+  if (!columnExists("sources", "aggregationDetectionEnabled")) {
+    runSqlite([dbPath], {
+      input: `ALTER TABLE "sources" ADD COLUMN "aggregationDetectionEnabled" BOOLEAN NOT NULL DEFAULT false;\n`,
+    });
+  }
+
+  if (!columnExists("items", "isAggregation")) {
+    runSqlite([dbPath], {
+      input: `ALTER TABLE "items" ADD COLUMN "isAggregation" BOOLEAN NOT NULL DEFAULT false;\n`,
+    });
+  }
+
+  if (!ftsTableExists("item_parsed_events")) {
+    runSqlite([dbPath], {
+      input: [
+        `CREATE TABLE IF NOT EXISTS "item_parsed_events" (`,
+        `  "id" TEXT NOT NULL PRIMARY KEY,`,
+        `  "itemId" TEXT NOT NULL,`,
+        `  "eventIndex" INTEGER NOT NULL,`,
+        `  "eventType" TEXT,`,
+        `  "eventSubject" TEXT,`,
+        `  "eventAction" TEXT,`,
+        `  "eventObject" TEXT,`,
+        `  "eventDate" TEXT,`,
+        `  "oneLiner" TEXT NOT NULL,`,
+        `  "qualityScore" INTEGER NOT NULL DEFAULT 50,`,
+        `  "clusterId" TEXT,`,
+        `  "fingerprint" TEXT NOT NULL,`,
+        `  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,`,
+        `  "updatedAt" DATETIME NOT NULL,`,
+        `  FOREIGN KEY ("itemId") REFERENCES "items"("id") ON DELETE CASCADE ON UPDATE CASCADE,`,
+        `  FOREIGN KEY ("clusterId") REFERENCES "content_clusters"("id") ON DELETE SET NULL ON UPDATE CASCADE`,
+        `);`,
+        `CREATE UNIQUE INDEX IF NOT EXISTS "item_parsed_events_fingerprint_key" ON "item_parsed_events"("fingerprint");`,
+        `CREATE INDEX IF NOT EXISTS "item_parsed_events_itemId_eventIndex_idx" ON "item_parsed_events"("itemId", "eventIndex");`,
+        `CREATE INDEX IF NOT EXISTS "item_parsed_events_clusterId_createdAt_idx" ON "item_parsed_events"("clusterId", "createdAt");`,
+        `CREATE INDEX IF NOT EXISTS "item_parsed_events_eventType_eventDate_idx" ON "item_parsed_events"("eventType", "eventDate");`,
+      ].join("\n"),
+    });
+  }
+
   runSqlite([dbPath], {
     input: [
       `CREATE INDEX IF NOT EXISTS "daily_report_sources_dailyReportId_sourceNumber_idx" ON "daily_report_sources"("dailyReportId", "sourceNumber");`,

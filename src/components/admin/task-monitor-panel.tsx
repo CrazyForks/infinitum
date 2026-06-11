@@ -57,6 +57,7 @@ const kindLabels: Record<TaskRunSnapshot["kind"], string> = {
   cluster_regenerate_summary: "聚合摘要重生成",
   daily_report_generate: "AI 日报生成",
   item_cleanup: "文章自动清理",
+  item_reparse_aggregations: "聚合内容重拆",
 };
 
 const kindOptions: Array<{ value: TaskKindFilter; label: string }> = [

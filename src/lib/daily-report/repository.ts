@@ -85,77 +85,175 @@ async function getDailyReportCacheVersion(isAdmin: boolean) {
 export async function listDailyReportCandidates(date: string, limit = 120, groupIdsInput: string[] = []) {
   const { start, end } = getDailyReportDateRange(date);
   const groupIds = [...new Set(groupIdsInput.filter(Boolean))];
-  const rows = await prisma.item.findMany({
-    take: getDailyReportCandidatePoolLimit(limit),
-    where: {
-      createdAt: {
-        gte: start,
-        lt: end,
+  const poolLimit = getDailyReportCandidatePoolLimit(limit);
+  const sourceFilter = {
+    source: {
+      is: {
+        enabled: true,
+        ...(groupIds.length > 0 ? { groupId: { in: groupIds } } : {}),
       },
-      status: "processed",
-      moderationStatus: {
-        in: [...DISPLAYABLE_MODERATION_STATUSES],
-      },
-      source: {
-        is: {
-          enabled: true,
-          ...(groupIds.length > 0 ? { groupId: { in: groupIds } } : {}),
-        },
-      },
-      AND: [
-        {
-          OR: [
-            { clusterId: null },
-            {
-              cluster: {
-                is: {
-                  status: "active",
+    },
+  };
+
+  const [itemRows, parsedEventRows] = await Promise.all([
+    prisma.item.findMany({
+      take: poolLimit,
+      where: {
+        createdAt: { gte: start, lt: end },
+        status: "processed",
+        moderationStatus: { in: [...DISPLAYABLE_MODERATION_STATUSES] },
+        ...sourceFilter,
+        AND: [
+          {
+            OR: [
+              { clusterId: null },
+              {
+                cluster: {
+                  is: { status: "active" },
                 },
               },
-            },
-          ],
-        },
-      ],
-    },
-    select: {
-      id: true,
-      clusterId: true,
-      originalTitle: true,
-      translatedTitle: true,
-      originalUrl: true,
-      summaryText: true,
-      rssExcerpt: true,
-      fullText: true,
-      rssContent: true,
-      qualityScore: true,
-      createdAt: true,
-      publishedAt: true,
-      eventType: true,
-      eventSubject: true,
-      eventAction: true,
-      eventObject: true,
-      eventDate: true,
-      source: {
-        select: {
-          id: true,
-          name: true,
+            ],
+          },
+        ],
+      },
+      select: {
+        id: true,
+        clusterId: true,
+        originalTitle: true,
+        translatedTitle: true,
+        originalUrl: true,
+        summaryText: true,
+        rssExcerpt: true,
+        fullText: true,
+        rssContent: true,
+        qualityScore: true,
+        createdAt: true,
+        publishedAt: true,
+        eventType: true,
+        eventSubject: true,
+        eventAction: true,
+        eventObject: true,
+        eventDate: true,
+        source: { select: { id: true, name: true } },
+        cluster: {
+          select: {
+            id: true,
+            title: true,
+            summary: true,
+            eventType: true,
+            eventSubject: true,
+            eventAction: true,
+            eventObject: true,
+            eventDate: true,
+          },
         },
       },
-      cluster: {
-        select: {
-          id: true,
-          title: true,
-          summary: true,
-          eventType: true,
-          eventSubject: true,
-          eventAction: true,
-          eventObject: true,
-          eventDate: true,
+      orderBy: [{ qualityScore: "desc" }, { createdAt: "desc" }],
+    }),
+    prisma.itemParsedEvent.findMany({
+      take: poolLimit,
+      where: {
+        item: {
+          createdAt: { gte: start, lt: end },
+          status: "processed",
+          moderationStatus: { in: [...DISPLAYABLE_MODERATION_STATUSES] },
+          isAggregation: true,
+          ...sourceFilter,
+        },
+        OR: [
+          { clusterId: null },
+          { cluster: { is: { status: "active" } } },
+        ],
+      },
+      select: {
+        id: true,
+        clusterId: true,
+        eventIndex: true,
+        oneLiner: true,
+        qualityScore: true,
+        createdAt: true,
+        eventType: true,
+        eventSubject: true,
+        eventAction: true,
+        eventObject: true,
+        eventDate: true,
+        item: {
+          select: {
+            id: true,
+            originalUrl: true,
+            originalTitle: true,
+            translatedTitle: true,
+            publishedAt: true,
+            summaryText: true,
+            rssExcerpt: true,
+            fullText: true,
+            rssContent: true,
+            source: { select: { id: true, name: true } },
+          },
+        },
+        cluster: {
+          select: {
+            id: true,
+            title: true,
+            summary: true,
+            eventType: true,
+            eventSubject: true,
+            eventAction: true,
+            eventObject: true,
+            eventDate: true,
+          },
         },
       },
-    },
-    orderBy: [{ qualityScore: "desc" }, { createdAt: "desc" }],
-  });
+      orderBy: [{ qualityScore: "desc" }, { createdAt: "desc" }],
+    }),
+  ]);
+
+  const rows = [
+    ...itemRows.map((item) => ({
+      kind: "item" as const,
+      id: item.id,
+      clusterId: item.clusterId,
+      originalTitle: item.originalTitle,
+      translatedTitle: item.translatedTitle,
+      originalUrl: item.originalUrl,
+      summaryText: item.summaryText,
+      rssExcerpt: item.rssExcerpt,
+      fullText: item.fullText,
+      rssContent: item.rssContent,
+      qualityScore: item.qualityScore,
+      createdAt: item.createdAt,
+      publishedAt: item.publishedAt,
+      eventType: item.eventType,
+      eventSubject: item.eventSubject,
+      eventAction: item.eventAction,
+      eventObject: item.eventObject,
+      eventDate: item.eventDate,
+      source: item.source,
+      cluster: item.cluster,
+    })),
+    ...parsedEventRows.map((parsed) => ({
+      kind: "parsedEvent" as const,
+      id: `parsed:${parsed.id}`,
+      clusterId: parsed.clusterId,
+      originalTitle: parsed.oneLiner || parsed.item.originalTitle,
+      translatedTitle: null,
+      originalUrl: parsed.item.originalUrl,
+      summaryText: parsed.oneLiner,
+      rssExcerpt: null,
+      fullText: null,
+      rssContent: null,
+      qualityScore: parsed.qualityScore,
+      createdAt: parsed.createdAt,
+      publishedAt: parsed.item.publishedAt,
+      eventType: parsed.eventType,
+      eventSubject: parsed.eventSubject,
+      eventAction: parsed.eventAction,
+      eventObject: parsed.eventObject,
+      eventDate: parsed.eventDate,
+      source: parsed.item.source,
+      cluster: parsed.cluster,
+    })),
+  ];
 
   const grouped = new Map<string, {
     representative: (typeof rows)[number];

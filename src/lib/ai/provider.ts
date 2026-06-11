@@ -18,6 +18,8 @@ import {
   DEFAULT_DAILY_REPORT_REFINEMENT_GENERATE_PROMPT,
   DEFAULT_DAILY_REPORT_REFINEMENT_GENERATE_USER_PROMPT_TEMPLATE,
   DEFAULT_DAILY_REPORT_USER_PROMPT_TEMPLATE,
+  DEFAULT_ITEM_AGGREGATION_ANALYSIS_PROMPT,
+  DEFAULT_ITEM_AGGREGATION_USER_PROMPT_TEMPLATE,
   DEFAULT_ITEM_ANALYSIS_PROMPT,
   DEFAULT_ITEM_ANALYSIS_USER_PROMPT_TEMPLATE,
   DEFAULT_ITEM_SUMMARY_PROMPT,
@@ -57,6 +59,29 @@ export type AiEnrichment = {
   eventSignature: AiEventSignature;
 };
 
+export type ItemSummaryResult = {
+  summary: string;
+  isAggregation: boolean;
+};
+
+export type ParsedEventSignature = {
+  eventType: string | null;
+  eventSubject: string | null;
+  eventAction: string | null;
+  eventObject: string | null;
+  eventDate: string | null;
+};
+
+export type ParsedEvent = ParsedEventSignature & {
+  oneLiner: string;
+  qualityScore: number;
+};
+
+export type ParsedAggregation = {
+  mainEvent: ParsedEventSignature | null;
+  events: ParsedEvent[];
+};
+
 type ParsedEnrichmentResult =
   | {
       ok: true;
@@ -71,7 +96,8 @@ type ParsedEnrichmentResult =
 export type MergeGroup = string[];
 
 export type AiProvider = {
-  summarizeItem(inputText: string, metadata: { title: string; sourceName?: string }): Promise<string>;
+  summarizeItem(inputText: string, metadata: { title: string; sourceName?: string }): Promise<ItemSummaryResult>;
+  parseAggregation(inputText: string, metadata: { title: string; sourceName?: string }): Promise<ParsedAggregation>;
   enrichContent(
     inputText: string,
     metadata: { title: string; sourceName?: string; translateTitle: boolean },
@@ -140,6 +166,7 @@ type PromptRuntimeConfig = {
 type PromptOverrides = {
   itemSummary?: PromptRuntimeConfig;
   itemAnalysis?: PromptRuntimeConfig;
+  itemAggregation?: PromptRuntimeConfig;
   clusterSummary?: PromptRuntimeConfig;
   clusterMatch?: PromptRuntimeConfig;
   clusterMerge?: PromptRuntimeConfig;
@@ -261,17 +288,122 @@ function getFallbackEnrichment(
   };
 }
 
-function getFallbackSummary(inputText: string): string {
-  return inputText.trim();
+function getFallbackSummary(inputText: string): ItemSummaryResult {
+  return { summary: inputText.trim(), isAggregation: false };
+}
+
+function getFallbackAggregation(): ParsedAggregation {
+  return { mainEvent: null, events: [] };
 }
 
 function stripCodeFence(value: string): string {
   return value.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
 }
 
+function parseSummaryAndClassification(rawContent: string, fallback: ItemSummaryResult): ItemSummaryResult {
+  const normalized = stripCodeFence(rawContent);
+
+  if (!normalized) {
+    return fallback;
+  }
+
+  try {
+    const parsed = JSON.parse(normalized) as { summary?: string; isAggregation?: boolean };
+    const summary = typeof parsed.summary === "string" ? parsed.summary.trim() : "";
+    const isAggregation = parsed.isAggregation === true;
+
+    if (summary) {
+      return { summary, isAggregation };
+    }
+  } catch {
+    // Fall through to tolerant parsing below.
+  }
+
+  // Tolerant fallback: treat the whole output as the summary, mark non-aggregation.
+  return { summary: normalized, isAggregation: fallback.isAggregation };
+}
+
 function parseSummaryOutput(rawContent: string, fallback: string): string {
   const normalized = stripCodeFence(rawContent);
   return normalized || fallback;
+}
+
+function parseAggregationOutput(rawContent: string, fallback: ParsedAggregation): ParsedAggregation {
+  const normalized = stripCodeFence(rawContent);
+
+  if (!normalized) {
+    return fallback;
+  }
+
+  try {
+    const parsed = JSON.parse(normalized) as {
+      mainEvent?: Partial<ParsedEventSignature> | null;
+      events?: Array<Partial<ParsedEvent>>;
+    };
+
+    const events = Array.isArray(parsed.events)
+      ? parsed.events
+          .map((event) => normalizeParsedEvent(event))
+          .filter((event): event is ParsedEvent => event !== null)
+      : [];
+
+    const mainEvent = normalizeParsedEventSignature(parsed.mainEvent);
+
+    return { mainEvent, events };
+  } catch {
+    return fallback;
+  }
+}
+
+function normalizeParsedEventSignature(
+  raw: Partial<ParsedEventSignature> | null | undefined,
+): ParsedEventSignature | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+
+  return {
+    eventType: normalizeEventType(raw.eventType ?? null),
+    eventSubject: typeof raw.eventSubject === "string" ? raw.eventSubject.trim() || null : null,
+    eventAction: typeof raw.eventAction === "string" ? raw.eventAction.trim() || null : null,
+    eventObject: typeof raw.eventObject === "string" ? raw.eventObject.trim() || null : null,
+    eventDate: normalizeEventDate(raw.eventDate ?? null),
+  };
+}
+
+function normalizeParsedEvent(raw: Partial<ParsedEvent>): ParsedEvent | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+
+  const signature = normalizeParsedEventSignature(raw);
+  const oneLiner = typeof raw.oneLiner === "string" ? raw.oneLiner.trim() : "";
+
+  if (!oneLiner) {
+    return null;
+  }
+
+  if (!signature) {
+    return {
+      eventType: null,
+      eventSubject: null,
+      eventAction: null,
+      eventObject: null,
+      eventDate: null,
+      oneLiner,
+      qualityScore: normalizeScore(raw.qualityScore, 50),
+    };
+  }
+
+  return {
+    eventType: signature.eventType,
+    eventSubject: signature.eventSubject,
+    eventAction: signature.eventAction,
+    eventObject: signature.eventObject,
+    eventDate: signature.eventDate,
+    oneLiner,
+    qualityScore: normalizeScore(raw.qualityScore, 50),
+  };
 }
 
 function buildChineseSummaryRetryPrompt(userContent: string) {
@@ -829,6 +961,11 @@ export function createAiProvider(
     DEFAULT_ITEM_ANALYSIS_USER_PROMPT_TEMPLATE,
     promptOverrides?.itemAnalysis,
   );
+  const itemAggregationConfig = resolvePromptConfig(
+    DEFAULT_ITEM_AGGREGATION_ANALYSIS_PROMPT,
+    DEFAULT_ITEM_AGGREGATION_USER_PROMPT_TEMPLATE,
+    promptOverrides?.itemAggregation,
+  );
   const clusterSummaryConfig = resolvePromptConfig(
     DEFAULT_CLUSTER_SUMMARY_PROMPT,
     DEFAULT_CLUSTER_SUMMARY_USER_PROMPT_TEMPLATE,
@@ -935,28 +1072,55 @@ export function createAiProvider(
       const output = await completeTextWithCircuitBreaker(
         itemSummaryConfig,
         userContent,
+        {
+          responseFormat: { type: "json_object" },
+        },
       );
 
       if (output == null) {
         return fallback;
       }
 
-      const summary = parseSummaryOutput(output, fallback);
+      const result = parseSummaryAndClassification(output, fallback);
 
-      if (!shouldRegenerateChineseSummary(summary)) {
-        return summary;
+      if (!shouldRegenerateChineseSummary(result.summary)) {
+        return result;
       }
 
       const retryOutput = await completeTextWithCircuitBreaker(
         itemSummaryConfig,
         buildChineseSummaryRetryPrompt(userContent),
+        {
+          responseFormat: { type: "json_object" },
+        },
       );
 
       if (retryOutput == null) {
-        return summary;
+        return result;
       }
 
-      return parseSummaryOutput(retryOutput, summary);
+      return parseSummaryAndClassification(retryOutput, result);
+    },
+    async parseAggregation(inputText, metadata) {
+      const fallback = getFallbackAggregation();
+      const userContent = renderPromptTemplate(itemAggregationConfig.promptTemplate, {
+        title: metadata.title,
+        sourceName: metadata.sourceName ?? "未知来源",
+        inputText,
+      });
+      const output = await completeTextWithCircuitBreaker(
+        itemAggregationConfig,
+        userContent,
+        {
+          responseFormat: { type: "json_object" },
+        },
+      );
+
+      if (output == null) {
+        return fallback;
+      }
+
+      return parseAggregationOutput(output, fallback);
     },
     async enrichContent(inputText, metadata) {
       const fallback = getFallbackEnrichment(metadata);
@@ -1010,7 +1174,7 @@ export function createAiProvider(
       throw new Error(`Invalid AI enrichment response after retry. ${lastFailureReason}`);
     },
     async summarizeCluster(inputText, metadata) {
-      const fallback = getFallbackSummary(inputText);
+      const fallback = inputText.trim();
       const userContent = renderPromptTemplate(clusterSummaryConfig.promptTemplate, {
         title: metadata.title,
         inputText,

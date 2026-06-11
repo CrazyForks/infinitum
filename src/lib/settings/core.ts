@@ -103,6 +103,7 @@ type ParsedOpmlSource = {
   enabled: boolean | null;
   aiParsingEnabled: boolean | null;
   aggregationEnabled: boolean | null;
+  aggregationDetectionEnabled: boolean | null;
 };
 
 function parseOptionalBoolean(value: string | null): boolean | null {
@@ -208,6 +209,9 @@ export function parseOpmlSources(opmlText: string): ParsedOpmlSource[] {
           aggregationEnabled: parseOptionalBoolean(
             node.getAttribute("infinitum:aggregationEnabled") ?? node.getAttribute("aggregationEnabled"),
           ),
+          aggregationDetectionEnabled: parseOptionalBoolean(
+            node.getAttribute("infinitum:aggregationDetectionEnabled") ?? node.getAttribute("aggregationDetectionEnabled"),
+          ),
         });
         continue;
       }
@@ -242,6 +246,7 @@ export function toSourceConfig(source: {
   enabled: boolean;
   aiParsingEnabled: boolean;
   aggregationEnabled?: boolean;
+  aggregationDetectionEnabled?: boolean;
 }): SourceConfig {
   return {
     name: source.name,
@@ -250,6 +255,7 @@ export function toSourceConfig(source: {
     enabled: source.enabled,
     aiParsingEnabled: source.aiParsingEnabled,
     aggregationEnabled: source.aggregationEnabled,
+    aggregationDetectionEnabled: source.aggregationDetectionEnabled,
   };
 }
 
@@ -732,6 +738,7 @@ async function ensureModelAndPromptConfigsSeeded() {
           enabled: source.enabled,
           aiParsingEnabled: source.aiParsingEnabled,
           aggregationEnabled: source.aggregationEnabled ?? true,
+          aggregationDetectionEnabled: source.aggregationDetectionEnabled ?? false,
         })),
       });
     }

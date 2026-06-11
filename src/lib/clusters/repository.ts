@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { Prisma } from "@prisma/client";
 
 export type ClusterAssignmentCandidate = {
   id: string;
@@ -202,5 +203,78 @@ export async function updateClusterStatus(clusterId: string, status: "active" | 
   return prisma.contentCluster.update({
     where: { id: clusterId },
     data: { status },
+  });
+}
+
+
+export async function setParsedEventCluster(parsedEventId: string, clusterId: string | null) {
+  return prisma.itemParsedEvent.update({
+    where: { id: parsedEventId },
+    data: {
+      clusterId,
+    },
+  });
+}
+
+export async function createParsedEvents(
+  events: Array<{
+    itemId: string;
+    eventIndex: number;
+    eventType?: string | null;
+    eventSubject?: string | null;
+    eventAction?: string | null;
+    eventObject?: string | null;
+    eventDate?: string | null;
+    oneLiner: string;
+    qualityScore: number;
+    fingerprint: string;
+  }>,
+) {
+  if (events.length === 0) {
+    return [];
+  }
+  return prisma.$transaction(
+    events.map((event) =>
+      prisma.itemParsedEvent.create({
+            data: {
+              itemId: event.itemId,
+              eventIndex: event.eventIndex,
+              eventType: event.eventType ?? null,
+              eventSubject: event.eventSubject ?? null,
+              eventAction: event.eventAction ?? null,
+              eventObject: event.eventObject ?? null,
+              eventDate: event.eventDate ?? null,
+              oneLiner: event.oneLiner,
+              qualityScore: event.qualityScore,
+              fingerprint: event.fingerprint,
+            },
+          }).catch(async (error) => {
+            if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+              // Fingerprint collision with an existing parsed event (cross-item
+              // dedupe). Refresh cached fields but keep the existing clusterId.
+              return prisma.itemParsedEvent.update({
+                where: { fingerprint: event.fingerprint },
+                data: {
+                  itemId: event.itemId,
+                  eventIndex: event.eventIndex,
+                  eventType: event.eventType ?? null,
+                  eventSubject: event.eventSubject ?? null,
+                  eventAction: event.eventAction ?? null,
+                  eventObject: event.eventObject ?? null,
+                  eventDate: event.eventDate ?? null,
+                  oneLiner: event.oneLiner,
+                  qualityScore: event.qualityScore,
+                },
+              });
+            }
+            throw error;
+          }),
+    ),
+  );
+}
+
+export async function deleteParsedEventsForItem(itemId: string) {
+  return prisma.itemParsedEvent.deleteMany({
+    where: { itemId },
   });
 }

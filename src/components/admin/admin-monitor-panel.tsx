@@ -59,6 +59,7 @@ const taskKindLabels = {
   item_regenerate_summary: "摘要重生成",
   item_regenerate_translation: "译文重生成",
   item_cleanup: "文章自动清理",
+  item_reparse_aggregations: "聚合内容重拆",
 } as const;
 
 const surfaceCardClassName =

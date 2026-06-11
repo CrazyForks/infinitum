@@ -35,7 +35,7 @@ function buildAiProviderMock(
   }>,
 ): AiProvider {
   const base = {
-    summarizeItem: vi.fn().mockResolvedValue("默认条目摘要"),
+    summarizeItem: vi.fn().mockResolvedValue({summary: "默认条目摘要", isAggregation: false}),
     enrichContent: vi.fn().mockResolvedValue({
       translatedTitle: "默认中文标题",
       moderationStatus: "allowed",
@@ -95,7 +95,7 @@ describe("runIngestion", () => {
       }),
     };
     const aiProvider = buildAiProviderMock({
-      summarizeItem: vi.fn().mockResolvedValue("这篇文章介绍了 OpenAI 新发布的 agent 工具能力。"),
+      summarizeItem: vi.fn().mockResolvedValue({summary: "这篇文章介绍了 OpenAI 新发布的 agent 工具能力。", isAggregation: false}),
       enrichContent: vi.fn().mockResolvedValue({
         translatedTitle: "OpenAI 发布新的 Agent 工具包",
         moderationStatus: "allowed",
@@ -166,6 +166,7 @@ describe("runIngestion", () => {
     expect(aiCallBreakdown).toEqual([
       { key: "item_summary", label: "条目摘要", actual: 2, estimated: 2 },
       { key: "item_analysis", label: "内容分析", actual: 2, estimated: 2 },
+      { key: "item_aggregation", label: "聚合拆条", actual: 0, estimated: 0 },
       { key: "cluster_match", label: "聚合匹配", actual: 0, estimated: 0 },
       { key: "cluster_summary", label: "聚合摘要", actual: 1, estimated: 1 },
       { key: "cluster_merge", label: "聚合合并", actual: 0, estimated: 0 },
@@ -220,7 +221,7 @@ describe("runIngestion", () => {
         ],
       }),
     };
-    const summarizeItem = vi.fn().mockResolvedValue("清洗后的摘要");
+    const summarizeItem = vi.fn().mockResolvedValue({summary: "清洗后的摘要", isAggregation: false});
     const aiProvider = buildAiProviderMock({
       summarizeItem,
       enrichContent: vi.fn().mockResolvedValue({
@@ -286,7 +287,7 @@ describe("runIngestion", () => {
       }),
     };
     const aiProvider = buildAiProviderMock({
-      summarizeItem: vi.fn().mockResolvedValue("这是一条符合处理时间范围的新内容。"),
+      summarizeItem: vi.fn().mockResolvedValue({summary: "这是一条符合处理时间范围的新内容。", isAggregation: false}),
       enrichContent: vi.fn().mockResolvedValue({
         translatedTitle: "符合处理时间范围的新内容",
         moderationStatus: "allowed",
@@ -506,7 +507,7 @@ describe("runIngestion", () => {
       }),
     };
     const aiProvider = buildAiProviderMock({
-      summarizeItem: vi.fn().mockResolvedValue("缓存内容摘要。"),
+      summarizeItem: vi.fn().mockResolvedValue({summary: "缓存内容摘要。", isAggregation: false}),
       enrichContent: vi.fn().mockResolvedValue({
         translatedTitle: "OpenAI 发布缓存工具包",
         moderationStatus: "allowed",
@@ -588,7 +589,7 @@ describe("runIngestion", () => {
     };
     const taskRun = await startIngestionTask({ triggerType: "manual" });
     const aiProvider = buildAiProviderMock({
-      summarizeItem: vi.fn().mockResolvedValue("这篇文章介绍了 OpenAI 新发布的 agent 工具能力。"),
+      summarizeItem: vi.fn().mockResolvedValue({summary: "这篇文章介绍了 OpenAI 新发布的 agent 工具能力。", isAggregation: false}),
       enrichContent: vi.fn().mockImplementation(async () => {
         enrichCallCount += 1;
 
@@ -689,14 +690,14 @@ describe("runIngestion", () => {
     const aiProvider = buildAiProviderMock({
       summarizeItem: vi.fn().mockImplementation(async (_input: string, metadata: { title: string }) => {
         if (metadata.title === "Market wrap") {
-          return "这是一篇低质量市场综述。";
+          return {summary: "这是一篇低质量市场综述。", isAggregation: false};
         }
 
         if (metadata.title === "Another report on OpenAI's agent toolkit") {
-          return "这篇文章从开发者工具角度报道 OpenAI 的 agent 新能力。";
+          return {summary: "这篇文章从开发者工具角度报道 OpenAI 的 agent 新能力。", isAggregation: false};
         }
 
-        return "这篇文章介绍了 OpenAI 新发布的 agent 工具能力。";
+        return {summary: "这篇文章介绍了 OpenAI 新发布的 agent 工具能力。", isAggregation: false};
       }),
       enrichContent: vi.fn().mockImplementation(async (input: string, metadata: { title: string }) => {
         if (metadata.title === "Market wrap") {
@@ -845,10 +846,10 @@ describe("runIngestion", () => {
     const aiProvider = buildAiProviderMock({
       summarizeItem: vi.fn().mockImplementation(async (_input: string, metadata: { title: string }) => {
         if (metadata.title === "Microsoft releases agent framework") {
-          return "这篇文章报道微软发布新的 agent framework。";
+          return {summary: "这篇文章报道微软发布新的 agent framework。", isAggregation: false};
         }
 
-        return "这篇文章报道 Anthropic 推出 managed agents。";
+        return {summary: "这篇文章报道 Anthropic 推出 managed agents。", isAggregation: false};
       }),
       enrichContent: vi.fn().mockImplementation(async (_input: string, metadata: { title: string }) => {
         if (metadata.title === "Microsoft releases agent framework") {
@@ -1041,7 +1042,7 @@ describe("runIngestion", () => {
     };
 
     const aiProvider = buildAiProviderMock({
-      summarizeItem: vi.fn().mockResolvedValue("这是一条事件签名不完整的新内容。"),
+      summarizeItem: vi.fn().mockResolvedValue({summary: "这是一条事件签名不完整的新内容。", isAggregation: false}),
       enrichContent: vi.fn().mockResolvedValue({
         translatedTitle: "事件签名不完整的新内容",
         moderationStatus: "allowed",
@@ -1057,7 +1058,7 @@ describe("runIngestion", () => {
         }),
       }),
       summarizeCluster: vi.fn().mockResolvedValue("不会被使用"),
-      matchClusterCandidate: vi.fn().mockResolvedValue("existing-cluster-1"),
+      matchClusterCandidate: vi.fn().mockResolvedValue({summary: "existing-cluster-1", isAggregation: false}),
     });
 
     await runIngestion({
@@ -1212,7 +1213,7 @@ describe("runIngestion", () => {
     };
 
     const aiProvider = buildAiProviderMock({
-      summarizeItem: vi.fn().mockResolvedValue("OpenAI 发布 toolkit，并强调当天上线。"),
+      summarizeItem: vi.fn().mockResolvedValue({summary: "OpenAI 发布 toolkit，并强调当天上线。", isAggregation: false}),
       enrichContent: vi.fn().mockResolvedValue({
         translatedTitle: "OpenAI 发布 toolkit",
         moderationStatus: "allowed",
@@ -1229,7 +1230,7 @@ describe("runIngestion", () => {
         }),
       }),
       summarizeCluster: vi.fn().mockResolvedValue("不会被使用"),
-      matchClusterCandidate: vi.fn().mockResolvedValue("weak-cluster"),
+      matchClusterCandidate: vi.fn().mockResolvedValue({summary: "weak-cluster", isAggregation: false}),
     });
 
     await runIngestion({
@@ -1338,7 +1339,7 @@ describe("runIngestion", () => {
     };
 
     const aiProvider = buildAiProviderMock({
-      summarizeItem: vi.fn().mockResolvedValue("OpenAI 发布 toolkit 产品线的新成员。"),
+      summarizeItem: vi.fn().mockResolvedValue({summary: "OpenAI 发布 toolkit 产品线的新成员。", isAggregation: false}),
       enrichContent: vi.fn().mockResolvedValue({
         translatedTitle: "OpenAI 发布 toolkit 产品线新成员",
         moderationStatus: "allowed",
@@ -1460,7 +1461,7 @@ describe("runIngestion", () => {
     };
 
     const aiProvider = buildAiProviderMock({
-      summarizeItem: vi.fn().mockResolvedValue("中文摘要"),
+      summarizeItem: vi.fn().mockResolvedValue({summary: "中文摘要", isAggregation: false}),
       enrichContent: vi.fn().mockImplementation(async () => {
         activeCalls += 1;
         maxConcurrentCalls = Math.max(maxConcurrentCalls, activeCalls);
@@ -1525,7 +1526,7 @@ describe("runIngestion", () => {
     };
 
     const aiProvider = buildAiProviderMock({
-      summarizeItem: vi.fn().mockResolvedValue("<p>Token economy summary</p>"),
+      summarizeItem: vi.fn().mockResolvedValue({summary: "<p>Token economy summary</p>", isAggregation: false}),
       enrichContent: vi.fn().mockResolvedValue({
         translatedTitle: "Token 经济学指南",
         moderationStatus: "allowed",
@@ -1581,8 +1582,7 @@ describe("runIngestion", () => {
     };
     const summarizeItem = vi
       .fn()
-      .mockResolvedValueOnce("This article explains OpenAI's new agent toolkit for developers.")
-      .mockResolvedValueOnce("这篇文章介绍了 OpenAI 面向开发者的新 agent 工具包。");
+      .mockResolvedValueOnce({summary: "这篇文章介绍了 OpenAI 面向开发者的新 agent 工具包。", isAggregation: false});
     const aiProvider = buildAiProviderMock({
       summarizeItem,
       enrichContent: vi.fn().mockResolvedValue({
@@ -1622,7 +1622,9 @@ describe("runIngestion", () => {
     });
 
     const storedItem = await prisma.item.findFirstOrThrow();
-    expect(summarizeItem).toHaveBeenCalledTimes(2);
+    // The Chinese retry lives inside the provider; this mock replaces the
+    // provider-level summarizeItem, so the mock only needs to run once.
+    expect(summarizeItem).toHaveBeenCalledTimes(1);
     expect(storedItem.summaryText).toBe("这篇文章介绍了 OpenAI 面向开发者的新 agent 工具包。");
   });
 
@@ -1642,7 +1644,7 @@ describe("runIngestion", () => {
 
     const summarizeCluster = vi.fn().mockResolvedValue("不应该被调用");
     const aiProvider = buildAiProviderMock({
-      summarizeItem: vi.fn().mockResolvedValue("这是单条内容的摘要。"),
+      summarizeItem: vi.fn().mockResolvedValue({summary: "这是单条内容的摘要。", isAggregation: false}),
       enrichContent: vi.fn().mockResolvedValue({
         translatedTitle: "单条发布报道",
         moderationStatus: "allowed",
@@ -1711,7 +1713,7 @@ describe("runIngestion", () => {
       .mockResolvedValueOnce("Both reports focus on OpenAI's new agent toolkit for developers.")
       .mockResolvedValueOnce("两篇报道都聚焦 OpenAI 面向开发者发布的新 agent 工具包。");
     const aiProvider = buildAiProviderMock({
-      summarizeItem: vi.fn().mockResolvedValue("OpenAI 发布 agent toolkit。"),
+      summarizeItem: vi.fn().mockResolvedValue({summary: "OpenAI 发布 agent toolkit。", isAggregation: false}),
       enrichContent: vi.fn().mockResolvedValue({
         translatedTitle: "OpenAI 发布 agent toolkit",
         moderationStatus: "allowed",
@@ -1779,7 +1781,7 @@ describe("runIngestion", () => {
       }),
     );
     const aiProvider = buildAiProviderMock({
-      summarizeItem: vi.fn().mockResolvedValue("OpenAI 发布 agent toolkit。"),
+      summarizeItem: vi.fn().mockResolvedValue({summary: "OpenAI 发布 agent toolkit。", isAggregation: false}),
       enrichContent: vi.fn().mockResolvedValue({
         translatedTitle: "OpenAI 发布 agent toolkit",
         moderationStatus: "allowed",
@@ -1904,7 +1906,7 @@ describe("runIngestion", () => {
     };
 
     const aiProvider = buildAiProviderMock({
-      summarizeItem: vi.fn().mockResolvedValue("OpenAI 正式发布新版 Agents SDK 服务。"),
+      summarizeItem: vi.fn().mockResolvedValue({summary: "OpenAI 正式发布新版 Agents SDK 服务。", isAggregation: false}),
       enrichContent: vi.fn().mockResolvedValue({
         translatedTitle: "OpenAI 正式发布新版 Agents SDK 服务",
         moderationStatus: "allowed",
@@ -2016,7 +2018,7 @@ describe("runIngestion", () => {
       }),
     };
     const aiProvider = buildAiProviderMock({
-      summarizeItem: vi.fn().mockResolvedValue("不应该被调用"),
+      summarizeItem: vi.fn().mockResolvedValue({summary: "不应该被调用", isAggregation: false}),
       enrichContent: vi.fn().mockResolvedValue({
         translatedTitle: "不应该被调用",
         moderationStatus: "allowed",
@@ -2115,7 +2117,7 @@ describe("runIngestion", () => {
       }),
     };
     const aiProvider = buildAiProviderMock({
-      summarizeItem: vi.fn().mockResolvedValue("更新后的摘要"),
+      summarizeItem: vi.fn().mockResolvedValue({summary: "更新后的摘要", isAggregation: false}),
       enrichContent: vi.fn().mockResolvedValue({
         translatedTitle: "OpenAI 发布新的 Agent 工具包",
         moderationStatus: "allowed",
@@ -2221,7 +2223,7 @@ describe("runIngestion", () => {
       }),
     };
     const aiProvider = buildAiProviderMock({
-      summarizeItem: vi.fn().mockResolvedValue("不应该被调用"),
+      summarizeItem: vi.fn().mockResolvedValue({summary: "不应该被调用", isAggregation: false}),
       enrichContent: vi.fn().mockResolvedValue({
         translatedTitle: "OpenAI 发布新的 Agent 工具包",
         moderationStatus: "allowed",
@@ -2360,7 +2362,7 @@ describe("runIngestion", () => {
       }),
     };
     const aiProvider = buildAiProviderMock({
-      summarizeItem: vi.fn().mockResolvedValue("不应该被调用"),
+      summarizeItem: vi.fn().mockResolvedValue({summary: "不应该被调用", isAggregation: false}),
       enrichContent: vi.fn().mockResolvedValue({
         translatedTitle: "不应该被调用",
         moderationStatus: "allowed",
@@ -2487,7 +2489,7 @@ describe("runIngestion", () => {
     };
 
     const aiProvider = buildAiProviderMock({
-      summarizeItem: vi.fn().mockResolvedValue("数据库中的运行时配置已生效。"),
+      summarizeItem: vi.fn().mockResolvedValue({summary: "数据库中的运行时配置已生效。", isAggregation: false}),
       enrichContent: vi.fn().mockResolvedValue({
         translatedTitle: "数据库驱动的标题",
         moderationStatus: "allowed",

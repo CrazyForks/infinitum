@@ -100,6 +100,7 @@ export async function importSourcesFromOpml(
           enabled: source.enabled ?? true,
           aiParsingEnabled: source.aiParsingEnabled ?? true,
           aggregationEnabled: source.aggregationEnabled ?? true,
+          aggregationDetectionEnabled: source.aggregationDetectionEnabled ?? false,
         },
         create: {
           name,
@@ -109,6 +110,7 @@ export async function importSourcesFromOpml(
           enabled: source.enabled ?? true,
           aiParsingEnabled: source.aiParsingEnabled ?? true,
           aggregationEnabled: source.aggregationEnabled ?? true,
+          aggregationDetectionEnabled: source.aggregationDetectionEnabled ?? false,
         },
       });
 
@@ -240,6 +242,7 @@ export async function createSource(input: SourceInput) {
       enabled: input.enabled,
       aiParsingEnabled: input.aiParsingEnabled,
       aggregationEnabled: input.aggregationEnabled ?? true,
+      aggregationDetectionEnabled: input.aggregationDetectionEnabled ?? false,
       groupId: input.groupId ?? null,
     },
   });
@@ -263,6 +266,7 @@ export async function updateSource(id: string, input: SourceInput) {
       enabled: input.enabled,
       aiParsingEnabled: input.aiParsingEnabled,
       aggregationEnabled: input.aggregationEnabled ?? true,
+      aggregationDetectionEnabled: input.aggregationDetectionEnabled ?? false,
       groupId: input.groupId ?? null,
     },
   });

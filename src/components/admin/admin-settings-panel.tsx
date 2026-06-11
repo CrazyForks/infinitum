@@ -248,6 +248,7 @@ export function AdminSettingsPanel({
     enabled: true,
     aiParsingEnabled: true,
     aggregationEnabled: true,
+    aggregationDetectionEnabled: false,
     groupId: "",
   });
   const [taskScheduleEnabled, setTaskScheduleEnabled] = useState(
@@ -450,6 +451,7 @@ export function AdminSettingsPanel({
       enabled: true,
       aiParsingEnabled: true,
       aggregationEnabled: true,
+      aggregationDetectionEnabled: false,
       groupId: "",
     });
   };
@@ -491,6 +493,7 @@ export function AdminSettingsPanel({
             enabled: source.enabled,
             aiParsingEnabled: source.aiParsingEnabled,
             aggregationEnabled: source.aggregationEnabled,
+            aggregationDetectionEnabled: source.aggregationDetectionEnabled ?? false,
             groupId: nextGroupId,
           },
         );
@@ -525,6 +528,7 @@ export function AdminSettingsPanel({
       enabled: source.enabled,
       aiParsingEnabled: source.aiParsingEnabled ?? true,
       aggregationEnabled: source.aggregationEnabled ?? true,
+      aggregationDetectionEnabled: source.aggregationDetectionEnabled ?? false,
       groupId: source.groupId ?? "",
     });
   };
@@ -602,7 +606,7 @@ export function AdminSettingsPanel({
     }
 
     const sourceOutline = (source: AdminSource, indent = "    ") =>
-      `${indent}<outline text="${escapeXml(source.name)}" title="${escapeXml(source.name)}" type="rss" xmlUrl="${escapeXml(source.rssUrl)}" htmlUrl="${escapeXml(source.siteUrl)}" infinitum:enabled="${source.enabled ? "true" : "false"}" infinitum:aiParsingEnabled="${source.aiParsingEnabled !== false ? "true" : "false"}" infinitum:aggregationEnabled="${source.aggregationEnabled !== false ? "true" : "false"}" />`;
+      `${indent}<outline text="${escapeXml(source.name)}" title="${escapeXml(source.name)}" type="rss" xmlUrl="${escapeXml(source.rssUrl)}" htmlUrl="${escapeXml(source.siteUrl)}" infinitum:enabled="${source.enabled ? "true" : "false"}" infinitum:aiParsingEnabled="${source.aiParsingEnabled !== false ? "true" : "false"}" infinitum:aggregationEnabled="${source.aggregationEnabled !== false ? "true" : "false"}" infinitum:aggregationDetectionEnabled="${source.aggregationDetectionEnabled === true ? "true" : "false"}" />`;
     const outlines = [
       ...orderedGroups.flatMap((group) => {
         const sources = groupedSources.get(group.id) ?? [];
@@ -1570,6 +1574,20 @@ export function AdminSettingsPanel({
                     }
                   />
                   <span className="text-sm text-[var(--text-2)]">参与聚合</span>
+                </label>
+                <label className="flex flex-wrap items-center gap-2">
+                  <input
+                    checked={sourceForm.aggregationDetectionEnabled}
+                    className={checkboxInputClassName}
+                    type="checkbox"
+                    onChange={(event) =>
+                      setSourceForm((current) => ({
+                        ...current,
+                        aggregationDetectionEnabled: event.target.checked,
+                      }))
+                    }
+                  />
+                  <span className="text-sm text-[var(--text-2)]">启用聚合内容识别（拆条）</span>
                 </label>
               </div>
             </ModalShell>

@@ -11,6 +11,7 @@ const sourceSchema = z.object({
   enabled: z.boolean(),
   aiParsingEnabled: z.boolean().default(true),
   aggregationEnabled: z.boolean().default(true),
+  aggregationDetectionEnabled: z.boolean().default(false),
   groupId: z.string().nullable().optional(),
 });
 

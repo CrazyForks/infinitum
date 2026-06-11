@@ -40,7 +40,7 @@ function buildAiProviderMock(
   }>,
 ): AiProvider {
   const base = {
-    summarizeItem: vi.fn().mockResolvedValue("默认条目摘要"),
+    summarizeItem: vi.fn().mockResolvedValue({summary: "默认条目摘要", isAggregation: false}),
     enrichContent: vi.fn().mockResolvedValue({
       translatedTitle: "默认中文标题",
       moderationStatus: "allowed",
@@ -167,7 +167,7 @@ describe("regenerateItemContent", () => {
 
     const regenerated = await regenerateItemContent(item.id, "summary", {
       aiProvider: buildAiProviderMock({
-        summarizeItem: vi.fn().mockResolvedValue("新的摘要内容"),
+        summarizeItem: vi.fn().mockResolvedValue({summary: "新的摘要内容", isAggregation: false}),
         summarizeCluster: vi.fn().mockResolvedValue("聚合摘要"),
         matchClusterCandidate: vi.fn().mockResolvedValue(null),
       }),
@@ -206,8 +206,8 @@ describe("regenerateItemContent", () => {
     });
     const summarizeItem = vi
       .fn()
-      .mockResolvedValueOnce("Anthropic announced a new enterprise AI services company with financial partners.")
-      .mockResolvedValueOnce("Anthropic 与多家金融机构共同成立企业 AI 服务公司。");
+      .mockResolvedValueOnce({summary: "Anthropic announced a new enterprise AI services company with financial partners.", isAggregation: false})
+      .mockResolvedValueOnce({summary: "Anthropic 与多家金融机构共同成立企业 AI 服务公司。", isAggregation: false});
 
     const regenerated = await regenerateItemContent(item.id, "summary", {
       aiProvider: buildAiProviderMock({
@@ -290,8 +290,8 @@ describe("regenerateItemContent", () => {
     });
     const summarizeItem = vi
       .fn()
-      .mockResolvedValueOnce("SAS explains AI is just a tool for enterprise customers.")
-      .mockResolvedValueOnce("SAS still explains AI is just a tool for enterprise customers.");
+      .mockResolvedValueOnce({summary: "SAS explains AI is just a tool for enterprise customers.", isAggregation: false})
+      .mockResolvedValueOnce({summary: "SAS still explains AI is just a tool for enterprise customers.", isAggregation: false});
 
     const regenerated = await regenerateItemContent(item.id, "summary", {
       aiProvider: buildAiProviderMock({
@@ -386,7 +386,7 @@ describe("regenerateItemContent", () => {
 
     await executeItemRegenerationTask(taskRun, "summary", {
       aiProvider: buildAiProviderMock({
-        summarizeItem: vi.fn().mockResolvedValue("新的摘要内容"),
+        summarizeItem: vi.fn().mockResolvedValue({summary: "新的摘要内容", isAggregation: false}),
         summarizeCluster: vi.fn().mockResolvedValue("新的聚合摘要"),
         matchClusterCandidate: vi.fn().mockResolvedValue(null),
       }),
@@ -509,7 +509,7 @@ describe("regenerateItemContent", () => {
 
     await executeItemRegenerationTask(taskRun, "summary", {
       aiProvider: buildAiProviderMock({
-        summarizeItem: vi.fn().mockResolvedValue("新的摘要内容"),
+        summarizeItem: vi.fn().mockResolvedValue({summary: "新的摘要内容", isAggregation: false}),
         summarizeCluster: vi.fn().mockResolvedValue("新的聚合摘要"),
         matchClusterCandidate: vi.fn().mockResolvedValue(null),
       }),
@@ -602,7 +602,7 @@ describe("regenerateItemContent", () => {
 
     await executeItemReanalyzeTask(taskRun, {
       aiProvider: buildAiProviderMock({
-        summarizeItem: vi.fn().mockResolvedValue("新的重分析摘要"),
+        summarizeItem: vi.fn().mockResolvedValue({summary: "新的重分析摘要", isAggregation: false}),
         enrichContent: vi.fn().mockResolvedValue({
           translatedTitle: "另一篇 OpenAI 工具包报道",
           moderationStatus: "allowed",

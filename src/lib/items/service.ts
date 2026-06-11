@@ -1,8 +1,13 @@
 import type { BackgroundTaskRun, Item } from "@prisma/client";
 
-import { createAiProvider, type AiProvider } from "@/lib/ai/provider";
+import { createAiProvider, type AiEventSignature, type AiProvider, type ParsedAggregation } from "@/lib/ai/provider";
 import { retryChineseSummary } from "@/lib/ai/summary-language";
-import { assignItemToCluster, recomputeCluster } from "@/lib/clusters/service";
+import { invalidateDailyReportCache } from "@/lib/daily-report/cache";
+import {
+  assignItemToCluster,
+  persistParsedAggregationForItem,
+  recomputeCluster,
+} from "@/lib/clusters/service";
 import { prisma } from "@/lib/db";
 import { invalidateFeedCache } from "@/lib/feed/cache";
 import { shouldTranslateTitle, stripHtmlTags } from "@/lib/feed/presentation";
@@ -56,7 +61,10 @@ async function resolveItemSummary(
 
   return normalizeSummary(
     await retryChineseSummary(
-      (metadata) => aiProvider.summarizeItem(inputText, metadata),
+      async (metadata) => {
+        const result = await aiProvider.summarizeItem(inputText, metadata);
+        return result.summary;
+      },
       {
         title: item.originalTitle,
         sourceName: item.source.name,
@@ -509,6 +517,7 @@ export async function executeItemReanalyzeTask(
 }
 
 const CLEANUP_BATCH_SIZE = 5000;
+const REPARSE_AGGREGATIONS_BATCH_SIZE = 200;
 
 export async function executeItemCleanupTask(taskRun: BackgroundTaskRun) {
   const schedule = await ensureDefaultItemCleanupSchedule();
@@ -606,6 +615,233 @@ export async function executeItemCleanupTask(taskRun: BackgroundTaskRun) {
     progressCurrent: totalDeleted,
     progressTotal: totalDeleted,
     progressLabel: `已清理 ${totalDeleted} 篇文章，涉及 ${affectedClusterIds.length} 个聚合`,
+    finishedAt: new Date(),
+  });
+}
+
+
+function serializeParsedEventSignature(input: AiEventSignature | null | undefined): AiEventSignature | null {
+  if (!input) {
+    return null;
+  }
+  return {
+    eventType: input.eventType ?? null,
+    eventSubject: input.eventSubject ?? null,
+    eventAction: input.eventAction ?? null,
+    eventObject: input.eventObject ?? null,
+    eventDate: input.eventDate ?? null,
+  };
+}
+
+function isCompleteParsedAggregation(
+  parsed: ParsedAggregation | null | undefined,
+): parsed is ParsedAggregation & {
+  mainEvent: AiEventSignature;
+  events: Array<AiEventSignature & { oneLiner: string; qualityScore: number }>;
+} {
+  return Boolean(parsed && parsed.mainEvent && parsed.events && parsed.events.length > 0);
+}
+
+/**
+ * Backfill task that re-runs parseAggregation for items from sources that have
+ * been opted into aggregation detection. Selects items where the source has
+ * aggregationDetectionEnabled=true but the item has not yet been routed through
+ * parseAggregation (isAggregation=false) and full text is available.
+ */
+export async function executeItemReparseAggregationsTask(
+  taskRun: { id: string; entityId?: string | null },
+  options?: RegenerationOptions,
+) {
+  if (await isTaskRunCancellationRequested(taskRun.id)) {
+    await updateTaskRun(taskRun.id, {
+      status: "cancelled",
+      progressLabel: TASK_RUN_CANCELLED_LABEL,
+      errorSummary: TASK_RUN_CANCELLED_MESSAGE,
+      finishedAt: new Date(),
+    });
+    return;
+  }
+
+  const candidates = await prisma.item.findMany({
+    where: {
+      isAggregation: false,
+      status: "processed",
+      fullText: { not: null },
+      source: { is: { aggregationDetectionEnabled: true, enabled: true } },
+    },
+    select: {
+      id: true,
+      originalTitle: true,
+      publishedAt: true,
+      fullText: true,
+      source: { select: { name: true } },
+    },
+    orderBy: { publishedAt: "desc" },
+    take: REPARSE_AGGREGATIONS_BATCH_SIZE,
+  });
+
+  const totalCandidates = candidates.length;
+  if (totalCandidates === 0) {
+    await updateTaskRun(taskRun.id, {
+      status: "succeeded",
+      progressCurrent: 0,
+      progressTotal: 0,
+      progressLabel: "无需重拆的聚合内容",
+      finishedAt: new Date(),
+    });
+    return;
+  }
+
+  const aiProvider = await resolveAiProvider(options?.aiProvider);
+  const aiUsage = createTaskAiUsageTracker(totalCandidates);
+  aiUsage.addEstimated(totalCandidates, "item_aggregation");
+  const trackedAiProvider = aiUsage.wrapProvider(aiProvider);
+  const initialAiUsage = aiUsage.snapshot();
+
+  await updateTaskRun(taskRun.id, {
+    status: "running",
+    progressCurrent: 0,
+    progressTotal: totalCandidates,
+    progressLabel: `开始重拆 ${totalCandidates} 条聚合内容`,
+    aiCallCountActual: 0,
+    aiCallCountEstimated: initialAiUsage.estimated,
+    aiCallBreakdown: initialAiUsage.breakdown,
+  });
+
+  let processedCount = 0;
+  let reparsedCount = 0;
+  const affectedClusterIds = new Set<string>();
+  const issues: string[] = [];
+
+  for (const candidate of candidates) {
+    if (await isTaskRunCancellationRequested(taskRun.id)) {
+      await updateTaskRun(taskRun.id, {
+        status: "cancelled",
+        progressCurrent: processedCount,
+        progressTotal: totalCandidates,
+        progressLabel: TASK_RUN_CANCELLED_LABEL,
+        errorSummary: TASK_RUN_CANCELLED_MESSAGE,
+        finishedAt: new Date(),
+      });
+      return;
+    }
+
+    processedCount += 1;
+    const inputText = candidate.fullText ?? "";
+
+    try {
+      const parsedAggregation = await trackedAiProvider.parseAggregation(inputText, {
+        title: candidate.originalTitle,
+        sourceName: candidate.source.name,
+      });
+
+      if (!isCompleteParsedAggregation(parsedAggregation)) {
+        await updateTaskRun(taskRun.id, {
+          progressCurrent: processedCount,
+          progressTotal: totalCandidates,
+          progressLabel: `已扫描 ${processedCount}/${totalCandidates} 条`,
+        });
+        continue;
+      }
+
+      await persistParsedAggregationForItem(
+        { id: candidate.id, publishedAt: candidate.publishedAt },
+        {
+          mainEvent: serializeParsedEventSignature(parsedAggregation.mainEvent),
+          events: parsedAggregation.events.map((event) => ({
+            eventType: event.eventType as AiEventSignature["eventType"],
+            eventSubject: event.eventSubject,
+            eventAction: event.eventAction,
+            eventObject: event.eventObject,
+            eventDate: event.eventDate,
+            oneLiner: event.oneLiner,
+            qualityScore: event.qualityScore,
+          })),
+        },
+      );
+
+      reparsedCount += 1;
+
+      const persistedParsedEvents = await prisma.itemParsedEvent.findMany({
+        where: { itemId: candidate.id },
+        select: { clusterId: true },
+      });
+      for (const event of persistedParsedEvents) {
+        if (event.clusterId) {
+          affectedClusterIds.add(event.clusterId);
+        }
+      }
+
+      const updatedItem = await prisma.item.findUnique({
+        where: { id: candidate.id },
+        select: { clusterId: true },
+      });
+      if (updatedItem?.clusterId) {
+        affectedClusterIds.add(updatedItem.clusterId);
+      }
+
+      const mainEvent = serializeParsedEventSignature(parsedAggregation.mainEvent);
+      await prisma.item.update({
+        where: { id: candidate.id },
+        data: {
+          isAggregation: true,
+          eventType: mainEvent?.eventType ?? null,
+          eventSubject: mainEvent?.eventSubject ?? null,
+          eventAction: mainEvent?.eventAction ?? null,
+          eventObject: mainEvent?.eventObject ?? null,
+          eventDate: mainEvent?.eventDate ?? null,
+          qualityRationale: "聚合内容重拆后取主事件签名",
+          aiProcessedAt: new Date(),
+        },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown reparse error";
+      issues.push(`${candidate.id}: ${message}`);
+      console.error(`[Item Reparse] Failed for ${candidate.id}:`, error);
+    }
+
+    await updateTaskRun(taskRun.id, {
+      progressCurrent: processedCount,
+      progressTotal: totalCandidates,
+      progressLabel: `已扫描 ${processedCount}/${totalCandidates} 条，识别 ${reparsedCount} 条聚合`,
+    });
+  }
+
+  for (const clusterId of affectedClusterIds) {
+    if (await isTaskRunCancellationRequested(taskRun.id)) {
+      await updateTaskRun(taskRun.id, {
+        status: "cancelled",
+        progressCurrent: processedCount,
+        progressTotal: totalCandidates,
+        progressLabel: TASK_RUN_CANCELLED_LABEL,
+        errorSummary: TASK_RUN_CANCELLED_MESSAGE,
+        finishedAt: new Date(),
+      });
+      return;
+    }
+    await recomputeCluster(clusterId);
+  }
+
+  if (reparsedCount > 0) {
+    invalidateFeedCache();
+    invalidateDailyReportCache();
+  }
+
+  const finalStatus =
+    issues.length > 0 && reparsedCount === 0
+      ? "failed"
+      : issues.length > 0
+        ? "partial"
+        : "succeeded";
+  await updateTaskRun(taskRun.id, {
+    status: finalStatus,
+    progressCurrent: processedCount,
+    progressTotal: totalCandidates,
+    progressLabel: `聚合重拆完成，识别 ${reparsedCount} 条聚合${issues.length > 0 ? `，${issues.length} 条失败` : ""}`,
+    aiCallCountActual: aiUsage.snapshot().actual,
+    aiCallCountEstimated: aiUsage.snapshot().estimated,
+    aiCallBreakdown: aiUsage.snapshot().breakdown,
+    errorSummary: issues.length > 0 ? issues.slice(0, 5).join("; ") : null,
     finishedAt: new Date(),
   });
 }

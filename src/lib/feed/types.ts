@@ -149,4 +149,5 @@ export type SourceConfig = {
   enabled: boolean;
   aiParsingEnabled: boolean;
   aggregationEnabled?: boolean;
+  aggregationDetectionEnabled?: boolean;
 };

@@ -1,9 +1,11 @@
 import type { Item } from "@prisma/client";
 
 import type { AiEventSignature } from "@/lib/ai/provider";
-import { retryChineseSummary } from "@/lib/ai/summary-language";
 import type { ClusterAssignmentCoordinator } from "@/lib/clusters/helpers";
-import { assignItemToCluster } from "@/lib/clusters/service";
+import {
+  assignItemToCluster,
+  persistParsedAggregationForItem,
+} from "@/lib/clusters/service";
 import { prisma } from "@/lib/db";
 import {
   findExistingItem,
@@ -24,6 +26,7 @@ export type PreparedFeedItem = {
   sourceName: string;
   aiParsingEnabled: boolean;
   aggregationEnabled: boolean;
+  aggregationDetectionEnabled: boolean;
 };
 
 export type PreparedFeedItemLookup = {
@@ -147,17 +150,6 @@ function buildItemSummaryInput(inputText: string): string {
 
   const maxBodyLength = ITEM_SUMMARY_INPUT_MAX_CHARS - ITEM_SUMMARY_TRUNCATED_NOTICE.length;
   return `${cleaned.slice(0, maxBodyLength).trimEnd()}${ITEM_SUMMARY_TRUNCATED_NOTICE}`;
-}
-
-async function summarizeItemWithChineseRetry(
-  aiProvider: RunIngestionOptions["aiProvider"],
-  inputText: string,
-  metadata: { title: string; sourceName: string },
-) {
-  return retryChineseSummary(
-    (nextMetadata) => aiProvider.summarizeItem(inputText, nextMetadata),
-    metadata,
-  );
 }
 
 function hasSucceededSummary(existing?: {
@@ -310,6 +302,7 @@ export async function processFeedItem({
   sourceName,
   aiParsingEnabled,
   aggregationEnabled,
+  aggregationDetectionEnabled,
   lookup: providedLookup,
   existingItem,
   blacklist,
@@ -324,6 +317,7 @@ export async function processFeedItem({
   sourceName: string;
   aiParsingEnabled: boolean;
   aggregationEnabled: boolean;
+  aggregationDetectionEnabled: boolean;
   lookup?: PreparedFeedItemLookup | null;
   existingItem?: Item | null;
   blacklist: string[];
@@ -339,6 +333,7 @@ export async function processFeedItem({
     sourceName,
     aiParsingEnabled,
     aggregationEnabled,
+    aggregationDetectionEnabled,
   }, now);
 
   if (!lookup) {
@@ -390,6 +385,7 @@ export async function processFeedItem({
   let summaryFailed = false;
   let analysisCompleted = false;
   let analysisFailed = false;
+  let isAggregation = existing?.isAggregation ?? false;
   const issues: string[] = [];
   const contentForFullTextDecision = fullText || rssContent || rssExcerpt || "";
   const canReuseExistingAnalysis = Boolean(
@@ -445,6 +441,7 @@ export async function processFeedItem({
         eventAction: eventSignature?.eventAction ?? null,
         eventObject: eventSignature?.eventObject ?? null,
         eventDate: eventSignature?.eventDate ?? null,
+        isAggregation,
         aiProcessedAt: null,
         clusterId: null,
         manualClusterAssignedAt: null,
@@ -505,6 +502,7 @@ export async function processFeedItem({
             eventAction: eventSignature?.eventAction ?? null,
             eventObject: eventSignature?.eventObject ?? null,
             eventDate: eventSignature?.eventDate ?? null,
+            isAggregation: existing.isAggregation ?? false,
             aiProcessedAt: existing.aiProcessedAt,
             clusterId: existing.clusterId ?? null,
             manualClusterAssignedAt: existing.manualClusterAssignedAt,
@@ -562,12 +560,13 @@ export async function processFeedItem({
       summaryStatus = "succeeded";
     } else {
       try {
-        summaryText = stripHtmlTags(
-          await summarizeItemWithChineseRetry(aiProvider, summarySourceText, {
-            title: originalTitle,
-            sourceName,
-          }),
-        ) || buildFallbackSummary(rssExcerpt, fullText || rssContent);
+        const summaryOutput = await aiProvider.summarizeItem(summarySourceText, {
+          title: originalTitle,
+          sourceName,
+        });
+
+        summaryText = stripHtmlTags(summaryOutput.summary) || buildFallbackSummary(rssExcerpt, fullText || rssContent);
+        isAggregation = aggregationDetectionEnabled && summaryOutput.isAggregation === true;
         summaryCompleted = true;
         summaryStatus = "succeeded";
       } catch (error) {
@@ -578,7 +577,146 @@ export async function processFeedItem({
       }
     }
 
-    if (canReuseExistingCompletedAnalysis) {
+
+    if (isAggregation) {
+      // Aggregation items skip enrichContent and route through parseAggregation.
+      // parseAggregation produces both sub-events and a main event signature that fills Item.event*.
+      try {
+        const aggregationSourceText = buildItemSummaryInput(fullText || rssContent || rssExcerpt || originalTitle) || originalTitle;
+        const aggregationResult = await aiProvider.parseAggregation(aggregationSourceText, {
+          title: originalTitle,
+          sourceName,
+        });
+        const mainEventSig = aggregationResult.mainEvent;
+        const events = (aggregationResult.events ?? []).map((event) => ({
+          eventType: event.eventType ?? null,
+          eventSubject: event.eventSubject ?? null,
+          eventAction: event.eventAction ?? null,
+          eventObject: event.eventObject ?? null,
+          eventDate: event.eventDate ?? null,
+          oneLiner: event.oneLiner,
+          qualityScore: event.qualityScore,
+        }));
+        // Pre-upsert to obtain stored.id for parsed event persistence.
+        // The final upsert at the end of the function will overwrite with complete fields.
+        const preUpsert = await upsertItem(
+          {
+            id: existing?.id,
+            urlHash: dedupeKeys.urlHash,
+            dedupeSignature: dedupeKeys.signature,
+          },
+          {
+            sourceId,
+            originalUrl,
+            canonicalUrl: dedupeKeys.canonicalUrl,
+            urlHash: dedupeKeys.urlHash,
+            dedupeSignature: dedupeKeys.signature,
+            originalTitle,
+            translatedTitle,
+            author,
+            publishedAt,
+            rssExcerpt,
+            rssContent,
+            fullText,
+            summaryText,
+            language: shouldTranslateTitle(originalTitle) ? "en" : "unknown",
+            status,
+            summaryStatus,
+            analysisStatus: "pending",
+            filterReason,
+            moderationStatus,
+            moderationReason,
+            moderationDetail,
+            qualityScore: 50,
+            qualityRationale: "聚合内容拆条中",
+            eventType: null,
+            eventSubject: null,
+            eventAction: null,
+            eventObject: null,
+            eventDate: null,
+            isAggregation: true,
+            aiProcessedAt: null,
+            clusterId: existing?.clusterId ?? null,
+            manualClusterAssignedAt: existing?.manualClusterAssignedAt ?? null,
+            errorMessage: null,
+          },
+        );
+
+        await persistParsedAggregationForItem(
+          { id: preUpsert.id, publishedAt },
+          {
+            mainEvent: mainEventSig
+              ? {
+                  eventType: mainEventSig.eventType as AiEventSignature["eventType"],
+                  eventSubject: mainEventSig.eventSubject,
+                  eventAction: mainEventSig.eventAction,
+                  eventObject: mainEventSig.eventObject,
+                  eventDate: mainEventSig.eventDate,
+                }
+              : null,
+            events: events.map((event) => ({
+              eventType: event.eventType as AiEventSignature["eventType"],
+              eventSubject: event.eventSubject,
+              eventAction: event.eventAction,
+              eventObject: event.eventObject,
+              eventDate: event.eventDate,
+              oneLiner: event.oneLiner,
+              qualityScore: event.qualityScore,
+            })),
+          },
+        );
+        if (mainEventSig) {
+          eventSignature = {
+            eventType: mainEventSig.eventType as AiEventSignature["eventType"],
+            eventSubject: mainEventSig.eventSubject,
+            eventAction: mainEventSig.eventAction,
+            eventObject: mainEventSig.eventObject,
+            eventDate: mainEventSig.eventDate,
+          };
+        }
+        qualityScore = events.length > 0
+          ? Math.max(...events.map((event) => event.qualityScore))
+          : 50;
+        qualityRationale = `聚合内容拆出 ${events.length} 条子事件`;
+        analysisCompleted = true;
+        analysisStatus = "succeeded";
+      } catch (error) {
+        appendIssue(issues, error, "Unknown aggregation parsing error");
+        // Fall back to enrichContent on parse failure so item still gets a signature.
+        if (canReuseExistingCompletedAnalysis) {
+          analysisStatus = "succeeded";
+        } else {
+          try {
+            const enrichment = await aiProvider.enrichContent(summaryText || originalTitle, {
+              title: originalTitle,
+              sourceName,
+              translateTitle,
+            });
+            if (translateTitle) {
+              translatedTitle = enrichment.translatedTitle?.trim() || originalTitle;
+            }
+            moderationStatus = enrichment.moderationStatus === "restored" ? "allowed" : enrichment.moderationStatus;
+            moderationReason = enrichment.moderationReason;
+            moderationDetail = enrichment.moderationDetail;
+            qualityScore = enrichment.qualityScore;
+            qualityRationale = enrichment.qualityRationale;
+            eventSignature = enrichment.eventSignature;
+            analysisCompleted = true;
+            analysisStatus = "succeeded";
+          } catch (fallbackError) {
+            appendIssue(issues, fallbackError, "Unknown ai enrichment error");
+            moderationStatus = "allowed";
+            moderationReason = null;
+            moderationDetail = null;
+            qualityScore = 50;
+            qualityRationale = "AI analysis unavailable";
+            eventSignature = null;
+            analysisStatus = "failed";
+            analysisFailed = true;
+          }
+        }
+      }
+    } else if (canReuseExistingCompletedAnalysis) {
       analysisStatus = "succeeded";
     } else {
       try {
@@ -666,6 +804,7 @@ export async function processFeedItem({
       eventAction: eventSignature?.eventAction ?? null,
       eventObject: eventSignature?.eventObject ?? null,
       eventDate: eventSignature?.eventDate ?? null,
+      isAggregation,
       aiProcessedAt: analysisStatus === "succeeded" ? new Date() : null,
       clusterId: moderationStatus === "filtered" ? null : existing?.clusterId ?? null,
       manualClusterAssignedAt: moderationStatus === "filtered" ? null : existing?.manualClusterAssignedAt ?? null,

@@ -56,6 +56,7 @@ enum BackgroundTaskKind {
   cluster_regenerate_summary
   daily_report_generate
   item_cleanup
+  item_reparse_aggregations
 }
 
 enum BackgroundTaskTrigger {
@@ -100,25 +101,26 @@ enum DailyReportStatus {
 }
 
 model Source {
-  id               String   @id @default(cuid())
-  groupId          String?
-  name             String
-  rssUrl           String   @unique
-  siteUrl          String
-  enabled          Boolean  @default(true)
-  aiParsingEnabled Boolean  @default(true)
-  aggregationEnabled Boolean @default(true)
-  feedEtag         String?
-  feedLastModified String?
-  feedContentHash  String?
-  lastFetchedAt    DateTime?
-  healthStatus     String   @default("unknown")
-  healthMessage    String?
-  healthCheckedAt  DateTime?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-  items            Item[]
-  group            SourceGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  id                          String       @id @default(cuid())
+  groupId                     String?
+  name                        String
+  rssUrl                      String       @unique
+  siteUrl                     String
+  enabled                     Boolean      @default(true)
+  aiParsingEnabled            Boolean      @default(true)
+  aggregationEnabled          Boolean      @default(true)
+  aggregationDetectionEnabled Boolean      @default(false)
+  feedEtag                    String?
+  feedLastModified            String?
+  feedContentHash             String?
+  lastFetchedAt               DateTime?
+  healthStatus                String       @default("unknown")
+  healthMessage               String?
+  healthCheckedAt             DateTime?
+  createdAt                   DateTime     @default(now())
+  updatedAt                   DateTime     @updatedAt
+  items                       Item[]
+  group                       SourceGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
 
   @@index([groupId, name])
   @@index([enabled, healthStatus])
@@ -126,45 +128,47 @@ model Source {
 }
 
 model Item {
-  id               String     @id @default(cuid())
-  sourceId         String
-  clusterId        String?
-  originalUrl      String
-  canonicalUrl     String
-  urlHash          String     @unique
-  dedupeSignature  String     @unique
-  originalTitle    String
-  translatedTitle  String?
-  author           String?
-  publishedAt      DateTime
-  rssExcerpt       String?
-  rssContent       String?
-  fullText         String?
-  summaryText      String?
-  language         String?
-  status           ItemStatus @default(new)
-  summaryStatus    ProcessingCheckpointStatus @default(pending)
-  analysisStatus   ProcessingCheckpointStatus @default(pending)
-  filterReason     String?
-  moderationStatus ModerationStatus @default(allowed)
-  moderationReason ModerationReason?
-  moderationDetail String?
-  qualityScore     Int @default(50)
-  qualityRationale String @default("AI analysis unavailable")
-  eventType        String?
-  eventSubject     String?
-  eventAction      String?
-  eventObject      String?
-  eventDate        String?
-  aiProcessedAt    DateTime?
+  id                      String                     @id @default(cuid())
+  sourceId                String
+  clusterId               String?
+  originalUrl             String
+  canonicalUrl            String
+  urlHash                 String                     @unique
+  dedupeSignature         String                     @unique
+  originalTitle           String
+  translatedTitle         String?
+  author                  String?
+  publishedAt             DateTime
+  rssExcerpt              String?
+  rssContent              String?
+  fullText                String?
+  summaryText             String?
+  language                String?
+  status                  ItemStatus                 @default(new)
+  summaryStatus           ProcessingCheckpointStatus @default(pending)
+  analysisStatus          ProcessingCheckpointStatus @default(pending)
+  filterReason            String?
+  moderationStatus        ModerationStatus           @default(allowed)
+  moderationReason        ModerationReason?
+  moderationDetail        String?
+  qualityScore            Int                        @default(50)
+  qualityRationale        String                     @default("AI analysis unavailable")
+  eventType               String?
+  eventSubject            String?
+  eventAction             String?
+  eventObject             String?
+  eventDate               String?
+  aiProcessedAt           DateTime?
   manualClusterAssignedAt DateTime?
-  restoredByAdminAt DateTime?
-  errorMessage     String?
-  createdAt        DateTime   @default(now())
-  updatedAt        DateTime   @updatedAt
-  source           Source     @relation(fields: [sourceId], references: [id], onDelete: Cascade)
-  cluster          ContentCluster? @relation(fields: [clusterId], references: [id], onDelete: SetNull)
-  dailyReportSources DailyReportSource[]
+  restoredByAdminAt       DateTime?
+  isAggregation           Boolean                    @default(false)
+  errorMessage            String?
+  createdAt               DateTime                   @default(now())
+  updatedAt               DateTime                   @updatedAt
+  source                  Source                     @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  cluster                 ContentCluster?            @relation(fields: [clusterId], references: [id], onDelete: SetNull)
+  dailyReportSources      DailyReportSource[]
+  parsedEvents            ItemParsedEvent[]
 
   @@index([sourceId, publishedAt])
   @@index([status, publishedAt])
@@ -178,29 +182,30 @@ model Item {
 }
 
 model ContentCluster {
-  id              String @id @default(cuid())
-  kind            ContentClusterKind @default(topic)
-  title           String
-  summary         String
-  summaryInputHash String?
-  mergeInputHash  String?
-  score           Int @default(50)
-  itemCount       Int @default(0)
-  latestPublishedAt DateTime
-  status          ContentClusterStatus @default(active)
-  fingerprint     String @unique
-  eventType       String?
-  eventSubject    String?
-  eventAction     String?
-  eventObject     String?
-  eventDate       String?
-  upvotes         Int @default(0)
-  downvotes       Int @default(0)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  items           Item[]
-  visitorVotes    VisitorClusterVote[]
+  id                 String               @id @default(cuid())
+  kind               ContentClusterKind   @default(topic)
+  title              String
+  summary            String
+  summaryInputHash   String?
+  mergeInputHash     String?
+  score              Int                  @default(50)
+  itemCount          Int                  @default(0)
+  latestPublishedAt  DateTime
+  status             ContentClusterStatus @default(active)
+  fingerprint        String               @unique
+  eventType          String?
+  eventSubject       String?
+  eventAction        String?
+  eventObject        String?
+  eventDate          String?
+  upvotes            Int                  @default(0)
+  downvotes          Int                  @default(0)
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  items              Item[]
+  visitorVotes       VisitorClusterVote[]
   dailyReportSources DailyReportSource[]
+  parsedEvents       ItemParsedEvent[]
 
   @@index([status, latestPublishedAt])
   @@index([upvotes, downvotes])
@@ -208,13 +213,13 @@ model ContentCluster {
 }
 
 model VisitorClusterVote {
-  id            String   @id @default(cuid())
-  clusterId     String
-  visitorId     String
-  voteType      VoteType
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  cluster       ContentCluster @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+  id        String         @id @default(cuid())
+  clusterId String
+  visitorId String
+  voteType  VoteType
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  cluster   ContentCluster @relation(fields: [clusterId], references: [id], onDelete: Cascade)
 
   @@unique([clusterId, visitorId])
   @@index([visitorId])
@@ -247,57 +252,57 @@ model FetchRun {
 }
 
 model TaskSchedule {
-  id                String                @id @default(cuid())
-  key               String                @unique
-  enabled           Boolean               @default(false)
-  cronExpression    String                @default("0 * * * *")
-  sourceConcurrency Int                   @default(2)
-  fullTextFetchThreshold Int              @default(80)
-  perSourceItemLimit Int                  @default(20)
-  dailyReportCandidateLimit Int           @default(120)
-  dailyReportOffsetDays Int                @default(0)
-  dailyReportAutoPublish Boolean          @default(false)
-  dailyReportMaxRetries Int              @default(0)
-  dailyReportGroupIdsJson String          @default("")
-  cleanupRetentionDays Int               @default(365)
-  processingStartAt DateTime?
-  timezone          String
-  lastHeartbeatAt   DateTime?
-  lastRunStartedAt  DateTime?
-  lastRunFinishedAt DateTime?
-  lastRunStatus     BackgroundTaskStatus?
-  nextRunAt         DateTime
-  createdAt         DateTime              @default(now())
-  updatedAt         DateTime              @updatedAt
+  id                        String                @id @default(cuid())
+  key                       String                @unique
+  enabled                   Boolean               @default(false)
+  cronExpression            String                @default("0 * * * *")
+  sourceConcurrency         Int                   @default(2)
+  fullTextFetchThreshold    Int                   @default(80)
+  perSourceItemLimit        Int                   @default(20)
+  dailyReportCandidateLimit Int                   @default(120)
+  dailyReportOffsetDays     Int                   @default(0)
+  dailyReportAutoPublish    Boolean               @default(false)
+  dailyReportMaxRetries     Int                   @default(0)
+  dailyReportGroupIdsJson   String                @default("")
+  cleanupRetentionDays      Int                   @default(365)
+  processingStartAt         DateTime?
+  timezone                  String
+  lastHeartbeatAt           DateTime?
+  lastRunStartedAt          DateTime?
+  lastRunFinishedAt         DateTime?
+  lastRunStatus             BackgroundTaskStatus?
+  nextRunAt                 DateTime
+  createdAt                 DateTime              @default(now())
+  updatedAt                 DateTime              @updatedAt
 
   @@map("task_schedules")
 }
 
 model BackgroundTaskRun {
-  id              String                @id @default(cuid())
-  kind            BackgroundTaskKind
-  triggerType     BackgroundTaskTrigger
-  status          BackgroundTaskStatus  @default(queued)
-  label           String
-  entityId        String?
-  progressCurrent Int                   @default(0)
-  progressTotal   Int                   @default(0)
-  progressLabel   String?
-  itemsAdded      Int                   @default(0)
-  fullTextFetchedCount Int              @default(0)
-  aiCallCountActual Int                 @default(0)
-  aiCallCountEstimated Int              @default(0)
-  aiCallBreakdownJson String?
-  cancelRequestedAt DateTime?
-  startedAt       DateTime?
-  finishedAt      DateTime?
-  errorSummary    String?
-  stageTimingsJson String?
-  taskTimelineJson String?
-  createdAt       DateTime              @default(now())
-  updatedAt       DateTime              @updatedAt
-  fetchRuns       FetchRun[]
-  dailyReports    DailyReport[]
+  id                   String                @id @default(cuid())
+  kind                 BackgroundTaskKind
+  triggerType          BackgroundTaskTrigger
+  status               BackgroundTaskStatus  @default(queued)
+  label                String
+  entityId             String?
+  progressCurrent      Int                   @default(0)
+  progressTotal        Int                   @default(0)
+  progressLabel        String?
+  itemsAdded           Int                   @default(0)
+  fullTextFetchedCount Int                   @default(0)
+  aiCallCountActual    Int                   @default(0)
+  aiCallCountEstimated Int                   @default(0)
+  aiCallBreakdownJson  String?
+  cancelRequestedAt    DateTime?
+  startedAt            DateTime?
+  finishedAt           DateTime?
+  errorSummary         String?
+  stageTimingsJson     String?
+  taskTimelineJson     String?
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  fetchRuns            FetchRun[]
+  dailyReports         DailyReport[]
 
   @@index([status, createdAt])
   @@index([kind, status, createdAt])
@@ -305,26 +310,26 @@ model BackgroundTaskRun {
 }
 
 model DailyReport {
-  id              String            @id @default(cuid())
-  date            String
-  timezone        String            @default("Asia/Shanghai")
-  status          DailyReportStatus @default(draft)
-  title           String
-  openingSummary  String
-  closingThought  String
-  summaryJson     String
-  renderedMarkdown String
-  inputHash       String
-  modelName       String?
-  taskRunId       String?
-  candidateSnapshot String?
-  errorMessage    String?
-  publishedAt     DateTime?
-  generatedAt     DateTime          @default(now())
-  createdAt       DateTime          @default(now())
-  updatedAt       DateTime          @updatedAt
-  taskRun         BackgroundTaskRun? @relation(fields: [taskRunId], references: [id], onDelete: SetNull)
-  sources         DailyReportSource[]
+  id                 String                         @id @default(cuid())
+  date               String
+  timezone           String                         @default("Asia/Shanghai")
+  status             DailyReportStatus              @default(draft)
+  title              String
+  openingSummary     String
+  closingThought     String
+  summaryJson        String
+  renderedMarkdown   String
+  inputHash          String
+  modelName          String?
+  taskRunId          String?
+  candidateSnapshot  String?
+  errorMessage       String?
+  publishedAt        DateTime?
+  generatedAt        DateTime                       @default(now())
+  createdAt          DateTime                       @default(now())
+  updatedAt          DateTime                       @updatedAt
+  taskRun            BackgroundTaskRun?             @relation(fields: [taskRunId], references: [id], onDelete: SetNull)
+  sources            DailyReportSource[]
   refinementSessions DailyReportRefinementSession[]
 
   @@unique([date, timezone])
@@ -334,29 +339,29 @@ model DailyReport {
 }
 
 model DailyReportSource {
-  id            String @id @default(cuid())
-  dailyReportId String
-  sourceNumber  Int?
-  sourceKey     String?
-  itemId        String?
-  clusterId     String?
-  sourceName    String
-  title         String
-  url           String
-  sourceSummary String?
-  sourcePublishedAt DateTime?
+  id                 String          @id @default(cuid())
+  dailyReportId      String
+  sourceNumber       Int?
+  sourceKey          String?
+  itemId             String?
+  clusterId          String?
+  sourceName         String
+  title              String
+  url                String
+  sourceSummary      String?
+  sourcePublishedAt  DateTime?
   sourceQualityScore Int?
-  eventType     String?
-  eventSubject  String?
-  eventAction   String?
-  eventObject   String?
-  eventDate     String?
-  sectionName   String?
-  topic         String?
-  createdAt     DateTime @default(now())
-  dailyReport   DailyReport @relation(fields: [dailyReportId], references: [id], onDelete: Cascade)
-  item          Item? @relation(fields: [itemId], references: [id], onDelete: SetNull)
-  cluster       ContentCluster? @relation(fields: [clusterId], references: [id], onDelete: SetNull)
+  eventType          String?
+  eventSubject       String?
+  eventAction        String?
+  eventObject        String?
+  eventDate          String?
+  sectionName        String?
+  topic              String?
+  createdAt          DateTime        @default(now())
+  dailyReport        DailyReport     @relation(fields: [dailyReportId], references: [id], onDelete: Cascade)
+  item               Item?           @relation(fields: [itemId], references: [id], onDelete: SetNull)
+  cluster            ContentCluster? @relation(fields: [clusterId], references: [id], onDelete: SetNull)
 
   @@index([dailyReportId])
   @@index([dailyReportId, sourceNumber])
@@ -367,33 +372,33 @@ model DailyReportSource {
 }
 
 model DailyReportRefinementSession {
-  id                    String   @id @default(cuid())
-  dailyReportId         String
-  status                String   @default("active")
-  baseContentJson       String
-  currentDraftJson      String
-  sourceRegistryJson    String
-  providerSessionId     String?
-  providerResponseId    String?
-  modelName             String?
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
-  finishedAt            DateTime?
-  dailyReport           DailyReport @relation(fields: [dailyReportId], references: [id], onDelete: Cascade)
-  messages              DailyReportRefinementMessage[]
+  id                 String                         @id @default(cuid())
+  dailyReportId      String
+  status             String                         @default("active")
+  baseContentJson    String
+  currentDraftJson   String
+  sourceRegistryJson String
+  providerSessionId  String?
+  providerResponseId String?
+  modelName          String?
+  createdAt          DateTime                       @default(now())
+  updatedAt          DateTime                       @updatedAt
+  finishedAt         DateTime?
+  dailyReport        DailyReport                    @relation(fields: [dailyReportId], references: [id], onDelete: Cascade)
+  messages           DailyReportRefinementMessage[]
 
   @@index([dailyReportId, updatedAt])
   @@map("daily_report_refinement_sessions")
 }
 
 model DailyReportRefinementMessage {
-  id            String   @id @default(cuid())
+  id            String                       @id @default(cuid())
   sessionId     String
   role          String
   content       String
   candidateJson String?
   errorMessage  String?
-  createdAt     DateTime @default(now())
+  createdAt     DateTime                     @default(now())
   session       DailyReportRefinementSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@index([sessionId, createdAt])
@@ -414,38 +419,38 @@ model SourceGroup {
 }
 
 model ModelApiConfig {
-  id                   String   @id @default(cuid())
-  name                 String
-  baseUrl              String
-  apiKey               String   @default("")
-  modelName            String
-  ingestionItemConcurrency Int    @default(3)
-  customHeaders        String   @default("")
-  isEnabled            Boolean  @default(true)
-  isDefault            Boolean  @default(false)
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
-  promptConfigs        PromptConfig[]
+  id                       String         @id @default(cuid())
+  name                     String
+  baseUrl                  String
+  apiKey                   String         @default("")
+  modelName                String
+  ingestionItemConcurrency Int            @default(3)
+  customHeaders            String         @default("")
+  isEnabled                Boolean        @default(true)
+  isDefault                Boolean        @default(false)
+  createdAt                DateTime       @default(now())
+  updatedAt                DateTime       @updatedAt
+  promptConfigs            PromptConfig[]
 
   @@index([isEnabled, isDefault])
   @@map("model_api_configs")
 }
 
 model PromptConfig {
-  id                 String           @id @default(cuid())
-  name               String
-  type               PromptConfigType
-  prompt             String
-  systemPrompt       String?
-  temperature        Float?
-  maxTokens          Int?
-  topP               Float?
-  modelApiConfigId   String?
-  isEnabled          Boolean          @default(true)
-  isDefault          Boolean          @default(false)
-  createdAt          DateTime         @default(now())
-  updatedAt          DateTime         @updatedAt
-  modelApiConfig     ModelApiConfig?  @relation(fields: [modelApiConfigId], references: [id], onDelete: SetNull)
+  id               String           @id @default(cuid())
+  name             String
+  type             PromptConfigType
+  prompt           String
+  systemPrompt     String?
+  temperature      Float?
+  maxTokens        Int?
+  topP             Float?
+  modelApiConfigId String?
+  isEnabled        Boolean          @default(true)
+  isDefault        Boolean          @default(false)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  modelApiConfig   ModelApiConfig?  @relation(fields: [modelApiConfigId], references: [id], onDelete: SetNull)
 
   @@index([type, isEnabled, isDefault])
   @@index([modelApiConfigId])
@@ -453,13 +458,13 @@ model PromptConfig {
 }
 
 model SourceHealthLog {
-  id          String   @id @default(cuid())
-  sourceId    String
-  sourceName  String
-  fromStatus  String
-  toStatus    String
-  message     String?
-  changedAt   DateTime @default(now())
+  id         String   @id @default(cuid())
+  sourceId   String
+  sourceName String
+  fromStatus String
+  toStatus   String
+  message    String?
+  changedAt  DateTime @default(now())
 
   @@index([sourceId, changedAt])
   @@index([changedAt])
@@ -485,4 +490,28 @@ model PageView {
   @@index([path, date])
   @@index([path, date, visitorId])
   @@map("page_views")
+}
+
+model ItemParsedEvent {
+  id           String          @id @default(cuid())
+  itemId       String
+  eventIndex   Int
+  eventType    String?
+  eventSubject String?
+  eventAction  String?
+  eventObject  String?
+  eventDate    String?
+  oneLiner     String
+  qualityScore Int             @default(50)
+  clusterId    String?
+  fingerprint  String          @unique
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  item         Item            @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  cluster      ContentCluster? @relation(fields: [clusterId], references: [id], onDelete: SetNull)
+
+  @@index([itemId, eventIndex])
+  @@index([clusterId, createdAt])
+  @@index([eventType, eventDate])
+  @@map("item_parsed_events")
 }
