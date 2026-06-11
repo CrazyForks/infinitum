@@ -79,6 +79,7 @@ function normalizePromptType(value: string | null): PromptConfigType {
   if (
     value === "item_summary" ||
     value === "item_analysis" ||
+    value === "item_aggregation" ||
     value === "cluster_summary" ||
     value === "cluster_match" ||
     value === "cluster_merge" ||

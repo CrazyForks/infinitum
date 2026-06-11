@@ -315,6 +315,16 @@ function applyIncrementalMigrations() {
       input: `ALTER TABLE "items" ADD COLUMN "isAggregation" BOOLEAN NOT NULL DEFAULT false;\n`,
     });
   }
+  if (!columnExists("items", "aggregationCheckedAt")) {
+    runSqlite([dbPath], {
+      input: `ALTER TABLE "items" ADD COLUMN "aggregationCheckedAt" DATETIME;\n`,
+    });
+  }
+  if (!columnExists("items", "aggregationParseStatus")) {
+    runSqlite([dbPath], {
+      input: `ALTER TABLE "items" ADD COLUMN "aggregationParseStatus" TEXT;\n`,
+    });
+  }
 
   if (!ftsTableExists("item_parsed_events")) {
     runSqlite([dbPath], {
@@ -337,8 +347,9 @@ function applyIncrementalMigrations() {
         `  FOREIGN KEY ("itemId") REFERENCES "items"("id") ON DELETE CASCADE ON UPDATE CASCADE,`,
         `  FOREIGN KEY ("clusterId") REFERENCES "content_clusters"("id") ON DELETE SET NULL ON UPDATE CASCADE`,
         `);`,
-        `CREATE UNIQUE INDEX IF NOT EXISTS "item_parsed_events_fingerprint_key" ON "item_parsed_events"("fingerprint");`,
+        `CREATE UNIQUE INDEX IF NOT EXISTS "item_parsed_events_itemId_fingerprint_key" ON "item_parsed_events"("itemId", "fingerprint");`,
         `CREATE INDEX IF NOT EXISTS "item_parsed_events_itemId_eventIndex_idx" ON "item_parsed_events"("itemId", "eventIndex");`,
+        `CREATE INDEX IF NOT EXISTS "item_parsed_events_fingerprint_idx" ON "item_parsed_events"("fingerprint");`,
         `CREATE INDEX IF NOT EXISTS "item_parsed_events_clusterId_createdAt_idx" ON "item_parsed_events"("clusterId", "createdAt");`,
         `CREATE INDEX IF NOT EXISTS "item_parsed_events_eventType_eventDate_idx" ON "item_parsed_events"("eventType", "eventDate");`,
       ].join("\n"),

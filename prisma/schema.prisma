@@ -86,6 +86,7 @@ enum ContentClusterStatus {
 enum PromptConfigType {
   item_summary
   item_analysis
+  item_aggregation
   cluster_summary
   cluster_match
   cluster_merge
@@ -162,6 +163,8 @@ model Item {
   manualClusterAssignedAt DateTime?
   restoredByAdminAt       DateTime?
   isAggregation           Boolean                    @default(false)
+  aggregationCheckedAt    DateTime?
+  aggregationParseStatus  String?
   errorMessage            String?
   createdAt               DateTime                   @default(now())
   updatedAt               DateTime                   @updatedAt
@@ -504,13 +507,15 @@ model ItemParsedEvent {
   oneLiner     String
   qualityScore Int             @default(50)
   clusterId    String?
-  fingerprint  String          @unique
+  fingerprint  String
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
   item         Item            @relation(fields: [itemId], references: [id], onDelete: Cascade)
   cluster      ContentCluster? @relation(fields: [clusterId], references: [id], onDelete: SetNull)
 
+  @@unique([itemId, fingerprint])
   @@index([itemId, eventIndex])
+  @@index([fingerprint])
   @@index([clusterId, createdAt])
   @@index([eventType, eventDate])
   @@map("item_parsed_events")

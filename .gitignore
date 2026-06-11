@@ -19,6 +19,7 @@
 
 # production
 /build
+/dist
 
 # misc
 .DS_Store
@@ -64,3 +65,4 @@ next-env.d.ts
 /Library/
 /.playwright-mcp/
 /daily-detail*.png
+/graphify-out

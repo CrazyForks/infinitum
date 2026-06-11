@@ -5,6 +5,8 @@ ALTER TABLE "sources" ADD COLUMN "aggregationDetectionEnabled" BOOLEAN NOT NULL 
 
 -- AlterTable
 ALTER TABLE "items" ADD COLUMN "isAggregation" BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE "items" ADD COLUMN "aggregationCheckedAt" DATETIME;
+ALTER TABLE "items" ADD COLUMN "aggregationParseStatus" TEXT;
 
 -- CreateTable
 CREATE TABLE "item_parsed_events" (
@@ -27,10 +29,13 @@ CREATE TABLE "item_parsed_events" (
 );
 
 -- CreateIndex
-CREATE UNIQUE INDEX "item_parsed_events_fingerprint_key" ON "item_parsed_events"("fingerprint");
+CREATE UNIQUE INDEX "item_parsed_events_itemId_fingerprint_key" ON "item_parsed_events"("itemId", "fingerprint");
 
 -- CreateIndex
 CREATE INDEX "item_parsed_events_itemId_eventIndex_idx" ON "item_parsed_events"("itemId", "eventIndex");
+
+-- CreateIndex
+CREATE INDEX "item_parsed_events_fingerprint_idx" ON "item_parsed_events"("fingerprint");
 
 -- CreateIndex
 CREATE INDEX "item_parsed_events_clusterId_createdAt_idx" ON "item_parsed_events"("clusterId", "createdAt");

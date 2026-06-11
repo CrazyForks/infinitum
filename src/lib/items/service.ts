@@ -1,5 +1,9 @@
 import type { BackgroundTaskRun, Item } from "@prisma/client";
 
+import {
+  AGGREGATION_PARSE_STATUS,
+  RETRIABLE_AGGREGATION_PARSE_STATUSES,
+} from "@/lib/aggregation/status";
 import { createAiProvider, type AiEventSignature, type AiProvider, type ParsedAggregation } from "@/lib/ai/provider";
 import { retryChineseSummary } from "@/lib/ai/summary-language";
 import { invalidateDailyReportCache } from "@/lib/daily-report/cache";
@@ -11,6 +15,7 @@ import {
 import { prisma } from "@/lib/db";
 import { invalidateFeedCache } from "@/lib/feed/cache";
 import { shouldTranslateTitle, stripHtmlTags } from "@/lib/feed/presentation";
+import { normalizeStoredEventType } from "@/lib/clusters/normalization";
 import { getIngestionRuntimeConfig } from "@/lib/settings/service";
 import { createTaskAiUsageTracker } from "@/lib/tasks/ai-usage";
 import {
@@ -98,6 +103,7 @@ async function resolveAiProvider(aiProvider?: AiProvider) {
   return createAiProvider(runtimeConfig.modelApi, {
     itemSummary: runtimeConfig.selectedPromptConfigs?.itemSummary,
     itemAnalysis: runtimeConfig.selectedPromptConfigs?.itemAnalysis,
+    itemAggregation: runtimeConfig.selectedPromptConfigs?.itemAggregation,
     clusterSummary: runtimeConfig.selectedPromptConfigs?.clusterSummary,
     clusterMatch: runtimeConfig.selectedPromptConfigs?.clusterMatch,
   });
@@ -518,6 +524,8 @@ export async function executeItemReanalyzeTask(
 
 const CLEANUP_BATCH_SIZE = 5000;
 const REPARSE_AGGREGATIONS_BATCH_SIZE = 200;
+const REPARSE_AGGREGATIONS_MIN_TEXT_CHARS = 40;
+const REPARSE_AGGREGATIONS_PROGRESS_UPDATE_INTERVAL = 10;
 
 export async function executeItemCleanupTask(taskRun: BackgroundTaskRun) {
   const schedule = await ensureDefaultItemCleanupSchedule();
@@ -620,12 +628,18 @@ export async function executeItemCleanupTask(taskRun: BackgroundTaskRun) {
 }
 
 
-function serializeParsedEventSignature(input: AiEventSignature | null | undefined): AiEventSignature | null {
+function serializeParsedEventSignature(input: {
+  eventType?: string | null;
+  eventSubject?: string | null;
+  eventAction?: string | null;
+  eventObject?: string | null;
+  eventDate?: string | null;
+} | null | undefined): AiEventSignature | null {
   if (!input) {
     return null;
   }
   return {
-    eventType: input.eventType ?? null,
+    eventType: normalizeStoredEventType(input.eventType ?? null),
     eventSubject: input.eventSubject ?? null,
     eventAction: input.eventAction ?? null,
     eventObject: input.eventObject ?? null,
@@ -636,17 +650,29 @@ function serializeParsedEventSignature(input: AiEventSignature | null | undefine
 function isCompleteParsedAggregation(
   parsed: ParsedAggregation | null | undefined,
 ): parsed is ParsedAggregation & {
-  mainEvent: AiEventSignature;
   events: Array<AiEventSignature & { oneLiner: string; qualityScore: number }>;
 } {
-  return Boolean(parsed && parsed.mainEvent && parsed.events && parsed.events.length > 0);
+  return Boolean(parsed && parsed.events && parsed.events.length > 0);
+}
+
+function getAggregationReparseSourceText(input: {
+  fullText?: string | null;
+  rssContent?: string | null;
+  rssExcerpt?: string | null;
+}) {
+  return input.fullText?.trim() || input.rssContent?.trim() || input.rssExcerpt?.trim() || "";
+}
+
+function shouldWriteReparseProgress(processedCount: number, totalCandidates: number) {
+  return processedCount === totalCandidates ||
+    processedCount % REPARSE_AGGREGATIONS_PROGRESS_UPDATE_INTERVAL === 0;
 }
 
 /**
  * Backfill task that re-runs parseAggregation for items from sources that have
  * been opted into aggregation detection. Selects items where the source has
- * aggregationDetectionEnabled=true but the item has not yet been routed through
- * parseAggregation (isAggregation=false) and full text is available.
+ * aggregationDetectionEnabled=true, the item has not been checked or is in a
+ * retriable parse state, and useful source text is available.
  */
 export async function executeItemReparseAggregationsTask(
   taskRun: { id: string; entityId?: string | null },
@@ -664,16 +690,35 @@ export async function executeItemReparseAggregationsTask(
 
   const candidates = await prisma.item.findMany({
     where: {
-      isAggregation: false,
       status: "processed",
-      fullText: { not: null },
+      OR: [
+        {
+          isAggregation: false,
+          aggregationParseStatus: null,
+        },
+        {
+          aggregationParseStatus: { in: RETRIABLE_AGGREGATION_PARSE_STATUSES },
+        },
+      ],
+      AND: [
+        {
+          OR: [
+            { fullText: { not: null } },
+            { rssContent: { not: null } },
+            { rssExcerpt: { not: null } },
+          ],
+        },
+      ],
       source: { is: { aggregationDetectionEnabled: true, enabled: true } },
     },
     select: {
       id: true,
       originalTitle: true,
+      clusterId: true,
       publishedAt: true,
       fullText: true,
+      rssContent: true,
+      rssExcerpt: true,
       source: { select: { name: true } },
     },
     orderBy: { publishedAt: "desc" },
@@ -727,7 +772,26 @@ export async function executeItemReparseAggregationsTask(
     }
 
     processedCount += 1;
-    const inputText = candidate.fullText ?? "";
+    const inputText = getAggregationReparseSourceText(candidate);
+
+    if (inputText.length < REPARSE_AGGREGATIONS_MIN_TEXT_CHARS) {
+      await prisma.item.update({
+        where: { id: candidate.id },
+        data: {
+          isAggregation: false,
+          aggregationCheckedAt: new Date(),
+          aggregationParseStatus: AGGREGATION_PARSE_STATUS.notAggregation,
+        },
+      });
+      if (shouldWriteReparseProgress(processedCount, totalCandidates)) {
+        await updateTaskRun(taskRun.id, {
+          progressCurrent: processedCount,
+          progressTotal: totalCandidates,
+          progressLabel: `已扫描 ${processedCount}/${totalCandidates} 条，识别 ${reparsedCount} 条聚合`,
+        });
+      }
+      continue;
+    }
 
     try {
       const parsedAggregation = await trackedAiProvider.parseAggregation(inputText, {
@@ -736,11 +800,21 @@ export async function executeItemReparseAggregationsTask(
       });
 
       if (!isCompleteParsedAggregation(parsedAggregation)) {
-        await updateTaskRun(taskRun.id, {
-          progressCurrent: processedCount,
-          progressTotal: totalCandidates,
-          progressLabel: `已扫描 ${processedCount}/${totalCandidates} 条`,
+        await prisma.item.update({
+          where: { id: candidate.id },
+          data: {
+            isAggregation: false,
+            aggregationCheckedAt: new Date(),
+            aggregationParseStatus: AGGREGATION_PARSE_STATUS.notAggregation,
+          },
         });
+        if (shouldWriteReparseProgress(processedCount, totalCandidates)) {
+          await updateTaskRun(taskRun.id, {
+            progressCurrent: processedCount,
+            progressTotal: totalCandidates,
+            progressLabel: `已扫描 ${processedCount}/${totalCandidates} 条，识别 ${reparsedCount} 条聚合`,
+          });
+        }
         continue;
       }
 
@@ -762,22 +836,8 @@ export async function executeItemReparseAggregationsTask(
 
       reparsedCount += 1;
 
-      const persistedParsedEvents = await prisma.itemParsedEvent.findMany({
-        where: { itemId: candidate.id },
-        select: { clusterId: true },
-      });
-      for (const event of persistedParsedEvents) {
-        if (event.clusterId) {
-          affectedClusterIds.add(event.clusterId);
-        }
-      }
-
-      const updatedItem = await prisma.item.findUnique({
-        where: { id: candidate.id },
-        select: { clusterId: true },
-      });
-      if (updatedItem?.clusterId) {
-        affectedClusterIds.add(updatedItem.clusterId);
+      if (candidate.clusterId) {
+        affectedClusterIds.add(candidate.clusterId);
       }
 
       const mainEvent = serializeParsedEventSignature(parsedAggregation.mainEvent);
@@ -785,11 +845,15 @@ export async function executeItemReparseAggregationsTask(
         where: { id: candidate.id },
         data: {
           isAggregation: true,
+          aggregationCheckedAt: new Date(),
+          aggregationParseStatus: AGGREGATION_PARSE_STATUS.parsed,
           eventType: mainEvent?.eventType ?? null,
           eventSubject: mainEvent?.eventSubject ?? null,
           eventAction: mainEvent?.eventAction ?? null,
           eventObject: mainEvent?.eventObject ?? null,
           eventDate: mainEvent?.eventDate ?? null,
+          clusterId: null,
+          manualClusterAssignedAt: null,
           qualityRationale: "聚合内容重拆后取主事件签名",
           aiProcessedAt: new Date(),
         },
@@ -798,13 +862,22 @@ export async function executeItemReparseAggregationsTask(
       const message = error instanceof Error ? error.message : "Unknown reparse error";
       issues.push(`${candidate.id}: ${message}`);
       console.error(`[Item Reparse] Failed for ${candidate.id}:`, error);
+      await prisma.item.update({
+        where: { id: candidate.id },
+        data: {
+          aggregationCheckedAt: new Date(),
+          aggregationParseStatus: AGGREGATION_PARSE_STATUS.failed,
+        },
+      });
     }
 
-    await updateTaskRun(taskRun.id, {
-      progressCurrent: processedCount,
-      progressTotal: totalCandidates,
-      progressLabel: `已扫描 ${processedCount}/${totalCandidates} 条，识别 ${reparsedCount} 条聚合`,
-    });
+    if (shouldWriteReparseProgress(processedCount, totalCandidates)) {
+      await updateTaskRun(taskRun.id, {
+        progressCurrent: processedCount,
+        progressTotal: totalCandidates,
+        progressLabel: `已扫描 ${processedCount}/${totalCandidates} 条，识别 ${reparsedCount} 条聚合`,
+      });
+    }
   }
 
   for (const clusterId of affectedClusterIds) {

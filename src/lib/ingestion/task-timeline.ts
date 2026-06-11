@@ -26,6 +26,11 @@ export type IngestionTimelineCounters = {
     completed: number;
     failed: number;
   };
+  aggregationParsing: {
+    parsed: number;
+    failed: number;
+    events: number;
+  };
   itemAnalysis: {
     completed: number;
     filtered: number;
@@ -76,6 +81,7 @@ export type IngestionTaskStageState = {
 
 export type IngestionTimelineModelNames = {
   itemSummary: string | null;
+  itemAggregation: string | null;
   itemAnalysis: string | null;
   clusterMatch: string | null;
   clusterMerge: string | null;
@@ -138,6 +144,11 @@ export function createIngestionTimelineCounters(): IngestionTimelineCounters {
       completed: 0,
       failed: 0,
     },
+    aggregationParsing: {
+      parsed: 0,
+      failed: 0,
+      events: 0,
+    },
     itemAnalysis: {
       completed: 0,
       filtered: 0,
@@ -183,6 +194,7 @@ export function createIngestionTimelineCounters(): IngestionTimelineCounters {
 export function createIngestionTimelineModelNames(): IngestionTimelineModelNames {
   return {
     itemSummary: null,
+    itemAggregation: null,
     itemAnalysis: null,
     clusterMatch: null,
     clusterMerge: null,
@@ -195,6 +207,7 @@ export function createInitialIngestionTaskTimeline(): TaskTimelineNodeSnapshot[]
     { key: "source_fetch", label: "信息抓取", status: "running", startedAt: null, finishedAt: null, durationMs: null, metrics: [] },
     { key: "rule_filter", label: "规则过滤", status: "pending", startedAt: null, finishedAt: null, durationMs: null, metrics: [] },
     { key: "item_summary", label: "条目摘要", status: "pending", startedAt: null, finishedAt: null, durationMs: null, metrics: [] },
+    { key: "item_aggregation", label: "聚合拆分", status: "pending", startedAt: null, finishedAt: null, durationMs: null, metrics: [] },
     { key: "item_analysis", label: "内容分析", status: "pending", startedAt: null, finishedAt: null, durationMs: null, metrics: [] },
     { key: "cluster_assignment", label: "归组决策", status: "pending", startedAt: null, finishedAt: null, durationMs: null, metrics: [] },
     { key: "cluster_merge", label: "聚合合并", status: "pending", startedAt: null, finishedAt: null, durationMs: null, metrics: [] },
@@ -292,6 +305,22 @@ export function buildIngestionTaskTimeline(input: {
       metrics: [
         { label: "完成", value: counters.itemSummary.completed },
         { label: "失败", value: counters.itemSummary.failed },
+      ],
+    },
+    {
+      key: "item_aggregation",
+      label: "聚合拆分",
+      status: resolveNodeStatusFromCounts({
+        stageTiming: stages.itemProcessing,
+        successCount: counters.aggregationParsing.parsed,
+        failureCount: counters.aggregationParsing.failed,
+      }),
+      ...toNodeTiming(stages.itemProcessing),
+      modelName: modelNames.itemAggregation,
+      metrics: [
+        { label: "拆分成功", value: counters.aggregationParsing.parsed },
+        { label: "拆分失败", value: counters.aggregationParsing.failed },
+        { label: "子事件", value: counters.aggregationParsing.events },
       ],
     },
     {

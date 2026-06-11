@@ -1587,7 +1587,7 @@ export function AdminSettingsPanel({
                       }))
                     }
                   />
-                  <span className="text-sm text-[var(--text-2)]">启用聚合内容识别（拆条）</span>
+                  <span className="text-sm text-[var(--text-2)]">聚合自动拆分</span>
                 </label>
               </div>
             </ModalShell>

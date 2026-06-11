@@ -6,6 +6,7 @@ import {
   DEFAULT_CLUSTER_SUMMARY_PROMPT,
   DEFAULT_DAILY_REPORT_PROMPT,
   DEFAULT_DAILY_REPORT_REFINEMENT_GENERATE_USER_PROMPT_TEMPLATE,
+  DEFAULT_ITEM_AGGREGATION_ANALYSIS_PROMPT,
 } from "@/config/prompts";
 import { prisma } from "@/lib/db";
 import * as settingsService from "@/lib/settings/service";
@@ -78,12 +79,14 @@ describe("admin settings service", () => {
     expect(runtimeConfig.selectedPromptConfigs?.itemSummary.promptTemplate).toContain("{{sourceName}}");
     expect(runtimeConfig.prompts.itemAnalysis.length).toBeGreaterThan(0);
     expect(runtimeConfig.selectedPromptConfigs?.itemAnalysis.promptTemplate).toContain("{{title}}");
+    expect(runtimeConfig.prompts.itemAggregation).toBe(DEFAULT_ITEM_AGGREGATION_ANALYSIS_PROMPT);
+    expect(runtimeConfig.selectedPromptConfigs?.itemAggregation.promptTemplate).toContain("{{inputText}}");
 
     expect(settings.modelApiConfigs).toHaveLength(1);
     expect(settings.modelApiConfigs[0]?.baseUrl).toBe("");
     expect(settings.modelApiConfigs[0]?.apiKeyMasked).toBe("");
     expect(settings.modelApiConfigs[0]?.ingestionItemConcurrency).toBe(3);
-    expect(settings.promptConfigs).toHaveLength(8);
+    expect(settings.promptConfigs).toHaveLength(9);
     expect(settings.promptConfigs.find((config) => config.type === "daily_report")?.systemPrompt).toContain("AI 新闻日报");
     expect(settings.promptConfigs.find((config) => config.type === "daily_report")?.systemPrompt).toContain(
       "candidateScore 是综合质量、聚合热度和时效排序后的参考分",
@@ -110,7 +113,7 @@ describe("admin settings service", () => {
     );
     expect(settings.promptConfigs.find((config) => config.type === "item_summary")).toMatchObject({
       temperature: 0.2,
-      maxTokens: 300,
+      maxTokens: 600,
       topP: null,
     });
     expect(settings.promptConfigs.find((config) => config.type === "item_analysis")?.systemPrompt).toContain(
@@ -120,6 +123,16 @@ describe("admin settings service", () => {
       temperature: 0.2,
       maxTokens: 1000,
       topP: null,
+    });
+    expect(settings.promptConfigs.find((config) => config.type === "item_aggregation")).toMatchObject({
+      name: "默认聚合拆分提示词",
+      systemPrompt: DEFAULT_ITEM_AGGREGATION_ANALYSIS_PROMPT,
+      temperature: 0,
+      maxTokens: 8000,
+      topP: null,
+      modelApiConfigId: null,
+      isEnabled: true,
+      isDefault: true,
     });
     expect(settings.promptConfigs.find((config) => config.type === "cluster_summary")).toMatchObject({
       temperature: 0.2,
@@ -325,6 +338,7 @@ describe("admin settings service", () => {
     expect(runtimeConfig.selectedPromptConfigs?.itemAnalysis.systemPrompt).toBe("分析系统提示词");
     expect(runtimeConfig.selectedPromptConfigs?.itemAnalysis.modelApi?.model).toBe("gpt-live");
     expect(runtimeConfig.selectedPromptConfigs?.itemAnalysis.maxTokens).toBe(1000);
+    expect(runtimeConfig.selectedPromptConfigs?.itemAggregation.systemPrompt).toBe(DEFAULT_ITEM_AGGREGATION_ANALYSIS_PROMPT);
     expect(runtimeConfig.selectedPromptConfigs?.clusterSummary.maxTokens).toBe(300);
     expect(runtimeConfig.selectedPromptConfigs?.clusterMatch.maxTokens).toBe(80);
     expect(runtimeConfig.selectedPromptConfigs?.dailyReportRefinementChat.systemPrompt).toContain("持续对话");

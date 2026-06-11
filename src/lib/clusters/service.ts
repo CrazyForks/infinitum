@@ -40,6 +40,7 @@ import {
   deleteParsedEventsForItem,
   findActiveClusterByFingerprint,
   findActiveClusterByTitle,
+  getClusterParsedEvents,
   findRecentActiveClusterCandidates,
   getClusterWithItems,
   setItemCluster,
@@ -73,6 +74,34 @@ export type ClusterRecomputeResult = {
   summaryAttempted: boolean;
   summarySucceeded: boolean;
 };
+
+type ClusterParsedEvent = Awaited<ReturnType<typeof getClusterParsedEvents>>[number];
+
+function buildParsedEventClusterStats(parsedEvents: ClusterParsedEvent[]) {
+  if (parsedEvents.length === 0) {
+    return null;
+  }
+
+  const primaryEvent = parsedEvents[0]!;
+  const eventSignature = normalizeEventSignatureForStorage({
+    eventType: normalizeStoredEventType(primaryEvent.eventType),
+    eventSubject: primaryEvent.eventSubject,
+    eventAction: primaryEvent.eventAction,
+    eventObject: primaryEvent.eventObject,
+    eventDate: primaryEvent.eventDate,
+  });
+
+  return {
+    score: Math.max(...parsedEvents.map((event) => event.qualityScore)),
+    itemCount: parsedEvents.length,
+    latestPublishedAt: primaryEvent.item.publishedAt,
+    eventType: eventSignature?.eventType ?? null,
+    eventSubject: eventSignature?.eventSubject ?? null,
+    eventAction: eventSignature?.eventAction ?? null,
+    eventObject: eventSignature?.eventObject ?? null,
+    eventDate: eventSignature?.eventDate ?? null,
+  };
+}
 
 
 async function findClusterForItem(
@@ -378,6 +407,7 @@ export async function assignParsedEventToCluster(
   options: {
     eventSignature: AiEventSignature;
     latestPublishedAt: Date;
+    qualityScore?: number;
   },
 ): Promise<{
   clusterId: string;
@@ -405,7 +435,8 @@ export async function assignParsedEventToCluster(
       fingerprint,
       title: buildEventDisplayTitle(resolvedEventSignature) || `聚合事件 ${fingerprint.slice(0, 16)}`,
       summary: "聚合内容拆出的子事件，等待汇总。",
-      score: 50,
+      score: options.qualityScore ?? 50,
+      itemCount: 1,
       latestPublishedAt: options.latestPublishedAt,
       eventType: resolvedEventSignature?.eventType ?? null,
       eventSubject: resolvedEventSignature?.eventSubject ?? null,
@@ -431,11 +462,12 @@ export async function persistParsedAggregationForItem(
   if (!item.id) {
     return { mainEvent: parsedAggregation.mainEvent, assignedEvents: 0, createdClusters: 0 };
   }
+
+  await deleteParsedEventsForItem(item.id);
+
   if (parsedAggregation.events.length === 0) {
     return { mainEvent: parsedAggregation.mainEvent, assignedEvents: 0, createdClusters: 0 };
   }
-
-  await deleteParsedEventsForItem(item.id);
 
   const eventsToPersist = parsedAggregation.events.map((event, index) => ({
     itemId: item.id,
@@ -465,6 +497,7 @@ export async function persistParsedAggregationForItem(
     const result = await assignParsedEventToCluster(parsedEvent.id, {
       eventSignature: signature,
       latestPublishedAt: item.publishedAt,
+      qualityScore: parsedEvent.qualityScore,
     });
     if (result.clusterId) {
       assignedEvents += 1;
@@ -518,6 +551,38 @@ export async function recomputeCluster(
   }
 
   if (cluster.items.length === 0) {
+    const parsedEvents = await getClusterParsedEvents(clusterId);
+    const parsedEventStats = buildParsedEventClusterStats(parsedEvents);
+
+    if (parsedEventStats) {
+      const shouldSkipParsedEventUpdate =
+        cluster.score === parsedEventStats.score &&
+        cluster.itemCount === parsedEventStats.itemCount &&
+        cluster.latestPublishedAt.getTime() === parsedEventStats.latestPublishedAt.getTime() &&
+        cluster.eventType === parsedEventStats.eventType &&
+        cluster.eventSubject === parsedEventStats.eventSubject &&
+        cluster.eventAction === parsedEventStats.eventAction &&
+        cluster.eventObject === parsedEventStats.eventObject &&
+        cluster.eventDate === parsedEventStats.eventDate;
+
+      if (!shouldSkipParsedEventUpdate) {
+        await updateClusterSummary(clusterId, {
+          title: cluster.title,
+          summary: cluster.summary,
+          summaryInputHash: cluster.summaryInputHash,
+          ...parsedEventStats,
+        });
+      }
+
+      return {
+        clusterId,
+        deleted: false,
+        updated: !shouldSkipParsedEventUpdate,
+        summaryAttempted: false,
+        summarySucceeded: false,
+      } satisfies ClusterRecomputeResult;
+    }
+
     await deleteCluster(clusterId);
     return {
       clusterId,
@@ -596,6 +661,15 @@ async function refreshClusterStats(clusterId: string) {
   }
 
   if (cluster.items.length === 0) {
+    const parsedEventStats = buildParsedEventClusterStats(await getClusterParsedEvents(clusterId));
+
+    if (parsedEventStats) {
+      return prisma.contentCluster.update({
+        where: { id: clusterId },
+        data: parsedEventStats,
+      });
+    }
+
     await deleteCluster(clusterId);
     return null;
   }
@@ -928,6 +1002,7 @@ export async function executeClusterSummaryTask(
         createAiProvider(runtimeConfig!.modelApi, {
           itemSummary: runtimeConfig!.selectedPromptConfigs?.itemSummary,
           itemAnalysis: runtimeConfig!.selectedPromptConfigs?.itemAnalysis,
+          itemAggregation: runtimeConfig!.selectedPromptConfigs?.itemAggregation,
           clusterSummary: runtimeConfig!.selectedPromptConfigs?.clusterSummary,
           clusterMatch: runtimeConfig!.selectedPromptConfigs?.clusterMatch,
         }),
@@ -1054,17 +1129,24 @@ export async function executeClusterMerge(
   const lookbackSince = new Date(now.getTime() - CLUSTER_LOOKBACK_MS);
 
   // Refresh itemCount for clusters in the lookback window.
-  // Newly created clusters start with itemCount=0 and only get updated
-  // during cluster_finalize — which runs AFTER merge.  Without this,
-  // clusters created/modified in the current task are excluded by the
-  // itemCount >= 2 filter below.
+  // Newly created clusters only get fully refreshed during cluster_finalize,
+  // which runs AFTER merge. Include parsed aggregation events here as well so
+  // event-only clusters do not get reset to 0 before later feed/report reads.
   await prisma.$executeRaw`
     UPDATE content_clusters
     SET itemCount = (
-      SELECT COUNT(*) FROM items
-      WHERE items.clusterId = content_clusters.id
-      AND items.status = 'processed'
-      AND items.moderationStatus IN ('allowed', 'restored')
+      SELECT
+        (
+          SELECT COUNT(*) FROM items
+          WHERE items.clusterId = content_clusters.id
+          AND items.status = 'processed'
+          AND items.moderationStatus IN ('allowed', 'restored')
+        )
+        +
+        (
+          SELECT COUNT(*) FROM item_parsed_events
+          WHERE item_parsed_events.clusterId = content_clusters.id
+        )
     )
     WHERE status = 'active'
     AND latestPublishedAt >= ${lookbackSince.getTime()}

@@ -1,5 +1,6 @@
 import type { Item } from "@prisma/client";
 
+import { AGGREGATION_PARSE_STATUS } from "@/lib/aggregation/status";
 import type { AiEventSignature } from "@/lib/ai/provider";
 import type { ClusterAssignmentCoordinator } from "@/lib/clusters/helpers";
 import {
@@ -385,7 +386,12 @@ export async function processFeedItem({
   let summaryFailed = false;
   let analysisCompleted = false;
   let analysisFailed = false;
+  let aggregationParsed = false;
+  let aggregationParseFailed = false;
+  let aggregationEventCount = 0;
   let isAggregation = existing?.isAggregation ?? false;
+  let aggregationCheckedAt: Date | null = existing?.aggregationCheckedAt ?? null;
+  let aggregationParseStatus: string | null = existing?.aggregationParseStatus ?? null;
   const issues: string[] = [];
   const contentForFullTextDecision = fullText || rssContent || rssExcerpt || "";
   const canReuseExistingAnalysis = Boolean(
@@ -442,6 +448,8 @@ export async function processFeedItem({
         eventObject: eventSignature?.eventObject ?? null,
         eventDate: eventSignature?.eventDate ?? null,
         isAggregation,
+        aggregationCheckedAt,
+        aggregationParseStatus,
         aiProcessedAt: null,
         clusterId: null,
         manualClusterAssignedAt: null,
@@ -503,6 +511,8 @@ export async function processFeedItem({
             eventObject: eventSignature?.eventObject ?? null,
             eventDate: eventSignature?.eventDate ?? null,
             isAggregation: existing.isAggregation ?? false,
+            aggregationCheckedAt: existing.aggregationCheckedAt,
+            aggregationParseStatus: existing.aggregationParseStatus,
             aiProcessedAt: existing.aiProcessedAt,
             clusterId: existing.clusterId ?? null,
             manualClusterAssignedAt: existing.manualClusterAssignedAt,
@@ -567,6 +577,10 @@ export async function processFeedItem({
 
         summaryText = stripHtmlTags(summaryOutput.summary) || buildFallbackSummary(rssExcerpt, fullText || rssContent);
         isAggregation = aggregationDetectionEnabled && summaryOutput.isAggregation === true;
+        aggregationCheckedAt = aggregationDetectionEnabled ? new Date() : null;
+        aggregationParseStatus = aggregationDetectionEnabled
+          ? isAggregation ? AGGREGATION_PARSE_STATUS.detected : AGGREGATION_PARSE_STATUS.notAggregation
+          : null;
         summaryCompleted = true;
         summaryStatus = "succeeded";
       } catch (error) {
@@ -597,6 +611,9 @@ export async function processFeedItem({
           oneLiner: event.oneLiner,
           qualityScore: event.qualityScore,
         }));
+        if (events.length === 0) {
+          throw new Error("Aggregation parsing returned no events");
+        }
         // Pre-upsert to obtain stored.id for parsed event persistence.
         // The final upsert at the end of the function will overwrite with complete fields.
         const preUpsert = await upsertItem(
@@ -635,6 +652,8 @@ export async function processFeedItem({
             eventObject: null,
             eventDate: null,
             isAggregation: true,
+            aggregationCheckedAt,
+            aggregationParseStatus: AGGREGATION_PARSE_STATUS.detected,
             aiProcessedAt: null,
             clusterId: existing?.clusterId ?? null,
             manualClusterAssignedAt: existing?.manualClusterAssignedAt ?? null,
@@ -678,10 +697,15 @@ export async function processFeedItem({
           ? Math.max(...events.map((event) => event.qualityScore))
           : 50;
         qualityRationale = `聚合内容拆出 ${events.length} 条子事件`;
+        aggregationParseStatus = AGGREGATION_PARSE_STATUS.parsed;
+        aggregationParsed = true;
+        aggregationEventCount = events.length;
         analysisCompleted = true;
         analysisStatus = "succeeded";
       } catch (error) {
         appendIssue(issues, error, "Unknown aggregation parsing error");
+        aggregationParseStatus = AGGREGATION_PARSE_STATUS.failed;
+        aggregationParseFailed = true;
         // Fall back to enrichContent on parse failure so item still gets a signature.
         if (canReuseExistingCompletedAnalysis) {
           analysisStatus = "succeeded";
@@ -805,9 +829,11 @@ export async function processFeedItem({
       eventObject: eventSignature?.eventObject ?? null,
       eventDate: eventSignature?.eventDate ?? null,
       isAggregation,
+      aggregationCheckedAt,
+      aggregationParseStatus,
       aiProcessedAt: analysisStatus === "succeeded" ? new Date() : null,
-      clusterId: moderationStatus === "filtered" ? null : existing?.clusterId ?? null,
-      manualClusterAssignedAt: moderationStatus === "filtered" ? null : existing?.manualClusterAssignedAt ?? null,
+      clusterId: moderationStatus === "filtered" || isAggregation ? null : existing?.clusterId ?? null,
+      manualClusterAssignedAt: moderationStatus === "filtered" || isAggregation ? null : existing?.manualClusterAssignedAt ?? null,
       errorMessage: issues.length > 0 ? issues.join(" | ") : null,
     },
   );
@@ -815,7 +841,7 @@ export async function processFeedItem({
   let affectedClusterId: string | null = null;
   let clusterAssignmentMetrics: NonNullable<ProcessedItemRecord["metrics"]>["clusterAssignment"] | undefined;
 
-  if (moderationStatus === "filtered") {
+  if (moderationStatus === "filtered" || isAggregation) {
     if (existing?.clusterId) {
       affectedClusterId = existing.clusterId;
     }
@@ -835,7 +861,7 @@ export async function processFeedItem({
     }
   }
 
-  if (moderationStatus !== "filtered" && (!existing?.manualClusterAssignedAt || !stored.clusterId || !affectedClusterId)) {
+  if (moderationStatus !== "filtered" && !isAggregation && (!existing?.manualClusterAssignedAt || !stored.clusterId || !affectedClusterId)) {
     if (existing?.manualClusterAssignedAt && stored.clusterId) {
       await prisma.item.update({
         where: { id: stored.id },
@@ -873,6 +899,9 @@ export async function processFeedItem({
       blacklistFiltered: ruleFilter.filtered,
       summaryCompleted,
       summaryFailed,
+      aggregationParsed,
+      aggregationParseFailed,
+      aggregationEventCount,
       analysisCompleted,
       analysisFailed,
       analysisFiltered: analysisCompleted && moderationStatus === "filtered",

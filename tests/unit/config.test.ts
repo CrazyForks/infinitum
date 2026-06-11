@@ -26,6 +26,9 @@ describe("runtime config defaults", () => {
     expect(defaults.prompts.itemAnalysis).toContain("只返回单个短动作");
     expect(defaults.prompts.itemAnalysis).toContain("优先写唯一锚点");
     expect(defaults.prompts.itemAnalysis).not.toContain("restored");
+    expect(defaults.prompts.itemAggregation).toContain("聚合内容拆条助手");
+    expect(defaults.prompts.itemAggregation).toContain('"mainEvent"');
+    expect(defaults.prompts.itemAggregation).toContain('"events"');
     expect(defaults.prompts.clusterSummary.length).toBeGreaterThan(0);
     expect(defaults.prompts.clusterSummary).toContain("聚合展示编辑");
     expect(defaults.prompts.clusterSummary).toContain("固定输出格式");

@@ -612,6 +612,7 @@ describe("daily report service", () => {
     await prisma.dailyReportRefinementSession.deleteMany();
     await prisma.dailyReportSource.deleteMany();
     await prisma.dailyReport.deleteMany();
+    await prisma.itemParsedEvent.deleteMany();
     await prisma.item.deleteMany();
     await prisma.contentCluster.deleteMany();
     await prisma.fetchRun.deleteMany();
@@ -1257,6 +1258,77 @@ describe("daily report service", () => {
         }),
       ]),
     });
+  });
+
+  it("uses parsed aggregation events for daily report candidates without duplicating the parent item", async () => {
+    const source = await prisma.source.create({
+      data: {
+        name: "Aggregation Source",
+        rssUrl: "https://aggregation.example.com/feed.xml",
+        siteUrl: "https://aggregation.example.com",
+        aggregationDetectionEnabled: true,
+      },
+    });
+    const item = await prisma.item.create({
+      data: {
+        sourceId: source.id,
+        originalUrl: "https://aggregation.example.com/roundup",
+        canonicalUrl: "https://aggregation.example.com/roundup",
+        urlHash: "daily-aggregation-parent",
+        dedupeSignature: "daily-aggregation-parent",
+        originalTitle: "AI 行业简报合集",
+        publishedAt: new Date("2026-04-24T04:00:00.000Z"),
+        createdAt: new Date("2026-04-24T04:00:00.000Z"),
+        status: "processed",
+        moderationStatus: "allowed",
+        summaryText: "父级聚合摘要不应直接进入日报候选",
+        qualityScore: 98,
+        isAggregation: true,
+        aggregationCheckedAt: new Date("2026-04-24T04:05:00.000Z"),
+        aggregationParseStatus: "parsed",
+      },
+    });
+
+    await prisma.itemParsedEvent.createMany({
+      data: [
+        {
+          itemId: item.id,
+          eventIndex: 0,
+          eventType: "launch",
+          eventSubject: "OpenAI",
+          eventAction: "发布",
+          eventObject: "Toolkit",
+          eventDate: REPORT_DATE,
+          oneLiner: "OpenAI 发布 Toolkit",
+          qualityScore: 91,
+          fingerprint: "launch|openai|发布|toolkit|2026-04-24",
+        },
+        {
+          itemId: item.id,
+          eventIndex: 1,
+          eventType: "update",
+          eventSubject: "Anthropic",
+          eventAction: "更新",
+          eventObject: "Console",
+          eventDate: REPORT_DATE,
+          oneLiner: "Anthropic 更新 Console",
+          qualityScore: 89,
+          fingerprint: "update|anthropic|更新|console|2026-04-24",
+        },
+      ],
+    });
+
+    const candidates = await listDailyReportCandidates(REPORT_DATE, 10);
+
+    expect(candidates.map((candidate) => candidate.title)).toEqual([
+      "OpenAI 发布 Toolkit",
+      "Anthropic 更新 Console",
+    ]);
+    expect(candidates.map((candidate) => candidate.itemId)).toEqual(
+      expect.arrayContaining([expect.stringMatching(/^parsed:/)]),
+    );
+    expect(candidates[0]?.createdAt).toBe("2026-04-24T04:00:00.000Z");
+    expect(candidates.some((candidate) => candidate.title === "AI 行业简报合集")).toBe(false);
   });
 
   it("recovers stable source numbers for an existing report before refinement", async () => {

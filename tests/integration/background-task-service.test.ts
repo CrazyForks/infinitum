@@ -459,6 +459,30 @@ describe("background task persistence", () => {
             { label: "正文补抓", value: 3 },
           ],
         },
+        {
+          key: "item_summary",
+          label: "条目摘要",
+          status: "succeeded",
+          startedAt: "2026-04-12T00:00:10.000Z",
+          finishedAt: "2026-04-12T00:00:14.000Z",
+          durationMs: 4_000,
+          metrics: [
+            { label: "完成", value: 4 },
+            { label: "失败", value: 0 },
+          ],
+        },
+        {
+          key: "item_analysis",
+          label: "内容分析",
+          status: "succeeded",
+          startedAt: "2026-04-12T00:00:15.000Z",
+          finishedAt: "2026-04-12T00:00:20.000Z",
+          durationMs: 5_000,
+          metrics: [
+            { label: "完成", value: 4 },
+            { label: "过滤", value: 0 },
+          ],
+        },
       ],
     });
 
@@ -547,6 +571,32 @@ describe("background task persistence", () => {
           { label: "抓取源", value: 2 },
           { label: "抓取内容", value: 20 },
           { label: "正文补抓", value: 3 },
+        ],
+      },
+      {
+        key: "item_summary",
+        label: "条目摘要",
+        status: "succeeded",
+        startedAt: "2026-04-12T00:00:10.000Z",
+        finishedAt: "2026-04-12T00:00:14.000Z",
+        durationMs: 4_000,
+        modelName: null,
+        metrics: [
+          { label: "完成", value: 4 },
+          { label: "失败", value: 0 },
+        ],
+      },
+      {
+        key: "item_analysis",
+        label: "内容分析",
+        status: "succeeded",
+        startedAt: "2026-04-12T00:00:15.000Z",
+        finishedAt: "2026-04-12T00:00:20.000Z",
+        durationMs: 5_000,
+        modelName: null,
+        metrics: [
+          { label: "完成", value: 4 },
+          { label: "过滤", value: 0 },
         ],
       },
     ]);

@@ -78,8 +78,10 @@ function normalizeTaskAiCallBreakdownSnapshot(value: unknown): TaskAiCallBreakdo
   if (
     maybeSnapshot.key !== "item_summary" &&
     maybeSnapshot.key !== "item_analysis" &&
+    maybeSnapshot.key !== "item_aggregation" &&
     maybeSnapshot.key !== "cluster_match" &&
     maybeSnapshot.key !== "cluster_summary" &&
+    maybeSnapshot.key !== "cluster_merge" &&
     maybeSnapshot.key !== "daily_report"
   ) {
     return null;
@@ -230,6 +232,7 @@ function normalizeTaskTimelineNodeSnapshot(value: unknown): TaskTimelineNodeSnap
     "source_fetch",
     "rule_filter",
     "item_summary",
+    "item_aggregation",
     "item_analysis",
     "cluster_assignment",
     "cluster_merge",

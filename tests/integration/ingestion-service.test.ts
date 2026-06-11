@@ -29,6 +29,7 @@ function buildEventSignature(
 function buildAiProviderMock(
   overrides?: Partial<{
     summarizeItem: ReturnType<typeof vi.fn>;
+    parseAggregation: ReturnType<typeof vi.fn>;
     enrichContent: ReturnType<typeof vi.fn>;
     summarizeCluster: ReturnType<typeof vi.fn>;
     matchClusterCandidate: ReturnType<typeof vi.fn>;
@@ -36,6 +37,7 @@ function buildAiProviderMock(
 ): AiProvider {
   const base = {
     summarizeItem: vi.fn().mockResolvedValue({summary: "默认条目摘要", isAggregation: false}),
+    parseAggregation: vi.fn().mockResolvedValue({ mainEvent: null, events: [] }),
     enrichContent: vi.fn().mockResolvedValue({
       translatedTitle: "默认中文标题",
       moderationStatus: "allowed",
@@ -53,6 +55,7 @@ function buildAiProviderMock(
 
 describe("runIngestion", () => {
   beforeEach(async () => {
+    await prisma.itemParsedEvent.deleteMany();
     await prisma.item.deleteMany();
     await prisma.fetchRun.deleteMany();
     await prisma.backgroundTaskRun.deleteMany();
@@ -176,6 +179,7 @@ describe("runIngestion", () => {
       "source_fetch",
       "rule_filter",
       "item_summary",
+      "item_aggregation",
       "item_analysis",
       "cluster_assignment",
       "cluster_merge",
@@ -190,14 +194,19 @@ describe("runIngestion", () => {
       { label: "完成", value: 2 },
       { label: "失败", value: 0 },
     ]);
-    expect(taskTimeline[4]?.metrics).toEqual([
+    expect(taskTimeline[3]?.metrics).toEqual([
+      { label: "拆分成功", value: 0 },
+      { label: "拆分失败", value: 0 },
+      { label: "子事件", value: 0 },
+    ]);
+    expect(taskTimeline[5]?.metrics).toEqual([
       { label: "指纹命中", value: 1 },
       { label: "本地直连", value: 0 },
       { label: "AI归组", value: 0 },
       { label: "跳过", value: 0 },
       { label: "新建", value: 1 },
     ]);
-    expect(taskTimeline[6]?.metrics).toEqual([
+    expect(taskTimeline[7]?.metrics).toEqual([
       { label: "参与重算", value: 1 },
       { label: "完成更新", value: 1 },
       { label: "摘要完成", value: 1 },
@@ -2519,5 +2528,185 @@ describe("runIngestion", () => {
     expect(result.status).toBe("succeeded");
     expect(parser.parseURL).toHaveBeenCalledWith("https://db.example.com/feed.xml", { headers: {} });
     expect(aiProvider.enrichContent).toHaveBeenCalledOnce();
+  });
+
+  it("persists parsed aggregation events without moving duplicate fingerprints across items", async () => {
+    const parser = {
+      parseURL: vi.fn().mockImplementation(async (url: string) => ({
+        items: [
+          {
+            title: url.includes("source-b") ? "AI funding and product roundup" : "AI weekly launch roundup",
+            link: url.includes("source-b") ? "https://source-b.example.com/roundup" : "https://source-a.example.com/roundup",
+            isoDate: url.includes("source-b") ? "2026-04-10T09:05:00.000Z" : "2026-04-10T09:00:00.000Z",
+            content: url.includes("source-b")
+              ? "A market roundup covers the same OpenAI Toolkit launch and Anthropic Console update from another source."
+              : "A developer roundup covers OpenAI Toolkit launch and Anthropic Console update.",
+          },
+        ],
+      })),
+    };
+    const parseAggregation = vi.fn().mockResolvedValue({
+      mainEvent: {
+        eventType: "launch",
+        eventSubject: "OpenAI",
+        eventAction: "发布",
+        eventObject: "Toolkit",
+        eventDate: "2026-04-10",
+      },
+      events: [
+        {
+          eventType: "launch",
+          eventSubject: "OpenAI",
+          eventAction: "发布",
+          eventObject: "Toolkit",
+          eventDate: "2026-04-10",
+          oneLiner: "OpenAI 发布 Toolkit",
+          qualityScore: 92,
+        },
+        {
+          eventType: "update",
+          eventSubject: "Anthropic",
+          eventAction: "更新",
+          eventObject: "Console",
+          eventDate: "2026-04-10",
+          oneLiner: "Anthropic 更新 Console",
+          qualityScore: 84,
+        },
+      ],
+    });
+    const aiProvider = buildAiProviderMock({
+      summarizeItem: vi.fn().mockResolvedValue({ summary: "这是一篇聚合简报。", isAggregation: true }),
+      parseAggregation,
+      enrichContent: vi.fn().mockResolvedValue({
+        translatedTitle: "不应调用",
+        moderationStatus: "allowed",
+        moderationReason: null,
+        moderationDetail: null,
+        qualityScore: 50,
+        qualityRationale: "不应调用",
+        eventSignature: buildEventSignature(),
+      }),
+      summarizeCluster: vi.fn().mockResolvedValue("聚合事件摘要"),
+      matchClusterCandidate: vi.fn().mockResolvedValue(null),
+    });
+
+    const taskRun = await startIngestionTask({ triggerType: "manual" });
+    await runIngestionTask(taskRun, {
+      trigger: "manual",
+      parser,
+      articleFetcher: vi.fn(),
+      aiProvider,
+      sourceConfigs: [
+        {
+          name: "Aggregation Feed A",
+          rssUrl: "https://source-a.example.com/feed.xml",
+          siteUrl: "https://source-a.example.com",
+          enabled: true,
+          aiParsingEnabled: true,
+          aggregationDetectionEnabled: true,
+        },
+        {
+          name: "Aggregation Feed B",
+          rssUrl: "https://source-b.example.com/feed.xml",
+          siteUrl: "https://source-b.example.com",
+          enabled: true,
+          aiParsingEnabled: true,
+          aggregationDetectionEnabled: true,
+        },
+      ],
+      blacklist: [],
+      now: new Date("2026-04-10T10:00:00.000Z"),
+    });
+
+    const items = await prisma.item.findMany({
+      orderBy: { originalUrl: "asc" },
+      include: { parsedEvents: { orderBy: { eventIndex: "asc" } } },
+    });
+    const parsedEvents = await prisma.itemParsedEvent.findMany({
+      orderBy: [{ itemId: "asc" }, { eventIndex: "asc" }],
+    });
+    const storedTaskRun = await prisma.backgroundTaskRun.findUniqueOrThrow({
+      where: { id: taskRun.id },
+    });
+    const taskTimeline = JSON.parse(
+      storedTaskRun.taskTimelineJson ?? "[]",
+    ) as Array<{ key: string; metrics: Array<{ label: string; value: number }> }>;
+
+    expect(items).toHaveLength(2);
+    expect(items.every((item) => item.isAggregation)).toBe(true);
+    expect(items.every((item) => item.aggregationParseStatus === "parsed")).toBe(true);
+    expect(items.every((item) => item.clusterId === null)).toBe(true);
+    expect(items.every((item) => item.parsedEvents.length === 2)).toBe(true);
+    expect(parsedEvents).toHaveLength(4);
+    expect(new Set(parsedEvents.map((event) => event.itemId)).size).toBe(2);
+    expect(new Set(parsedEvents.map((event) => event.fingerprint)).size).toBe(2);
+    expect(taskTimeline.find((node) => node.key === "item_aggregation")?.metrics).toEqual([
+      { label: "拆分成功", value: 2 },
+      { label: "拆分失败", value: 0 },
+      { label: "子事件", value: 4 },
+    ]);
+    expect(aiProvider.enrichContent).not.toHaveBeenCalled();
+    expect(aiProvider.summarizeCluster).not.toHaveBeenCalled();
+    expect(aiProvider.matchClusterCandidate).not.toHaveBeenCalled();
+  });
+
+  it("falls back to normal enrichment when aggregation parsing returns no events", async () => {
+    const parser = {
+      parseURL: vi.fn().mockResolvedValue({
+        items: [
+          {
+            title: "Empty aggregation parse",
+            link: "https://agg.example.com/empty",
+            isoDate: "2026-04-10T09:00:00.000Z",
+            content: "The model may fail to split this roundup.",
+          },
+        ],
+      }),
+    };
+    const enrichContent = vi.fn().mockResolvedValue({
+      translatedTitle: "空拆条兜底",
+      moderationStatus: "allowed",
+      moderationReason: null,
+      moderationDetail: null,
+      qualityScore: 77,
+      qualityRationale: "兜底分析成功",
+      eventSignature: buildEventSignature({
+        eventType: "other",
+        eventSubject: "Roundup",
+        eventAction: "分析",
+        eventObject: "fallback",
+      }),
+    });
+
+    await runIngestion({
+      trigger: "manual",
+      parser,
+      articleFetcher: vi.fn(),
+      aiProvider: buildAiProviderMock({
+        summarizeItem: vi.fn().mockResolvedValue({ summary: "这是一篇聚合简报。", isAggregation: true }),
+        parseAggregation: vi.fn().mockResolvedValue({ mainEvent: null, events: [] }),
+        enrichContent,
+      }),
+      sourceConfigs: [
+        {
+          name: "Aggregation Feed",
+          rssUrl: "https://agg.example.com/feed.xml",
+          siteUrl: "https://agg.example.com",
+          enabled: true,
+          aiParsingEnabled: true,
+          aggregationDetectionEnabled: true,
+        },
+      ],
+      blacklist: [],
+      now: new Date("2026-04-10T10:00:00.000Z"),
+    });
+
+    const item = await prisma.item.findFirstOrThrow();
+
+    expect(enrichContent).toHaveBeenCalledOnce();
+    expect(item.isAggregation).toBe(true);
+    expect(item.aggregationParseStatus).toBe("failed");
+    expect(item.analysisStatus).toBe("succeeded");
+    expect(await prisma.itemParsedEvent.count()).toBe(0);
   });
 });

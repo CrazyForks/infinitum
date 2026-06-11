@@ -62,6 +62,12 @@ function buildMonitorSnapshot(): BackgroundTaskMonitorSnapshot {
             estimated: 2,
           },
           {
+            key: "item_aggregation",
+            label: "聚合拆条",
+            actual: 1,
+            estimated: 1,
+          },
+          {
             key: "cluster_match",
             label: "聚合匹配",
             actual: 0,
@@ -131,6 +137,20 @@ function buildMonitorSnapshot(): BackgroundTaskMonitorSnapshot {
             metrics: [
               { label: "完成", value: 5 },
               { label: "失败", value: 1 },
+            ],
+          },
+          {
+            key: "item_aggregation",
+            label: "聚合拆分",
+            status: "succeeded",
+            startedAt: "2026-04-21T00:00:08.000Z",
+            finishedAt: null,
+            durationMs: null,
+            modelName: "gpt-4.1-mini-aggregation",
+            metrics: [
+              { label: "拆分成功", value: 1 },
+              { label: "拆分失败", value: 0 },
+              { label: "子事件", value: 12 },
             ],
           },
           {
@@ -237,6 +257,7 @@ describe("TaskMonitorPanel", () => {
     expect(within(dialog).getByText("信息抓取")).toBeInTheDocument();
     expect(within(dialog).getByText("规则过滤")).toBeInTheDocument();
     expect(within(dialog).getByText("条目摘要 · 模型 gpt-4.1-mini-summary")).toBeInTheDocument();
+    expect(within(dialog).getByText("聚合拆分 · 模型 gpt-4.1-mini-aggregation")).toBeInTheDocument();
     expect(within(dialog).getByText("内容分析 · 模型 gpt-4.1-mini-analysis")).toBeInTheDocument();
     expect(within(dialog).getByText("归组决策 · 模型 gpt-4.1-mini-match")).toBeInTheDocument();
     expect(within(dialog).getByText("聚合合并 · 模型 gpt-4.1-mini-merge")).toBeInTheDocument();
@@ -245,6 +266,7 @@ describe("TaskMonitorPanel", () => {
     expect(within(dialog).getByText("抓取 1 个源 · 10 篇内容 · 正文补抓 2 篇")).toBeInTheDocument();
     expect(within(dialog).getByText("黑名单 2 · 复用 1")).toBeInTheDocument();
     expect(within(dialog).getByText("完成 5 · 失败 1")).toBeInTheDocument();
+    expect(within(dialog).getByText("成功 1 · 失败 0 · 子事件 12")).toBeInTheDocument();
     expect(within(dialog).getByText("完成 4 · 过滤 2")).toBeInTheDocument();
     expect(within(dialog).getByText("指纹命中 1 · 本地直连 2 · AI归组 1 · 跳过 0 · 新建 1")).toBeInTheDocument();
     expect(within(dialog).getByText("候选 12/18 · Dirty 5 · Hash跳过 4 · AI返回 2 · 移动 6 · 失败 1 · 已合并 · 合并后 9 组")).toBeInTheDocument();

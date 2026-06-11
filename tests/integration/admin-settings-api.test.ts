@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { prisma } from "@/lib/db";
+
 const requireAdmin = vi.fn();
 const getAdminSettings = vi.fn();
 const createModelApiConfig = vi.fn();
@@ -248,6 +250,47 @@ describe("/api/admin/settings", () => {
     });
   });
 
+  it("accepts aggregation split prompt configs", async () => {
+    requireAdmin.mockResolvedValue(undefined);
+    createPromptConfig.mockResolvedValue({ id: "prompt-aggregation" });
+
+    const { POST } = await import("@/app/api/admin/settings/prompt-configs/route");
+    const response = await POST(
+      new Request("http://localhost/api/admin/settings/prompt-configs", {
+        method: "POST",
+        body: JSON.stringify({
+          name: "默认聚合拆分提示词",
+          type: "item_aggregation",
+          prompt: "标题：{{title}}\n来源：{{sourceName}}\n正文：{{inputText}}",
+          systemPrompt: "聚合拆分系统提示词",
+          temperature: 0,
+          maxTokens: 8000,
+          topP: null,
+          modelApiConfigId: null,
+          isEnabled: true,
+          isDefault: true,
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    expect(createPromptConfig).toHaveBeenCalledWith({
+      name: "默认聚合拆分提示词",
+      type: "item_aggregation",
+      prompt: "标题：{{title}}\n来源：{{sourceName}}\n正文：{{inputText}}",
+      systemPrompt: "聚合拆分系统提示词",
+      temperature: 0,
+      maxTokens: 8000,
+      topP: null,
+      modelApiConfigId: null,
+      isEnabled: true,
+      isDefault: true,
+    });
+  });
+
   it("updates cluster merge prompt configs", async () => {
     requireAdmin.mockResolvedValue(undefined);
     updatePromptConfig.mockResolvedValue({ id: "prompt-merge" });
@@ -290,5 +333,38 @@ describe("/api/admin/settings", () => {
       isEnabled: true,
       isDefault: true,
     });
+  });
+});
+
+describe("/api/admin/settings/sources", () => {
+  it("returns aggregation detection flags in the paginated source list", async () => {
+    requireAdmin.mockResolvedValue(undefined);
+    await prisma.item.deleteMany();
+    await prisma.source.deleteMany();
+    await prisma.sourceGroup.deleteMany();
+    await prisma.source.create({
+      data: {
+        name: "Aggregation Source",
+        rssUrl: "https://aggregation.example.com/feed.xml",
+        siteUrl: "https://aggregation.example.com",
+        enabled: true,
+        aiParsingEnabled: true,
+        aggregationEnabled: true,
+        aggregationDetectionEnabled: true,
+      },
+    });
+
+    const { GET } = await import("@/app/api/admin/settings/sources/route");
+    const response = await GET(new Request("http://localhost/api/admin/settings/sources?page=1&pageSize=10"));
+    const json = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(json.sources).toEqual([
+      expect.objectContaining({
+        name: "Aggregation Source",
+        aggregationEnabled: true,
+        aggregationDetectionEnabled: true,
+      }),
+    ]);
   });
 });

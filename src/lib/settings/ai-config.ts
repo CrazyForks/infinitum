@@ -5,6 +5,7 @@ import {
   DEFAULT_DAILY_REPORT_REFINEMENT_CHAT_USER_PROMPT_TEMPLATE,
   DEFAULT_DAILY_REPORT_REFINEMENT_GENERATE_USER_PROMPT_TEMPLATE,
   DEFAULT_DAILY_REPORT_USER_PROMPT_TEMPLATE,
+  DEFAULT_ITEM_AGGREGATION_USER_PROMPT_TEMPLATE,
   DEFAULT_ITEM_ANALYSIS_USER_PROMPT_TEMPLATE,
   DEFAULT_ITEM_SUMMARY_USER_PROMPT_TEMPLATE,
 } from "@/config/prompts";
@@ -16,6 +17,7 @@ export const PROMPT_TYPE_OPTIONS: Array<{
 }> = [
   { value: "item_summary", label: "条目摘要" },
   { value: "item_analysis", label: "内容分析" },
+  { value: "item_aggregation", label: "聚合拆分" },
   { value: "cluster_summary", label: "聚合摘要" },
   { value: "cluster_match", label: "归组判定" },
   { value: "cluster_merge", label: "聚合合并" },
@@ -34,6 +36,8 @@ export function getDefaultPromptConfigName(type: PromptConfigType): string {
       return "默认条目摘要提示词";
     case "item_analysis":
       return "默认内容分析提示词";
+    case "item_aggregation":
+      return "默认聚合拆分提示词";
     case "cluster_summary":
       return "默认聚合摘要提示词";
     case "cluster_match":
@@ -55,6 +59,8 @@ export function getDefaultPromptTemplate(type: PromptConfigType): string {
       return DEFAULT_ITEM_SUMMARY_USER_PROMPT_TEMPLATE;
     case "item_analysis":
       return DEFAULT_ITEM_ANALYSIS_USER_PROMPT_TEMPLATE;
+    case "item_aggregation":
+      return DEFAULT_ITEM_AGGREGATION_USER_PROMPT_TEMPLATE;
     case "cluster_summary":
       return DEFAULT_CLUSTER_SUMMARY_USER_PROMPT_TEMPLATE;
     case "cluster_match":
@@ -79,13 +85,19 @@ export function getDefaultPromptSampling(type: PromptConfigType): {
     case "item_summary":
       return {
         temperature: 0.2,
-        maxTokens: 300,
+        maxTokens: 600,
         topP: null,
       };
     case "item_analysis":
       return {
         temperature: 0.2,
         maxTokens: 1000,
+        topP: null,
+      };
+    case "item_aggregation":
+      return {
+        temperature: 0,
+        maxTokens: 8000,
         topP: null,
       };
     case "cluster_summary":

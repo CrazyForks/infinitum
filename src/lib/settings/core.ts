@@ -19,6 +19,8 @@ export const DEFAULT_MODEL_CONFIG_NAME = "默认模型配置";
 const LEGACY_DEFAULT_CLUSTER_SUMMARY_PROMPT =
   "你是聚合摘要助手。请基于给定的多条候选内容，提炼它们共同指向的同一具体事件，并输出 100 到 200 字中文摘要。只输出摘要正文，不要输出 JSON、代码块、标题、前后缀说明或项目符号。可使用有限 Markdown 行内标记突出关键信息：用 **加粗** 标注共同事件、关键进展、结果或数字，用 *斜体* 标注必要差异点或影响；不要使用链接、图片、标题、表格或列表。摘要要突出共同事件、关键进展和必要差异点；要体现这是多条报道的归纳结果，而不是复述某一篇原文；不要写成行业综述、公司介绍或主题总结，不要编造未提供的信息。";
 
+const LEGACY_DEFAULT_ITEM_SUMMARY_PROMPT_PREFIX = "你是单条新闻摘要助手。";
+
 const LEGACY_DEFAULT_CLUSTER_MERGE_PROMPT = `你是聚合合并助手。请基于给定的多个聚合组信息，判断哪些聚合组描述的是同一具体事件但被错误地分到了不同组，输出合并建议。
 
 判断标准：
@@ -457,6 +459,7 @@ export async function validatePromptConfigInput(
 const ALL_PROMPT_TYPES = [
   PromptConfigType.item_summary,
   PromptConfigType.item_analysis,
+  PromptConfigType.item_aggregation,
   PromptConfigType.cluster_summary,
   PromptConfigType.cluster_match,
   PromptConfigType.cluster_merge,
@@ -549,6 +552,8 @@ function resolveSystemPromptByType(type: PromptConfigType, fileConfig: RuntimeCo
       return fileConfig.prompts.itemSummary;
     case PromptConfigType.item_analysis:
       return fileConfig.prompts.itemAnalysis;
+    case PromptConfigType.item_aggregation:
+      return fileConfig.prompts.itemAggregation;
     case PromptConfigType.cluster_summary:
       return fileConfig.prompts.clusterSummary;
     case PromptConfigType.cluster_match:
@@ -587,6 +592,7 @@ async function ensureModelAndPromptConfigsSeeded() {
       legacyDefaultClusterMergePromptCount,
       legacyDefaultDailyReportPromptCount,
       legacyDefaultDailyReportRefinementGeneratePromptCount,
+      legacyDefaultItemSummaryPromptCount,
     ] = await Promise.all([
       prisma.promptConfig.findMany({
         where: { type: { in: ALL_PROMPT_TYPES as unknown as PromptConfigType[] } },
@@ -608,12 +614,22 @@ async function ensureModelAndPromptConfigsSeeded() {
           fileConfig,
         ),
       }),
+      prisma.promptConfig.count({
+        where: {
+          type: PromptConfigType.item_summary,
+          name: getDefaultPromptConfigName(PromptConfigType.item_summary),
+          systemPrompt: { startsWith: LEGACY_DEFAULT_ITEM_SUMMARY_PROMPT_PREFIX },
+          isEnabled: true,
+          isDefault: true,
+        },
+      }),
     ]);
     if (
       legacyDefaultClusterSummaryPromptCount === 0 &&
       legacyDefaultClusterMergePromptCount === 0 &&
       legacyDefaultDailyReportPromptCount === 0 &&
       legacyDefaultDailyReportRefinementGeneratePromptCount === 0 &&
+      legacyDefaultItemSummaryPromptCount === 0 &&
       ALL_PROMPT_TYPES.every((type) => existingTypes.some((row) => row.type === type))
     ) {
       return;
@@ -685,6 +701,24 @@ async function ensureModelAndPromptConfigsSeeded() {
     }
 
     const clusterSummarySampling = getDefaultPromptSampling(PromptConfigType.cluster_summary);
+    const itemSummarySampling = getDefaultPromptSampling(PromptConfigType.item_summary);
+    await tx.promptConfig.updateMany({
+      where: {
+        type: PromptConfigType.item_summary,
+        name: getDefaultPromptConfigName(PromptConfigType.item_summary),
+        systemPrompt: { startsWith: LEGACY_DEFAULT_ITEM_SUMMARY_PROMPT_PREFIX },
+        isEnabled: true,
+        isDefault: true,
+      },
+      data: {
+        systemPrompt: resolveSystemPromptByType(PromptConfigType.item_summary, fileConfig),
+        prompt: getDefaultPromptTemplate(PromptConfigType.item_summary),
+        maxTokens: itemSummarySampling.maxTokens,
+        temperature: itemSummarySampling.temperature,
+        topP: itemSummarySampling.topP,
+      },
+    });
+
     await tx.promptConfig.updateMany({
       where: getLegacyDefaultClusterSummaryPromptWhere(),
       data: {

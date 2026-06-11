@@ -51,6 +51,7 @@ export async function getIngestionRuntimeConfig(): Promise<RuntimeConfig> {
 
   const itemAnalysisConfig = pickPromptConfigByType(promptConfigs, PromptConfigType.item_analysis);
   const itemSummaryConfig = pickPromptConfigByType(promptConfigs, PromptConfigType.item_summary);
+  const itemAggregationConfig = pickPromptConfigByType(promptConfigs, PromptConfigType.item_aggregation);
   const clusterSummaryConfig = pickPromptConfigByType(promptConfigs, PromptConfigType.cluster_summary);
   const clusterMatchConfig = pickPromptConfigByType(promptConfigs, PromptConfigType.cluster_match);
   const clusterMergeConfig = pickPromptConfigByType(promptConfigs, PromptConfigType.cluster_merge);
@@ -72,6 +73,7 @@ export async function getIngestionRuntimeConfig(): Promise<RuntimeConfig> {
     prompts: {
       itemSummary: itemSummaryConfig.systemPrompt || itemSummaryConfig.prompt,
       itemAnalysis: itemAnalysisConfig.systemPrompt || itemAnalysisConfig.prompt,
+      itemAggregation: itemAggregationConfig.systemPrompt || itemAggregationConfig.prompt,
       clusterSummary: clusterSummaryConfig.systemPrompt || clusterSummaryConfig.prompt,
       clusterMatch: clusterMatchConfig.systemPrompt || clusterMatchConfig.prompt,
       clusterMerge: clusterMergeConfig.systemPrompt || clusterMergeConfig.prompt,
@@ -82,6 +84,7 @@ export async function getIngestionRuntimeConfig(): Promise<RuntimeConfig> {
     selectedPromptConfigs: {
       itemSummary: serializeSelectedPromptConfig(itemSummaryConfig),
       itemAnalysis: serializeSelectedPromptConfig(itemAnalysisConfig),
+      itemAggregation: serializeSelectedPromptConfig(itemAggregationConfig),
       clusterSummary: serializeSelectedPromptConfig(clusterSummaryConfig),
       clusterMatch: serializeSelectedPromptConfig(clusterMatchConfig),
       clusterMerge: serializeSelectedPromptConfig(clusterMergeConfig),

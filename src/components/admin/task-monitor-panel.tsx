@@ -118,6 +118,8 @@ function formatTaskTimelineDetail(task: TaskRunSnapshot, node: NonNullable<TaskR
       return `黑名单 ${getValue("命中黑名单")} · 复用 ${getValue("复用已有处理")}`;
     case "item_summary":
       return `完成 ${getValue("完成")} · 失败 ${getValue("失败")}`;
+    case "item_aggregation":
+      return `成功 ${getValue("拆分成功")} · 失败 ${getValue("拆分失败")} · 子事件 ${getValue("子事件")}`;
     case "item_analysis":
       return `完成 ${getValue("完成")} · 过滤 ${getValue("过滤")}`;
     case "cluster_assignment":

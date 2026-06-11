@@ -179,6 +179,8 @@ type CompletionResponseFormat = {
   type: "json_object";
 };
 
+const MAX_PARSED_AGGREGATION_EVENTS = 20;
+
 type ModelApiCircuitState = {
   failures: number[];
   openUntil: number;
@@ -319,8 +321,34 @@ function parseSummaryAndClassification(rawContent: string, fallback: ItemSummary
     // Fall through to tolerant parsing below.
   }
 
+  const recoveredSummary = recoverSummaryFromJsonLikeOutput(normalized);
+  if (recoveredSummary) {
+    return { summary: recoveredSummary, isAggregation: fallback.isAggregation };
+  }
+
   // Tolerant fallback: treat the whole output as the summary, mark non-aggregation.
   return { summary: normalized, isAggregation: fallback.isAggregation };
+}
+
+function recoverSummaryFromJsonLikeOutput(value: string): string {
+  const match = value.match(/^\s*\{\s*"summary"\s*:\s*"([\s\S]*)/);
+  if (!match?.[1]) {
+    return "";
+  }
+
+  const rawSummary = match[1];
+  const closingQuoteIndex = rawSummary.search(/"[\s,}]*("isAggregation"|})/);
+  const candidate = closingQuoteIndex >= 0 ? rawSummary.slice(0, closingQuoteIndex) : rawSummary;
+
+  try {
+    return JSON.parse(`"${candidate.replace(/\\?$/, "")}"`).trim();
+  } catch {
+    return candidate
+      .replace(/\\"/g, "\"")
+      .replace(/\\\\/g, "\\")
+      .replace(/\\n/g, "\n")
+      .trim();
+  }
 }
 
 function parseSummaryOutput(rawContent: string, fallback: string): string {
@@ -345,13 +373,16 @@ function parseAggregationOutput(rawContent: string, fallback: ParsedAggregation)
       ? parsed.events
           .map((event) => normalizeParsedEvent(event))
           .filter((event): event is ParsedEvent => event !== null)
+          .slice(0, MAX_PARSED_AGGREGATION_EVENTS)
       : [];
 
     const mainEvent = normalizeParsedEventSignature(parsed.mainEvent);
 
     return { mainEvent, events };
-  } catch {
-    return fallback;
+  } catch (error) {
+    throw new Error(
+      `聚合拆分模型返回了无法解析的 JSON：${error instanceof Error ? error.message : "Unknown parse error"}`,
+    );
   }
 }
 
@@ -961,11 +992,18 @@ export function createAiProvider(
     DEFAULT_ITEM_ANALYSIS_USER_PROMPT_TEMPLATE,
     promptOverrides?.itemAnalysis,
   );
-  const itemAggregationConfig = resolvePromptConfig(
+  const resolvedItemAggregationConfig = resolvePromptConfig(
     DEFAULT_ITEM_AGGREGATION_ANALYSIS_PROMPT,
     DEFAULT_ITEM_AGGREGATION_USER_PROMPT_TEMPLATE,
     promptOverrides?.itemAggregation,
   );
+  const itemAggregationConfig = promptOverrides?.itemAggregation
+    ? resolvedItemAggregationConfig
+    : {
+        ...resolvedItemAggregationConfig,
+        temperature: 0,
+        maxTokens: 8000,
+      };
   const clusterSummaryConfig = resolvePromptConfig(
     DEFAULT_CLUSTER_SUMMARY_PROMPT,
     DEFAULT_CLUSTER_SUMMARY_USER_PROMPT_TEMPLATE,

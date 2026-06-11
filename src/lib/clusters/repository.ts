@@ -114,6 +114,7 @@ export async function createContentCluster(data: {
   summary: string;
   summaryInputHash?: string | null;
   score: number;
+  itemCount?: number;
   latestPublishedAt: Date;
   eventType?: string | null;
   eventSubject?: string | null;
@@ -130,7 +131,7 @@ export async function createContentCluster(data: {
       summary: data.summary,
       summaryInputHash: data.summaryInputHash ?? null,
       score: data.score,
-      itemCount: 0,
+      itemCount: data.itemCount ?? 0,
       latestPublishedAt: data.latestPublishedAt,
       status: "active",
       fingerprint: data.fingerprint,
@@ -167,6 +168,31 @@ export async function getClusterWithItems(clusterId: string) {
         orderBy: [{ publishedAt: "desc" }, { createdAt: "desc" }],
       },
     },
+  });
+}
+
+export async function getClusterParsedEvents(clusterId: string) {
+  return prisma.itemParsedEvent.findMany({
+    where: {
+      clusterId,
+      item: {
+        status: "processed",
+        moderationStatus: {
+          in: ["allowed", "restored"],
+        },
+        source: {
+          aggregationDetectionEnabled: true,
+        },
+      },
+    },
+    include: {
+      item: {
+        select: {
+          publishedAt: true,
+        },
+      },
+    },
+    orderBy: [{ item: { publishedAt: "desc" } }, { eventIndex: "asc" }],
   });
 }
 
@@ -233,9 +259,13 @@ export async function createParsedEvents(
   if (events.length === 0) {
     return [];
   }
-  return prisma.$transaction(
-    events.map((event) =>
-      prisma.itemParsedEvent.create({
+  return prisma.$transaction(async (tx) => {
+    const persisted = [];
+
+    for (const event of events) {
+      try {
+        persisted.push(
+          await tx.itemParsedEvent.create({
             data: {
               itemId: event.itemId,
               eventIndex: event.eventIndex,
@@ -248,29 +278,40 @@ export async function createParsedEvents(
               qualityScore: event.qualityScore,
               fingerprint: event.fingerprint,
             },
-          }).catch(async (error) => {
-            if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-              // Fingerprint collision with an existing parsed event (cross-item
-              // dedupe). Refresh cached fields but keep the existing clusterId.
-              return prisma.itemParsedEvent.update({
-                where: { fingerprint: event.fingerprint },
-                data: {
-                  itemId: event.itemId,
-                  eventIndex: event.eventIndex,
-                  eventType: event.eventType ?? null,
-                  eventSubject: event.eventSubject ?? null,
-                  eventAction: event.eventAction ?? null,
-                  eventObject: event.eventObject ?? null,
-                  eventDate: event.eventDate ?? null,
-                  oneLiner: event.oneLiner,
-                  qualityScore: event.qualityScore,
-                },
-              });
-            }
-            throw error;
           }),
-    ),
-  );
+        );
+      } catch (error) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+          // Reparse of the same item may produce a stable event again. Refresh
+          // cached fields but keep any existing cluster assignment.
+          persisted.push(
+            await tx.itemParsedEvent.update({
+              where: {
+                itemId_fingerprint: {
+                  itemId: event.itemId,
+                  fingerprint: event.fingerprint,
+                },
+              },
+              data: {
+                eventIndex: event.eventIndex,
+                eventType: event.eventType ?? null,
+                eventSubject: event.eventSubject ?? null,
+                eventAction: event.eventAction ?? null,
+                eventObject: event.eventObject ?? null,
+                eventDate: event.eventDate ?? null,
+                oneLiner: event.oneLiner,
+                qualityScore: event.qualityScore,
+              },
+            }),
+          );
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    return persisted;
+  });
 }
 
 export async function deleteParsedEventsForItem(itemId: string) {

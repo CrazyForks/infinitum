@@ -6,6 +6,7 @@ import {
   DEFAULT_DAILY_REPORT_PROMPT,
   DEFAULT_DAILY_REPORT_REFINEMENT_CHAT_PROMPT,
   DEFAULT_DAILY_REPORT_REFINEMENT_GENERATE_PROMPT,
+  DEFAULT_ITEM_AGGREGATION_ANALYSIS_PROMPT,
   DEFAULT_ITEM_ANALYSIS_PROMPT,
   DEFAULT_ITEM_SUMMARY_PROMPT,
 } from "@/config/prompts";
@@ -35,6 +36,7 @@ export type RuntimeConfig = {
   prompts: {
     itemSummary: string;
     itemAnalysis: string;
+    itemAggregation: string;
     clusterSummary: string;
     clusterMatch: string;
     clusterMerge: string;
@@ -53,6 +55,15 @@ export type RuntimeConfig = {
       modelApi?: RuntimeConfig["modelApi"] | null;
     };
     itemAnalysis: {
+      name: string;
+      systemPrompt: string;
+      promptTemplate: string;
+      temperature?: number | null;
+      maxTokens?: number | null;
+      topP?: number | null;
+      modelApi?: RuntimeConfig["modelApi"] | null;
+    };
+    itemAggregation: {
       name: string;
       systemPrompt: string;
       promptTemplate: string;
@@ -138,6 +149,7 @@ export function getRuntimeConfig(): RuntimeConfig {
     prompts: {
       itemSummary: DEFAULT_ITEM_SUMMARY_PROMPT,
       itemAnalysis: DEFAULT_ITEM_ANALYSIS_PROMPT,
+      itemAggregation: DEFAULT_ITEM_AGGREGATION_ANALYSIS_PROMPT,
       clusterSummary: DEFAULT_CLUSTER_SUMMARY_PROMPT,
       clusterMatch: DEFAULT_CLUSTER_MATCH_PROMPT,
       clusterMerge: DEFAULT_CLUSTER_MERGE_PROMPT,

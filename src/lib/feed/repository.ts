@@ -105,6 +105,8 @@ export async function syncSources(sourceConfigs: SourceConfig[]) {
         siteUrl: source.siteUrl,
         enabled: source.enabled,
         aiParsingEnabled: source.aiParsingEnabled,
+        aggregationEnabled: source.aggregationEnabled ?? true,
+        aggregationDetectionEnabled: source.aggregationDetectionEnabled ?? false,
       },
       create: {
         name: source.name,
@@ -112,6 +114,8 @@ export async function syncSources(sourceConfigs: SourceConfig[]) {
         siteUrl: source.siteUrl,
         enabled: source.enabled,
         aiParsingEnabled: source.aiParsingEnabled,
+        aggregationEnabled: source.aggregationEnabled ?? true,
+        aggregationDetectionEnabled: source.aggregationDetectionEnabled ?? false,
       },
     });
   }

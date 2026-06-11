@@ -548,6 +548,43 @@ describe("ai provider", () => {
     expect(summary.summary).not.toMatch(/\.\.\.$/);
   });
 
+  it("recovers item summary text from truncated json output", async () => {
+    const create = vi.fn().mockResolvedValue({
+      choices: [
+        {
+          message: {
+            content: "{\"summary\":\"今日科技行业多条重要动态：**苹果 Siri AI 提示词文件曝光**，何小鹏亲自直管机器人业务；**影石 Luna Ultra 云台相机发布**，3999 元起；**大疆 Pocket4P 价格曝光**，预计",
+          },
+        },
+      ],
+    });
+    const provider = createAiProvider(
+      {
+        apiKey: "sk-test",
+        baseURL: "https://example.com/v1",
+        model: "test-model",
+      },
+      undefined,
+      {
+        chat: {
+          completions: {
+            create,
+          },
+        },
+      },
+    );
+
+    const summary = await provider.summarizeItem("Long body text", {
+      title: "早报",
+      sourceName: "爱范儿",
+    });
+
+    expect(summary).toEqual({
+      summary: "今日科技行业多条重要动态：**苹果 Siri AI 提示词文件曝光**，何小鹏亲自直管机器人业务；**影石 Luna Ultra 云台相机发布**，3999 元起；**大疆 Pocket4P 价格曝光**，预计",
+      isAggregation: false,
+    });
+  });
+
   it("retries item summaries with an explicit Chinese-only instruction when the first output is English", async () => {
     const create = vi
       .fn()
@@ -977,5 +1014,188 @@ describe("ai provider", () => {
     expect(systemPrompt).toContain("如果只是主题接近");
     expect(systemPrompt).toContain("当前内容缺少明确事件线索时");
     expect(create.mock.calls[0]?.[0]?.response_format).toEqual({ type: "json_object" });
+  });
+
+  it("uses item aggregation prompt overrides when parsing aggregated content", async () => {
+    const create = vi.fn().mockResolvedValue({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              mainEvent: null,
+              events: [
+                {
+                  eventType: "release",
+                  eventSubject: "OpenAI",
+                  eventAction: "发布",
+                  eventObject: "Agent SDK",
+                  eventDate: null,
+                  oneLiner: "OpenAI 发布 Agent SDK。",
+                  qualityScore: 88,
+                },
+              ],
+            }),
+          },
+        },
+      ],
+    });
+
+    const provider = createAiProvider(
+      {
+        apiKey: "sk-test",
+        baseURL: "https://example.com/v1",
+        model: "test-model",
+      },
+      {
+        itemAggregation: {
+          systemPrompt: "聚合拆分专用系统提示词",
+          promptTemplate: "拆分标题：{{title}}\n拆分来源：{{sourceName}}\n拆分正文：{{inputText}}",
+          temperature: 0,
+          maxTokens: 1600,
+        },
+      },
+      {
+        chat: {
+          completions: {
+            create,
+          },
+        },
+      },
+    );
+
+    const parsed = await provider.parseAggregation("事件一。事件二。", {
+      title: "聚合简讯",
+      sourceName: "测试源",
+    });
+
+    expect(parsed.events).toHaveLength(1);
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(create.mock.calls[0]?.[0]?.messages?.[0]?.content).toBe("聚合拆分专用系统提示词");
+    expect(create.mock.calls[0]?.[0]?.messages?.[1]?.content).toBe(
+      "拆分标题：聚合简讯\n拆分来源：测试源\n拆分正文：事件一。事件二。",
+    );
+    expect(create.mock.calls[0]?.[0]?.temperature).toBe(0);
+    expect(create.mock.calls[0]?.[0]?.max_tokens).toBe(1600);
+    expect(create.mock.calls[0]?.[0]?.response_format).toEqual({ type: "json_object" });
+  });
+
+  it("uses the higher default token budget for aggregation parsing", async () => {
+    const create = vi.fn().mockResolvedValue({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              mainEvent: null,
+              events: [],
+            }),
+          },
+        },
+      ],
+    });
+
+    const provider = createAiProvider(
+      {
+        apiKey: "sk-test",
+        baseURL: "https://example.com/v1",
+        model: "test-model",
+      },
+      undefined,
+      {
+        chat: {
+          completions: {
+            create,
+          },
+        },
+      },
+    );
+
+    await provider.parseAggregation("事件一。事件二。", {
+      title: "聚合简讯",
+      sourceName: "测试源",
+    });
+
+    expect(create.mock.calls[0]?.[0]?.max_tokens).toBe(8000);
+  });
+
+  it("caps aggregation parsing results at twenty events", async () => {
+    const create = vi.fn().mockResolvedValue({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              mainEvent: null,
+              events: Array.from({ length: 25 }, (_, index) => ({
+                eventType: "launch",
+                eventSubject: `Subject ${index}`,
+                eventAction: "发布",
+                eventObject: `Object ${index}`,
+                eventDate: null,
+                oneLiner: `Subject ${index} 发布 Object ${index}`,
+                qualityScore: 80,
+              })),
+            }),
+          },
+        },
+      ],
+    });
+
+    const provider = createAiProvider(
+      {
+        apiKey: "sk-test",
+        baseURL: "https://example.com/v1",
+        model: "test-model",
+      },
+      undefined,
+      {
+        chat: {
+          completions: {
+            create,
+          },
+        },
+      },
+    );
+
+    const parsed = await provider.parseAggregation("很多事件", {
+      title: "聚合简讯",
+      sourceName: "测试源",
+    });
+
+    expect(parsed.events).toHaveLength(20);
+    expect(parsed.events.at(-1)?.eventSubject).toBe("Subject 19");
+  });
+
+  it("rejects invalid aggregation JSON instead of treating it as non-aggregation", async () => {
+    const create = vi.fn().mockResolvedValue({
+      choices: [
+        {
+          message: {
+            content: '{"mainEvent":null,"events":[{"eventType":"release","eventSubject":"OpenAI"',
+          },
+        },
+      ],
+    });
+
+    const provider = createAiProvider(
+      {
+        apiKey: "sk-test",
+        baseURL: "https://example.com/v1",
+        model: "test-model",
+      },
+      undefined,
+      {
+        chat: {
+          completions: {
+            create,
+          },
+        },
+      },
+    );
+
+    await expect(
+      provider.parseAggregation("事件一。事件二。", {
+        title: "聚合简讯",
+        sourceName: "测试源",
+      }),
+    ).rejects.toThrow("聚合拆分模型返回了无法解析的 JSON");
   });
 });

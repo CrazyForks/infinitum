@@ -102,6 +102,10 @@ export async function listDailyReportCandidates(date: string, limit = 120, group
         createdAt: { gte: start, lt: end },
         status: "processed",
         moderationStatus: { in: [...DISPLAYABLE_MODERATION_STATUSES] },
+        OR: [
+          { isAggregation: false },
+          { parsedEvents: { none: {} } },
+        ],
         ...sourceFilter,
         AND: [
           {
@@ -183,6 +187,7 @@ export async function listDailyReportCandidates(date: string, limit = 120, group
             originalUrl: true,
             originalTitle: true,
             translatedTitle: true,
+            createdAt: true,
             publishedAt: true,
             summaryText: true,
             rssExcerpt: true,
@@ -204,7 +209,7 @@ export async function listDailyReportCandidates(date: string, limit = 120, group
           },
         },
       },
-      orderBy: [{ qualityScore: "desc" }, { createdAt: "desc" }],
+      orderBy: [{ qualityScore: "desc" }, { item: { createdAt: "desc" } }],
     }),
   ]);
 
@@ -243,7 +248,7 @@ export async function listDailyReportCandidates(date: string, limit = 120, group
       fullText: null,
       rssContent: null,
       qualityScore: parsed.qualityScore,
-      createdAt: parsed.createdAt,
+      createdAt: parsed.item.createdAt,
       publishedAt: parsed.item.publishedAt,
       eventType: parsed.eventType,
       eventSubject: parsed.eventSubject,

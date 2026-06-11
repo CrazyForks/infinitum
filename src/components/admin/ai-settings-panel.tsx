@@ -99,6 +99,7 @@ const checkboxInputClassName =
 const PROMPT_PLACEHOLDERS_BY_TYPE: Record<PromptConfigType, string[]> = {
   item_summary: ["{{title}}", "{{sourceName}}", "{{inputText}}"],
   item_analysis: ["{{title}}", "{{sourceName}}", "{{translateTitle}}", "{{inputText}}"],
+  item_aggregation: ["{{title}}", "{{sourceName}}", "{{inputText}}"],
   cluster_summary: ["{{title}}", "{{inputText}}"],
   cluster_match: ["{{title}}", "{{inputText}}", "{{candidatesJson}}"],
   cluster_merge: ["{{clustersJson}}"],
@@ -1110,7 +1111,8 @@ export function AiSettingsPanel({ initialSettings, mode, initialPromptType = "it
           </Button>
         </div>
 
-        <div className="mb-6 flex gap-2">
+        <div className="mb-6 overflow-x-auto pb-1">
+          <div className="flex min-w-max gap-2">
           {PROMPT_TYPE_OPTIONS.map((option) => (
             <SelectableButton
               key={option.value}
@@ -1119,11 +1121,13 @@ export function AiSettingsPanel({ initialSettings, mode, initialPromptType = "it
                 updatePromptTypeUrl(option.value);
               }}
               active={selectedPromptType === option.value}
+              className="shrink-0 whitespace-nowrap"
               variant="pill"
             >
               {option.label}
             </SelectableButton>
           ))}
+          </div>
         </div>
 
         {filteredPromptConfigs.length === 0 ? (

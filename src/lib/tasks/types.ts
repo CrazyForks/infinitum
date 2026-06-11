@@ -53,6 +53,7 @@ export type TaskTimelineNodeKey =
   | "source_fetch"
   | "rule_filter"
   | "item_summary"
+  | "item_aggregation"
   | "item_analysis"
   | "cluster_assignment"
   | "cluster_merge"

@@ -51,6 +51,9 @@ export type ProcessedItemRecord = {
     reusedExisting?: boolean;
     summaryCompleted?: boolean;
     summaryFailed?: boolean;
+    aggregationParsed?: boolean;
+    aggregationParseFailed?: boolean;
+    aggregationEventCount?: number;
     analysisCompleted?: boolean;
     analysisFailed?: boolean;
     analysisFiltered?: boolean;

@@ -73,6 +73,7 @@ type RuntimePromptConfigs = NonNullable<RuntimeConfig["selectedPromptConfigs"]>;
 type RuntimePromptConfig =
   | RuntimePromptConfigs["itemSummary"]
   | RuntimePromptConfigs["itemAnalysis"]
+  | RuntimePromptConfigs["itemAggregation"]
   | RuntimePromptConfigs["clusterSummary"]
   | RuntimePromptConfigs["clusterMatch"]
   | RuntimePromptConfigs["clusterMerge"];
@@ -143,6 +144,7 @@ async function resolveRunOptions(options?: Partial<RunIngestionOptions>): Promis
           ? {
               itemSummary: runtimeConfig.selectedPromptConfigs.itemSummary,
               itemAnalysis: runtimeConfig.selectedPromptConfigs.itemAnalysis,
+              itemAggregation: runtimeConfig.selectedPromptConfigs.itemAggregation,
               clusterSummary: runtimeConfig.selectedPromptConfigs.clusterSummary,
               clusterMatch: runtimeConfig.selectedPromptConfigs.clusterMatch,
               clusterMerge: runtimeConfig.selectedPromptConfigs.clusterMerge,
@@ -168,6 +170,7 @@ async function resolveRunOptions(options?: Partial<RunIngestionOptions>): Promis
     taskTimelineModelNames: runtimeConfig?.selectedPromptConfigs
       ? {
           itemSummary: resolvePromptModelName(runtimeConfig.selectedPromptConfigs.itemSummary, defaultModelName),
+          itemAggregation: resolvePromptModelName(runtimeConfig.selectedPromptConfigs.itemAggregation, defaultModelName),
           itemAnalysis: resolvePromptModelName(runtimeConfig.selectedPromptConfigs.itemAnalysis, defaultModelName),
           clusterSummary: resolvePromptModelName(runtimeConfig.selectedPromptConfigs.clusterSummary, defaultModelName),
           clusterMatch: resolvePromptModelName(runtimeConfig.selectedPromptConfigs.clusterMatch, defaultModelName),
@@ -544,6 +547,18 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
 
       if (result?.metrics?.summaryFailed) {
         timelineCounters.itemSummary.failed += 1;
+      }
+
+      if (result?.metrics?.aggregationParsed) {
+        timelineCounters.aggregationParsing.parsed += 1;
+      }
+
+      if (result?.metrics?.aggregationParseFailed) {
+        timelineCounters.aggregationParsing.failed += 1;
+      }
+
+      if (result?.metrics?.aggregationEventCount) {
+        timelineCounters.aggregationParsing.events += result.metrics.aggregationEventCount;
       }
 
       if (result?.metrics?.analysisCompleted) {

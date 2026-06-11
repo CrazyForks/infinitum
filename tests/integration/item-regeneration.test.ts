@@ -9,6 +9,7 @@ import {
   enqueueItemRegenerationTask,
   executeItemReanalyzeTask,
   executeItemRegenerationTask,
+  executeItemReparseAggregationsTask,
   regenerateItemContent,
 } from "@/lib/items/service";
 
@@ -34,6 +35,7 @@ function buildEventSignature(
 function buildAiProviderMock(
   overrides?: Partial<{
     summarizeItem: ReturnType<typeof vi.fn>;
+    parseAggregation: ReturnType<typeof vi.fn>;
     enrichContent: ReturnType<typeof vi.fn>;
     summarizeCluster: ReturnType<typeof vi.fn>;
     matchClusterCandidate: ReturnType<typeof vi.fn>;
@@ -41,6 +43,7 @@ function buildAiProviderMock(
 ): AiProvider {
   const base = {
     summarizeItem: vi.fn().mockResolvedValue({summary: "默认条目摘要", isAggregation: false}),
+    parseAggregation: vi.fn().mockResolvedValue({ mainEvent: null, events: [] }),
     enrichContent: vi.fn().mockResolvedValue({
       translatedTitle: "默认中文标题",
       moderationStatus: "allowed",
@@ -58,6 +61,7 @@ function buildAiProviderMock(
 
 describe("regenerateItemContent", () => {
   beforeEach(async () => {
+    await prisma.itemParsedEvent.deleteMany();
     await prisma.item.deleteMany();
     await prisma.contentCluster.deleteMany();
     await prisma.fetchRun.deleteMany();
@@ -934,5 +938,226 @@ describe("regenerateItemContent", () => {
     expect(storedCluster.title).toBe("OpenAI 上线 GPT Image 2 登顶全球视觉模型榜首");
     expect(storedCluster.summary).toContain('文字"漂浮感"和乱码问题');
     expect(storedCluster.summary).not.toContain('{"title"');
+  });
+
+  it("marks non-aggregation reparse candidates so they are not scanned repeatedly", async () => {
+    const source = await prisma.source.create({
+      data: {
+        name: "Aggregation Source",
+        rssUrl: "https://aggregation.example.com/feed.xml",
+        siteUrl: "https://aggregation.example.com",
+        enabled: true,
+        aiParsingEnabled: true,
+        aggregationDetectionEnabled: true,
+      },
+    });
+    await prisma.item.create({
+      data: {
+        sourceId: source.id,
+        originalUrl: "https://aggregation.example.com/single",
+        canonicalUrl: "https://aggregation.example.com/single",
+        urlHash: "reparse-non-aggregation",
+        dedupeSignature: "reparse-non-aggregation",
+        originalTitle: "Single story",
+        publishedAt: new Date("2026-04-10T09:00:00.000Z"),
+        status: "processed",
+        moderationStatus: "allowed",
+        summaryText: "单条新闻",
+        fullText: "Only one event is present in this article, so the aggregation parser should classify it as not a roundup.",
+        isAggregation: false,
+      },
+    });
+    const parseAggregation = vi.fn().mockResolvedValue({ mainEvent: null, events: [] });
+    const firstTaskRun = await prisma.backgroundTaskRun.create({
+      data: {
+        kind: "item_reparse_aggregations",
+        triggerType: "admin_action",
+        status: "queued",
+        label: "聚合内容重拆",
+      },
+    });
+
+    await executeItemReparseAggregationsTask(firstTaskRun, {
+      aiProvider: buildAiProviderMock({ parseAggregation }),
+    });
+    const secondTaskRun = await prisma.backgroundTaskRun.create({
+      data: {
+        kind: "item_reparse_aggregations",
+        triggerType: "admin_action",
+        status: "queued",
+        label: "聚合内容重拆",
+      },
+    });
+    await executeItemReparseAggregationsTask(secondTaskRun, {
+      aiProvider: buildAiProviderMock({ parseAggregation }),
+    });
+
+    const item = await prisma.item.findFirstOrThrow();
+    const storedSecondTaskRun = await prisma.backgroundTaskRun.findUniqueOrThrow({
+      where: { id: secondTaskRun.id },
+    });
+
+    expect(parseAggregation).toHaveBeenCalledTimes(1);
+    expect(item.isAggregation).toBe(false);
+    expect(item.aggregationParseStatus).toBe("not_aggregation");
+    expect(item.aggregationCheckedAt).not.toBeNull();
+    expect(storedSecondTaskRun.progressTotal).toBe(0);
+  });
+
+  it("persists reparse events even when the aggregation has no main event", async () => {
+    const source = await prisma.source.create({
+      data: {
+        name: "Aggregation Source",
+        rssUrl: "https://aggregation.example.com/feed.xml",
+        siteUrl: "https://aggregation.example.com",
+        enabled: true,
+        aiParsingEnabled: true,
+        aggregationDetectionEnabled: true,
+      },
+    });
+    const item = await prisma.item.create({
+      data: {
+        sourceId: source.id,
+        originalUrl: "https://aggregation.example.com/roundup",
+        canonicalUrl: "https://aggregation.example.com/roundup",
+        urlHash: "reparse-no-main-event",
+        dedupeSignature: "reparse-no-main-event",
+        originalTitle: "Roundup",
+        publishedAt: new Date("2026-04-10T09:00:00.000Z"),
+        status: "processed",
+        moderationStatus: "allowed",
+        summaryText: "多条新闻",
+        fullText: "OpenAI launches Toolkit. Anthropic updates Console.",
+        isAggregation: false,
+      },
+    });
+    const taskRun = await prisma.backgroundTaskRun.create({
+      data: {
+        kind: "item_reparse_aggregations",
+        triggerType: "admin_action",
+        status: "queued",
+        label: "聚合内容重拆",
+      },
+    });
+
+    const summarizeCluster = vi.fn().mockResolvedValue("聚合摘要");
+    await executeItemReparseAggregationsTask(taskRun, {
+      aiProvider: buildAiProviderMock({
+        parseAggregation: vi.fn().mockResolvedValue({
+          mainEvent: null,
+          events: [
+            {
+              eventType: "launch",
+              eventSubject: "OpenAI",
+              eventAction: "发布",
+              eventObject: "Toolkit",
+              eventDate: "2026-04-10",
+              oneLiner: "OpenAI 发布 Toolkit",
+              qualityScore: 92,
+            },
+          ],
+        }),
+        summarizeCluster,
+      }),
+    });
+
+    const updatedItem = await prisma.item.findUniqueOrThrow({ where: { id: item.id } });
+    const parsedEvents = await prisma.itemParsedEvent.findMany({ where: { itemId: item.id } });
+    const parsedEventCluster = parsedEvents[0]?.clusterId
+      ? await prisma.contentCluster.findUnique({ where: { id: parsedEvents[0].clusterId } })
+      : null;
+
+    expect(updatedItem.isAggregation).toBe(true);
+    expect(updatedItem.aggregationParseStatus).toBe("parsed");
+    expect(parsedEvents).toHaveLength(1);
+    expect(parsedEvents[0]?.oneLiner).toBe("OpenAI 发布 Toolkit");
+    expect(parsedEvents[0]?.clusterId).toBeTruthy();
+    expect(summarizeCluster).not.toHaveBeenCalled();
+    expect(parsedEventCluster).toMatchObject({
+      title: "OpenAI 发布 Toolkit",
+      itemCount: 1,
+      eventSubject: "OpenAI",
+      eventAction: "发布",
+      eventObject: "Toolkit",
+    });
+  });
+
+  it("retries failed aggregation parses using rss content when full text is unavailable", async () => {
+    const source = await prisma.source.create({
+      data: {
+        name: "Aggregation Source",
+        rssUrl: "https://aggregation.example.com/feed.xml",
+        siteUrl: "https://aggregation.example.com",
+        enabled: true,
+        aiParsingEnabled: true,
+        aggregationDetectionEnabled: true,
+      },
+    });
+    const item = await prisma.item.create({
+      data: {
+        sourceId: source.id,
+        originalUrl: "https://aggregation.example.com/failed-roundup",
+        canonicalUrl: "https://aggregation.example.com/failed-roundup",
+        urlHash: "reparse-failed-rss-content",
+        dedupeSignature: "reparse-failed-rss-content",
+        originalTitle: "Failed Roundup",
+        publishedAt: new Date("2026-04-10T09:00:00.000Z"),
+        status: "processed",
+        moderationStatus: "allowed",
+        summaryText: "此前拆分失败的多条新闻",
+        rssContent: "OpenAI launches Toolkit. Anthropic updates Console. Mistral ships a model update.",
+        fullText: null,
+        isAggregation: true,
+        aggregationParseStatus: "failed",
+      },
+    });
+    const parseAggregation = vi.fn().mockResolvedValue({
+      mainEvent: {
+        eventType: "launch",
+        eventSubject: "OpenAI",
+        eventAction: "发布",
+        eventObject: "Toolkit",
+        eventDate: "2026-04-10",
+      },
+      events: [
+        {
+          eventType: "launch",
+          eventSubject: "OpenAI",
+          eventAction: "发布",
+          eventObject: "Toolkit",
+          eventDate: "2026-04-10",
+          oneLiner: "OpenAI 发布 Toolkit",
+          qualityScore: 92,
+        },
+      ],
+    });
+    const taskRun = await prisma.backgroundTaskRun.create({
+      data: {
+        kind: "item_reparse_aggregations",
+        triggerType: "admin_action",
+        status: "queued",
+        label: "聚合内容重拆",
+      },
+    });
+
+    const summarizeCluster = vi.fn().mockResolvedValue("聚合摘要");
+    await executeItemReparseAggregationsTask(taskRun, {
+      aiProvider: buildAiProviderMock({
+        parseAggregation,
+        summarizeCluster,
+      }),
+    });
+
+    const updatedItem = await prisma.item.findUniqueOrThrow({ where: { id: item.id } });
+    const parsedEvents = await prisma.itemParsedEvent.findMany({ where: { itemId: item.id } });
+
+    expect(parseAggregation).toHaveBeenCalledWith(
+      "OpenAI launches Toolkit. Anthropic updates Console. Mistral ships a model update.",
+      expect.objectContaining({ title: "Failed Roundup" }),
+    );
+    expect(updatedItem.isAggregation).toBe(true);
+    expect(updatedItem.aggregationParseStatus).toBe("parsed");
+    expect(parsedEvents).toHaveLength(1);
+    expect(summarizeCluster).not.toHaveBeenCalled();
   });
 });
