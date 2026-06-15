@@ -254,4 +254,4 @@ docker compose logs -f app worker
 
 ## 许可证
 
-CC BY 4.0 License
+MIT
