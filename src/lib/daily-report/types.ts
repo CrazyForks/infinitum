@@ -14,6 +14,7 @@ export type DailyReportStatus = "draft" | "published" | "failed";
 
 export type DailyReportCandidate = {
   id: number;
+  sourceKey: string;
   itemId: string;
   clusterId: string | null;
   title: string;

@@ -217,6 +217,8 @@ export async function listDailyReportCandidates(date: string, limit = 120, group
     ...itemRows.map((item) => ({
       kind: "item" as const,
       id: item.id,
+      sourceKey: `item:${item.id}`,
+      itemId: item.id,
       clusterId: item.clusterId,
       originalTitle: item.originalTitle,
       translatedTitle: item.translatedTitle,
@@ -239,6 +241,8 @@ export async function listDailyReportCandidates(date: string, limit = 120, group
     ...parsedEventRows.map((parsed) => ({
       kind: "parsedEvent" as const,
       id: `parsed:${parsed.id}`,
+      sourceKey: `parsed:${parsed.id}`,
+      itemId: parsed.item.id,
       clusterId: parsed.clusterId,
       originalTitle: parsed.oneLiner || parsed.item.originalTitle,
       translatedTitle: null,
@@ -332,7 +336,8 @@ export async function listDailyReportCandidates(date: string, limit = 120, group
 
     return {
       id: index + 1,
-      itemId: item.id,
+      sourceKey: item.sourceKey,
+      itemId: item.itemId,
       clusterId: item.clusterId,
       title: shouldUseClusterDisplay && cluster ? cluster.title : getDisplayTitle(item.originalTitle, item.translatedTitle),
       sourceName: item.source.name,

@@ -57,6 +57,7 @@ function buildInputHash(date: string, candidates: DailyReportCandidate[], groupI
   hash.update(JSON.stringify([...groupIds].sort()));
   for (const candidate of candidates) {
     hash.update(JSON.stringify({
+      sourceKey: candidate.sourceKey,
       itemId: candidate.itemId,
       clusterId: candidate.clusterId,
       title: candidate.title,
@@ -84,7 +85,13 @@ function getSectionSourceIds(content: DailyReportContent) {
   return rows;
 }
 
-function buildDailyReportSourceKey(input: { itemId: string | null; clusterId: string | null; url: string }) {
+function buildDailyReportSourceKey(input: {
+  sourceKey?: string | null;
+  itemId: string | null;
+  clusterId: string | null;
+  url: string;
+}) {
+  if (input.sourceKey?.trim()) return input.sourceKey;
   if (input.itemId) return `item:${input.itemId}`;
   if (input.clusterId) return `cluster:${input.clusterId}`;
   return `url:${input.url.trim().toLowerCase()}`;
@@ -167,10 +174,17 @@ function matchesRecentDailyReportSource(
 ) {
   const candidateSourceKey = buildDailyReportSourceKey(candidate);
   const recentSourceKey = recentSource.sourceKey ?? buildDailyReportSourceKey(recentSource);
+  const hasSameItemSourceKey = Boolean(
+    candidate.itemId &&
+      recentSource.itemId &&
+      candidate.itemId === recentSource.itemId &&
+      candidateSourceKey === `item:${candidate.itemId}` &&
+      (!recentSource.sourceKey || recentSourceKey === `item:${recentSource.itemId}`),
+  );
 
   return Boolean(
     (recentSourceKey && candidateSourceKey === recentSourceKey) ||
-      (candidate.itemId && recentSource.itemId && candidate.itemId === recentSource.itemId) ||
+      hasSameItemSourceKey ||
       (candidate.clusterId && recentSource.clusterId && candidate.clusterId === recentSource.clusterId) ||
       matchesRecentDailyReportEvent(candidate, recentSource),
   );
@@ -404,6 +418,7 @@ function assertDailyReportSourceIdsExist(content: DailyReportContent, registry: 
 function registryToCandidates(registry: DailyReportSourceRegistryEntry[]): DailyReportCandidate[] {
   return registry.map((entry) => ({
     id: entry.sourceNumber,
+    sourceKey: entry.sourceKey,
     itemId: entry.itemId ?? "",
     clusterId: entry.clusterId,
     title: entry.title,
@@ -921,6 +936,7 @@ export async function generateDailyReport(input: {
   const candidateSnapshot = JSON.stringify(
     candidates.map((candidate) => ({
       id: candidate.id,
+      sourceKey: candidate.sourceKey,
       itemId: candidate.itemId,
       clusterId: candidate.clusterId,
       title: candidate.title,

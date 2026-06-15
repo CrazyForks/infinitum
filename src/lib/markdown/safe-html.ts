@@ -2,6 +2,7 @@ const LINK_REL_TOKENS = "noopener noreferrer nofollow";
 
 type RenderSafeMarkdownOptions = {
   headingIdPrefix?: string;
+  collapsibleSourceLists?: boolean;
 };
 
 function escapeHtml(value: string) {
@@ -136,9 +137,22 @@ function flushParagraph(lines: string[], html: string[]) {
   lines.length = 0;
 }
 
-function flushList(lines: string[], html: string[]) {
+function flushList(lines: string[], html: string[], collapsibleLabelHtml?: string | null) {
   if (lines.length === 0) return;
-  html.push("<ul>", ...lines.map((line) => `<li>${renderInline(line)}</li>`), "</ul>");
+  const itemHtml = lines.map((line) => `<li>${renderInline(line)}</li>`);
+  if (collapsibleLabelHtml) {
+    const count = lines.length;
+    html.push(
+      `<details class="daily-report-source-list">`,
+      `<summary><span class="daily-report-source-label">${collapsibleLabelHtml}</span><span class="daily-report-source-state"><span class="daily-report-source-state-closed">展开 ${count} 条</span><span class="daily-report-source-state-open">收起 ${count} 条</span></span></summary>`,
+      "<ul>",
+      ...itemHtml,
+      "</ul>",
+      "</details>",
+    );
+  } else {
+    html.push("<ul>", ...itemHtml, "</ul>");
+  }
   lines.length = 0;
 }
 
@@ -152,19 +166,36 @@ function isLabelLine(line: string) {
   return /^(\*\*)?(重点|来源)：(\*\*)?/.test(line);
 }
 
+function isSourceLabelLine(line: string) {
+  return /^(\*\*)?来源：(\*\*)?/.test(line);
+}
+
 export function renderSafeMarkdown(markdown: string, options: RenderSafeMarkdownOptions = {}) {
   const html: string[] = [];
   const paragraphLines: string[] = [];
   const listLines: string[] = [];
   const blockquoteLines: string[] = [];
+  let pendingCollapsibleSourceLabelHtml: string | null = null;
   let headingIndex = 0;
+
+  const flushPendingSourceLabel = () => {
+    if (!pendingCollapsibleSourceLabelHtml) return;
+    html.push(`<p>${pendingCollapsibleSourceLabelHtml}</p>`);
+    pendingCollapsibleSourceLabelHtml = null;
+  };
+
+  const flushCurrentList = () => {
+    if (listLines.length === 0) return;
+    flushList(listLines, html, pendingCollapsibleSourceLabelHtml);
+    pendingCollapsibleSourceLabelHtml = null;
+  };
 
   for (const rawLine of markdown.replace(/\r\n/g, "\n").split("\n")) {
     const line = rawLine.trim();
 
     if (!line) {
       flushParagraph(paragraphLines, html);
-      flushList(listLines, html);
+      flushCurrentList();
       flushBlockquote(blockquoteLines, html);
       continue;
     }
@@ -172,15 +203,21 @@ export function renderSafeMarkdown(markdown: string, options: RenderSafeMarkdown
     const blockquote = /^>\s?(.+)$/.exec(line);
     if (blockquote) {
       flushParagraph(paragraphLines, html);
-      flushList(listLines, html);
+      flushCurrentList();
+      flushPendingSourceLabel();
       blockquoteLines.push(blockquote[1]);
       continue;
     }
 
     if (isLabelLine(line)) {
       flushParagraph(paragraphLines, html);
-      flushList(listLines, html);
+      flushCurrentList();
       flushBlockquote(blockquoteLines, html);
+      flushPendingSourceLabel();
+      if (options.collapsibleSourceLists && isSourceLabelLine(line)) {
+        pendingCollapsibleSourceLabelHtml = renderInline(line);
+        continue;
+      }
       html.push(`<p>${renderInline(line)}</p>`);
       continue;
     }
@@ -188,8 +225,9 @@ export function renderSafeMarkdown(markdown: string, options: RenderSafeMarkdown
     const heading = /^(#{1,6})\s+(.+)$/.exec(line);
     if (heading) {
       flushParagraph(paragraphLines, html);
-      flushList(listLines, html);
+      flushCurrentList();
       flushBlockquote(blockquoteLines, html);
+      flushPendingSourceLabel();
       const level = Math.min(6, heading[1].length);
       const id = options.headingIdPrefix ? ` id="${options.headingIdPrefix}-${headingIndex}"` : "";
       headingIndex += 1;
@@ -205,14 +243,16 @@ export function renderSafeMarkdown(markdown: string, options: RenderSafeMarkdown
       continue;
     }
 
-    flushList(listLines, html);
+    flushCurrentList();
     flushBlockquote(blockquoteLines, html);
+    flushPendingSourceLabel();
     paragraphLines.push(line);
   }
 
   flushParagraph(paragraphLines, html);
-  flushList(listLines, html);
+  flushCurrentList();
   flushBlockquote(blockquoteLines, html);
+  flushPendingSourceLabel();
 
   return html.join("\n");
 }

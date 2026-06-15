@@ -13,6 +13,7 @@ import { parseDailyReportContent } from "@/lib/daily-report/validator";
 const candidates: DailyReportCandidate[] = [
   {
     id: 1,
+    sourceKey: "item:item-1",
     itemId: "item-1",
     clusterId: null,
     title: "OpenAI 发布新模型",
@@ -33,6 +34,7 @@ const candidates: DailyReportCandidate[] = [
   },
   {
     id: 2,
+    sourceKey: "item:item-2",
     itemId: "item-2",
     clusterId: null,
     title: "开发者工具更新",

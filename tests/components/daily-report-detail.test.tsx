@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DailyReportDetail } from "@/components/daily/daily-report-detail";
@@ -119,5 +119,62 @@ describe("DailyReportDetail", () => {
     });
     expect(fetchMock).not.toHaveBeenCalledWith("/api/admin/daily-reports/2026-04-29");
     expect(screen.getByText("日报不存在")).toBeInTheDocument();
+  });
+
+  it("renders item sources collapsed by default", () => {
+    const report = buildReport({
+      renderedMarkdown: [
+        "# 公开日报",
+        "",
+        "## 今日大事",
+        "",
+        "### 主题",
+        "",
+        "正文内容。",
+        "",
+        "**来源：**",
+        "- [来源标题](https://example.com/source)（Source）",
+      ].join("\n"),
+    });
+
+    const { container } = render(<DailyReportDetail report={report} date="2026-04-29" isAdmin={false} />);
+
+    const details = container.querySelector("details.daily-report-source-list");
+    expect(details).toBeInTheDocument();
+    expect(details).not.toHaveAttribute("open");
+    expect(details?.querySelector("summary")).toHaveTextContent("展开 1 条");
+  });
+
+  it("keeps item sources expanded after the detail view rerenders", () => {
+    const report = buildReport({
+      renderedMarkdown: [
+        "# 公开日报",
+        "",
+        "## 今日大事",
+        "",
+        "### 主题",
+        "",
+        "正文内容。",
+        "",
+        "**来源：**",
+        "- [来源标题](https://example.com/source)（Source）",
+      ].join("\n"),
+    });
+
+    const { container, rerender } = render(
+      <DailyReportDetail report={report} date="2026-04-29" isAdmin={false} />,
+    );
+    const details = container.querySelector<HTMLDetailsElement>("details.daily-report-source-list");
+    const summary = details?.querySelector("summary");
+    expect(details).toBeInTheDocument();
+    expect(summary).toBeInTheDocument();
+
+    fireEvent.click(summary!);
+    fireEvent(details!, new Event("toggle", { bubbles: false }));
+    expect(details).toHaveAttribute("open");
+
+    rerender(<DailyReportDetail report={report} date="2026-04-29" isAdmin={false} />);
+
+    expect(container.querySelector("details.daily-report-source-list")).toHaveAttribute("open");
   });
 });

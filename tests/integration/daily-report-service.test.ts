@@ -1324,11 +1324,27 @@ describe("daily report service", () => {
       "OpenAI 发布 Toolkit",
       "Anthropic 更新 Console",
     ]);
-    expect(candidates.map((candidate) => candidate.itemId)).toEqual(
-      expect.arrayContaining([expect.stringMatching(/^parsed:/)]),
-    );
+    expect(candidates.map((candidate) => candidate.sourceKey)).toEqual([
+      expect.stringMatching(/^parsed:/),
+      expect.stringMatching(/^parsed:/),
+    ]);
+    expect(candidates.map((candidate) => candidate.itemId)).toEqual([item.id, item.id]);
     expect(candidates[0]?.createdAt).toBe("2026-04-24T04:00:00.000Z");
     expect(candidates.some((candidate) => candidate.title === "AI 行业简报合集")).toBe(false);
+
+    generateDailyReportMock.mockResolvedValue(buildDailyReportOutput());
+    const result = await generateDailyReport({ date: REPORT_DATE, force: true });
+    const savedSources = await prisma.dailyReportSource.findMany({
+      where: { dailyReportId: result.report?.id },
+      orderBy: { sourceNumber: "asc" },
+    });
+
+    expect(savedSources.map((source) => source.sourceNumber)).toEqual([1, 2]);
+    expect(savedSources.map((source) => source.itemId)).toEqual([item.id, item.id]);
+    expect(savedSources.map((source) => source.sourceKey)).toEqual([
+      candidates[0]?.sourceKey,
+      candidates[1]?.sourceKey,
+    ]);
   });
 
   it("recovers stable source numbers for an existing report before refinement", async () => {

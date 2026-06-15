@@ -154,6 +154,51 @@ describe("background task persistence", () => {
     expect(new Set([...pageOne.recentTasks, ...pageTwo.recentTasks].map((task) => task.id)).size).toBe(10);
   });
 
+  it("orders task monitor runs by startedAt and falls back to createdAt for queued tasks", async () => {
+    await prisma.backgroundTaskRun.createMany({
+      data: [
+        {
+          id: "created-later-started-earlier",
+          kind: "ingestion",
+          triggerType: "manual",
+          status: "succeeded",
+          label: "创建晚但开始早",
+          createdAt: new Date("2026-04-12T00:20:00.000Z"),
+          startedAt: new Date("2026-04-12T00:10:00.000Z"),
+          finishedAt: new Date("2026-04-12T00:11:00.000Z"),
+        },
+        {
+          id: "queued-latest-created",
+          kind: "daily_report_generate",
+          triggerType: "scheduled",
+          status: "queued",
+          label: "最新排队任务",
+          createdAt: new Date("2026-04-12T00:25:00.000Z"),
+        },
+        {
+          id: "created-earlier-started-later",
+          kind: "item_regenerate_summary",
+          triggerType: "admin_action",
+          status: "running",
+          label: "创建早但开始晚",
+          createdAt: new Date("2026-04-12T00:00:00.000Z"),
+          startedAt: new Date("2026-04-12T00:30:00.000Z"),
+        },
+      ],
+    });
+
+    const snapshot = await getBackgroundTaskMonitorSnapshot(new Date("2026-04-12T01:00:00.000Z"), {
+      page: 1,
+      pageSize: 10,
+    });
+
+    expect(snapshot.recentTasks.map((task) => task.id)).toEqual([
+      "created-earlier-started-later",
+      "queued-latest-created",
+      "created-later-started-earlier",
+    ]);
+  });
+
   it("marks stale running tasks as failed during recovery", async () => {
     const taskRun = await prisma.backgroundTaskRun.create({
       data: {

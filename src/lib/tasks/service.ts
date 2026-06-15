@@ -383,6 +383,37 @@ export async function listRecentTaskRuns(input: { limit: number }) {
   return findRecentTaskRuns(input.limit);
 }
 
+async function findTaskMonitorRuns(opts: {
+  pageSize?: number;
+  skip?: number;
+  status?: BackgroundTaskRunStatus | { in: BackgroundTaskRunStatus[] } | null;
+  kind?: BackgroundTaskRunKind | null;
+  startedAt?: { gte: Date } | null;
+}) {
+  const normalizedStatuses = typeof opts.status === "object" && opts.status && "in" in opts.status
+    ? opts.status.in
+    : opts.status
+      ? [opts.status]
+      : [null];
+
+  const runs = await Promise.all(normalizedStatuses.map((status) => prisma.backgroundTaskRun.findMany({
+    where: {
+      ...(status ? { status } : {}),
+      ...(opts.kind ? { kind: opts.kind } : {}),
+      ...(opts.startedAt ? { startedAt: opts.startedAt } : {}),
+    },
+  })));
+
+  return runs
+    .flat()
+    .sort((left, right) => {
+      const leftTime = (left.startedAt ?? left.createdAt).getTime();
+      const rightTime = (right.startedAt ?? right.createdAt).getTime();
+      return rightTime - leftTime || right.id.localeCompare(left.id);
+    })
+    .slice(opts.skip ?? 0, (opts.skip ?? 0) + (opts.pageSize ?? Number.MAX_SAFE_INTEGER));
+}
+
 export async function updateTaskRun(
   id: string,
   data: {
@@ -769,19 +800,18 @@ export async function getBackgroundTaskMonitorSnapshot(
 
   const [runningTasks, recentTasks, recentTotal] = await Promise.all([
     runningStatus
-      ? prisma.backgroundTaskRun.findMany({
-          where: {
-            ...where,
-            status: runningStatus,
-          },
-          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      ? findTaskMonitorRuns({
+          status: runningStatus,
+          kind: opts?.kind ?? null,
+          startedAt: getTaskMonitorStartedAtRange(now, opts?.timeRange),
         })
       : Promise.resolve([]),
-    prisma.backgroundTaskRun.findMany({
-      where,
-      take: pageSize,
+    findTaskMonitorRuns({
+      status: opts?.status ?? null,
+      kind: opts?.kind ?? null,
+      startedAt: getTaskMonitorStartedAtRange(now, opts?.timeRange),
+      pageSize,
       skip,
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     }),
     prisma.backgroundTaskRun.count({ where }),
   ]);

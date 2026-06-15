@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import {
   addDailyReportRefinementSources,
@@ -237,6 +237,8 @@ function DailyReportDetailContent({ report, isAdmin }: DailyReportDetailContentP
   const router = useRouter();
   const contentRef = useRef<HTMLDivElement | null>(null);
   const refinementMessagesRef = useRef<HTMLDivElement | null>(null);
+  const sourceListOpenStateRef = useRef(new Map<string, boolean>());
+  const sourceListContentHtmlRef = useRef("");
   const [feedback, setFeedback] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [refinementDialogOpen, setRefinementDialogOpen] = useState(false);
@@ -271,7 +273,10 @@ function DailyReportDetailContent({ report, isAdmin }: DailyReportDetailContentP
       .sort((left, right) => right.count - left.count || left.name.localeCompare(right.name));
   }, [report.sources]);
   const detailMarkdown = useMemo(() => buildDailyReportDetailMarkdown(report), [report]);
-  const contentHtml = useMemo(() => renderSafeMarkdown(detailMarkdown, { headingIdPrefix: "daily-heading" }), [detailMarkdown]);
+  const contentHtml = useMemo(() => renderSafeMarkdown(detailMarkdown, {
+    headingIdPrefix: "daily-heading",
+    collapsibleSourceLists: true,
+  }), [detailMarkdown]);
   const refinementPreviewHtml = useMemo(() => {
     return refinementCandidate
       ? renderSafeMarkdown(refinementCandidate.renderedMarkdown, { headingIdPrefix: "daily-refinement-preview" })
@@ -343,6 +348,46 @@ function DailyReportDetailContent({ report, isAdmin }: DailyReportDetailContentP
 
     setTocItems(nextItems);
     setActiveTocId(nextItems[0]?.id ?? "");
+  }, [contentHtml]);
+
+  useLayoutEffect(() => {
+    const content = contentRef.current;
+    if (!content) return;
+
+    if (sourceListContentHtmlRef.current !== contentHtml) {
+      sourceListContentHtmlRef.current = contentHtml;
+      sourceListOpenStateRef.current.clear();
+    }
+
+    const sourceLists = Array.from(content.querySelectorAll<HTMLDetailsElement>("details.daily-report-source-list"));
+    sourceLists.forEach((details, index) => {
+      const key = String(index);
+      details.dataset.sourceListKey = key;
+      details.open = sourceListOpenStateRef.current.get(key) ?? false;
+    });
+  });
+
+  useEffect(() => {
+    const content = contentRef.current;
+    if (!content) return;
+
+    const handleSourceListToggle = (event: Event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLDetailsElement) || !target.classList.contains("daily-report-source-list")) {
+        return;
+      }
+
+      const sourceLists = Array.from(content.querySelectorAll<HTMLDetailsElement>("details.daily-report-source-list"));
+      const key = target.dataset.sourceListKey ?? String(sourceLists.indexOf(target));
+      if (key === "-1") return;
+      target.dataset.sourceListKey = key;
+      sourceListOpenStateRef.current.set(key, target.open);
+    };
+
+    content.addEventListener("toggle", handleSourceListToggle, true);
+    return () => {
+      content.removeEventListener("toggle", handleSourceListToggle, true);
+    };
   }, [contentHtml]);
 
   useEffect(() => {
