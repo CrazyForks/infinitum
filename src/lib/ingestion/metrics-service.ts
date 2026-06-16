@@ -13,9 +13,11 @@ export type DailyAiUsageStat = {
   totalCalls: number;
   summaries: number;
   analyses: number;
+  aggregations: number;
   clusterMatches: number;
   clusterMerges: number;
   clusterSummaries: number;
+  dailyReports: number;
 };
 
 export type DailySourceHealthStat = {
@@ -57,14 +59,24 @@ function generateDateRange(days: number): string[] {
 type AiBreakdown = {
   summaries: number;
   analyses: number;
+  aggregations: number;
   clusterMatches: number;
   clusterMerges: number;
   clusterSummaries: number;
+  dailyReports: number;
 };
 
 /** Parse the JSON breakdown stored on a task run into typed counts. */
 function parseAiBreakdown(json: string | null): AiBreakdown {
-  const result: AiBreakdown = { summaries: 0, analyses: 0, clusterMatches: 0, clusterMerges: 0, clusterSummaries: 0 };
+  const result: AiBreakdown = {
+    summaries: 0,
+    analyses: 0,
+    aggregations: 0,
+    clusterMatches: 0,
+    clusterMerges: 0,
+    clusterSummaries: 0,
+    dailyReports: 0,
+  };
   if (!json) return result;
 
   try {
@@ -77,6 +89,9 @@ function parseAiBreakdown(json: string | null): AiBreakdown {
         case "item_analysis":
           result.analyses += item.actual;
           break;
+        case "item_aggregation":
+          result.aggregations += item.actual;
+          break;
         case "cluster_match":
           result.clusterMatches += item.actual;
           break;
@@ -85,6 +100,9 @@ function parseAiBreakdown(json: string | null): AiBreakdown {
           break;
         case "cluster_summary":
           result.clusterSummaries += item.actual;
+          break;
+        case "daily_report":
+          result.dailyReports += item.actual;
           break;
       }
     }
@@ -157,14 +175,26 @@ async function getDailyArticleStats(days: number): Promise<DailyArticleStat[]> {
 // Daily AI usage
 // ---------------------------------------------------------------------------
 
+const AI_USAGE_TASK_KINDS = [
+  "ingestion",
+  "item_regenerate_translation",
+  "item_regenerate_summary",
+  "item_reanalyze",
+  "cluster_regenerate_summary",
+  "daily_report_generate",
+  "item_reparse_aggregations",
+] as const;
+
 async function getDailyAiUsageStats(days: number): Promise<DailyAiUsageStat[]> {
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - days);
 
   const rows = await prisma.backgroundTaskRun.findMany({
     where: {
-      kind: "ingestion",
-      status: { in: ["succeeded", "partial"] },
+      kind: { in: [...AI_USAGE_TASK_KINDS] },
+      // Include any non-queued task so partial runs and failed runs after the
+      // first AI call still surface in the trend (queued runs have no calls).
+      status: { in: ["running", "succeeded", "partial", "failed", "cancelled"] },
       createdAt: { gte: cutoff },
     },
     select: {
@@ -183,9 +213,11 @@ async function getDailyAiUsageStats(days: number): Promise<DailyAiUsageStat[]> {
       total: 0,
       summaries: 0,
       analyses: 0,
+      aggregations: 0,
       clusterMatches: 0,
       clusterMerges: 0,
       clusterSummaries: 0,
+      dailyReports: 0,
     };
 
     entry.total += row.aiCallCountActual;
@@ -193,9 +225,11 @@ async function getDailyAiUsageStats(days: number): Promise<DailyAiUsageStat[]> {
     const breakdown = parseAiBreakdown(row.aiCallBreakdownJson);
     entry.summaries += breakdown.summaries;
     entry.analyses += breakdown.analyses;
+    entry.aggregations += breakdown.aggregations;
     entry.clusterMatches += breakdown.clusterMatches;
     entry.clusterMerges += breakdown.clusterMerges;
     entry.clusterSummaries += breakdown.clusterSummaries;
+    entry.dailyReports += breakdown.dailyReports;
 
     dateMap.set(date, entry);
   }
@@ -207,9 +241,11 @@ async function getDailyAiUsageStats(days: number): Promise<DailyAiUsageStat[]> {
       totalCalls: entry?.total ?? 0,
       summaries: entry?.summaries ?? 0,
       analyses: entry?.analyses ?? 0,
+      aggregations: entry?.aggregations ?? 0,
       clusterMatches: entry?.clusterMatches ?? 0,
       clusterMerges: entry?.clusterMerges ?? 0,
       clusterSummaries: entry?.clusterSummaries ?? 0,
+      dailyReports: entry?.dailyReports ?? 0,
     };
   });
 }

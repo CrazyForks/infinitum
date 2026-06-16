@@ -402,7 +402,8 @@ describe("regenerateItemContent", () => {
 
     expect(storedTaskRun.status).toBe("succeeded");
     expect(storedTaskRun.aiCallCountActual).toBe(1);
-    expect(storedTaskRun.aiCallCountEstimated).toBe(1);
+    // 1 summarizeItem + 1 matchClusterCandidate + up to 2 summarizeCluster (upper bound)
+    expect(storedTaskRun.aiCallCountEstimated).toBe(4);
   });
 
   it("reattaches summary regeneration targets to a matching cluster and records the match in task progress", async () => {
@@ -637,7 +638,8 @@ describe("regenerateItemContent", () => {
 
     expect(storedTaskRun.status).toBe("succeeded");
     expect(storedTaskRun.aiCallCountActual).toBe(3);
-    expect(storedTaskRun.aiCallCountEstimated).toBe(4);
+    // 1 enrichContent (item_analysis) + 1 summarizeItem (item_summary) + up to 2 summarizeCluster
+    expect(storedTaskRun.aiCallCountEstimated).toBe(5);
     expect(updatedItem.eventType).toBe("launch");
     expect(updatedItem.eventSubject).toBe("OpenAI");
     expect(updatedItem.eventAction).toBe("发布");

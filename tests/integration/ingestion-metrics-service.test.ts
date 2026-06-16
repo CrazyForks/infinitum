@@ -111,3 +111,155 @@ describe("ingestion metrics service", () => {
     expect(countByRange.get("90-100")).toBe(0);
   });
 });
+
+describe("ingestion metrics service - AI usage aggregation", () => {
+  beforeEach(async () => {
+    await prisma.backgroundTaskRun.deleteMany();
+  });
+
+  function makeTaskRun(overrides: {
+    kind: string;
+    status?: string;
+    createdAt: Date;
+    aiCallCountActual: number;
+    breakdownKeys?: string[];
+  }) {
+    const breakdown = (overrides.breakdownKeys ?? []).map((key) => ({
+      key,
+      label: key,
+      actual: 1,
+      estimated: 1,
+    }));
+    return prisma.backgroundTaskRun.create({
+      data: {
+        kind: overrides.kind as never,
+        triggerType: "scheduled",
+        status: (overrides.status ?? "succeeded") as never,
+        label: overrides.kind,
+        aiCallCountActual: overrides.aiCallCountActual,
+        aiCallBreakdownJson: JSON.stringify(breakdown),
+        createdAt: overrides.createdAt,
+      },
+    });
+  }
+
+  it("aggregates AI call counts across ingestion, item, cluster and daily report task kinds", async () => {
+    const today = new Date("2026-06-16T10:00:00.000Z");
+    const yesterday = new Date("2026-06-15T10:00:00.000Z");
+
+    // ingestion task with item_summary + item_analysis + cluster_merge
+    await makeTaskRun({
+      kind: "ingestion",
+      createdAt: today,
+      aiCallCountActual: 3,
+      breakdownKeys: ["item_summary", "item_analysis", "cluster_merge"],
+    });
+    // daily report task with daily_report
+    await makeTaskRun({
+      kind: "daily_report_generate",
+      createdAt: today,
+      aiCallCountActual: 2,
+      breakdownKeys: ["daily_report", "daily_report"],
+    });
+    // cluster summary task with cluster_summary
+    await makeTaskRun({
+      kind: "cluster_regenerate_summary",
+      createdAt: today,
+      aiCallCountActual: 1,
+      breakdownKeys: ["cluster_summary"],
+    });
+    // item reanalyze task with item_analysis + cluster_match
+    await makeTaskRun({
+      kind: "item_reanalyze",
+      createdAt: yesterday,
+      aiCallCountActual: 2,
+      breakdownKeys: ["item_analysis", "cluster_match"],
+    });
+    // item aggregation reparse task with item_aggregation
+    await makeTaskRun({
+      kind: "item_reparse_aggregations",
+      createdAt: yesterday,
+      aiCallCountActual: 5,
+      breakdownKeys: ["item_aggregation", "item_aggregation", "item_aggregation", "item_aggregation", "item_aggregation"],
+    });
+    // ingestion task that failed after partial work should still be counted
+    await makeTaskRun({
+      kind: "ingestion",
+      status: "failed",
+      createdAt: yesterday,
+      aiCallCountActual: 2,
+      breakdownKeys: ["item_summary", "cluster_match"],
+    });
+    // irrelevant task (no AI calls) should be excluded by the in-list filter
+    await makeTaskRun({
+      kind: "item_cleanup",
+      createdAt: today,
+      aiCallCountActual: 0,
+      breakdownKeys: [],
+    });
+    // queued task should be excluded by the status filter
+    await makeTaskRun({
+      kind: "ingestion",
+      status: "queued",
+      createdAt: today,
+      aiCallCountActual: 0,
+      breakdownKeys: [],
+    });
+
+    const metrics = await getIngestionMetrics(30);
+    const todayKey = today.toISOString().slice(0, 10);
+    const yesterdayKey = yesterday.toISOString().slice(0, 10);
+
+    const todayStat = metrics.dailyAiUsageStats.find((s) => s.date === todayKey);
+    const yesterdayStat = metrics.dailyAiUsageStats.find((s) => s.date === yesterdayKey);
+
+    expect(todayStat).toBeDefined();
+    expect(todayStat).toMatchObject({
+      date: todayKey,
+      totalCalls: 6, // 3 ingestion + 2 daily report + 1 cluster summary
+      summaries: 1, // item_summary from ingestion
+      analyses: 1, // item_analysis from ingestion
+      aggregations: 0,
+      clusterMatches: 0,
+      clusterMerges: 1, // cluster_merge from ingestion
+      clusterSummaries: 1, // cluster_summary from cluster regen task
+      dailyReports: 2, // daily_report x2
+    });
+
+    expect(yesterdayStat).toBeDefined();
+    expect(yesterdayStat).toMatchObject({
+      date: yesterdayKey,
+      totalCalls: 9, // 2 reanalyze + 5 reparse + 2 failed ingestion
+      summaries: 1, // item_summary from failed ingestion
+      analyses: 1, // item_analysis from reanalyze
+      aggregations: 5, // item_aggregation x5 from reparse
+      clusterMatches: 2, // cluster_match from reanalyze + failed ingestion
+      clusterMerges: 0,
+      clusterSummaries: 0,
+      dailyReports: 0,
+    });
+  });
+
+  it("returns zero counts for dates with no qualifying task runs", async () => {
+    const today = new Date("2026-06-16T10:00:00.000Z");
+    // Only an irrelevant task kind, no AI-relevant rows
+    await makeTaskRun({
+      kind: "item_cleanup",
+      createdAt: today,
+      aiCallCountActual: 0,
+      breakdownKeys: [],
+    });
+
+    const metrics = await getIngestionMetrics(7);
+    for (const stat of metrics.dailyAiUsageStats) {
+      expect(stat.totalCalls).toBe(0);
+      expect(stat.summaries).toBe(0);
+      expect(stat.analyses).toBe(0);
+      expect(stat.aggregations).toBe(0);
+      expect(stat.clusterMatches).toBe(0);
+      expect(stat.clusterMerges).toBe(0);
+      expect(stat.clusterSummaries).toBe(0);
+      expect(stat.dailyReports).toBe(0);
+    }
+  });
+});

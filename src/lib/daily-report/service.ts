@@ -27,7 +27,9 @@ import { normalizeEventSignatureForStorage } from "@/lib/clusters/normalization"
 import { getDisplaySummary, getDisplayTitle } from "@/lib/feed/presentation";
 import { getIngestionRuntimeConfig } from "@/lib/settings/runtime-service";
 import { DEFAULT_DAILY_REPORT_TASK_LABEL, type TaskTimelineNodeSnapshot } from "@/lib/tasks/types";
+import type { TaskAiCallBreakdownSnapshot } from "@/lib/tasks/types";
 import { enqueueTaskRun, ensureDefaultDailyReportSchedule, parseDailyReportGroupIdsJson, updateTaskRun } from "@/lib/tasks/service";
+import { createTaskAiUsageTracker } from "@/lib/tasks/ai-usage";
 
 const MIN_CANDIDATE_COUNT = 2;
 const DAILY_REPORT_RECENT_SOURCE_LOOKBACK_DAYS = 7;
@@ -866,6 +868,7 @@ export async function generateDailyReport(input: {
       reason: "日报输入未变化，已跳过生成。",
       candidateCount: candidates.length,
       selectedCount: await countExistingSelectedDailyReportCandidates(existing.id),
+      aiUsage: { actual: 0, estimated: 0, breakdown: [] },
     };
   }
 
@@ -876,11 +879,16 @@ export async function generateDailyReport(input: {
       reason: `候选内容不足 ${MIN_CANDIDATE_COUNT} 条，已跳过生成。`,
       candidateCount: candidates.length,
       selectedCount: 0,
+      aiUsage: { actual: 0, estimated: 0, breakdown: [] },
     };
   }
 
   const runtimeConfig = await getIngestionRuntimeConfig();
-  const provider = createAiProvider(runtimeConfig.modelApi, runtimeConfig.selectedPromptConfigs);
+  const baseProvider = createAiProvider(runtimeConfig.modelApi, runtimeConfig.selectedPromptConfigs);
+  // Track every AI call made during generation (main call + repair fallback)
+  // so the background task run records accurate `aiCallCountActual` / breakdown.
+  const aiUsage = createTaskAiUsageTracker(1, "daily_report");
+  const provider = aiUsage.wrapProvider(baseProvider);
   const rawOutput = await provider.generateDailyReport({
     date,
     timezone: DAILY_REPORT_TIMEZONE,
@@ -1033,6 +1041,7 @@ export async function generateDailyReport(input: {
     reason: null,
     candidateCount: candidates.length,
     selectedCount,
+    aiUsage: aiUsage.snapshot(),
   };
 }
 
@@ -1054,7 +1063,7 @@ export async function executeDailyReportTask(taskRun: BackgroundTaskRun) {
       }),
       aiCallCountEstimated: 1,
       aiCallBreakdown: [
-        { key: "daily_report", label: "AI 日报", actual: 0, estimated: 1 },
+        { key: "daily_report", label: "AI 日报", actual: 0, estimated: 1 } as TaskAiCallBreakdownSnapshot,
       ],
     });
 
@@ -1075,6 +1084,16 @@ export async function executeDailyReportTask(taskRun: BackgroundTaskRun) {
     });
 
     const finishedAt = new Date();
+    const finalAiUsage = result.aiUsage;
+    const totalActual = result.skipped ? 0 : finalAiUsage.actual;
+    const totalEstimated = finalAiUsage.estimated;
+    // Always include the daily_report key so the breakdown is non-empty when
+    // the task runs at all, even if the call count is zero.
+    const finalBreakdown: TaskAiCallBreakdownSnapshot[] = result.skipped
+      ? [{ key: "daily_report", label: "AI 日报", actual: 0, estimated: totalEstimated }]
+      : finalAiUsage.breakdown.some((entry) => entry.key === "daily_report")
+        ? finalAiUsage.breakdown
+        : [{ key: "daily_report", label: "AI 日报", actual: totalActual, estimated: totalEstimated }];
     await updateTaskRun(taskRun.id, {
       status: "succeeded",
       progressCurrent: 1,
@@ -1082,11 +1101,9 @@ export async function executeDailyReportTask(taskRun: BackgroundTaskRun) {
       progressLabel: result.skipped
         ? result.reason
         : `已生成 ${date} AI 日报${result.report?.status === "published" ? "并发布" : "草稿"}`,
-      aiCallCountActual: result.skipped ? 0 : 1,
-      aiCallCountEstimated: 1,
-      aiCallBreakdown: [
-        { key: "daily_report", label: "AI 日报", actual: result.skipped ? 0 : 1, estimated: 1 },
-      ],
+      aiCallCountActual: totalActual,
+      aiCallCountEstimated: totalEstimated,
+      aiCallBreakdown: finalBreakdown,
       taskTimeline: buildDailyReportTaskTimeline({
         taskRun,
         status: result.skipped ? "skipped" : "succeeded",

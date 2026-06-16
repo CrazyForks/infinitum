@@ -4,7 +4,7 @@ import type {
   TaskAiCallBreakdownSnapshot,
 } from "@/lib/tasks/types";
 
-type TaskAiUsageSnapshot = {
+export type TaskAiUsageSnapshot = {
   actual: number;
   estimated: number;
   breakdown: TaskAiCallBreakdownSnapshot[];

@@ -252,10 +252,27 @@ export async function executeItemRegenerationTask(
     throw new Error("Task entityId is required.");
   }
 
-  const aiUsage = createTaskAiUsageTracker(target === "translation" ? 1 : 1, target === "translation" ? "item_analysis" : "item_summary");
-  const trackedAiProvider = aiUsage.wrapProvider(await resolveAiProvider(options?.aiProvider), {
-    summarizeItemEstimated: target === "translation",
-  });
+  // Estimated call budget for item regeneration:
+  //   translation target:
+  //     - summarizeItem (skipped if a cached summary exists)
+  //     - enrichContent (translation pass)
+  //     - matchClusterCandidate (always called by assignItemToCluster)
+  //     - summarizeCluster (1-2x via recomputeCluster, only if hash changed)
+  //   summary target:
+  //     - summarizeItem (always, reuseExisting not set)
+  //     - matchClusterCandidate
+  //     - summarizeCluster (1-2x via recomputeCluster)
+  // Actual counts are always tracked by wrapProvider regardless of estimate.
+  const aiUsage = createTaskAiUsageTracker(
+    1,
+    target === "translation" ? "item_analysis" : "item_summary",
+  );
+  aiUsage.addEstimated(1, "cluster_match");
+  aiUsage.addEstimated(2, "cluster_summary");
+  const trackedAiProvider = aiUsage.wrapProvider(
+    await resolveAiProvider(options?.aiProvider),
+    { summarizeItemEstimated: target === "translation" },
+  );
   const initialAiUsage = aiUsage.snapshot();
 
   await updateTaskRun(taskRun.id, {
@@ -472,11 +489,18 @@ export async function executeItemReanalyzeTask(
     throw new Error("Task entityId is required.");
   }
 
-  const aiUsage = createTaskAiUsageTracker(1);
-  aiUsage.addEstimated(1, "item_analysis");
-  const trackedAiProvider = aiUsage.wrapProvider(await resolveAiProvider(options?.aiProvider), {
-    summarizeItemEstimated: false,
-  });
+  // Estimated call budget for reanalyze:
+  //   - enrichContent (the actual reanalyze pass)
+  //   - summarizeItem (if a cached summary doesn't exist)
+  //   - summarizeCluster (1-2x via recomputeCluster, only if hash changed)
+  // Actual counts are always tracked by wrapProvider regardless of estimate.
+  const aiUsage = createTaskAiUsageTracker(1, "item_analysis");
+  aiUsage.addEstimated(1, "item_summary");
+  aiUsage.addEstimated(2, "cluster_summary");
+  const trackedAiProvider = aiUsage.wrapProvider(
+    await resolveAiProvider(options?.aiProvider),
+    { summarizeItemEstimated: false },
+  );
   const initialAiUsage = aiUsage.snapshot();
 
   await updateTaskRun(taskRun.id, {
