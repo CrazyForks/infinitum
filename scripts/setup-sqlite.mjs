@@ -20,7 +20,7 @@ const testHoldMs = Number.parseInt(process.env.SQLITE_SETUP_LOCK_HOLD_MS || "0",
 const sqliteBusyTimeoutMs = Number.parseInt(process.env.SQLITE_BUSY_TIMEOUT_MS || "10000", 10);
 const sleepBuffer = new SharedArrayBuffer(4);
 const sleepView = new Int32Array(sleepBuffer);
-const adminClusterItemsIndexName = "items_clusterId_status_moderationStatus_updatedAt_idx";
+const itemAdminClusterIndexName = "items_clusterId_status_moderationStatus_updatedAt_idx";
 
 const sqliteRuntimePragmas = [
   "PRAGMA journal_mode = WAL;",
@@ -64,11 +64,7 @@ function makeSqliteSchemaIdempotent(sql) {
   return sql
     .replace(/^CREATE TABLE /gm, "CREATE TABLE IF NOT EXISTS ")
     .replace(/^CREATE UNIQUE INDEX /gm, "CREATE UNIQUE INDEX IF NOT EXISTS ")
-    .replace(/^CREATE INDEX /gm, "CREATE INDEX IF NOT EXISTS ")
-    .replace(/^CREATE INDEX IF NOT EXISTS "sources_enabled_healthStatus_idx" ON "sources"\("enabled", "healthStatus"\);\n?/gm, "")
-    .replace(/^CREATE INDEX IF NOT EXISTS "source_groups_sortOrder_name_idx" ON "source_groups"\("sortOrder", "name"\);\n?/gm, "")
-    .replace(/^CREATE INDEX IF NOT EXISTS "daily_report_sources_dailyReportId_sourceNumber_idx" ON "daily_report_sources"\("dailyReportId", "sourceNumber"\);\n?/gm, "")
-    .replace(/^CREATE INDEX IF NOT EXISTS "daily_report_sources_dailyReportId_sourceKey_idx" ON "daily_report_sources"\("dailyReportId", "sourceKey"\);\n?/gm, "");
+    .replace(/^CREATE INDEX /gm, "CREATE INDEX IF NOT EXISTS ");
 }
 
 function runSqlite(commandArgs, options = {}) {
@@ -76,18 +72,6 @@ function runSqlite(commandArgs, options = {}) {
     stdio: ["pipe", "inherit", "inherit"],
     ...options,
   });
-}
-
-function columnExists(tableName, columnName) {
-  const result = execFileSync(
-    "sqlite3",
-    [dbPath, `SELECT COUNT(*) FROM pragma_table_info('${tableName}') WHERE name = '${columnName}'`],
-    {
-      encoding: "utf8",
-    },
-  ).trim();
-
-  return result === "1";
 }
 
 function ftsTableExists(tableName) {
@@ -100,10 +84,6 @@ function ftsTableExists(tableName) {
   ).trim();
 
   return result === "1";
-}
-
-function tableExists(tableName) {
-  return ftsTableExists(tableName);
 }
 
 function indexStatsExist(indexName) {
@@ -122,271 +102,12 @@ function indexStatsExist(indexName) {
   return Number(result) > 0;
 }
 
-function migrateItemParsedEventsToChildItems() {
-  const scriptPath = path.resolve(root, "scripts", "migrate-aggregation-split.mjs");
-  execFileSync(
-    process.execPath,
-    [scriptPath],
-    {
-      cwd: root,
-      env: { ...process.env, DATABASE_URL: `file:${dbPath}` },
-      encoding: "utf8",
-      stdio: ["ignore", "inherit", "inherit"],
-    },
-  );
-}
-
-function applyPreSchemaMigrations() {
-  // Columns must be added BEFORE the schema SQL runs, because the schema
-  // defines indexes that reference new columns. Skip when items does not
-  // exist yet (fresh databases let loadSchemaSql create everything in one
-  // shot; legacy databases get the column first, then the index from the
-  // schema SQL).
-  if (tableExists("items") && !columnExists("items", "parentItemId")) {
-    runSqlite([dbPath], {
-      input: `ALTER TABLE "items" ADD COLUMN "parentItemId" TEXT;\n`,
-    });
-  }
-}
-
-function applyIncrementalMigrations() {
-  runSqlite([dbPath], {
-    input: [
-      `CREATE INDEX IF NOT EXISTS "items_status_moderationStatus_updatedAt_idx" ON "items"("status", "moderationStatus", "updatedAt");`,
-      `CREATE INDEX IF NOT EXISTS "${adminClusterItemsIndexName}" ON "items"("clusterId", "status", "moderationStatus", "updatedAt");`,
-    ].join("\n"),
-  });
-
-  if (!indexStatsExist(adminClusterItemsIndexName)) {
+function applyRuntimeSqliteObjects() {
+  if (!indexStatsExist(itemAdminClusterIndexName)) {
     runSqlite([dbPath], {
       input: `ANALYZE "items";\n`,
     });
   }
-
-  if (!columnExists("source_groups", "sortOrder")) {
-    runSqlite([dbPath], {
-      input: `ALTER TABLE "source_groups" ADD COLUMN "sortOrder" INTEGER NOT NULL DEFAULT 0;\nCREATE INDEX IF NOT EXISTS "source_groups_sortOrder_name_idx" ON "source_groups"("sortOrder", "name");\n`,
-    });
-  }
-
-  if (!columnExists("source_groups", "color")) {
-    runSqlite([dbPath], {
-      input: `ALTER TABLE "source_groups" ADD COLUMN "color" TEXT NOT NULL DEFAULT '';\n`,
-    });
-  }
-
-  if (!columnExists("task_schedules", "processingStartAt")) {
-    runSqlite([dbPath], {
-      input: `ALTER TABLE "task_schedules" ADD COLUMN "processingStartAt" DATETIME;\n`,
-    });
-  }
-
-  if (!columnExists("task_schedules", "dailyReportCandidateLimit")) {
-    runSqlite([dbPath], {
-      input: `ALTER TABLE "task_schedules" ADD COLUMN "dailyReportCandidateLimit" INTEGER NOT NULL DEFAULT 120;\n`,
-    });
-  }
-
-  if (!columnExists("task_schedules", "dailyReportOffsetDays")) {
-    runSqlite([dbPath], {
-      input: `ALTER TABLE "task_schedules" ADD COLUMN "dailyReportOffsetDays" INTEGER NOT NULL DEFAULT 0;\n`,
-    });
-  }
-
-  if (!columnExists("task_schedules", "dailyReportAutoPublish")) {
-    runSqlite([dbPath], {
-      input: `ALTER TABLE "task_schedules" ADD COLUMN "dailyReportAutoPublish" BOOLEAN NOT NULL DEFAULT false;\n`,
-    });
-  }
-
-  if (!columnExists("task_schedules", "dailyReportMaxRetries")) {
-    runSqlite([dbPath], {
-      input: `ALTER TABLE "task_schedules" ADD COLUMN "dailyReportMaxRetries" INTEGER NOT NULL DEFAULT 0;\n`,
-    });
-  }
-
-  if (!columnExists("task_schedules", "dailyReportGroupIdsJson")) {
-    runSqlite([dbPath], {
-      input: `ALTER TABLE "task_schedules" ADD COLUMN "dailyReportGroupIdsJson" TEXT NOT NULL DEFAULT '';\n`,
-    });
-  }
-
-  if (!columnExists("sources", "aggregationEnabled")) {
-    runSqlite([dbPath], {
-      input: `ALTER TABLE "sources" ADD COLUMN "aggregationEnabled" BOOLEAN NOT NULL DEFAULT true;\n`,
-    });
-  }
-
-  if (!columnExists("sources", "healthStatus")) {
-    runSqlite([dbPath], {
-      input: `ALTER TABLE "sources" ADD COLUMN "healthStatus" TEXT NOT NULL DEFAULT 'unknown';\nCREATE INDEX IF NOT EXISTS "sources_enabled_healthStatus_idx" ON "sources"("enabled", "healthStatus");\n`,
-    });
-  }
-
-  runSqlite([dbPath], {
-    input: `UPDATE "sources" SET "healthStatus" = 'unknown' WHERE "healthStatus" NOT IN ('unknown', 'healthy', 'failed');\nDROP INDEX IF EXISTS "sources_enabled_healthStatus_idx";\nCREATE INDEX "sources_enabled_healthStatus_idx" ON "sources"("enabled", "healthStatus");\n`,
-  });
-
-  if (!columnExists("sources", "healthMessage")) {
-    runSqlite([dbPath], {
-      input: `ALTER TABLE "sources" ADD COLUMN "healthMessage" TEXT;\n`,
-    });
-  }
-
-  if (!columnExists("sources", "healthCheckedAt")) {
-    runSqlite([dbPath], {
-      input: `ALTER TABLE "sources" ADD COLUMN "healthCheckedAt" DATETIME;\n`,
-    });
-  }
-
-  if (!columnExists("items", "manualClusterAssignedAt")) {
-    runSqlite([dbPath], {
-      input: `ALTER TABLE "items" ADD COLUMN "manualClusterAssignedAt" DATETIME;\n`,
-    });
-  }
-
-  if (!columnExists("task_schedules", "cleanupRetentionDays")) {
-    runSqlite([dbPath], {
-      input: `ALTER TABLE "task_schedules" ADD COLUMN "cleanupRetentionDays" INTEGER NOT NULL DEFAULT 365;\n`,
-    });
-  }
-
-  if (!columnExists("task_schedules", "aggregationSplitMaxEvents")) {
-    runSqlite([dbPath], {
-      input: `ALTER TABLE "task_schedules" ADD COLUMN "aggregationSplitMaxEvents" INTEGER NOT NULL DEFAULT 20;\n`,
-    });
-  }
-
-  if (!columnExists("content_clusters", "summaryInputHash")) {
-    runSqlite([dbPath], {
-      input: `ALTER TABLE "content_clusters" ADD COLUMN "summaryInputHash" TEXT;\n`,
-    });
-  }
-
-  if (!columnExists("content_clusters", "mergeInputHash")) {
-    runSqlite([dbPath], {
-      input: `ALTER TABLE "content_clusters" ADD COLUMN "mergeInputHash" TEXT;\n`,
-    });
-  }
-
-  if (!columnExists("daily_report_sources", "sourceNumber")) {
-    runSqlite([dbPath], {
-      input: `ALTER TABLE "daily_report_sources" ADD COLUMN "sourceNumber" INTEGER;\n`,
-    });
-  }
-
-  if (!columnExists("daily_report_sources", "sourceKey")) {
-    runSqlite([dbPath], {
-      input: `ALTER TABLE "daily_report_sources" ADD COLUMN "sourceKey" TEXT;\n`,
-    });
-  }
-
-  if (!columnExists("daily_report_sources", "sourceSummary")) {
-    runSqlite([dbPath], {
-      input: `ALTER TABLE "daily_report_sources" ADD COLUMN "sourceSummary" TEXT;\n`,
-    });
-  }
-
-  if (!columnExists("daily_report_sources", "sourcePublishedAt")) {
-    runSqlite([dbPath], {
-      input: `ALTER TABLE "daily_report_sources" ADD COLUMN "sourcePublishedAt" DATETIME;\n`,
-    });
-  }
-
-  if (!columnExists("daily_report_sources", "sourceQualityScore")) {
-    runSqlite([dbPath], {
-      input: `ALTER TABLE "daily_report_sources" ADD COLUMN "sourceQualityScore" INTEGER;\n`,
-    });
-  }
-
-  if (!columnExists("daily_report_sources", "eventType")) {
-    runSqlite([dbPath], {
-      input: `ALTER TABLE "daily_report_sources" ADD COLUMN "eventType" TEXT;\n`,
-    });
-  }
-
-  if (!columnExists("daily_report_sources", "eventSubject")) {
-    runSqlite([dbPath], {
-      input: `ALTER TABLE "daily_report_sources" ADD COLUMN "eventSubject" TEXT;\n`,
-    });
-  }
-
-  if (!columnExists("daily_report_sources", "eventAction")) {
-    runSqlite([dbPath], {
-      input: `ALTER TABLE "daily_report_sources" ADD COLUMN "eventAction" TEXT;\n`,
-    });
-  }
-
-  if (!columnExists("daily_report_sources", "eventObject")) {
-    runSqlite([dbPath], {
-      input: `ALTER TABLE "daily_report_sources" ADD COLUMN "eventObject" TEXT;\n`,
-    });
-  }
-
-  if (!columnExists("daily_report_sources", "eventDate")) {
-    runSqlite([dbPath], {
-      input: `ALTER TABLE "daily_report_sources" ADD COLUMN "eventDate" TEXT;\n`,
-    });
-  }
-
-  if (!columnExists("daily_reports", "candidateSnapshot")) {
-    runSqlite([dbPath], {
-      input: `ALTER TABLE "daily_reports" ADD COLUMN "candidateSnapshot" TEXT;\n`,
-    });
-  }
-
-  if (!columnExists("model_api_configs", "customHeaders")) {
-    runSqlite([dbPath], {
-      input: `ALTER TABLE "model_api_configs" ADD COLUMN "customHeaders" TEXT NOT NULL DEFAULT '';\n`,
-    });
-  }
-
-  if (!columnExists("sources", "aggregationDetectionEnabled")) {
-    runSqlite([dbPath], {
-      input: `ALTER TABLE "sources" ADD COLUMN "aggregationDetectionEnabled" BOOLEAN NOT NULL DEFAULT false;\n`,
-    });
-  }
-
-  if (!columnExists("items", "isAggregation")) {
-    runSqlite([dbPath], {
-      input: `ALTER TABLE "items" ADD COLUMN "isAggregation" BOOLEAN NOT NULL DEFAULT false;\n`,
-    });
-  }
-  if (!columnExists("items", "aggregationCheckedAt")) {
-    runSqlite([dbPath], {
-      input: `ALTER TABLE "items" ADD COLUMN "aggregationCheckedAt" DATETIME;\n`,
-    });
-  }
-  if (!columnExists("items", "aggregationParseStatus")) {
-    runSqlite([dbPath], {
-      input: `ALTER TABLE "items" ADD COLUMN "aggregationParseStatus" TEXT;\n`,
-    });
-  }
-
-  // Migrate existing item_parsed_events rows into items as child rows.
-  // Idempotent: runs only if the legacy table still exists. We re-use the
-  // parsed event id so a partial retry re-upserts the same child item.
-  if (tableExists("item_parsed_events")) {
-    migrateItemParsedEventsToChildItems();
-
-    runSqlite([dbPath], {
-      input: [
-        `DROP TABLE IF EXISTS "item_parsed_events";`,
-        `DROP INDEX IF EXISTS "item_parsed_events_itemId_fingerprint_key";`,
-        `DROP INDEX IF EXISTS "item_parsed_events_itemId_eventIndex_idx";`,
-        `DROP INDEX IF EXISTS "item_parsed_events_fingerprint_idx";`,
-        `DROP INDEX IF EXISTS "item_parsed_events_clusterId_createdAt_idx";`,
-        `DROP INDEX IF EXISTS "item_parsed_events_eventType_eventDate_idx";`,
-      ].join("\n"),
-    });
-  }
-
-  runSqlite([dbPath], {
-    input: [
-      `CREATE INDEX IF NOT EXISTS "daily_report_sources_dailyReportId_sourceNumber_idx" ON "daily_report_sources"("dailyReportId", "sourceNumber");`,
-      `CREATE INDEX IF NOT EXISTS "daily_report_sources_dailyReportId_sourceKey_idx" ON "daily_report_sources"("dailyReportId", "sourceKey");`,
-    ].join("\n"),
-  });
 
   if (!ftsTableExists("items_fts")) {
     runSqlite([dbPath], {
@@ -494,12 +215,11 @@ try {
     rmSync(`${dbPath}-wal`, { force: true });
   }
 
-  applyPreSchemaMigrations();
   const sql = `${sqliteRuntimePragmas}\n${makeSqliteSchemaIdempotent(loadSchemaSql())}\n${sqliteRuntimePragmas}\n`;
   runSqlite([dbPath], {
     input: sql,
   });
-  applyIncrementalMigrations();
+  applyRuntimeSqliteObjects();
 
   if (testHoldMs > 0) {
     sleep(testHoldMs);

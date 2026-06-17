@@ -56,7 +56,6 @@ COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/node_modules/@prisma/client ./node_modules/@prisma/client
 COPY --from=builder /app/node_modules/.prisma/client ./node_modules/.prisma/client
 COPY --from=builder /app/scripts/setup-sqlite.mjs ./scripts/setup-sqlite.mjs
-COPY --from=builder /app/scripts/migrate-aggregation-split.mjs ./scripts/migrate-aggregation-split.mjs
 COPY --from=builder /app/scripts/worker-entrypoint.sh ./scripts/worker-entrypoint.sh
 
 RUN mkdir -p /app/data
@@ -74,7 +73,6 @@ COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/scripts/docker-entrypoint.sh ./scripts/docker-entrypoint.sh
 COPY --from=builder /app/scripts/setup-sqlite.mjs ./scripts/setup-sqlite.mjs
-COPY --from=builder /app/scripts/migrate-aggregation-split.mjs ./scripts/migrate-aggregation-split.mjs
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 

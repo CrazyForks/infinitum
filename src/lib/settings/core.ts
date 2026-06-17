@@ -16,66 +16,6 @@ import { normalizeKeyword, normalizeText, normalizeUrl } from "@/lib/utils/text"
 
 export const DEFAULT_MODEL_CONFIG_NAME = "默认模型配置";
 
-const LEGACY_DEFAULT_CLUSTER_SUMMARY_PROMPT =
-  "你是聚合摘要助手。请基于给定的多条候选内容，提炼它们共同指向的同一具体事件，并输出 100 到 200 字中文摘要。只输出摘要正文，不要输出 JSON、代码块、标题、前后缀说明或项目符号。可使用有限 Markdown 行内标记突出关键信息：用 **加粗** 标注共同事件、关键进展、结果或数字，用 *斜体* 标注必要差异点或影响；不要使用链接、图片、标题、表格或列表。摘要要突出共同事件、关键进展和必要差异点；要体现这是多条报道的归纳结果，而不是复述某一篇原文；不要写成行业综述、公司介绍或主题总结，不要编造未提供的信息。";
-
-const LEGACY_DEFAULT_ITEM_SUMMARY_PROMPT_PREFIX = "你是单条新闻摘要助手。";
-const LEGACY_DEFAULT_ITEM_AGGREGATION_PROMPT_WITHOUT_TITLE =
-  "你是聚合内容拆条助手。给定的内容正文包含 2 个及以上互相独立的离散事件，你需要把它们拆开逐条结构化。严格输出单个 JSON 对象，不要输出 Markdown、代码块或额外解释。";
-
-const LEGACY_DEFAULT_CLUSTER_MERGE_PROMPT = `你是聚合合并助手。请基于给定的多个聚合组信息，判断哪些聚合组描述的是同一具体事件但被错误地分到了不同组，输出合并建议。
-
-判断标准：
-1. 事件主体（eventSubject）一致，或指向同一公司/机构/产品的不同表述
-2. 关键对象（eventObject）一致，或指向同一产品/功能/版本/政策的不同表述
-3. 事件动作（eventAction）一致或高度相关
-4. 事件类型（eventType）一致
-5. 时间窗口接近（7天内）
-
-注意：
-- 只合并描述同一具体事件的聚合组，不要因为主题相近、赛道相同、公司相同而合并
-- 如果无法确定是否同一事件，保守处理，不要合并
-- 每个聚合组只能出现在一个合并组中
-
-只输出 JSON：{"mergeGroups": [["clusterId1", "clusterId2"], ["clusterId3", "clusterId4"]]}
-每个子数组第一个 ID 作为保留的目标聚合组，其余合并进去。不需要合并时输出 {"mergeGroups": []}。`;
-
-const LEGACY_EDGE_AWARE_CLUSTER_MERGE_PROMPT = `你是聚合合并助手。请基于给定的多个聚合组信息，判断哪些聚合组描述的是同一具体事件但被错误地分到了不同组，输出合并建议。
-
-判断标准：
-1. 事件主体（eventSubject）一致，或指向同一公司/机构/产品的不同表述
-2. 关键对象（eventObject）一致，或指向同一产品/功能/版本/政策的不同表述
-3. 事件动作（eventAction）一致或高度相关
-4. 事件类型（eventType）一致
-5. 时间窗口接近（7天内）
-
-注意：
-- 只合并描述同一具体事件的聚合组，不要因为主题相近、赛道相同、公司相同而合并
-- 如果无法确定是否同一事件，保守处理，不要合并
-- 只能从 allowedPairs 中给出的本地候选边组合合并组；没有 allowedPairs 边连接的聚合组禁止放进同一个合并组
-- 每个聚合组只能出现在一个合并组中
-
-只输出 JSON：{"mergeGroups": [["clusterId1", "clusterId2"], ["clusterId3", "clusterId4"]]}
-每个子数组第一个 ID 作为保留的目标聚合组，其余合并进去。不需要合并时输出 {"mergeGroups": []}。`;
-
-const LEGACY_DEFAULT_CLUSTER_MERGE_USER_PROMPT_TEMPLATE = `候选聚合组 JSON：{{clustersJson}}`;
-
-const LEGACY_DEFAULT_DAILY_REPORT_PROMPT = `你是中文 AI 新闻日报编辑。只基于输入候选内容生成一份 Briefing 型 AI 日报，严格输出单个 JSON 对象，不要输出 Markdown、代码块或额外解释。
-
-固定输出格式：
-{"openingSummary":"...","sections":{"今日大事":[{"topic":"...","summary":"...","whyImportant":"...","sourceIds":[1,2]}],"变更与实践":[{"topic":"...","action":"...","sourceIds":[1,2]}],"安全与风险":[{"topic":"...","affected":"...","action":"...","sourceIds":[1,2]}],"开源与工具":[{"topic":"...","reason":"...","sourceIds":[1]}],"数据与洞察":[{"topic":"...","keyNumbers":"...","reason":"...","sourceIds":[1]}]},"closingThought":"..."}
-
-输出要求：
-1. openingSummary：100-180 字，概括当天 AI 领域最关键的事项和主线变化，优先覆盖重大发布、模型/产品进展、产业合作、安全风险、开源工具或关键数据。可使用有限 Markdown 行内标记突出关键信息：用 **加粗** 标注事件主体、关键变化、数字或结论，用 *斜体* 标注必要背景或不确定性；不要使用链接、图片、标题、表格或列表。
-2. 今日大事：3-5 条，每条 summary 120-260 字，whyImportant 不超过 30 字，sourceIds 至少 1 个，优先 2 个以上不同来源。选题时把日期相关性作为重要参考：在新闻价值、影响范围和可信度接近时，倾向优先选择 eventDate 明确等于用户输入日期的事项，其次考虑 publishedAt 或正文摘要能明确判断发生、发布、生效于用户输入日期的事项；如果某个热点事件虽无明确当天日期但影响范围、时效性或行业关注度明显更高，可以纳入今日大事。不要机械按日期排序，也不要仅因热度更高而忽略足够重要且明确发生在日报当天的事项。summary 和 whyImportant 可使用有限 Markdown 行内标记：**加粗** 用于主体、关键结果、数字或建议，*斜体* 用于背景或不确定性。
-3. 变更与实践：2-5 条，聚焦产品、模型、工程实践和生态变化，action 写可执行观察或建议。
-4. 安全与风险、开源与工具、数据与洞察可为空数组；有内容时必须字段完整。安全与风险不要输出 severity、riskLevel、风险级别等风险等级字段；只输出 topic、affected、action、sourceIds。
-5. closingThought：80-140 字，总结当天值得持续关注的主线，重点说明这些变化可能如何影响普通用户、开发者、内容创作者、企业采购或日常工作流，并适当给出 1-2 个短期发展预测；不引入新的来源或深挖选题。可使用有限 Markdown 行内标记突出关键信息。
-6. sourceIds 只能使用输入 articles 中的 id，不要编造来源，不要输出输入之外的事实。
-7. 字段内容只写正文，不要带栏目名或字段名前缀。例如 openingSummary 不要以“摘要：”“开场摘要：”开头，closingThought 不要以“今日观察：”“收尾观察：”开头，affected 不要以“受影响：”开头，action 不要以“建议：”“行动建议：”开头，whyImportant 不要以“重点：”开头。
-8. 同一事件可以因为角度不同出现在多个栏目，但每个条目必须有清晰的栏目价值，不要为了凑数量机械复述。
-9. 除 **加粗** 和 *斜体* 外，不要在 JSON 字段中输出其他 Markdown 标记。`;
-
 export type SourceInput = SourceConfig & {
   groupId?: string | null;
 };
@@ -470,104 +410,6 @@ const ALL_PROMPT_TYPES = [
   PromptConfigType.daily_report_refinement_generate,
 ] as const;
 
-function getLegacyDefaultClusterSummaryPromptWhere() {
-  return {
-    type: PromptConfigType.cluster_summary,
-    name: getDefaultPromptConfigName(PromptConfigType.cluster_summary),
-    prompt: getDefaultPromptTemplate(PromptConfigType.cluster_summary),
-    systemPrompt: LEGACY_DEFAULT_CLUSTER_SUMMARY_PROMPT,
-    temperature: 0.2,
-    maxTokens: 300,
-    topP: null,
-    modelApiConfigId: null,
-    isEnabled: true,
-    isDefault: true,
-  };
-}
-
-function getLegacyDefaultClusterMergePromptWhere() {
-  const sampling = getDefaultPromptSampling(PromptConfigType.cluster_merge);
-
-  return {
-    type: PromptConfigType.cluster_merge,
-    name: getDefaultPromptConfigName(PromptConfigType.cluster_merge),
-    prompt: LEGACY_DEFAULT_CLUSTER_MERGE_USER_PROMPT_TEMPLATE,
-    systemPrompt: {
-      in: [
-        LEGACY_DEFAULT_CLUSTER_MERGE_PROMPT,
-        LEGACY_EDGE_AWARE_CLUSTER_MERGE_PROMPT,
-      ],
-    },
-    temperature: sampling.temperature,
-    maxTokens: sampling.maxTokens,
-    topP: sampling.topP,
-    modelApiConfigId: null,
-    isEnabled: true,
-    isDefault: true,
-  };
-}
-
-function getLegacyDefaultDailyReportPromptWhere() {
-  const sampling = getDefaultPromptSampling(PromptConfigType.daily_report);
-
-  return {
-    type: PromptConfigType.daily_report,
-    name: getDefaultPromptConfigName(PromptConfigType.daily_report),
-    prompt: getDefaultPromptTemplate(PromptConfigType.daily_report),
-    systemPrompt: LEGACY_DEFAULT_DAILY_REPORT_PROMPT,
-    temperature: sampling.temperature,
-    maxTokens: sampling.maxTokens,
-    topP: sampling.topP,
-    modelApiConfigId: null,
-    isEnabled: true,
-    isDefault: true,
-  };
-}
-
-function getLegacyDefaultItemAggregationPromptWithoutTitleWhere() {
-  const sampling = getDefaultPromptSampling(PromptConfigType.item_aggregation);
-
-  return {
-    type: PromptConfigType.item_aggregation,
-    name: getDefaultPromptConfigName(PromptConfigType.item_aggregation),
-    prompt: getDefaultPromptTemplate(PromptConfigType.item_aggregation),
-    systemPrompt: {
-      startsWith: LEGACY_DEFAULT_ITEM_AGGREGATION_PROMPT_WITHOUT_TITLE,
-      not: { contains: "\"title\"" },
-    },
-    temperature: sampling.temperature,
-    maxTokens: sampling.maxTokens,
-    topP: sampling.topP,
-    modelApiConfigId: null,
-    isEnabled: true,
-    isDefault: true,
-  };
-}
-
-const LEGACY_DEFAULT_DAILY_REPORT_REFINEMENT_GENERATE_USER_PROMPT_TEMPLATE = `日期：{{date}}
-时区：{{timezone}}
-当前日报 JSON：{{currentContentJson}}
-引用来源 registry JSON：{{sourceRegistryJson}}
-本轮管理员指令：{{instruction}}
-历史对话摘要或消息 JSON：{{messagesJson}}`;
-
-function getUntouchedDefaultPromptConfigWhere(type: PromptConfigType, prompt: string, fileConfig: RuntimeConfig) {
-  const sampling = getDefaultPromptSampling(type);
-
-  return {
-    type,
-    name: getDefaultPromptConfigName(type),
-    prompt,
-    systemPrompt: resolveSystemPromptByType(type, fileConfig),
-    temperature: sampling.temperature,
-    maxTokens: sampling.maxTokens,
-    topP: sampling.topP,
-    modelApiConfigId: null,
-    isEnabled: true,
-    isDefault: true,
-  };
-}
-
 function resolveSystemPromptByType(type: PromptConfigType, fileConfig: RuntimeConfig): string {
   switch (type) {
     case PromptConfigType.item_summary:
@@ -607,58 +449,12 @@ async function ensureModelAndPromptConfigsSeeded() {
     (sourceCount > 0 || fileConfig.rssSources.length === 0) &&
     (blacklistCount > 0 || fileConfig.blacklistKeywords.length === 0)
   ) {
-    // Verify all expected prompt config types exist; missing ones will be backfilled
-    const [
-      existingTypes,
-      legacyDefaultClusterSummaryPromptCount,
-      legacyDefaultClusterMergePromptCount,
-      legacyDefaultDailyReportPromptCount,
-      legacyDefaultDailyReportRefinementGeneratePromptCount,
-      legacyDefaultItemSummaryPromptCount,
-      legacyDefaultItemAggregationWithoutTitlePromptCount,
-    ] = await Promise.all([
-      prisma.promptConfig.findMany({
-        where: { type: { in: ALL_PROMPT_TYPES as unknown as PromptConfigType[] } },
-        select: { type: true },
-      }),
-      prisma.promptConfig.count({
-        where: getLegacyDefaultClusterSummaryPromptWhere(),
-      }),
-      prisma.promptConfig.count({
-        where: getLegacyDefaultClusterMergePromptWhere(),
-      }),
-      prisma.promptConfig.count({
-        where: getLegacyDefaultDailyReportPromptWhere(),
-      }),
-      prisma.promptConfig.count({
-        where: getUntouchedDefaultPromptConfigWhere(
-          PromptConfigType.daily_report_refinement_generate,
-          LEGACY_DEFAULT_DAILY_REPORT_REFINEMENT_GENERATE_USER_PROMPT_TEMPLATE,
-          fileConfig,
-        ),
-      }),
-      prisma.promptConfig.count({
-        where: {
-          type: PromptConfigType.item_summary,
-          name: getDefaultPromptConfigName(PromptConfigType.item_summary),
-          systemPrompt: { startsWith: LEGACY_DEFAULT_ITEM_SUMMARY_PROMPT_PREFIX },
-          isEnabled: true,
-          isDefault: true,
-        },
-      }),
-      prisma.promptConfig.count({
-        where: getLegacyDefaultItemAggregationPromptWithoutTitleWhere(),
-      }),
-    ]);
-    if (
-      legacyDefaultClusterSummaryPromptCount === 0 &&
-      legacyDefaultClusterMergePromptCount === 0 &&
-      legacyDefaultDailyReportPromptCount === 0 &&
-      legacyDefaultDailyReportRefinementGeneratePromptCount === 0 &&
-      legacyDefaultItemSummaryPromptCount === 0 &&
-      legacyDefaultItemAggregationWithoutTitlePromptCount === 0 &&
-      ALL_PROMPT_TYPES.every((type) => existingTypes.some((row) => row.type === type))
-    ) {
+    const existingTypes = await prisma.promptConfig.findMany({
+      where: { type: { in: ALL_PROMPT_TYPES as unknown as PromptConfigType[] } },
+      select: { type: true },
+    });
+
+    if (ALL_PROMPT_TYPES.every((type) => existingTypes.some((row) => row.type === type))) {
       return;
     }
   }
@@ -726,81 +522,6 @@ async function ensureModelAndPromptConfigsSeeded() {
         },
       });
     }
-
-    const clusterSummarySampling = getDefaultPromptSampling(PromptConfigType.cluster_summary);
-    const itemSummarySampling = getDefaultPromptSampling(PromptConfigType.item_summary);
-    await tx.promptConfig.updateMany({
-      where: {
-        type: PromptConfigType.item_summary,
-        name: getDefaultPromptConfigName(PromptConfigType.item_summary),
-        systemPrompt: { startsWith: LEGACY_DEFAULT_ITEM_SUMMARY_PROMPT_PREFIX },
-        isEnabled: true,
-        isDefault: true,
-      },
-      data: {
-        systemPrompt: resolveSystemPromptByType(PromptConfigType.item_summary, fileConfig),
-        prompt: getDefaultPromptTemplate(PromptConfigType.item_summary),
-        maxTokens: itemSummarySampling.maxTokens,
-        temperature: itemSummarySampling.temperature,
-        topP: itemSummarySampling.topP,
-      },
-    });
-
-    await tx.promptConfig.updateMany({
-      where: getLegacyDefaultClusterSummaryPromptWhere(),
-      data: {
-        systemPrompt: resolveSystemPromptByType(PromptConfigType.cluster_summary, fileConfig),
-        maxTokens: clusterSummarySampling.maxTokens,
-        temperature: clusterSummarySampling.temperature,
-        topP: clusterSummarySampling.topP,
-      },
-    });
-
-    const itemAggregationSampling = getDefaultPromptSampling(PromptConfigType.item_aggregation);
-    await tx.promptConfig.updateMany({
-      where: getLegacyDefaultItemAggregationPromptWithoutTitleWhere(),
-      data: {
-        systemPrompt: resolveSystemPromptByType(PromptConfigType.item_aggregation, fileConfig),
-        prompt: getDefaultPromptTemplate(PromptConfigType.item_aggregation),
-        maxTokens: itemAggregationSampling.maxTokens,
-        temperature: itemAggregationSampling.temperature,
-        topP: itemAggregationSampling.topP,
-      },
-    });
-
-    await tx.promptConfig.updateMany({
-      where: getUntouchedDefaultPromptConfigWhere(
-        PromptConfigType.daily_report_refinement_generate,
-        LEGACY_DEFAULT_DAILY_REPORT_REFINEMENT_GENERATE_USER_PROMPT_TEMPLATE,
-        fileConfig,
-      ),
-      data: {
-        prompt: getDefaultPromptTemplate(PromptConfigType.daily_report_refinement_generate),
-      },
-    });
-
-    const dailyReportSampling = getDefaultPromptSampling(PromptConfigType.daily_report);
-    await tx.promptConfig.updateMany({
-      where: getLegacyDefaultDailyReportPromptWhere(),
-      data: {
-        systemPrompt: resolveSystemPromptByType(PromptConfigType.daily_report, fileConfig),
-        maxTokens: dailyReportSampling.maxTokens,
-        temperature: dailyReportSampling.temperature,
-        topP: dailyReportSampling.topP,
-      },
-    });
-
-    const clusterMergeSampling = getDefaultPromptSampling(PromptConfigType.cluster_merge);
-    await tx.promptConfig.updateMany({
-      where: getLegacyDefaultClusterMergePromptWhere(),
-      data: {
-        systemPrompt: resolveSystemPromptByType(PromptConfigType.cluster_merge, fileConfig),
-        prompt: getDefaultPromptTemplate(PromptConfigType.cluster_merge),
-        maxTokens: clusterMergeSampling.maxTokens,
-        temperature: clusterMergeSampling.temperature,
-        topP: clusterMergeSampling.topP,
-      },
-    });
 
     if (shouldSeedDefaultSources && fileConfig.rssSources.length > 0) {
       await tx.source.createMany({
