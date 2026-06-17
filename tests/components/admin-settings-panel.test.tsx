@@ -103,6 +103,7 @@ function buildInitialSettings(): AdminSettingsSnapshot {
       sourceConcurrency: 2,
       fullTextFetchThreshold: 80,
       perSourceItemLimit: 20,
+      aggregationSplitMaxEvents: 20,
       dailyReportCandidateLimit: 120,
       dailyReportOffsetDays: 0,
       dailyReportAutoPublish: false,
@@ -124,6 +125,7 @@ function buildInitialSettings(): AdminSettingsSnapshot {
       sourceConcurrency: 2,
       fullTextFetchThreshold: 80,
       perSourceItemLimit: 20,
+      aggregationSplitMaxEvents: 20,
       dailyReportCandidateLimit: 120,
       dailyReportOffsetDays: 0,
       dailyReportAutoPublish: false,
@@ -1217,6 +1219,7 @@ describe("AdminSettingsPanel", () => {
             cronExpression: "*/15 * * * *",
             sourceConcurrency: 4,
             fullTextFetchThreshold: 120,
+            aggregationSplitMaxEvents: 12,
           },
         }),
       ),
@@ -1241,6 +1244,7 @@ describe("AdminSettingsPanel", () => {
     expect(within(taskPanel).getByLabelText("采集 Cron 表达式")).toHaveValue("0 * * * *");
     expect(within(taskPanel).getByLabelText("源抓取并发")).toHaveValue(2);
     expect(within(taskPanel).getByLabelText("正文补抓阈值")).toHaveValue(80);
+    expect(within(taskPanel).getByLabelText("单条聚合拆分上限")).toHaveValue(20);
 
     await user.clear(within(taskPanel).getByLabelText("采集 Cron 表达式"));
     await user.type(within(taskPanel).getByLabelText("采集 Cron 表达式"), "*/15 * * * *");
@@ -1248,6 +1252,8 @@ describe("AdminSettingsPanel", () => {
     await user.type(within(taskPanel).getByLabelText("源抓取并发"), "4");
     await user.clear(within(taskPanel).getByLabelText("正文补抓阈值"));
     await user.type(within(taskPanel).getByLabelText("正文补抓阈值"), "120");
+    await user.clear(within(taskPanel).getByLabelText("单条聚合拆分上限"));
+    await user.type(within(taskPanel).getByLabelText("单条聚合拆分上限"), "12");
     await user.click(within(taskPanel).getByLabelText("启用默认抓取任务"));
     await user.click(within(taskPanel).getAllByRole("button", { name: "保存配置" })[0]!);
 
@@ -1263,6 +1269,7 @@ describe("AdminSettingsPanel", () => {
           sourceConcurrency: 4,
           fullTextFetchThreshold: 120,
           perSourceItemLimit: 20,
+          aggregationSplitMaxEvents: 12,
           processingStartAt: null,
         }),
       });

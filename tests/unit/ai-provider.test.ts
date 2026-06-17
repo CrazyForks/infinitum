@@ -1030,6 +1030,7 @@ describe("ai provider", () => {
                   eventAction: "发布",
                   eventObject: "Agent SDK",
                   eventDate: null,
+                  title: "OpenAI 推出 Agent SDK",
                   oneLiner: "OpenAI 发布 Agent SDK。",
                   qualityScore: 88,
                 },
@@ -1069,6 +1070,7 @@ describe("ai provider", () => {
     });
 
     expect(parsed.events).toHaveLength(1);
+    expect(parsed.events[0]?.title).toBe("OpenAI 推出 Agent SDK");
     expect(create).toHaveBeenCalledTimes(1);
     expect(create.mock.calls[0]?.[0]?.messages?.[0]?.content).toBe("聚合拆分专用系统提示词");
     expect(create.mock.calls[0]?.[0]?.messages?.[1]?.content).toBe(
@@ -1077,6 +1079,62 @@ describe("ai provider", () => {
     expect(create.mock.calls[0]?.[0]?.temperature).toBe(0);
     expect(create.mock.calls[0]?.[0]?.max_tokens).toBe(1600);
     expect(create.mock.calls[0]?.[0]?.response_format).toEqual({ type: "json_object" });
+  });
+
+  it("uses the configured aggregation split max events in prompts and parser limits", async () => {
+    const create = vi.fn().mockResolvedValue({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              mainEvent: null,
+              events: [1, 2, 3].map((index) => ({
+                eventType: "release",
+                eventSubject: `主体 ${index}`,
+                eventAction: "发布",
+                eventObject: `对象 ${index}`,
+                eventDate: null,
+                title: `事件标题 ${index}`,
+                oneLiner: `事件摘要 ${index}`,
+                qualityScore: 80 + index,
+              })),
+            }),
+          },
+        },
+      ],
+    });
+
+    const provider = createAiProvider(
+      {
+        apiKey: "sk-test",
+        baseURL: "https://example.com/v1",
+        model: "test-model",
+      },
+      {
+        itemAggregation: {
+          systemPrompt: "聚合拆分系统提示词",
+          promptTemplate: "最多 {{maxEvents}} 条\n标题：{{title}}\n正文：{{inputText}}",
+        },
+      },
+      {
+        chat: {
+          completions: {
+            create,
+          },
+        },
+      },
+      {
+        aggregationSplitMaxEvents: 2,
+      },
+    );
+
+    const parsed = await provider.parseAggregation("事件一。事件二。事件三。", {
+      title: "聚合简讯",
+      sourceName: "测试源",
+    });
+
+    expect(parsed.events.map((event) => event.title)).toEqual(["事件标题 1", "事件标题 2"]);
+    expect(create.mock.calls[0]?.[0]?.messages?.[1]?.content).toContain("最多 2 条");
   });
 
   it("uses the higher default token budget for aggregation parsing", async () => {

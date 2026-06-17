@@ -61,7 +61,6 @@ function buildAiProviderMock(
 
 describe("regenerateItemContent", () => {
   beforeEach(async () => {
-    await prisma.itemParsedEvent.deleteMany();
     await prisma.item.deleteMany();
     await prisma.contentCluster.deleteMany();
     await prisma.fetchRun.deleteMany();
@@ -1033,6 +1032,39 @@ describe("regenerateItemContent", () => {
         isAggregation: false,
       },
     });
+    const staleCluster = await prisma.contentCluster.create({
+      data: {
+        kind: "topic",
+        title: "旧拆条聚合",
+        summary: "旧拆条摘要",
+        score: 70,
+        itemCount: 1,
+        latestPublishedAt: new Date("2026-04-10T08:00:00.000Z"),
+        status: "active",
+        fingerprint: "stale-child-cluster",
+      },
+    });
+    const staleChild = await prisma.item.create({
+      data: {
+        sourceId: source.id,
+        parentItemId: item.id,
+        clusterId: staleCluster.id,
+        originalUrl: "https://aggregation.example.com/roundup#event-stale",
+        canonicalUrl: "https://aggregation.example.com/roundup",
+        urlHash: "reparse-stale-child-url",
+        dedupeSignature: "stale-child-signature",
+        originalTitle: "旧拆条事件",
+        publishedAt: new Date("2026-04-10T08:00:00.000Z"),
+        status: "processed",
+        moderationStatus: "allowed",
+        summaryText: "旧拆条摘要",
+        summaryStatus: "succeeded",
+        analysisStatus: "succeeded",
+        qualityScore: 70,
+        qualityRationale: "旧拆条",
+        isAggregation: false,
+      },
+    });
     const taskRun = await prisma.backgroundTaskRun.create({
       data: {
         kind: "item_reparse_aggregations",
@@ -1054,8 +1086,10 @@ describe("regenerateItemContent", () => {
               eventAction: "发布",
               eventObject: "Toolkit",
               eventDate: "2026-04-10",
+              title: "OpenAI 推出 Toolkit",
               oneLiner: "OpenAI 发布 Toolkit",
               qualityScore: 92,
+              sourceUrl: "https://aggregation.example.com/roundup/",
             },
           ],
         }),
@@ -1064,20 +1098,33 @@ describe("regenerateItemContent", () => {
     });
 
     const updatedItem = await prisma.item.findUniqueOrThrow({ where: { id: item.id } });
-    const parsedEvents = await prisma.itemParsedEvent.findMany({ where: { itemId: item.id } });
-    const parsedEventCluster = parsedEvents[0]?.clusterId
-      ? await prisma.contentCluster.findUnique({ where: { id: parsedEvents[0].clusterId } })
+    const childItems = await prisma.item.findMany({ where: { parentItemId: item.id }, orderBy: { createdAt: "asc" } });
+    const activeChildItems = childItems.filter((child) => child.status === "processed");
+    const retiredChild = childItems.find((child) => child.id === staleChild.id);
+    const activeChild = activeChildItems[0];
+    const childCluster = activeChild?.clusterId
+      ? await prisma.contentCluster.findUnique({ where: { id: activeChild.clusterId } })
       : null;
 
     expect(updatedItem.isAggregation).toBe(true);
     expect(updatedItem.aggregationParseStatus).toBe("parsed");
-    expect(parsedEvents).toHaveLength(1);
-    expect(parsedEvents[0]?.oneLiner).toBe("OpenAI 发布 Toolkit");
-    expect(parsedEvents[0]?.clusterId).toBeTruthy();
+    expect(childItems).toHaveLength(2);
+    expect(retiredChild).toMatchObject({
+      status: "filtered",
+      moderationStatus: "filtered",
+      filterReason: "reparsed_parent",
+      clusterId: staleCluster.id,
+    });
+    expect(activeChildItems).toHaveLength(1);
+    expect(activeChild?.summaryText).toBe("OpenAI 发布 Toolkit");
+    expect(activeChild?.originalTitle).toBe("OpenAI 推出 Toolkit");
+    expect(activeChild?.parentItemId).toBe(item.id);
+    expect(activeChild?.isAggregation).toBe(false);
+    expect(activeChild?.originalUrl).toBe("https://aggregation.example.com/roundup");
     expect(summarizeCluster).not.toHaveBeenCalled();
-    expect(parsedEventCluster).toMatchObject({
-      title: "OpenAI 发布 Toolkit",
-      itemCount: 1,
+    // Cluster is created at assignment time; itemCount refresh happens at the
+    // batch-level cluster_finalize pass, which is not part of the reparse task.
+    expect(childCluster).toMatchObject({
       eventSubject: "OpenAI",
       eventAction: "发布",
       eventObject: "Toolkit",
@@ -1107,7 +1154,7 @@ describe("regenerateItemContent", () => {
         status: "processed",
         moderationStatus: "allowed",
         summaryText: "此前拆分失败的多条新闻",
-        rssContent: "OpenAI launches Toolkit. Anthropic updates Console. Mistral ships a model update.",
+        rssContent: `OpenAI launches <a href="https://tracking.tldrnewsletter.com/CL0/https:%2F%2Fopenai.com%2Ftoolkit%3Futm_source=tldrdev/1/test">Toolkit</a>. Anthropic updates Console. Mistral ships a model update.`,
         fullText: null,
         isAggregation: true,
         aggregationParseStatus: "failed",
@@ -1151,15 +1198,15 @@ describe("regenerateItemContent", () => {
     });
 
     const updatedItem = await prisma.item.findUniqueOrThrow({ where: { id: item.id } });
-    const parsedEvents = await prisma.itemParsedEvent.findMany({ where: { itemId: item.id } });
+    const childItems = await prisma.item.findMany({ where: { parentItemId: item.id } });
 
     expect(parseAggregation).toHaveBeenCalledWith(
-      "OpenAI launches Toolkit. Anthropic updates Console. Mistral ships a model update.",
+      "OpenAI launches Toolkit (link: https://openai.com/toolkit?utm_source=tldrdev). Anthropic updates Console. Mistral ships a model update.",
       expect.objectContaining({ title: "Failed Roundup" }),
     );
     expect(updatedItem.isAggregation).toBe(true);
     expect(updatedItem.aggregationParseStatus).toBe("parsed");
-    expect(parsedEvents).toHaveLength(1);
+    expect(childItems).toHaveLength(1);
     expect(summarizeCluster).not.toHaveBeenCalled();
   });
 });

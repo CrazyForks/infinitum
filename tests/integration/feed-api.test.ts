@@ -255,6 +255,73 @@ describe("/api/feed", () => {
     vi.useRealTimers();
   });
 
+  it("omits aggregation parent metadata from the public feed list", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-10T12:00:00.000Z"));
+
+    try {
+      const source = await prisma.source.findFirstOrThrow({
+        where: { rssUrl: "https://api.example.com/feed.xml" },
+      });
+      const parent = await prisma.item.create({
+        data: {
+          id: "aggregation-parent-feed",
+          sourceId: source.id,
+          originalUrl: "https://api.example.com/roundup",
+          canonicalUrl: "https://api.example.com/roundup",
+          urlHash: "aggregation-parent-feed",
+          dedupeSignature: "aggregation-parent-feed",
+          originalTitle: "AI Roundup Parent",
+          translatedTitle: "AI 简报父条目",
+          publishedAt: new Date("2026-04-10T09:00:00.000Z"),
+          summaryText: "父聚合摘要",
+          status: "processed",
+          moderationStatus: "allowed",
+          qualityScore: 80,
+          qualityRationale: "聚合父条目",
+          isAggregation: true,
+          aggregationParseStatus: "parsed",
+          createdAt: new Date("2026-04-10T09:00:00.000Z"),
+        },
+      });
+      await prisma.item.create({
+        data: {
+          id: "aggregation-child-feed",
+          sourceId: source.id,
+          parentItemId: parent.id,
+          originalUrl: "https://api.example.com/roundup#event-child",
+          canonicalUrl: "https://api.example.com/roundup",
+          urlHash: "aggregation-child-feed",
+          dedupeSignature: "aggregation-child-feed",
+          originalTitle: "Split Child Feed Story",
+          translatedTitle: "拆条子事件",
+          publishedAt: new Date("2026-04-10T09:00:00.000Z"),
+          summaryText: "拆条子事件摘要",
+          status: "processed",
+          moderationStatus: "allowed",
+          qualityScore: 85,
+          qualityRationale: "由聚合内容拆出",
+          isAggregation: false,
+          createdAt: new Date("2026-04-10T09:01:00.000Z"),
+        },
+      });
+
+      const { GET } = await import("@/app/api/feed/route");
+      const response = await GET(
+        new Request("http://localhost/api/feed?range=7d&title=Split%20Child"),
+      );
+      const json = await response.json();
+
+      expect(json.items).toHaveLength(1);
+      expect(json.items[0]).toMatchObject({
+        id: "aggregation-child-feed",
+      });
+      expect(json.items[0]).not.toHaveProperty("aggregationParent");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps a multi-item cluster as a cluster when only one item matches the time range", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-10T12:00:00.000Z"));
@@ -1406,6 +1473,53 @@ describe("/api/feed", () => {
   });
 
   it("returns all cluster child items regardless of feed time filters", async () => {
+    const source = await prisma.source.findFirstOrThrow({
+      where: { rssUrl: "https://api.example.com/feed.xml" },
+    });
+    const parent = await prisma.item.create({
+      data: {
+        id: "aggregation-parent-cluster-detail",
+        sourceId: source.id,
+        originalUrl: "https://api.example.com/roundup-detail",
+        canonicalUrl: "https://api.example.com/roundup-detail",
+        urlHash: "aggregation-parent-cluster-detail",
+        dedupeSignature: "aggregation-parent-cluster-detail",
+        originalTitle: "Cluster Detail Parent",
+        translatedTitle: "聚类详情父条目",
+        publishedAt: new Date("2026-04-10T10:00:00.000Z"),
+        summaryText: "父聚合摘要",
+        status: "processed",
+        moderationStatus: "allowed",
+        qualityScore: 80,
+        qualityRationale: "聚合父条目",
+        isAggregation: true,
+        aggregationParseStatus: "parsed",
+        createdAt: new Date("2026-04-10T10:00:00.000Z"),
+      },
+    });
+    await prisma.item.create({
+      data: {
+        id: "aggregation-child-cluster-detail",
+        sourceId: source.id,
+        clusterId: "cluster-a",
+        parentItemId: parent.id,
+        originalUrl: "https://api.example.com/roundup-detail#child",
+        canonicalUrl: "https://api.example.com/roundup-detail",
+        urlHash: "aggregation-child-cluster-detail",
+        dedupeSignature: "aggregation-child-cluster-detail",
+        originalTitle: "Cluster Detail Child",
+        translatedTitle: "聚类详情子事件",
+        publishedAt: new Date("2026-04-10T10:00:00.000Z"),
+        summaryText: "子事件摘要",
+        status: "processed",
+        moderationStatus: "allowed",
+        qualityScore: 82,
+        qualityRationale: "聚类详情 parent 元数据",
+        isAggregation: false,
+        createdAt: new Date("2026-04-10T10:00:00.000Z"),
+      },
+    });
+
     const { GET } = await import("@/app/api/feed/clusters/[id]/route");
     const response = await GET(
       new Request("http://localhost/api/feed/clusters/cluster-a?range=all&start=2026-04-11&end=2026-04-11"),
@@ -1414,7 +1528,18 @@ describe("/api/feed", () => {
 
     const json = await response.json();
 
-    expect(json.items.map((item: { id: string }) => item.id)).toEqual(["item-a1", "item-a2"]);
+    expect(json.items.map((item: { id: string }) => item.id)).toEqual([
+      "aggregation-child-cluster-detail",
+      "item-a1",
+      "item-a2",
+    ]);
+    expect(json.items[0]).toMatchObject({
+      aggregationParent: {
+        id: parent.id,
+        title: "聚类详情父条目",
+        originalUrl: "https://api.example.com/roundup-detail",
+      },
+    });
   });
 
   it("downgrades a filtered cluster into a single entry when only one source item matches", async () => {

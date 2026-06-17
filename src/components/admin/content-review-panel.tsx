@@ -4,6 +4,8 @@ import type { Dispatch, SetStateAction } from "react";
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 
 import {
+  fetchAggregationSplitDetail,
+  fetchAggregationSplits,
   fetchAdminCluster,
   fetchFilteredReviewItems,
   fetchReviewClusters,
@@ -29,17 +31,18 @@ import {
   IconRotateCw,
   IconCheck,
   IconX,
+  IconEye,
   IconExternalLink,
   IconTrash,
   IconMerge,
   IconSplit,
 } from "@/components/ui/icons";
-import type { ClusterDTO, ReviewItemDTO } from "@/lib/feed/types";
+import type { AggregationSplitParentDTO, ClusterDTO, ReviewItemDTO } from "@/lib/feed/types";
 import { getClusterDisplayTitle } from "@/lib/feed/cluster-display";
 import { cx } from "@/lib/ui/cx";
 import { matchesFuzzySearch } from "@/lib/utils/search";
 
-type ReviewTab = "filtered" | "clusters";
+type ReviewTab = "filtered" | "clusters" | "splits";
 
 const reviewReasonLabels: Record<NonNullable<ReviewItemDTO["moderationReason"]>, string> = {
   marketing: "营销内容",
@@ -67,6 +70,25 @@ const clusterStatusLabels: Record<ClusterDTO["status"], string> = {
 const clusterStatusTone: Record<ClusterDTO["status"], "success" | "neutral"> = {
   active: "success",
   hidden: "neutral",
+};
+
+const splitStatusOptions = [
+  { value: "", label: "全部状态" },
+  { value: "parsed", label: "已拆分" },
+  { value: "detected", label: "待拆分" },
+  { value: "failed", label: "解析失败" },
+];
+
+const splitStatusLabels: Record<string, string> = {
+  parsed: "已拆分",
+  detected: "待拆分",
+  failed: "解析失败",
+};
+
+const splitStatusTone: Record<string, "success" | "warning" | "danger" | "neutral"> = {
+  parsed: "success",
+  detected: "warning",
+  failed: "danger",
 };
 
 // Time range filter options
@@ -113,6 +135,14 @@ function getReviewReasonLabel(reason: ReviewItemDTO["moderationReason"]) {
     return "待复核";
   }
   return reviewReasonLabels[reason];
+}
+
+function getSplitStatusLabel(status: string | null) {
+  return status ? splitStatusLabels[status] ?? status : "未知";
+}
+
+function getSplitStatusTone(status: string | null) {
+  return status ? splitStatusTone[status] ?? "neutral" : "neutral";
 }
 
 async function executeWithPendingId(
@@ -420,6 +450,132 @@ function ClusterDetailModal({
   );
 }
 
+interface AggregationSplitDetailModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  item: AggregationSplitParentDTO | null;
+  onCancelSplit?: () => void;
+  isCancelling?: boolean;
+}
+
+function AggregationSplitDetailModal({
+  isOpen,
+  onClose,
+  item,
+  onCancelSplit,
+  isCancelling,
+}: AggregationSplitDetailModalProps) {
+  if (!item) return null;
+
+  return (
+    <ModalShell
+      isOpen={isOpen}
+      onClose={onClose}
+      title="聚合拆分详情"
+      widthClassName="max-w-3xl"
+      headerClassName="border-b border-[color:var(--line)] p-6"
+      bodyClassName="space-y-4 p-6 max-h-[70vh] overflow-y-auto"
+      footerClassName="border-t border-[color:var(--line)] bg-[var(--bg-muted)] p-6"
+      footer={
+        <div className="flex justify-end gap-2">
+          {onCancelSplit && (
+            <Button onClick={onCancelSplit} variant="danger" disabled={isCancelling}>
+              <IconSplit className={cx("h-4 w-4 mr-1", isCancelling && "animate-pulse")} />
+              取消拆分
+            </Button>
+          )}
+          <Button onClick={onClose} variant="secondary">
+            关闭
+          </Button>
+        </div>
+      }
+    >
+      <div className="space-y-4">
+        <div className="rounded-lg border border-[color:var(--line)] bg-[var(--bg-muted)] p-4 text-sm text-[var(--text-2)]">
+          <div className="font-medium text-[var(--text-1)] mb-2">{item.title}</div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <span className="text-[var(--text-3)]">来源:</span> {item.sourceName}
+            </div>
+            <div>
+              <span className="text-[var(--text-3)]">发布时间:</span> {formatDateTime(item.publishedAt)}
+            </div>
+            <div>
+              <span className="text-[var(--text-3)]">子事件:</span> {item.childCount}
+            </div>
+            <div>
+              <span className="text-[var(--text-3)]">质量分:</span> {item.qualityScore}
+            </div>
+            <div>
+              <span className="text-[var(--text-3)]">事件链接:</span> {item.eventUrlCount}
+            </div>
+            <div>
+              <span className="text-[var(--text-3)]">父链接复用:</span> {item.parentUrlCount}
+            </div>
+            <div>
+              <span className="text-[var(--text-3)]">状态:</span> {item.aggregationParseStatus ?? "未知"}
+            </div>
+            <div>
+              <span className="text-[var(--text-3)]">错误信息:</span> {item.errorMessage || "无"}
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <h4 className="text-sm font-semibold text-[var(--text-1)]">父项摘要</h4>
+          <p className="text-sm text-[var(--text-2)] leading-6">
+            {renderInlineMarkdown(item.summary || "暂无摘要")}
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          <h4 className="text-sm font-semibold text-[var(--text-1)]">
+            拆分子项 ({item.children?.length ?? 0})
+          </h4>
+          <div className="space-y-2">
+            {(item.children ?? []).map((child) => (
+              <div
+                key={child.id}
+                className={cx(subtleCardClassName, "p-3 flex items-start justify-between gap-3")}
+              >
+                <div className="min-w-0 flex-1 space-y-1">
+                  <div className="flex items-center gap-2">
+                    <div className="font-medium text-sm text-[var(--foreground)] truncate">
+                      {child.title}
+                    </div>
+                    <StatusTag tone={child.usesParentUrl ? "warning" : "success"}>
+                      {child.usesParentUrl ? "父链接" : "事件链接"}
+                    </StatusTag>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--muted)]">
+                    <span>{child.sourceName}</span>
+                    <span>{formatDate(child.publishedAt)}</span>
+                    <span>质量 {child.qualityScore}</span>
+                    <span>{child.filterReason ?? "未过滤"}</span>
+                  </div>
+                  <p className="text-xs text-[var(--text-2)] leading-5 line-clamp-2">
+                    {renderInlineMarkdown(child.summary || "暂无摘要")}
+                  </p>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <IconButton
+                    onClick={() => window.open(child.originalUrl, "_blank")}
+                    variant="ghost"
+                    size="sm"
+                    title="查看原文"
+                  >
+                    <IconExternalLink className="h-4 w-4" />
+                  </IconButton>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </ModalShell>
+  );
+}
+
 interface ContentReviewContentProps {
   initialTab?: ReviewTab;
   initialPage?: number | null;
@@ -439,6 +595,7 @@ function ContentReviewContent({
   const activeTab = initialTab;
   const [filteredItems, setFilteredItems] = useState<ReviewItemDTO[]>([]);
   const [clusters, setClusters] = useState<ClusterDTO[]>([]);
+  const [aggregationSplits, setAggregationSplits] = useState<AggregationSplitParentDTO[]>([]);
   const [filteredSearch, setFilteredSearch] = useState("");
   const [debouncedFilteredSearch, setDebouncedFilteredSearch] = useState("");
   const [filteredSource, setFilteredSource] = useState("");
@@ -447,17 +604,23 @@ function ContentReviewContent({
   const [debouncedClusterSearch, setDebouncedClusterSearch] = useState("");
   const [clusterStatus, setClusterStatus] = useState<ClusterDTO["status"] | "">("");
   const [clusterTimeRange, setClusterTimeRange] = useState<TimeRangeFilter>("");
+  const [splitSearch, setSplitSearch] = useState("");
+  const [debouncedSplitSearch, setDebouncedSplitSearch] = useState("");
+  const [splitStatus, setSplitStatus] = useState("");
   const [isPending, startTransition] = useTransition();
   const [page, setPage] = useState(initialPage ?? 1);
   const [pageSize, setPageSize] = useState(initialPageSize ?? 10);
   const [filteredTotal, setFilteredTotal] = useState(0);
   const [clusterTotal, setClusterTotal] = useState(0);
+  const [splitTotal, setSplitTotal] = useState(0);
 
   // Detail modal states
   const [selectedFilteredItem, setSelectedFilteredItem] = useState<ReviewItemDTO | null>(null);
   const [selectedCluster, setSelectedCluster] = useState<ClusterDTO | null>(null);
+  const [selectedSplit, setSelectedSplit] = useState<AggregationSplitParentDTO | null>(null);
   const [isFilteredDetailOpen, setIsFilteredDetailOpen] = useState(false);
   const [isClusterDetailOpen, setIsClusterDetailOpen] = useState(false);
+  const [isSplitDetailOpen, setIsSplitDetailOpen] = useState(false);
 
   // Action states
   const [restoringItemId, setRestoringItemId] = useState<string | null>(null);
@@ -466,6 +629,7 @@ function ContentReviewContent({
   const [togglingClusterId, setTogglingClusterId] = useState<string | null>(null);
   const [mergingClusterId, setMergingClusterId] = useState<string | null>(null);
   const [splittingClusterId, setSplittingClusterId] = useState<string | null>(null);
+  const [cancellingSplitId, setCancellingSplitId] = useState<string | null>(null);
 
   // Merge modal states
   const [isMergeModalOpen, setIsMergeModalOpen] = useState(false);
@@ -505,7 +669,7 @@ function ContentReviewContent({
           if (cancelled) return;
           setFilteredItems(result.items);
           setFilteredTotal(result.total);
-        } else {
+        } else if (activeTab === "clusters") {
           const result = await fetchReviewClusters(page, pageSize, debouncedClusterSearch, {
             minItemCount: 2,
             status: clusterStatus,
@@ -515,6 +679,12 @@ function ContentReviewContent({
           if (cancelled) return;
           setClusters(result.clusters);
           setClusterTotal(result.total);
+        } else {
+          const result = await fetchAggregationSplits(page, pageSize, debouncedSplitSearch, splitStatus);
+
+          if (cancelled) return;
+          setAggregationSplits(result.items);
+          setSplitTotal(result.total);
         }
       } catch (error) {
         if (!cancelled) {
@@ -536,6 +706,8 @@ function ContentReviewContent({
     debouncedClusterSearch,
     clusterStatus,
     clusterTimeRange,
+    debouncedSplitSearch,
+    splitStatus,
     showToast,
   ]);
 
@@ -569,6 +741,19 @@ function ContentReviewContent({
 
     return () => window.clearTimeout(timer);
   }, [activeTab, filteredSearch]);
+
+  useEffect(() => {
+    if (activeTab !== "splits") {
+      return;
+    }
+
+    const timer = window.setTimeout(
+      () => setDebouncedSplitSearch(splitSearch),
+      splitSearch.trim() ? ADMIN_CLUSTER_SEARCH_DEBOUNCE_MS : 0,
+    );
+
+    return () => window.clearTimeout(timer);
+  }, [activeTab, splitSearch]);
 
   useEffect(() => {
     if (!isMergeModalOpen) {
@@ -660,9 +845,6 @@ function ContentReviewContent({
     []
   );
 
-  const visibleFilteredItems = filteredItems;
-  const visibleClusters = clusters;
-
   // Available clusters for merge (exclude current cluster and filter by search)
   const availableClustersForMerge = useMemo(() => {
     const filtered = mergeCandidateClusters.filter((cluster: ClusterDTO) => {
@@ -690,17 +872,39 @@ function ContentReviewContent({
 
   // Pagination — total comes from API, items are already paginated by the server
   const { totalPages, paginatedItems, currentPage } = useMemo(() => {
-    const items = activeTab === "filtered" ? visibleFilteredItems : visibleClusters;
-    const total = activeTab === "filtered" ? filteredTotal : clusterTotal;
+    const items =
+      activeTab === "filtered"
+        ? filteredItems
+        : activeTab === "clusters"
+          ? clusters
+          : aggregationSplits;
+    const total =
+      activeTab === "filtered"
+        ? filteredTotal
+        : activeTab === "clusters"
+          ? clusterTotal
+          : splitTotal;
     const totalPages = Math.ceil(total / pageSize) || 1;
     const currentPage = Math.min(page, totalPages);
     return { totalPages, paginatedItems: items, currentPage };
-  }, [activeTab, visibleFilteredItems, visibleClusters, filteredTotal, clusterTotal, page, pageSize]);
+  }, [
+    activeTab,
+    filteredItems,
+    clusters,
+    aggregationSplits,
+    filteredTotal,
+    clusterTotal,
+    splitTotal,
+    page,
+    pageSize,
+  ]);
 
   const hasFilters =
     activeTab === "filtered"
       ? filteredSearch || filteredSource || filteredReason
-      : clusterSearch || clusterStatus || clusterTimeRange;
+      : activeTab === "clusters"
+        ? clusterSearch || clusterStatus || clusterTimeRange
+        : splitSearch || splitStatus;
 
   const updatePage = useCallback((nextPage: number) => {
     setPage(nextPage);
@@ -720,9 +924,15 @@ function ContentReviewContent({
       setFilteredSource("");
       setFilteredReason("");
     } else {
-      setClusterSearch("");
-      setClusterStatus("");
-      setClusterTimeRange("");
+      if (activeTab === "clusters") {
+        setClusterSearch("");
+        setClusterStatus("");
+        setClusterTimeRange("");
+      } else {
+        setSplitSearch("");
+        setDebouncedSplitSearch("");
+        setSplitStatus("");
+      }
     }
     setPage(1);
   };
@@ -749,6 +959,20 @@ function ContentReviewContent({
   const handleCloseClusterDetail = () => {
     setIsClusterDetailOpen(false);
     setSelectedCluster(null);
+  };
+
+  const handleOpenSplitDetail = async (item: AggregationSplitParentDTO) => {
+    try {
+      setSelectedSplit((await fetchAggregationSplitDetail(item.id)) ?? item);
+    } catch {
+      setSelectedSplit(item);
+    }
+    setIsSplitDetailOpen(true);
+  };
+
+  const handleCloseSplitDetail = () => {
+    setIsSplitDetailOpen(false);
+    setSelectedSplit(null);
   };
 
   const handleRestoreItem = (itemId: string) => {
@@ -838,6 +1062,26 @@ function ContentReviewContent({
         });
 
         if (succeeded) {
+          fetchData();
+        }
+      });
+    });
+  };
+
+  const handleCancelAggregationSplit = (parentItemId: string) => {
+    runTransition(async () => {
+      await executeWithPendingId(parentItemId, setCancellingSplitId, async () => {
+        const succeeded = await postAction(
+          `/api/admin/items/aggregation/${parentItemId}/cancel`,
+          "已取消聚合拆分。",
+        );
+
+        if (succeeded) {
+          setAggregationSplits((current) => current.filter((entry) => entry.id !== parentItemId));
+          setSplitTotal((current) => Math.max(0, current - 1));
+          if (selectedSplit?.id === parentItemId) {
+            handleCloseSplitDetail();
+          }
           fetchData();
         }
       });
@@ -939,6 +1183,21 @@ function ContentReviewContent({
     });
   };
 
+  const openConfirmCancelSplit = (parentItemId: string) => {
+    const item = selectedSplit?.id === parentItemId ? selectedSplit : aggregationSplits.find((entry) => entry.id === parentItemId);
+    setConfirmModal({
+      isOpen: true,
+      title: "确认取消拆分",
+      message: `确定要取消 "${item?.title ?? ""}" 的聚合拆分吗？父条目会重新进入内容流，${item?.childCount ?? 0} 个子事件会被过滤。`,
+      confirmText: "取消拆分",
+      variant: "danger",
+      onConfirm: () => {
+        handleCancelAggregationSplit(parentItemId);
+        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+      },
+    });
+  };
+
   const closeConfirmModal = () => {
     setConfirmModal((prev) => ({ ...prev, isOpen: false }));
   };
@@ -1003,12 +1262,18 @@ function ContentReviewContent({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1">
           <h2 className="text-lg font-semibold text-[var(--foreground)]">
-            {activeTab === "filtered" ? "过滤内容" : "聚合管理"}
+            {activeTab === "filtered"
+              ? "过滤内容"
+              : activeTab === "clusters"
+                ? "聚合管理"
+                : "聚合拆分"}
           </h2>
           <p className="text-sm text-[var(--muted)]">
             {activeTab === "filtered"
               ? "查看和管理被过滤的内容"
-              : "管理内容聚合组"}
+              : activeTab === "clusters"
+                ? "管理内容聚合组"
+                : "管理聚合拆分结果"}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -1027,13 +1292,27 @@ function ContentReviewContent({
           id="content-review-keyword"
           label="关键词"
           ariaLabel="审核关键词"
-          placeholder={activeTab === "filtered" ? "搜索标题、摘要或复核说明" : "搜索聚合标题或子项标题"}
-          value={activeTab === "filtered" ? filteredSearch : clusterSearch}
+          placeholder={
+            activeTab === "filtered"
+              ? "搜索标题、摘要或复核说明"
+              : activeTab === "clusters"
+                ? "搜索聚合标题或子项标题"
+                : "搜索父项标题、摘要或子事件"
+          }
+          value={
+            activeTab === "filtered"
+              ? filteredSearch
+              : activeTab === "clusters"
+                ? clusterSearch
+                : splitSearch
+          }
           onChange={(value) => {
             if (activeTab === "filtered") {
               setFilteredSearch(value);
-            } else {
+            } else if (activeTab === "clusters") {
               setClusterSearch(value);
+            } else {
+              setSplitSearch(value);
             }
             setPage(1);
           }}
@@ -1067,7 +1346,7 @@ function ContentReviewContent({
               options={reviewReasonOptions}
             />
           </>
-        ) : (
+        ) : activeTab === "clusters" ? (
           <>
             <FilterSelect
               id="content-review-status"
@@ -1099,6 +1378,23 @@ function ContentReviewContent({
               options={timeRangeOptions}
             />
           </>
+        ) : (
+          <>
+            <FilterSelect
+              id="content-review-split-status"
+              label="状态"
+              ariaLabel="拆分状态"
+              value={splitStatus}
+              onChange={(value) => {
+                setSplitStatus(value);
+                setPage(1);
+              }}
+              showSearch={false}
+              options={splitStatusOptions}
+            />
+
+            <div />
+          </>
         )}
       </div>
 
@@ -1107,7 +1403,13 @@ function ContentReviewContent({
         <EmptyState>加载中...</EmptyState>
       ) : paginatedItems.length === 0 ? (
         <EmptyState>
-          {hasFilters ? "暂无匹配内容" : activeTab === "filtered" ? "当前没有待处理的过滤内容" : "当前没有可管理的聚合结果"}
+          {hasFilters
+            ? "暂无匹配内容"
+            : activeTab === "filtered"
+              ? "当前没有待处理的过滤内容"
+              : activeTab === "clusters"
+                ? "当前没有可管理的聚合结果"
+                : "当前没有可复核的聚合拆分"}
         </EmptyState>
       ) : activeTab === "filtered" ? (
         <div className="w-full overflow-hidden">
@@ -1173,7 +1475,7 @@ function ContentReviewContent({
             </tbody>
           </table>
         </div>
-      ) : (
+      ) : activeTab === "clusters" ? (
         <div className="w-full overflow-x-auto">
           <table className="w-full table-auto text-sm">
             <thead className="bg-[var(--bg-muted)] text-[var(--muted)]">
@@ -1259,12 +1561,80 @@ function ContentReviewContent({
             </tbody>
           </table>
         </div>
+      ) : (
+        <div className="w-full overflow-x-auto">
+          <table className="w-full table-auto text-sm">
+            <thead className="bg-[var(--bg-muted)] text-[var(--muted)]">
+              <tr>
+                <th className="w-[38%] text-left px-4 py-3">标题</th>
+                <th className="w-[16%] whitespace-nowrap text-left px-4 py-3">来源</th>
+                <th className="w-[12%] whitespace-nowrap text-left px-4 py-3">子事件</th>
+                <th className="w-[12%] whitespace-nowrap text-left px-4 py-3">状态</th>
+                <th className="w-[12%] whitespace-nowrap text-left px-4 py-3">拆分时间</th>
+                <th className="w-[10%] whitespace-nowrap text-right px-4 py-3">操作</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[color:var(--line)]">
+              {(paginatedItems as AggregationSplitParentDTO[]).map((item) => (
+                <tr key={item.id} className="hover:bg-[var(--bg-muted)] transition-colors">
+                  <td className="px-4 py-3 max-w-0">
+                    <button
+                      type="button"
+                      onClick={() => handleOpenSplitDetail(item)}
+                      className="w-full text-left group"
+                    >
+                      <div className="font-medium text-[var(--foreground)] group-hover:text-[var(--accent)] transition-colors truncate">
+                        {item.title}
+                      </div>
+                    </button>
+                  </td>
+                  <td className="px-4 py-3 max-w-0 text-[var(--text-2)]">
+                    <div className="truncate" title={item.sourceName}>{item.sourceName}</div>
+                  </td>
+                  <td className="px-4 py-3 text-[var(--text-2)]">{item.childCount} 条</td>
+                  <td className="px-4 py-3">
+                    <StatusTag
+                      tone={getSplitStatusTone(item.aggregationParseStatus)}
+                      className="min-w-[3.75rem] justify-center whitespace-nowrap"
+                    >
+                      {getSplitStatusLabel(item.aggregationParseStatus)}
+                    </StatusTag>
+                  </td>
+                  <td className="px-4 py-3 text-[var(--text-3)] text-xs">
+                    {formatDate(item.aggregationCheckedAt ?? item.createdAt)}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <div className="flex items-center justify-end gap-1">
+                      <IconButton
+                        onClick={() => handleOpenSplitDetail(item)}
+                        variant="ghost"
+                        size="sm"
+                        title="查看拆分"
+                      >
+                        <IconEye className="h-4 w-4" />
+                      </IconButton>
+                      <IconButton
+                        onClick={() => openConfirmCancelSplit(item.id)}
+                        variant="ghost"
+                        size="sm"
+                        title="取消拆分"
+                        disabled={cancellingSplitId === item.id}
+                      >
+                        <IconSplit className={cx("h-4 w-4 text-[var(--danger-ink)]", cancellingSplitId === item.id && "animate-pulse")} />
+                      </IconButton>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
       {/* Pagination */}
-      {(activeTab === "filtered" ? filteredTotal : clusterTotal) > 0 && (
+      {(activeTab === "filtered" ? filteredTotal : activeTab === "clusters" ? clusterTotal : splitTotal) > 0 && (
         <PaginationControls
-          totalItems={activeTab === "filtered" ? filteredTotal : clusterTotal}
+          totalItems={activeTab === "filtered" ? filteredTotal : activeTab === "clusters" ? clusterTotal : splitTotal}
           page={currentPage}
           totalPages={totalPages}
           pageSize={pageSize}
@@ -1299,6 +1669,16 @@ function ContentReviewContent({
           isRegenerating={regeneratingClusterId === selectedCluster?.id}
           isTogglingStatus={togglingClusterId === selectedCluster?.id}
           isSplitting={splittingClusterId === selectedCluster?.id}
+        />
+      )}
+
+      {selectedSplit && (
+        <AggregationSplitDetailModal
+          isOpen={isSplitDetailOpen}
+          onClose={handleCloseSplitDetail}
+          item={selectedSplit}
+          onCancelSplit={() => openConfirmCancelSplit(selectedSplit.id)}
+          isCancelling={cancellingSplitId === selectedSplit.id}
         />
       )}
 

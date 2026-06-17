@@ -26,6 +26,7 @@ describe("task scheduler", () => {
         sourceConcurrency: 4,
         fullTextFetchThreshold: 120,
         perSourceItemLimit: 20,
+        aggregationSplitMaxEvents: 12,
       }),
     ).toEqual({
       enabled: true,
@@ -33,6 +34,7 @@ describe("task scheduler", () => {
       sourceConcurrency: 4,
       fullTextFetchThreshold: 120,
       perSourceItemLimit: 20,
+      aggregationSplitMaxEvents: 12,
       processingStartAt: null,
     });
   });

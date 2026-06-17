@@ -1,5 +1,4 @@
 import { prisma } from "@/lib/db";
-import { Prisma } from "@prisma/client";
 
 export type ClusterAssignmentCandidate = {
   id: string;
@@ -171,31 +170,6 @@ export async function getClusterWithItems(clusterId: string) {
   });
 }
 
-export async function getClusterParsedEvents(clusterId: string) {
-  return prisma.itemParsedEvent.findMany({
-    where: {
-      clusterId,
-      item: {
-        status: "processed",
-        moderationStatus: {
-          in: ["allowed", "restored"],
-        },
-        source: {
-          aggregationDetectionEnabled: true,
-        },
-      },
-    },
-    include: {
-      item: {
-        select: {
-          publishedAt: true,
-        },
-      },
-    },
-    orderBy: [{ item: { publishedAt: "desc" } }, { eventIndex: "asc" }],
-  });
-}
-
 export async function updateClusterSummary(
   clusterId: string,
   data: {
@@ -229,93 +203,5 @@ export async function updateClusterStatus(clusterId: string, status: "active" | 
   return prisma.contentCluster.update({
     where: { id: clusterId },
     data: { status },
-  });
-}
-
-
-export async function setParsedEventCluster(parsedEventId: string, clusterId: string | null) {
-  return prisma.itemParsedEvent.update({
-    where: { id: parsedEventId },
-    data: {
-      clusterId,
-    },
-  });
-}
-
-export async function createParsedEvents(
-  events: Array<{
-    itemId: string;
-    eventIndex: number;
-    eventType?: string | null;
-    eventSubject?: string | null;
-    eventAction?: string | null;
-    eventObject?: string | null;
-    eventDate?: string | null;
-    oneLiner: string;
-    qualityScore: number;
-    fingerprint: string;
-  }>,
-) {
-  if (events.length === 0) {
-    return [];
-  }
-  return prisma.$transaction(async (tx) => {
-    const persisted = [];
-
-    for (const event of events) {
-      try {
-        persisted.push(
-          await tx.itemParsedEvent.create({
-            data: {
-              itemId: event.itemId,
-              eventIndex: event.eventIndex,
-              eventType: event.eventType ?? null,
-              eventSubject: event.eventSubject ?? null,
-              eventAction: event.eventAction ?? null,
-              eventObject: event.eventObject ?? null,
-              eventDate: event.eventDate ?? null,
-              oneLiner: event.oneLiner,
-              qualityScore: event.qualityScore,
-              fingerprint: event.fingerprint,
-            },
-          }),
-        );
-      } catch (error) {
-        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-          // Reparse of the same item may produce a stable event again. Refresh
-          // cached fields but keep any existing cluster assignment.
-          persisted.push(
-            await tx.itemParsedEvent.update({
-              where: {
-                itemId_fingerprint: {
-                  itemId: event.itemId,
-                  fingerprint: event.fingerprint,
-                },
-              },
-              data: {
-                eventIndex: event.eventIndex,
-                eventType: event.eventType ?? null,
-                eventSubject: event.eventSubject ?? null,
-                eventAction: event.eventAction ?? null,
-                eventObject: event.eventObject ?? null,
-                eventDate: event.eventDate ?? null,
-                oneLiner: event.oneLiner,
-                qualityScore: event.qualityScore,
-              },
-            }),
-          );
-          continue;
-        }
-        throw error;
-      }
-    }
-
-    return persisted;
-  });
-}
-
-export async function deleteParsedEventsForItem(itemId: string) {
-  return prisma.itemParsedEvent.deleteMany({
-    where: { itemId },
   });
 }

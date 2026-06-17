@@ -95,123 +95,61 @@ export async function listDailyReportCandidates(date: string, limit = 120, group
     },
   };
 
-  const [itemRows, parsedEventRows] = await Promise.all([
-    prisma.item.findMany({
-      take: poolLimit,
-      where: {
-        createdAt: { gte: start, lt: end },
-        status: "processed",
-        moderationStatus: { in: [...DISPLAYABLE_MODERATION_STATUSES] },
-        OR: [
-          { isAggregation: false },
-          { parsedEvents: { none: {} } },
-        ],
-        ...sourceFilter,
-        AND: [
-          {
-            OR: [
-              { clusterId: null },
-              {
-                cluster: {
-                  is: { status: "active" },
-                },
+  const itemRows = await prisma.item.findMany({
+    take: poolLimit,
+    where: {
+      createdAt: { gte: start, lt: end },
+      status: "processed",
+      moderationStatus: { in: [...DISPLAYABLE_MODERATION_STATUSES] },
+      isAggregation: false,
+      ...sourceFilter,
+      AND: [
+        {
+          OR: [
+            { clusterId: null },
+            {
+              cluster: {
+                is: { status: "active" },
               },
-            ],
-          },
-        ],
-      },
-      select: {
-        id: true,
-        clusterId: true,
-        originalTitle: true,
-        translatedTitle: true,
-        originalUrl: true,
-        summaryText: true,
-        rssExcerpt: true,
-        fullText: true,
-        rssContent: true,
-        qualityScore: true,
-        createdAt: true,
-        publishedAt: true,
-        eventType: true,
-        eventSubject: true,
-        eventAction: true,
-        eventObject: true,
-        eventDate: true,
-        source: { select: { id: true, name: true } },
-        cluster: {
-          select: {
-            id: true,
-            title: true,
-            summary: true,
-            eventType: true,
-            eventSubject: true,
-            eventAction: true,
-            eventObject: true,
-            eventDate: true,
-          },
+            },
+          ],
+        },
+      ],
+    },
+    select: {
+      id: true,
+      clusterId: true,
+      originalTitle: true,
+      translatedTitle: true,
+      originalUrl: true,
+      summaryText: true,
+      rssExcerpt: true,
+      fullText: true,
+      rssContent: true,
+      qualityScore: true,
+      createdAt: true,
+      publishedAt: true,
+      eventType: true,
+      eventSubject: true,
+      eventAction: true,
+      eventObject: true,
+      eventDate: true,
+      source: { select: { id: true, name: true } },
+      cluster: {
+        select: {
+          id: true,
+          title: true,
+          summary: true,
+          eventType: true,
+          eventSubject: true,
+          eventAction: true,
+          eventObject: true,
+          eventDate: true,
         },
       },
-      orderBy: [{ qualityScore: "desc" }, { createdAt: "desc" }],
-    }),
-    prisma.itemParsedEvent.findMany({
-      take: poolLimit,
-      where: {
-        item: {
-          createdAt: { gte: start, lt: end },
-          status: "processed",
-          moderationStatus: { in: [...DISPLAYABLE_MODERATION_STATUSES] },
-          isAggregation: true,
-          ...sourceFilter,
-        },
-        OR: [
-          { clusterId: null },
-          { cluster: { is: { status: "active" } } },
-        ],
-      },
-      select: {
-        id: true,
-        clusterId: true,
-        eventIndex: true,
-        oneLiner: true,
-        qualityScore: true,
-        createdAt: true,
-        eventType: true,
-        eventSubject: true,
-        eventAction: true,
-        eventObject: true,
-        eventDate: true,
-        item: {
-          select: {
-            id: true,
-            originalUrl: true,
-            originalTitle: true,
-            translatedTitle: true,
-            createdAt: true,
-            publishedAt: true,
-            summaryText: true,
-            rssExcerpt: true,
-            fullText: true,
-            rssContent: true,
-            source: { select: { id: true, name: true } },
-          },
-        },
-        cluster: {
-          select: {
-            id: true,
-            title: true,
-            summary: true,
-            eventType: true,
-            eventSubject: true,
-            eventAction: true,
-            eventObject: true,
-            eventDate: true,
-          },
-        },
-      },
-      orderBy: [{ qualityScore: "desc" }, { item: { createdAt: "desc" } }],
-    }),
-  ]);
+    },
+    orderBy: [{ qualityScore: "desc" }, { createdAt: "desc" }],
+  });
 
   const rows = [
     ...itemRows.map((item) => ({
@@ -237,30 +175,6 @@ export async function listDailyReportCandidates(date: string, limit = 120, group
       eventDate: item.eventDate,
       source: item.source,
       cluster: item.cluster,
-    })),
-    ...parsedEventRows.map((parsed) => ({
-      kind: "parsedEvent" as const,
-      id: `parsed:${parsed.id}`,
-      sourceKey: `parsed:${parsed.id}`,
-      itemId: parsed.item.id,
-      clusterId: parsed.clusterId,
-      originalTitle: parsed.oneLiner || parsed.item.originalTitle,
-      translatedTitle: null,
-      originalUrl: parsed.item.originalUrl,
-      summaryText: parsed.oneLiner,
-      rssExcerpt: null,
-      fullText: null,
-      rssContent: null,
-      qualityScore: parsed.qualityScore,
-      createdAt: parsed.item.createdAt,
-      publishedAt: parsed.item.publishedAt,
-      eventType: parsed.eventType,
-      eventSubject: parsed.eventSubject,
-      eventAction: parsed.eventAction,
-      eventObject: parsed.eventObject,
-      eventDate: parsed.eventDate,
-      source: parsed.item.source,
-      cluster: parsed.cluster,
     })),
   ];
 

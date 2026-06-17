@@ -93,10 +93,63 @@ function buildDailyReportSourceKey(input: {
   clusterId: string | null;
   url: string;
 }) {
-  if (input.sourceKey?.trim()) return input.sourceKey;
+  const sourceKey = input.sourceKey?.trim();
+  if (sourceKey) return sourceKey;
   if (input.itemId) return `item:${input.itemId}`;
   if (input.clusterId) return `cluster:${input.clusterId}`;
   return `url:${input.url.trim().toLowerCase()}`;
+}
+
+function getLegacyParsedItemId(sourceKey: string | null | undefined) {
+  const normalized = sourceKey?.trim() ?? "";
+  const prefix = "parsed:";
+  if (!normalized.startsWith(prefix) || normalized.length === prefix.length) {
+    return null;
+  }
+  return normalized.slice(prefix.length);
+}
+
+function normalizeLegacyParsedSourceKey(sourceKey: string | null | undefined) {
+  const legacyParsedItemId = getLegacyParsedItemId(sourceKey);
+  return legacyParsedItemId ? `item:${legacyParsedItemId}` : sourceKey?.trim() || null;
+}
+
+function buildDailyReportCandidatesBySourceKey(candidates: DailyReportCandidate[]) {
+  const byKey = new Map<string, DailyReportCandidate>();
+  for (const candidate of candidates) {
+    const sourceKey = buildDailyReportSourceKey(candidate);
+    if (!byKey.has(sourceKey)) {
+      byKey.set(sourceKey, candidate);
+    }
+  }
+  return byKey;
+}
+
+function resolveDailyReportCandidateBySubmittedSourceKey(
+  candidatesByKey: Map<string, DailyReportCandidate>,
+  sourceKey: string,
+) {
+  const direct = candidatesByKey.get(sourceKey);
+  if (direct) return direct;
+
+  const legacyParsedItemId = getLegacyParsedItemId(sourceKey);
+  return legacyParsedItemId ? candidatesByKey.get(`item:${legacyParsedItemId}`) ?? null : null;
+}
+
+function resolveDailyReportCandidateForRegistryRow(
+  candidatesByKey: Map<string, DailyReportCandidate>,
+  row: DailyReportSourceRegistryRow,
+) {
+  const legacySourceKey = normalizeLegacyParsedSourceKey(row.sourceKey);
+  if (legacySourceKey) {
+    const legacyMatch = candidatesByKey.get(legacySourceKey);
+    if (legacyMatch) return legacyMatch;
+  }
+
+  const canonicalSourceKey = buildDailyReportSourceKey(row);
+  const direct = candidatesByKey.get(canonicalSourceKey);
+  if (direct) return direct;
+  return null;
 }
 
 function compactDailyReportCandidates(candidates: DailyReportCandidate[]) {
@@ -175,7 +228,7 @@ function matchesRecentDailyReportSource(
   recentSource: RecentDailyReportSourceSnapshot,
 ) {
   const candidateSourceKey = buildDailyReportSourceKey(candidate);
-  const recentSourceKey = recentSource.sourceKey ?? buildDailyReportSourceKey(recentSource);
+  const recentSourceKey = normalizeLegacyParsedSourceKey(recentSource.sourceKey) ?? buildDailyReportSourceKey(recentSource);
   const hasSameItemSourceKey = Boolean(
     candidate.itemId &&
       recentSource.itemId &&
@@ -553,7 +606,7 @@ export function buildDailyReportSourceRegistryFromRows(rows: Array<{
 
     entries.set(entryKey, {
       sourceNumber: row.sourceNumber,
-      sourceKey: row.sourceKey ?? buildDailyReportSourceKey(row),
+      sourceKey: normalizeLegacyParsedSourceKey(row.sourceKey) ?? buildDailyReportSourceKey(row),
       itemId: row.itemId,
       clusterId: row.clusterId,
       sourceName: row.sourceName,
@@ -615,16 +668,21 @@ async function recoverDailyReportSourceRegistryRows(input: {
   date: string;
   rows: DailyReportSourceRegistryRow[];
 }) {
-  if (input.rows.every((row) => row.sourceNumber)) {
+  if (input.rows.every((row) => row.sourceNumber && !getLegacyParsedItemId(row.sourceKey))) {
     return input.rows;
   }
 
   const candidates = await listDailyReportCandidates(input.date);
-  const candidatesByKey = new Map(candidates.map((candidate) => [buildDailyReportSourceKey(candidate), candidate]));
+  const candidatesByKey = buildDailyReportCandidatesBySourceKey(candidates);
 
   return input.rows.map((row) => {
-    const candidate = candidatesByKey.get(buildDailyReportSourceKey(row));
-    return candidate ? candidateToDailyReportSourceRegistryRow(candidate) : row;
+    const candidate = resolveDailyReportCandidateForRegistryRow(candidatesByKey, row);
+    if (!candidate) return row;
+
+    return {
+      ...candidateToDailyReportSourceRegistryRow(candidate),
+      sourceNumber: row.sourceNumber ?? candidate.id,
+    };
   });
 }
 
@@ -633,9 +691,13 @@ async function backfillRecoveredDailyReportSourceRows(input: {
   recoveredRows: DailyReportSourceRegistryRow[];
 }) {
   await Promise.all(input.rows.map(async (row, index) => {
-    if (row.sourceNumber) return;
     const recovered = input.recoveredRows[index];
     if (!recovered?.sourceNumber) return;
+    const needsBackfill =
+      !row.sourceNumber ||
+      row.sourceKey !== recovered.sourceKey ||
+      row.sourceSummary !== recovered.sourceSummary;
+    if (!needsBackfill) return;
 
     await prisma.dailyReportSource.update({
       where: { id: row.id },
@@ -1378,17 +1440,19 @@ export async function addDailyReportRefinementSources(input: {
     schedule.dailyReportCandidateLimit,
     parseDailyReportGroupIdsJson(schedule.dailyReportGroupIdsJson),
   );
-  const candidatesByKey = new Map(candidates.map((candidate) => [buildDailyReportSourceKey(candidate), candidate]));
+  const candidatesByKey = buildDailyReportCandidatesBySourceKey(candidates);
   const existingSourceKeys = new Set(context.registry.map((entry) => entry.sourceKey));
+  const existingSourceKeysBefore = new Set(existingSourceKeys);
   const existingSourceNumbers = new Set(context.registry.map((entry) => entry.sourceNumber));
   const nextRegistry = [...context.registry];
 
   for (const sourceKey of sourceKeys) {
-    if (existingSourceKeys.has(sourceKey)) {
+    const candidate = resolveDailyReportCandidateBySubmittedSourceKey(candidatesByKey, sourceKey);
+    if (!candidate) {
       continue;
     }
-    const candidate = candidatesByKey.get(sourceKey);
-    if (!candidate) {
+    const canonicalSourceKey = buildDailyReportSourceKey(candidate);
+    if (existingSourceKeys.has(canonicalSourceKey)) {
       continue;
     }
     if (existingSourceNumbers.has(candidate.id)) {
@@ -1396,7 +1460,7 @@ export async function addDailyReportRefinementSources(input: {
     }
     const entry = candidateToDailyReportSourceRegistryEntry(candidate);
     nextRegistry.push(entry);
-    existingSourceKeys.add(sourceKey);
+    existingSourceKeys.add(entry.sourceKey);
     existingSourceNumbers.add(candidate.id);
   }
 
@@ -1405,7 +1469,7 @@ export async function addDailyReportRefinementSources(input: {
   }
 
   nextRegistry.sort((left, right) => left.sourceNumber - right.sourceNumber);
-  const addedEntries = nextRegistry.filter((entry) => !context.registry.some((existing) => existing.sourceKey === entry.sourceKey));
+  const addedEntries = nextRegistry.filter((entry) => !existingSourceKeysBefore.has(entry.sourceKey));
   await prisma.$transaction(async (tx) => {
     await tx.dailyReportRefinementSession.update({
       where: { id: context.session.id },

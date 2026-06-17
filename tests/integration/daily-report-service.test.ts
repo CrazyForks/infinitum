@@ -612,7 +612,6 @@ describe("daily report service", () => {
     await prisma.dailyReportRefinementSession.deleteMany();
     await prisma.dailyReportSource.deleteMany();
     await prisma.dailyReport.deleteMany();
-    await prisma.itemParsedEvent.deleteMany();
     await prisma.item.deleteMany();
     await prisma.contentCluster.deleteMany();
     await prisma.fetchRun.deleteMany();
@@ -1160,11 +1159,12 @@ describe("daily report service", () => {
     const added = await addDailyReportRefinementSources({
       date: REPORT_DATE,
       sessionId: search.sessionId,
-      sourceKeys: [search.sources[0].sourceKey],
+      sourceKeys: [`parsed:${search.sources[0].itemId}`],
     });
     expect(added.sourceRegistry).toEqual(expect.arrayContaining([
       expect.objectContaining({
         sourceNumber: 4,
+        sourceKey: search.sources[0].sourceKey,
         title: "Claude Code 支持子代理工作流",
       }),
     ]));
@@ -1260,7 +1260,7 @@ describe("daily report service", () => {
     });
   });
 
-  it("uses parsed aggregation events for daily report candidates without duplicating the parent item", async () => {
+  it("uses aggregation child items for daily report candidates without duplicating the parent item", async () => {
     const source = await prisma.source.create({
       data: {
         name: "Aggregation Source",
@@ -1289,31 +1289,56 @@ describe("daily report service", () => {
       },
     });
 
-    await prisma.itemParsedEvent.createMany({
+    // Child items represent the parsed sub-events as full Item rows.
+    await prisma.item.createMany({
       data: [
         {
-          itemId: item.id,
-          eventIndex: 0,
+          sourceId: source.id,
+          parentItemId: item.id,
+          originalUrl: "https://aggregation.example.com/roundup#event-launch-openai-发布-toolkit-2026-04-24",
+          canonicalUrl: "https://aggregation.example.com/roundup",
+          urlHash: "daily-aggregation-child-0",
+          dedupeSignature: "launch|openai|发布|toolkit|2026-04-24|source|2026-04-24T04:00:00.000Z",
+          originalTitle: "OpenAI 发布 Toolkit",
+          publishedAt: new Date("2026-04-24T04:00:00.000Z"),
+          createdAt: new Date("2026-04-24T04:00:00.000Z"),
+          status: "processed",
+          moderationStatus: "allowed",
+          summaryText: "OpenAI 发布 Toolkit",
+          summaryStatus: "succeeded",
+          analysisStatus: "succeeded",
           eventType: "launch",
           eventSubject: "OpenAI",
           eventAction: "发布",
           eventObject: "Toolkit",
           eventDate: REPORT_DATE,
-          oneLiner: "OpenAI 发布 Toolkit",
           qualityScore: 91,
-          fingerprint: "launch|openai|发布|toolkit|2026-04-24",
+          qualityRationale: "由聚合内容拆出",
+          isAggregation: false,
         },
         {
-          itemId: item.id,
-          eventIndex: 1,
+          sourceId: source.id,
+          parentItemId: item.id,
+          originalUrl: "https://aggregation.example.com/roundup#event-update-anthropic-更新-console-2026-04-24",
+          canonicalUrl: "https://aggregation.example.com/roundup",
+          urlHash: "daily-aggregation-child-1",
+          dedupeSignature: "update|anthropic|更新|console|2026-04-24|source|2026-04-24T04:00:00.000Z",
+          originalTitle: "Anthropic 更新 Console",
+          publishedAt: new Date("2026-04-24T04:00:00.000Z"),
+          createdAt: new Date("2026-04-24T04:00:00.000Z"),
+          status: "processed",
+          moderationStatus: "allowed",
+          summaryText: "Anthropic 更新 Console",
+          summaryStatus: "succeeded",
+          analysisStatus: "succeeded",
           eventType: "update",
           eventSubject: "Anthropic",
           eventAction: "更新",
           eventObject: "Console",
           eventDate: REPORT_DATE,
-          oneLiner: "Anthropic 更新 Console",
           qualityScore: 89,
-          fingerprint: "update|anthropic|更新|console|2026-04-24",
+          qualityRationale: "由聚合内容拆出",
+          isAggregation: false,
         },
       ],
     });
@@ -1325,10 +1350,13 @@ describe("daily report service", () => {
       "Anthropic 更新 Console",
     ]);
     expect(candidates.map((candidate) => candidate.sourceKey)).toEqual([
-      expect.stringMatching(/^parsed:/),
-      expect.stringMatching(/^parsed:/),
+      expect.stringMatching(/^item:/),
+      expect.stringMatching(/^item:/),
     ]);
-    expect(candidates.map((candidate) => candidate.itemId)).toEqual([item.id, item.id]);
+    // Child item ids are different from the parent.
+    const childIds = candidates.map((candidate) => candidate.itemId);
+    expect(childIds[0]).not.toBe(item.id);
+    expect(childIds[1]).not.toBe(item.id);
     expect(candidates[0]?.createdAt).toBe("2026-04-24T04:00:00.000Z");
     expect(candidates.some((candidate) => candidate.title === "AI 行业简报合集")).toBe(false);
 
@@ -1340,7 +1368,13 @@ describe("daily report service", () => {
     });
 
     expect(savedSources.map((source) => source.sourceNumber)).toEqual([1, 2]);
-    expect(savedSources.map((source) => source.itemId)).toEqual([item.id, item.id]);
+    // After the split-to-items refactor, daily report sources point at the
+    // child item ids (one per parsed event) rather than the parent.
+    expect(savedSources.map((source) => source.itemId)).toEqual([
+      candidates[0]?.itemId,
+      candidates[1]?.itemId,
+    ]);
+    expect(savedSources.map((source) => source.itemId ?? null)).not.toContain(item.id);
     expect(savedSources.map((source) => source.sourceKey)).toEqual([
       candidates[0]?.sourceKey,
       candidates[1]?.sourceKey,
@@ -1351,14 +1385,19 @@ describe("daily report service", () => {
     await createReportCandidates();
     generateDailyReportMock.mockResolvedValue(buildDailyReportOutput());
     const result = await generateDailyReport({ date: REPORT_DATE, force: true });
-    await prisma.dailyReportSource.updateMany({
+    const originalSources = await prisma.dailyReportSource.findMany({
       where: { dailyReportId: result.report?.id },
-      data: {
-        sourceNumber: null,
-        sourceKey: null,
-        sourceSummary: null,
-      },
     });
+    await Promise.all(originalSources.map((source) =>
+      prisma.dailyReportSource.update({
+        where: { id: source.id },
+        data: {
+          sourceNumber: null,
+          sourceKey: source.itemId ? `parsed:${source.itemId}` : null,
+          sourceSummary: null,
+        },
+      }),
+    ));
     streamDailyReportRefinementMock.mockReturnValue(createStreamFromText(buildRefinedDailyReportOutput()));
 
     const events = [];
@@ -1383,6 +1422,9 @@ describe("daily report service", () => {
       orderBy: { sourceNumber: "asc" },
     });
     expect(recoveredSources.map((source) => source.sourceNumber)).toEqual([1, 2]);
+    expect(recoveredSources.map((source) => source.sourceKey)).toEqual(
+      originalSources.map((source) => `item:${source.itemId}`),
+    );
     expect(recoveredSources[0].sourceSummary).toBe("OpenAI 发布新模型摘要");
   });
 

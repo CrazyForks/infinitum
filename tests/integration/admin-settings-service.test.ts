@@ -72,6 +72,7 @@ describe("admin settings service", () => {
     expect(runtimeConfig.ingestion.itemConcurrency).toBe(3);
     expect(runtimeConfig.ingestion.sourceConcurrency).toBe(2);
     expect(runtimeConfig.ingestion.fullTextFetchThreshold).toBe(80);
+    expect(runtimeConfig.ingestion.aggregationSplitMaxEvents).toBe(20);
     expect(runtimeConfig.modelApi.apiKey).toBe("");
     expect(runtimeConfig.modelApi.baseURL).toBe("");
     expect(runtimeConfig.modelApi.model).toBe("gpt-4.1-mini");
@@ -86,6 +87,7 @@ describe("admin settings service", () => {
     expect(settings.modelApiConfigs[0]?.baseUrl).toBe("");
     expect(settings.modelApiConfigs[0]?.apiKeyMasked).toBe("");
     expect(settings.modelApiConfigs[0]?.ingestionItemConcurrency).toBe(3);
+    expect(settings.taskSchedule.aggregationSplitMaxEvents).toBe(20);
     expect(settings.promptConfigs).toHaveLength(9);
     expect(settings.promptConfigs.find((config) => config.type === "daily_report")?.systemPrompt).toContain("AI 新闻日报");
     expect(settings.promptConfigs.find((config) => config.type === "daily_report")?.systemPrompt).toContain(
@@ -332,6 +334,7 @@ describe("admin settings service", () => {
     expect(runtimeConfig.ingestion.itemConcurrency).toBe(6);
     expect(runtimeConfig.ingestion.sourceConcurrency).toBe(2);
     expect(runtimeConfig.ingestion.fullTextFetchThreshold).toBe(80);
+    expect(runtimeConfig.ingestion.aggregationSplitMaxEvents).toBe(20);
     expect(runtimeConfig.modelApi.model).toBe("gpt-live");
     expect(runtimeConfig.selectedPromptConfigs?.itemSummary.systemPrompt).toBe("条目摘要系统提示词");
     expect(runtimeConfig.selectedPromptConfigs?.itemSummary.maxTokens).toBe(300);

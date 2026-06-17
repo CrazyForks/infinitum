@@ -40,12 +40,7 @@ export function buildDedupeKeys({
 
 export function shouldFetchFullText(
   rssContent: string | null | undefined,
-  fetchFullTextWhenMissing: boolean,
   minFullTextLength: number,
 ): boolean {
-  if (!fetchFullTextWhenMissing) {
-    return false;
-  }
-
   return (rssContent?.trim().length ?? 0) < minFullTextLength;
 }

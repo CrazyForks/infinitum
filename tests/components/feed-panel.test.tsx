@@ -2154,6 +2154,38 @@ describe("FeedPanel", () => {
     expect(actionGroup).toHaveClass("gap-0.5");
   });
 
+  it("shows aggregation parent metadata to admins for split child items", () => {
+    const singleEntry = initialEntries.find((entry) => entry.type === "single");
+    if (!singleEntry) {
+      throw new Error("missing single entry fixture");
+    }
+
+    render(
+      <FeedPanel
+        initialItems={[
+          {
+            ...singleEntry,
+            aggregationParent: {
+              id: "parent-1",
+              title: "AI 简报父条目",
+              originalUrl: "https://example.com/roundup",
+            },
+          },
+        ]}
+        initialRange="7d"
+        initialSort="time_desc"
+        initialStartDate={null}
+        initialEndDate={null}
+        initialNextCursor={null}
+        initialStatus={null}
+        isAdmin
+      />,
+    );
+
+    const parentLink = screen.getByRole("link", { name: "拆条来源：AI 简报父条目" });
+    expect(parentLink).toHaveAttribute("href", "https://example.com/roundup");
+  });
+
   it("omits author metadata when the author is unknown", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () =>

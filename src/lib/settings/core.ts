@@ -20,6 +20,8 @@ const LEGACY_DEFAULT_CLUSTER_SUMMARY_PROMPT =
   "你是聚合摘要助手。请基于给定的多条候选内容，提炼它们共同指向的同一具体事件，并输出 100 到 200 字中文摘要。只输出摘要正文，不要输出 JSON、代码块、标题、前后缀说明或项目符号。可使用有限 Markdown 行内标记突出关键信息：用 **加粗** 标注共同事件、关键进展、结果或数字，用 *斜体* 标注必要差异点或影响；不要使用链接、图片、标题、表格或列表。摘要要突出共同事件、关键进展和必要差异点；要体现这是多条报道的归纳结果，而不是复述某一篇原文；不要写成行业综述、公司介绍或主题总结，不要编造未提供的信息。";
 
 const LEGACY_DEFAULT_ITEM_SUMMARY_PROMPT_PREFIX = "你是单条新闻摘要助手。";
+const LEGACY_DEFAULT_ITEM_AGGREGATION_PROMPT_WITHOUT_TITLE =
+  "你是聚合内容拆条助手。给定的内容正文包含 2 个及以上互相独立的离散事件，你需要把它们拆开逐条结构化。严格输出单个 JSON 对象，不要输出 Markdown、代码块或额外解释。";
 
 const LEGACY_DEFAULT_CLUSTER_MERGE_PROMPT = `你是聚合合并助手。请基于给定的多个聚合组信息，判断哪些聚合组描述的是同一具体事件但被错误地分到了不同组，输出合并建议。
 
@@ -522,6 +524,26 @@ function getLegacyDefaultDailyReportPromptWhere() {
   };
 }
 
+function getLegacyDefaultItemAggregationPromptWithoutTitleWhere() {
+  const sampling = getDefaultPromptSampling(PromptConfigType.item_aggregation);
+
+  return {
+    type: PromptConfigType.item_aggregation,
+    name: getDefaultPromptConfigName(PromptConfigType.item_aggregation),
+    prompt: getDefaultPromptTemplate(PromptConfigType.item_aggregation),
+    systemPrompt: {
+      startsWith: LEGACY_DEFAULT_ITEM_AGGREGATION_PROMPT_WITHOUT_TITLE,
+      not: { contains: "\"title\"" },
+    },
+    temperature: sampling.temperature,
+    maxTokens: sampling.maxTokens,
+    topP: sampling.topP,
+    modelApiConfigId: null,
+    isEnabled: true,
+    isDefault: true,
+  };
+}
+
 const LEGACY_DEFAULT_DAILY_REPORT_REFINEMENT_GENERATE_USER_PROMPT_TEMPLATE = `日期：{{date}}
 时区：{{timezone}}
 当前日报 JSON：{{currentContentJson}}
@@ -593,6 +615,7 @@ async function ensureModelAndPromptConfigsSeeded() {
       legacyDefaultDailyReportPromptCount,
       legacyDefaultDailyReportRefinementGeneratePromptCount,
       legacyDefaultItemSummaryPromptCount,
+      legacyDefaultItemAggregationWithoutTitlePromptCount,
     ] = await Promise.all([
       prisma.promptConfig.findMany({
         where: { type: { in: ALL_PROMPT_TYPES as unknown as PromptConfigType[] } },
@@ -623,6 +646,9 @@ async function ensureModelAndPromptConfigsSeeded() {
           isDefault: true,
         },
       }),
+      prisma.promptConfig.count({
+        where: getLegacyDefaultItemAggregationPromptWithoutTitleWhere(),
+      }),
     ]);
     if (
       legacyDefaultClusterSummaryPromptCount === 0 &&
@@ -630,6 +656,7 @@ async function ensureModelAndPromptConfigsSeeded() {
       legacyDefaultDailyReportPromptCount === 0 &&
       legacyDefaultDailyReportRefinementGeneratePromptCount === 0 &&
       legacyDefaultItemSummaryPromptCount === 0 &&
+      legacyDefaultItemAggregationWithoutTitlePromptCount === 0 &&
       ALL_PROMPT_TYPES.every((type) => existingTypes.some((row) => row.type === type))
     ) {
       return;
@@ -726,6 +753,18 @@ async function ensureModelAndPromptConfigsSeeded() {
         maxTokens: clusterSummarySampling.maxTokens,
         temperature: clusterSummarySampling.temperature,
         topP: clusterSummarySampling.topP,
+      },
+    });
+
+    const itemAggregationSampling = getDefaultPromptSampling(PromptConfigType.item_aggregation);
+    await tx.promptConfig.updateMany({
+      where: getLegacyDefaultItemAggregationPromptWithoutTitleWhere(),
+      data: {
+        systemPrompt: resolveSystemPromptByType(PromptConfigType.item_aggregation, fileConfig),
+        prompt: getDefaultPromptTemplate(PromptConfigType.item_aggregation),
+        maxTokens: itemAggregationSampling.maxTokens,
+        temperature: itemAggregationSampling.temperature,
+        topP: itemAggregationSampling.topP,
       },
     });
 

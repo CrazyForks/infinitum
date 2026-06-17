@@ -3,6 +3,7 @@ export const AGGREGATION_PARSE_STATUS = {
   parsed: "parsed",
   notAggregation: "not_aggregation",
   failed: "failed",
+  manualCancelled: "manual_cancelled",
 } as const;
 
 export type AggregationParseStatus =

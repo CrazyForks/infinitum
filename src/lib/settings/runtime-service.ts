@@ -67,6 +67,7 @@ export async function getIngestionRuntimeConfig(): Promise<RuntimeConfig> {
       sourceConcurrency: taskSchedule.sourceConcurrency,
       fullTextFetchThreshold: taskSchedule.fullTextFetchThreshold,
       perSourceItemLimit: taskSchedule.perSourceItemLimit,
+      aggregationSplitMaxEvents: taskSchedule.aggregationSplitMaxEvents,
       processingStartAt: taskSchedule.processingStartAt,
     },
     modelApi: serializeRuntimeModelApi(defaultModelConfig),

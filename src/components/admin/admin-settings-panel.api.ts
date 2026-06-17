@@ -101,6 +101,7 @@ export async function saveDefaultIngestionSchedule(input: {
   sourceConcurrency: number;
   fullTextFetchThreshold: number;
   perSourceItemLimit: number;
+  aggregationSplitMaxEvents: number;
   processingStartAt: string | null;
 }) {
   const payload = await requestAdminSettingsJson<SchedulePayload>(

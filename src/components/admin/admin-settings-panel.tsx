@@ -46,10 +46,12 @@ import type { AdminSettingsSnapshot, PromptConfigType } from "@/lib/settings/typ
 import {
   DEFAULT_SCHEDULE_TIMEZONE,
   MAX_CLEANUP_RETENTION_DAYS,
+  MAX_AGGREGATION_SPLIT_MAX_EVENTS,
   MAX_DAILY_REPORT_OFFSET_DAYS,
   MAX_FULL_TEXT_FETCH_THRESHOLD,
   MAX_SOURCE_CONCURRENCY,
   MIN_CLEANUP_RETENTION_DAYS,
+  MIN_AGGREGATION_SPLIT_MAX_EVENTS,
   MIN_DAILY_REPORT_OFFSET_DAYS,
   MIN_FULL_TEXT_FETCH_THRESHOLD,
   MIN_SOURCE_CONCURRENCY,
@@ -263,6 +265,8 @@ export function AdminSettingsPanel({
     useState(String(initialSettings.taskSchedule.fullTextFetchThreshold));
   const [taskSchedulePerSourceItemLimit, setTaskSchedulePerSourceItemLimit] =
     useState(String(initialSettings.taskSchedule.perSourceItemLimit));
+  const [taskScheduleAggregationSplitMaxEvents, setTaskScheduleAggregationSplitMaxEvents] =
+    useState(String(initialSettings.taskSchedule.aggregationSplitMaxEvents));
   const [taskScheduleProcessingStartAt, setTaskScheduleProcessingStartAt] = useState(
     toDateTimeLocalValue(initialSettings.taskSchedule.processingStartAt),
   );
@@ -749,6 +753,10 @@ export function AdminSettingsPanel({
       taskSchedulePerSourceItemLimit.trim(),
       10,
     );
+    const parsedAggregationSplitMaxEvents = Number.parseInt(
+      taskScheduleAggregationSplitMaxEvents.trim(),
+      10,
+    );
 
     if (
       !Number.isInteger(parsedSourceConcurrency) ||
@@ -786,6 +794,18 @@ export function AdminSettingsPanel({
       return;
     }
 
+    if (
+      !Number.isInteger(parsedAggregationSplitMaxEvents) ||
+      parsedAggregationSplitMaxEvents < MIN_AGGREGATION_SPLIT_MAX_EVENTS ||
+      parsedAggregationSplitMaxEvents > MAX_AGGREGATION_SPLIT_MAX_EVENTS
+    ) {
+      showToast(
+        `单条聚合拆分上限需为 ${MIN_AGGREGATION_SPLIT_MAX_EVENTS}-${MAX_AGGREGATION_SPLIT_MAX_EVENTS} 的整数。`,
+        "error",
+      );
+      return;
+    }
+
     startTransition(async () => {
       try {
         const schedule = await saveDefaultIngestionSchedule({
@@ -794,6 +814,7 @@ export function AdminSettingsPanel({
           sourceConcurrency: parsedSourceConcurrency,
           fullTextFetchThreshold: parsedFullTextFetchThreshold,
           perSourceItemLimit: parsedPerSourceItemLimit,
+          aggregationSplitMaxEvents: parsedAggregationSplitMaxEvents,
           processingStartAt: toIsoDateTimeOrNull(taskScheduleProcessingStartAt),
         });
 
@@ -803,6 +824,7 @@ export function AdminSettingsPanel({
         setTaskScheduleSourceConcurrency(String(schedule.sourceConcurrency));
         setTaskScheduleFullTextFetchThreshold(String(schedule.fullTextFetchThreshold));
         setTaskSchedulePerSourceItemLimit(String(schedule.perSourceItemLimit));
+        setTaskScheduleAggregationSplitMaxEvents(String(schedule.aggregationSplitMaxEvents));
         setTaskScheduleProcessingStartAt(toDateTimeLocalValue(schedule.processingStartAt));
         showToast("任务配置已保存。", "success");
       } catch (error) {
@@ -916,6 +938,7 @@ export function AdminSettingsPanel({
     taskScheduleSourceConcurrency.trim() !== String(taskScheduleSnapshot.sourceConcurrency) ||
     taskScheduleFullTextFetchThreshold.trim() !== String(taskScheduleSnapshot.fullTextFetchThreshold) ||
     taskSchedulePerSourceItemLimit.trim() !== String(taskScheduleSnapshot.perSourceItemLimit) ||
+    taskScheduleAggregationSplitMaxEvents.trim() !== String(taskScheduleSnapshot.aggregationSplitMaxEvents) ||
     taskScheduleProcessingStartAt.trim() !== toDateTimeLocalValue(taskScheduleSnapshot.processingStartAt);
   const dailyReportScheduleIsDirty =
     dailyReportScheduleEnabled !== dailyReportScheduleSnapshot.enabled ||
@@ -1643,7 +1666,7 @@ export function AdminSettingsPanel({
                   采集任务
                 </h2>
                 <p className="text-sm text-[var(--text-3)]">
-                  配置抓取任务的启用状态、Cron 调度、源抓取并发与正文补抓阈值
+                  配置抓取任务的启用状态、Cron 调度、抓取规模与聚合拆分上限
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -1706,8 +1729,8 @@ export function AdminSettingsPanel({
                 </div>
               </div>
 
-              {/* Row 2: 源抓取并发 + 正文补抓阈值 + 每源处理上限 */}
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+              {/* Row 2: 源抓取并发 + 正文补抓阈值 + 每源处理上限 + 聚合拆分上限 */}
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
                 <div className="space-y-1.5">
                   <label
                     htmlFor="task-schedule-source-concurrency"
@@ -1764,6 +1787,26 @@ export function AdminSettingsPanel({
                     step={1}
                     value={taskSchedulePerSourceItemLimit}
                     onChange={(event) => setTaskSchedulePerSourceItemLimit(event.target.value)}
+                    placeholder="例如 20"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label
+                    htmlFor="task-schedule-aggregation-split-max-events"
+                    className="block text-sm text-[var(--muted)]"
+                  >
+                    单条聚合拆分上限
+                  </label>
+                  <TextInput
+                    id="task-schedule-aggregation-split-max-events"
+                    type="number"
+                    inputMode="numeric"
+                    min={MIN_AGGREGATION_SPLIT_MAX_EVENTS}
+                    max={MAX_AGGREGATION_SPLIT_MAX_EVENTS}
+                    step={1}
+                    value={taskScheduleAggregationSplitMaxEvents}
+                    onChange={(event) => setTaskScheduleAggregationSplitMaxEvents(event.target.value)}
                     placeholder="例如 20"
                   />
                 </div>

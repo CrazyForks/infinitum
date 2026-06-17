@@ -12,6 +12,7 @@ import {
 import {
   computeNextRunAt,
   DEFAULT_CLEANUP_RETENTION_DAYS,
+  DEFAULT_AGGREGATION_SPLIT_MAX_EVENTS,
   DEFAULT_DAILY_REPORT_CANDIDATE_LIMIT,
   DEFAULT_DAILY_REPORT_MAX_RETRIES,
   DEFAULT_DAILY_REPORT_OFFSET_DAYS,
@@ -516,6 +517,7 @@ export function toTaskScheduleSnapshot(schedule: {
   sourceConcurrency: number;
   fullTextFetchThreshold: number;
   perSourceItemLimit: number | null;
+  aggregationSplitMaxEvents?: number | null;
   dailyReportCandidateLimit: number | null;
   dailyReportOffsetDays: number | null;
   dailyReportAutoPublish: boolean | null;
@@ -537,6 +539,7 @@ export function toTaskScheduleSnapshot(schedule: {
     sourceConcurrency: schedule.sourceConcurrency,
     fullTextFetchThreshold: schedule.fullTextFetchThreshold,
     perSourceItemLimit: schedule.perSourceItemLimit ?? 20,
+    aggregationSplitMaxEvents: schedule.aggregationSplitMaxEvents ?? DEFAULT_AGGREGATION_SPLIT_MAX_EVENTS,
     dailyReportCandidateLimit: schedule.dailyReportCandidateLimit ?? DEFAULT_DAILY_REPORT_CANDIDATE_LIMIT,
     dailyReportOffsetDays: schedule.dailyReportOffsetDays ?? DEFAULT_DAILY_REPORT_OFFSET_DAYS,
     dailyReportAutoPublish: schedule.dailyReportAutoPublish ?? false,
@@ -564,6 +567,7 @@ export async function updateDefaultIngestionSchedule(input: {
   sourceConcurrency: number;
   fullTextFetchThreshold: number;
   perSourceItemLimit: number;
+  aggregationSplitMaxEvents?: number;
   processingStartAt?: string | null;
 }) {
   const normalizedInput = normalizeScheduleInput(input);
@@ -584,6 +588,7 @@ export async function updateDefaultIngestionSchedule(input: {
       sourceConcurrency: normalizedInput.sourceConcurrency,
       fullTextFetchThreshold: normalizedInput.fullTextFetchThreshold,
       perSourceItemLimit: normalizedInput.perSourceItemLimit,
+      aggregationSplitMaxEvents: normalizedInput.aggregationSplitMaxEvents,
       processingStartAt: normalizedInput.processingStartAt ? new Date(normalizedInput.processingStartAt) : null,
       nextRunAt,
     },

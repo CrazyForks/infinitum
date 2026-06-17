@@ -1,12 +1,10 @@
 import type { Item } from "@prisma/client";
 
 import { AGGREGATION_PARSE_STATUS } from "@/lib/aggregation/status";
+import { persistAggregationChildItems } from "@/lib/aggregation/persist";
 import type { AiEventSignature } from "@/lib/ai/provider";
 import type { ClusterAssignmentCoordinator } from "@/lib/clusters/helpers";
-import {
-  assignItemToCluster,
-  persistParsedAggregationForItem,
-} from "@/lib/clusters/service";
+import { assignItemToCluster } from "@/lib/clusters/service";
 import { prisma } from "@/lib/db";
 import {
   findExistingItem,
@@ -15,6 +13,10 @@ import {
 import { shouldTranslateTitle, stripHtmlTags } from "@/lib/feed/presentation";
 import { buildDedupeKeys, shouldFetchFullText } from "@/lib/ingestion/dedupe";
 import { evaluateRuleFilter } from "@/lib/ingestion/filtering";
+import {
+  buildAggregationParsingInput,
+  buildItemSummaryInput,
+} from "@/lib/ingestion/model-input";
 import type {
   ParsedFeedItem,
   ProcessedItemRecord,
@@ -56,11 +58,6 @@ const EVENT_TYPES = new Set<NonNullable<AiEventSignature["eventType"]>>([
   "security",
   "other",
 ]);
-const ITEM_SUMMARY_INPUT_MAX_CHARS = 32_000;
-const ITEM_SUMMARY_TRUNCATED_NOTICE = "\n\n[内容过长，已截断用于摘要。]";
-const HTML_BLOCK_PATTERN = /<(script|style|noscript|svg|canvas|iframe)\b[^>]*>[\s\S]*?<\/\1>/gi;
-const HTML_COMMENT_PATTERN = /<!--[\s\S]*?-->/g;
-
 function getBestContent(item: ParsedFeedItem): string {
   return item["content:encoded"] || item.content || item.contentSnippet || "";
 }
@@ -132,25 +129,6 @@ function buildFallbackSummary(rssExcerpt: string | null, fallbackBody: string | 
   }
 
   return null;
-}
-
-function buildItemSummaryInput(inputText: string): string {
-  const cleaned = stripHtmlTags(
-    inputText
-      .replace(HTML_COMMENT_PATTERN, " ")
-      .replace(HTML_BLOCK_PATTERN, " "),
-  );
-
-  if (!cleaned) {
-    return "";
-  }
-
-  if (cleaned.length <= ITEM_SUMMARY_INPUT_MAX_CHARS) {
-    return cleaned;
-  }
-
-  const maxBodyLength = ITEM_SUMMARY_INPUT_MAX_CHARS - ITEM_SUMMARY_TRUNCATED_NOTICE.length;
-  return `${cleaned.slice(0, maxBodyLength).trimEnd()}${ITEM_SUMMARY_TRUNCATED_NOTICE}`;
 }
 
 function hasSucceededSummary(existing?: {
@@ -392,6 +370,7 @@ export async function processFeedItem({
   let isAggregation = existing?.isAggregation ?? false;
   let aggregationCheckedAt: Date | null = existing?.aggregationCheckedAt ?? null;
   let aggregationParseStatus: string | null = existing?.aggregationParseStatus ?? null;
+  let storedItemId = existing?.id ?? null;
   const issues: string[] = [];
   const contentForFullTextDecision = fullText || rssContent || rssExcerpt || "";
   const canReuseExistingAnalysis = Boolean(
@@ -532,7 +511,7 @@ export async function processFeedItem({
     };
   }
 
-  if (!fullText && shouldFetchFullText(contentForFullTextDecision, aiParsingEnabled, fullTextFetchThreshold)) {
+  if (!fullText && shouldFetchFullText(contentForFullTextDecision, fullTextFetchThreshold)) {
     try {
       const fetchedFullText = await articleFetcher(originalUrl);
       fullText = fetchedFullText;
@@ -592,30 +571,27 @@ export async function processFeedItem({
     }
 
 
+    let aggregationSucceeded = false;
     if (isAggregation) {
       // Aggregation items skip enrichContent and route through parseAggregation.
       // parseAggregation produces both sub-events and a main event signature that fills Item.event*.
+      // Sub-events are now persisted as full child Item rows (one per event) so they appear
+      // in the main feed, FTS, and cluster pipeline. The parent is hidden from the feed by
+      // buildFeedEntryCandidatesCte's isAggregation=false filter.
       try {
-        const aggregationSourceText = buildItemSummaryInput(fullText || rssContent || rssExcerpt || originalTitle) || originalTitle;
+        const aggregationSourceText = buildAggregationParsingInput(fullText || rssContent || rssExcerpt || originalTitle) || originalTitle;
         const aggregationResult = await aiProvider.parseAggregation(aggregationSourceText, {
           title: originalTitle,
           sourceName,
         });
         const mainEventSig = aggregationResult.mainEvent;
-        const events = (aggregationResult.events ?? []).map((event) => ({
-          eventType: event.eventType ?? null,
-          eventSubject: event.eventSubject ?? null,
-          eventAction: event.eventAction ?? null,
-          eventObject: event.eventObject ?? null,
-          eventDate: event.eventDate ?? null,
-          oneLiner: event.oneLiner,
-          qualityScore: event.qualityScore,
-        }));
+        const events = aggregationResult.events ?? [];
         if (events.length === 0) {
           throw new Error("Aggregation parsing returned no events");
         }
-        // Pre-upsert to obtain stored.id for parsed event persistence.
-        // The final upsert at the end of the function will overwrite with complete fields.
+
+        // 1. Pre-upsert the parent so we can use its id as parentItemId.
+        //    Final upsert below will overwrite with complete fields.
         const preUpsert = await upsertItem(
           {
             id: existing?.id,
@@ -654,36 +630,45 @@ export async function processFeedItem({
             isAggregation: true,
             aggregationCheckedAt,
             aggregationParseStatus: AGGREGATION_PARSE_STATUS.detected,
+            parentItemId: null,
             aiProcessedAt: null,
             clusterId: existing?.clusterId ?? null,
             manualClusterAssignedAt: existing?.manualClusterAssignedAt ?? null,
             errorMessage: null,
           },
         );
+        storedItemId = preUpsert.id;
 
-        await persistParsedAggregationForItem(
-          { id: preUpsert.id, publishedAt },
-          {
-            mainEvent: mainEventSig
-              ? {
-                  eventType: mainEventSig.eventType as AiEventSignature["eventType"],
-                  eventSubject: mainEventSig.eventSubject,
-                  eventAction: mainEventSig.eventAction,
-                  eventObject: mainEventSig.eventObject,
-                  eventDate: mainEventSig.eventDate,
-                }
-              : null,
-            events: events.map((event) => ({
-              eventType: event.eventType as AiEventSignature["eventType"],
-              eventSubject: event.eventSubject,
-              eventAction: event.eventAction,
-              eventObject: event.eventObject,
-              eventDate: event.eventDate,
-              oneLiner: event.oneLiner,
-              qualityScore: event.qualityScore,
-            })),
-          },
-        );
+        // 2. Persist each parsed event as a full child Item inside a single transaction.
+        //    The transaction guarantees that an aggregation parent always has either 0 or
+        //    all N child items; partial states can't be observed by readers.
+        const { childItemIds } = await persistAggregationChildItems({
+          sourceId,
+          parent: preUpsert,
+          publishedAt,
+          events,
+        });
+
+        // 3. Assign each child to a cluster. Done outside the upsert transaction because
+        //    assignItemToCluster acquires its own window-level lock and may invoke AI for
+        //    cluster matching. Failures here are non-fatal: the child item exists, and the
+        //    batch-level cluster_finalize pass will recompute affected clusters.
+        for (const childId of childItemIds) {
+          try {
+            await assignItemToCluster(childId, {
+              aiProvider,
+              coordinator: clusterAssignmentCoordinator,
+              aggregationEnabled,
+            });
+          } catch (assignError) {
+            appendIssue(
+              issues,
+              assignError,
+              `Unknown cluster assignment error for child item ${childId}`,
+            );
+          }
+        }
+
         if (mainEventSig) {
           eventSignature = {
             eventType: mainEventSig.eventType as AiEventSignature["eventType"],
@@ -702,43 +687,47 @@ export async function processFeedItem({
         aggregationEventCount = events.length;
         analysisCompleted = true;
         analysisStatus = "succeeded";
-      } catch (error) {
-        appendIssue(issues, error, "Unknown aggregation parsing error");
+        aggregationSucceeded = true;
+      } catch (aggregationError) {
+        appendIssue(issues, aggregationError, "Unknown aggregation parsing error");
         aggregationParseStatus = AGGREGATION_PARSE_STATUS.failed;
         aggregationParseFailed = true;
-        // Fall back to enrichContent on parse failure so item still gets a signature.
-        if (canReuseExistingCompletedAnalysis) {
-          analysisStatus = "succeeded";
-        } else {
-          try {
-            const enrichment = await aiProvider.enrichContent(summaryText || originalTitle, {
-              title: originalTitle,
-              sourceName,
-              translateTitle,
-            });
-            if (translateTitle) {
-              translatedTitle = enrichment.translatedTitle?.trim() || originalTitle;
-            }
-            moderationStatus = enrichment.moderationStatus === "restored" ? "allowed" : enrichment.moderationStatus;
-            moderationReason = enrichment.moderationReason;
-            moderationDetail = enrichment.moderationDetail;
-            qualityScore = enrichment.qualityScore;
-            qualityRationale = enrichment.qualityRationale;
-            eventSignature = enrichment.eventSignature;
-            analysisCompleted = true;
-            analysisStatus = "succeeded";
-          } catch (fallbackError) {
-            appendIssue(issues, fallbackError, "Unknown ai enrichment error");
-            moderationStatus = "allowed";
-            moderationReason = null;
-            moderationDetail = null;
-            qualityScore = 50;
-            qualityRationale = "AI analysis unavailable";
-            eventSignature = null;
-            analysisStatus = "failed";
-            analysisFailed = true;
-          }
+        // Degrade parent to a regular item so the feed can still surface it.
+        isAggregation = false;
+      }
+    }
+    if (isAggregation && aggregationSucceeded) {
+      // Aggregation parse succeeded; parent is already a full aggregation item.
+      // Skip the non-aggregation enrichContent / reuse-analysis branches below.
+    } else if (!isAggregation && aggregationParseStatus === AGGREGATION_PARSE_STATUS.failed) {
+      // Aggregation parse failed: run enrichContent on the parent as a regular item.
+      try {
+        const enrichment = await aiProvider.enrichContent(summaryText || originalTitle, {
+          title: originalTitle,
+          sourceName,
+          translateTitle,
+        });
+        if (translateTitle) {
+          translatedTitle = enrichment.translatedTitle?.trim() || originalTitle;
         }
+        moderationStatus = enrichment.moderationStatus === "restored" ? "allowed" : enrichment.moderationStatus;
+        moderationReason = enrichment.moderationReason;
+        moderationDetail = enrichment.moderationDetail;
+        qualityScore = enrichment.qualityScore;
+        qualityRationale = enrichment.qualityRationale;
+        eventSignature = enrichment.eventSignature;
+        analysisCompleted = true;
+        analysisStatus = "succeeded";
+      } catch (enrichError) {
+        appendIssue(issues, enrichError, "Unknown ai enrichment error");
+        moderationStatus = "allowed";
+        moderationReason = null;
+        moderationDetail = null;
+        qualityScore = 50;
+        qualityRationale = "AI analysis unavailable";
+        eventSignature = null;
+        analysisStatus = "failed";
+        analysisFailed = true;
       }
     } else if (canReuseExistingCompletedAnalysis) {
       analysisStatus = "succeeded";
@@ -795,7 +784,7 @@ export async function processFeedItem({
 
   const stored = await upsertItem(
     {
-      id: existing?.id,
+      id: storedItemId ?? undefined,
       urlHash: dedupeKeys.urlHash,
       dedupeSignature: dedupeKeys.signature,
     },

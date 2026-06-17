@@ -6,8 +6,10 @@ import { PageShell } from "@/components/ui/page-shell";
 import { useToast } from "@/components/ui/toast";
 import { StatusBanner } from "@/components/ui/status-banner";
 import {
+  MAX_AGGREGATION_SPLIT_MAX_EVENTS,
   MAX_FULL_TEXT_FETCH_THRESHOLD,
   MAX_SOURCE_CONCURRENCY,
+  MIN_AGGREGATION_SPLIT_MAX_EVENTS,
   MIN_FULL_TEXT_FETCH_THRESHOLD,
   MIN_SOURCE_CONCURRENCY,
   MAX_PER_SOURCE_ITEM_LIMIT,
@@ -291,6 +293,9 @@ export function AdminMonitorPanel({
   const [perSourceItemLimit, setPerSourceItemLimit] = useState(
     String(initialSnapshot.schedule.perSourceItemLimit),
   );
+  const [aggregationSplitMaxEvents, setAggregationSplitMaxEvents] = useState(
+    String(initialSnapshot.schedule.aggregationSplitMaxEvents),
+  );
   const [processingStartAt, setProcessingStartAt] = useState(
     toDateTimeLocalValue(initialSnapshot.schedule.processingStartAt),
   );
@@ -304,6 +309,7 @@ export function AdminMonitorPanel({
     sourceConcurrency.trim() !== String(snapshot.schedule.sourceConcurrency) ||
     fullTextFetchThreshold.trim() !== String(snapshot.schedule.fullTextFetchThreshold) ||
     perSourceItemLimit.trim() !== String(snapshot.schedule.perSourceItemLimit) ||
+    aggregationSplitMaxEvents.trim() !== String(snapshot.schedule.aggregationSplitMaxEvents) ||
     processingStartAt.trim() !== toDateTimeLocalValue(snapshot.schedule.processingStartAt);
 
   isScheduleDirtyRef.current = isScheduleDirty;
@@ -339,6 +345,7 @@ export function AdminMonitorPanel({
           setSourceConcurrency(String(payload.schedule.sourceConcurrency));
           setFullTextFetchThreshold(String(payload.schedule.fullTextFetchThreshold));
           setPerSourceItemLimit(String(payload.schedule.perSourceItemLimit));
+          setAggregationSplitMaxEvents(String(payload.schedule.aggregationSplitMaxEvents));
           setProcessingStartAt(toDateTimeLocalValue(payload.schedule.processingStartAt));
         }
       } catch {
@@ -368,6 +375,7 @@ export function AdminMonitorPanel({
     const parsedSourceConcurrency = Number.parseInt(sourceConcurrency.trim(), 10);
     const parsedFullTextFetchThreshold = Number.parseInt(fullTextFetchThreshold.trim(), 10);
     const parsedPerSourceItemLimit = Number.parseInt(perSourceItemLimit.trim(), 10);
+    const parsedAggregationSplitMaxEvents = Number.parseInt(aggregationSplitMaxEvents.trim(), 10);
 
     if (
       !Number.isInteger(parsedSourceConcurrency) ||
@@ -405,6 +413,18 @@ export function AdminMonitorPanel({
       return;
     }
 
+    if (
+      !Number.isInteger(parsedAggregationSplitMaxEvents) ||
+      parsedAggregationSplitMaxEvents < MIN_AGGREGATION_SPLIT_MAX_EVENTS ||
+      parsedAggregationSplitMaxEvents > MAX_AGGREGATION_SPLIT_MAX_EVENTS
+    ) {
+      showToast(
+        `单条聚合拆分上限需为 ${MIN_AGGREGATION_SPLIT_MAX_EVENTS}-${MAX_AGGREGATION_SPLIT_MAX_EVENTS} 的整数。`,
+        "error",
+      );
+      return;
+    }
+
     startTransition(async () => {
       try {
         const response = await fetch(
@@ -420,6 +440,7 @@ export function AdminMonitorPanel({
               sourceConcurrency: parsedSourceConcurrency,
               fullTextFetchThreshold: parsedFullTextFetchThreshold,
               perSourceItemLimit: parsedPerSourceItemLimit,
+              aggregationSplitMaxEvents: parsedAggregationSplitMaxEvents,
               processingStartAt: toIsoDateTimeOrNull(processingStartAt),
             }),
           },
@@ -440,6 +461,7 @@ export function AdminMonitorPanel({
         setSourceConcurrency(String(schedule.sourceConcurrency));
         setFullTextFetchThreshold(String(schedule.fullTextFetchThreshold));
         setPerSourceItemLimit(String(schedule.perSourceItemLimit));
+        setAggregationSplitMaxEvents(String(schedule.aggregationSplitMaxEvents));
         setProcessingStartAt(toDateTimeLocalValue(schedule.processingStartAt));
         showToast("调度配置已保存。", "success");
       } catch {
@@ -670,6 +692,30 @@ export function AdminMonitorPanel({
           </span>
         </label>
 
+        <label
+          className={cx(subtleCardClassName, "flex flex-col gap-3 p-3.5")}
+        >
+          <span className="font-mono text-[11px] font-medium uppercase tracking-[0.22em] text-[var(--muted)]">
+            Split Limit
+          </span>
+          <span className="text-sm font-medium text-[var(--foreground)]">
+            单条聚合拆分上限
+          </span>
+          <input
+            aria-label="单条聚合拆分上限"
+            className={inputClassName}
+            type="number"
+            min={MIN_AGGREGATION_SPLIT_MAX_EVENTS}
+            max={MAX_AGGREGATION_SPLIT_MAX_EVENTS}
+            step={1}
+            value={aggregationSplitMaxEvents}
+            onChange={(event) => setAggregationSplitMaxEvents(event.target.value)}
+          />
+          <span className="text-sm leading-6 text-[var(--muted)]">
+            控制每篇聚合内容最多拆出多少个子事件，代码和提示词共用该上限。
+          </span>
+        </label>
+
       </div>
 
       <div className="grid gap-2.5 sm:grid-cols-2">
@@ -700,6 +746,10 @@ export function AdminMonitorPanel({
         <TaskFact
           label="Per Source Limit"
           value={String(snapshot.schedule.perSourceItemLimit)}
+        />
+        <TaskFact
+          label="Split Event Limit"
+          value={String(snapshot.schedule.aggregationSplitMaxEvents)}
         />
         <TaskFact
           label="Processing Start"

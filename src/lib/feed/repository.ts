@@ -14,6 +14,8 @@ import { buildRecommendScoreSql, calculateRecommendScore } from "@/lib/feed/reco
 import { toGroupBadge, type GroupBadge } from "@/lib/groups/badge";
 import { getDatabaseSearchTerms } from "@/lib/utils/search";
 import type {
+  AggregationSplitChildDTO,
+  AggregationSplitParentDTO,
   ClusterDTO,
   FeedGroupOption,
   FeedClusterPreviewItemDTO,
@@ -28,8 +30,28 @@ import type {
 } from "@/lib/feed/types";
 
 const DISPLAYABLE_MODERATION_STATUSES = ["allowed", "restored"] as const;
+const aggregationParentSelect = {
+  id: true,
+  originalTitle: true,
+  translatedTitle: true,
+  originalUrl: true,
+} satisfies Prisma.ItemSelect;
 
-type ItemWithSource = Item & { source: Source & { group?: SourceGroup | null } };
+type ItemWithSource = Item & {
+  source: Source & { group?: SourceGroup | null };
+  parent?: Pick<Item, "id" | "originalTitle" | "translatedTitle" | "originalUrl"> | null;
+};
+
+type AggregationSplitChildWithSource = Item & {
+  source: Pick<Source, "name">;
+  cluster?: { id: string; title: string } | null;
+};
+
+type AggregationSplitParentWithChildren = Item & {
+  source: Pick<Source, "name">;
+  children: AggregationSplitChildWithSource[];
+};
+
 type FeedEntryRow = {
   id: string;
   entryType: "single" | "cluster";
@@ -63,6 +85,14 @@ type ClusterWithPreviewItems = Prisma.ContentClusterGetPayload<{
         source: {
           include: {
             group: true;
+          };
+        };
+        parent: {
+          select: {
+            id: true;
+            originalTitle: true;
+            translatedTitle: true;
+            originalUrl: true;
           };
         };
       };
@@ -369,6 +399,15 @@ function mapItemToClusterPreview(item: ItemWithSource): FeedClusterPreviewItemDT
     group: toGroupBadge(item.source.group),
     score: item.qualityScore,
     canRegenerateTranslation: shouldTranslateTitle(item.originalTitle),
+    ...(item.parent
+      ? {
+          aggregationParent: {
+            id: item.parent.id,
+            title: getDisplayTitle(item.parent.originalTitle, item.parent.translatedTitle),
+            originalUrl: item.parent.originalUrl,
+          },
+        }
+      : {}),
   };
 }
 
@@ -393,6 +432,15 @@ function mapItemToFeedItem(item: ItemWithSource): FeedItemDTO {
     downvotes: 0,
     userVote: null,
     canRegenerateTranslation: shouldTranslateTitle(item.originalTitle),
+    ...(item.parent
+      ? {
+          aggregationParent: {
+            id: item.parent.id,
+            title: getDisplayTitle(item.parent.originalTitle, item.parent.translatedTitle),
+            originalUrl: item.parent.originalUrl,
+          },
+        }
+      : {}),
   };
 }
 
@@ -440,6 +488,79 @@ export function mapItemToReviewItem(item: ItemWithSource): ReviewItemDTO {
     qualityScore: item.qualityScore,
     qualityRationale: item.qualityRationale,
     canRegenerateTranslation: shouldTranslateTitle(item.originalTitle),
+  };
+}
+
+function normalizeUrlForSplitComparison(value: string) {
+  try {
+    const parsed = new URL(value);
+    parsed.hash = "";
+    parsed.protocol = parsed.protocol.toLowerCase();
+    parsed.hostname = parsed.hostname.toLowerCase();
+    if (parsed.pathname.length > 1) {
+      parsed.pathname = parsed.pathname.replace(/\/+$/, "");
+    }
+    return parsed.toString();
+  } catch {
+    return value;
+  }
+}
+
+function isChildUsingParentUrl(child: Pick<Item, "originalUrl">, parent: Pick<Item, "originalUrl">) {
+  return normalizeUrlForSplitComparison(child.originalUrl) === normalizeUrlForSplitComparison(parent.originalUrl);
+}
+
+function mapAggregationSplitChildToDto(
+  child: AggregationSplitChildWithSource,
+  parent: Pick<Item, "originalUrl">,
+): AggregationSplitChildDTO {
+  return {
+    id: child.id,
+    title: getDisplayTitle(child.originalTitle, child.translatedTitle),
+    originalUrl: child.originalUrl,
+    publishedAt: child.publishedAt.toISOString(),
+    sourceName: child.source.name,
+    summary: getDisplaySummary(child.summaryText, child.rssExcerpt, child.fullText ?? child.rssContent),
+    status: child.status,
+    moderationStatus: child.moderationStatus,
+    filterReason: child.filterReason,
+    qualityScore: child.qualityScore,
+    eventType: child.eventType,
+    eventSubject: child.eventSubject,
+    eventAction: child.eventAction,
+    eventObject: child.eventObject,
+    eventDate: child.eventDate,
+    clusterId: child.clusterId,
+    clusterTitle: child.cluster?.title ?? null,
+    usesParentUrl: isChildUsingParentUrl(child, parent),
+  };
+}
+
+function mapAggregationSplitParentToDto(
+  parent: AggregationSplitParentWithChildren,
+  options?: { includeChildren?: boolean },
+): AggregationSplitParentDTO {
+  const children = parent.children.map((child) => mapAggregationSplitChildToDto(child, parent));
+  const parentUrlCount = children.filter((child) => child.usesParentUrl).length;
+
+  return {
+    id: parent.id,
+    title: getDisplayTitle(parent.originalTitle, parent.translatedTitle),
+    originalUrl: parent.originalUrl,
+    publishedAt: parent.publishedAt.toISOString(),
+    createdAt: parent.createdAt.toISOString(),
+    aggregationCheckedAt: parent.aggregationCheckedAt?.toISOString() ?? null,
+    sourceName: parent.source.name,
+    summary: getDisplaySummary(parent.summaryText, parent.rssExcerpt, parent.fullText ?? parent.rssContent),
+    status: parent.status,
+    moderationStatus: parent.moderationStatus,
+    aggregationParseStatus: parent.aggregationParseStatus,
+    errorMessage: parent.errorMessage,
+    childCount: children.length,
+    eventUrlCount: children.length - parentUrlCount,
+    parentUrlCount,
+    qualityScore: parent.qualityScore,
+    ...(options?.includeChildren ? { children } : {}),
   };
 }
 
@@ -688,6 +809,9 @@ function buildFeedEntryCandidatesCte(
     Prisma.sql`i."moderationStatus" IN (${Prisma.join([...DISPLAYABLE_MODERATION_STATUSES])})`,
     Prisma.sql`s.enabled = ${true}`,
     Prisma.sql`(i."clusterId" IS NULL OR c.status = ${"active"})`,
+    // Hide aggregation parents from the public feed; their child items carry the
+    // actual content. The child items are full Item rows with isAggregation=false.
+    Prisma.sql`i."isAggregation" = ${false}`,
   ];
 
   if (filters.sourceId) {
@@ -1278,6 +1402,9 @@ export async function listClusterItems(
           group: true,
         },
       },
+      parent: {
+        select: aggregationParentSelect,
+      },
     },
     orderBy: [{ publishedAt: "desc" }, { createdAt: "desc" }],
   });
@@ -1327,6 +1454,105 @@ export async function listFilteredItems(page = 1, pageSize = 20, filters?: Filte
   ]);
 
   return { items: items.map(mapItemToReviewItem), total, page, pageSize };
+}
+
+export type AggregationSplitQuery = {
+  search?: string | null;
+  status?: string | null;
+};
+
+function buildAggregationSplitWhere(filters?: AggregationSplitQuery): Prisma.ItemWhereInput {
+  const search = filters?.search?.trim();
+  const status = filters?.status?.trim();
+
+  return {
+    isAggregation: true,
+    ...(status ? { aggregationParseStatus: status } : {}),
+    ...(search
+      ? {
+          OR: [
+            { originalTitle: { contains: search } },
+            { translatedTitle: { contains: search } },
+            { summaryText: { contains: search } },
+            { rssExcerpt: { contains: search } },
+            { source: { is: { name: { contains: search } } } },
+            {
+              children: {
+                some: {
+                  OR: [
+                    { originalTitle: { contains: search } },
+                    { translatedTitle: { contains: search } },
+                    { summaryText: { contains: search } },
+                  ],
+                },
+              },
+            },
+          ],
+        }
+      : {}),
+  };
+}
+
+const aggregationSplitParentInclude = {
+  source: {
+    select: {
+      name: true,
+    },
+  },
+  children: {
+    include: {
+      source: {
+        select: {
+          name: true,
+        },
+      },
+      cluster: {
+        select: {
+          id: true,
+          title: true,
+        },
+      },
+    },
+    orderBy: [{ publishedAt: "desc" }, { createdAt: "desc" }],
+  },
+} satisfies Prisma.ItemInclude;
+
+export async function listAggregationSplitParents(
+  page = 1,
+  pageSize = 20,
+  filters?: AggregationSplitQuery,
+) {
+  const skip = (page - 1) * pageSize;
+  const where = buildAggregationSplitWhere(filters);
+  const [items, total] = await Promise.all([
+    prisma.item.findMany({
+      where,
+      include: aggregationSplitParentInclude,
+      orderBy: [{ aggregationCheckedAt: "desc" }, { updatedAt: "desc" }, { createdAt: "desc" }],
+      take: pageSize,
+      skip,
+    }),
+    prisma.item.count({ where }),
+  ]);
+
+  return {
+    items: items.map((item) => mapAggregationSplitParentToDto(item)),
+    total,
+    page,
+    pageSize,
+  };
+}
+
+export async function getAggregationSplitParent(parentItemId: string) {
+  const item = await prisma.item.findFirst({
+    where: {
+      id: parentItemId,
+      isAggregation: true,
+    },
+    include: aggregationSplitParentInclude,
+  });
+
+  return item ? mapAggregationSplitParentToDto(item, { includeChildren: true }) : null;
 }
 
 export type AdminClusterQueryOptions = {
@@ -1437,6 +1663,9 @@ export async function listAdminClusters(
                       group: true,
                     },
                   },
+                  parent: {
+                    select: aggregationParentSelect,
+                  },
                 },
                 orderBy: [{ publishedAt: "desc" }, { createdAt: "desc" }],
                 take: 5,
@@ -1504,6 +1733,9 @@ export async function listAdminClusters(
                     group: true,
                   },
                 },
+                parent: {
+                  select: aggregationParentSelect,
+                },
               },
               orderBy: [{ publishedAt: "desc" }, { createdAt: "desc" }],
               take: 5,
@@ -1544,6 +1776,9 @@ export async function getAdminCluster(clusterId: string) {
             include: {
               group: true,
             },
+          },
+          parent: {
+            select: aggregationParentSelect,
           },
         },
         orderBy: [{ publishedAt: "desc" }, { createdAt: "desc" }],

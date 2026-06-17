@@ -5,8 +5,10 @@ import { requireAdmin } from "@/lib/admin/session";
 import {
   MAX_FULL_TEXT_FETCH_THRESHOLD,
   MAX_SOURCE_CONCURRENCY,
+  MAX_AGGREGATION_SPLIT_MAX_EVENTS,
   MIN_FULL_TEXT_FETCH_THRESHOLD,
   MIN_SOURCE_CONCURRENCY,
+  MIN_AGGREGATION_SPLIT_MAX_EVENTS,
   MAX_PER_SOURCE_ITEM_LIMIT,
   MIN_PER_SOURCE_ITEM_LIMIT,
 } from "@/lib/tasks/scheduler";
@@ -22,6 +24,12 @@ const scheduleUpdateSchema = z.object({
     .min(MIN_FULL_TEXT_FETCH_THRESHOLD)
     .max(MAX_FULL_TEXT_FETCH_THRESHOLD),
   perSourceItemLimit: z.number().int().min(MIN_PER_SOURCE_ITEM_LIMIT).max(MAX_PER_SOURCE_ITEM_LIMIT),
+  aggregationSplitMaxEvents: z
+    .number()
+    .int()
+    .min(MIN_AGGREGATION_SPLIT_MAX_EVENTS)
+    .max(MAX_AGGREGATION_SPLIT_MAX_EVENTS)
+    .optional(),
   processingStartAt: z.string().trim().nullable().optional().default(null),
 });
 

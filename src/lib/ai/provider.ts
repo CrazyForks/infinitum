@@ -73,8 +73,10 @@ export type ParsedEventSignature = {
 };
 
 export type ParsedEvent = ParsedEventSignature & {
+  title: string | null;
   oneLiner: string;
   qualityScore: number;
+  sourceUrl: string | null;
 };
 
 export type ParsedAggregation = {
@@ -175,11 +177,15 @@ type PromptOverrides = {
   dailyReportRefinementGenerate?: PromptRuntimeConfig;
 };
 
+export type AiProviderOptions = {
+  aggregationSplitMaxEvents?: number;
+};
+
 type CompletionResponseFormat = {
   type: "json_object";
 };
 
-const MAX_PARSED_AGGREGATION_EVENTS = 20;
+const DEFAULT_PARSED_AGGREGATION_MAX_EVENTS = 20;
 
 type ModelApiCircuitState = {
   failures: number[];
@@ -266,8 +272,8 @@ function getClientForConfig(
   return client;
 }
 
-function renderPromptTemplate(template: string, values: Record<string, string>): string {
-  return template.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, key: string) => values[key] ?? "");
+function renderPromptTemplate(template: string, values: Record<string, string | number>): string {
+  return template.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, key: string) => String(values[key] ?? ""));
 }
 
 function getFallbackEnrichment(
@@ -356,7 +362,17 @@ function parseSummaryOutput(rawContent: string, fallback: string): string {
   return normalized || fallback;
 }
 
-function parseAggregationOutput(rawContent: string, fallback: ParsedAggregation): ParsedAggregation {
+function normalizeAggregationSplitMaxEvents(value: number | null | undefined) {
+  return typeof value === "number" && Number.isInteger(value) && value > 0
+    ? value
+    : DEFAULT_PARSED_AGGREGATION_MAX_EVENTS;
+}
+
+function parseAggregationOutput(
+  rawContent: string,
+  fallback: ParsedAggregation,
+  maxEvents = DEFAULT_PARSED_AGGREGATION_MAX_EVENTS,
+): ParsedAggregation {
   const normalized = stripCodeFence(rawContent);
 
   if (!normalized) {
@@ -373,7 +389,7 @@ function parseAggregationOutput(rawContent: string, fallback: ParsedAggregation)
       ? parsed.events
           .map((event) => normalizeParsedEvent(event))
           .filter((event): event is ParsedEvent => event !== null)
-          .slice(0, MAX_PARSED_AGGREGATION_EVENTS)
+          .slice(0, maxEvents)
       : [];
 
     const mainEvent = normalizeParsedEventSignature(parsed.mainEvent);
@@ -408,6 +424,7 @@ function normalizeParsedEvent(raw: Partial<ParsedEvent>): ParsedEvent | null {
   }
 
   const signature = normalizeParsedEventSignature(raw);
+  const title = typeof raw.title === "string" ? raw.title.trim().slice(0, 120) || null : null;
   const oneLiner = typeof raw.oneLiner === "string" ? raw.oneLiner.trim() : "";
 
   if (!oneLiner) {
@@ -421,8 +438,10 @@ function normalizeParsedEvent(raw: Partial<ParsedEvent>): ParsedEvent | null {
       eventAction: null,
       eventObject: null,
       eventDate: null,
+      title,
       oneLiner,
       qualityScore: normalizeScore(raw.qualityScore, 50),
+      sourceUrl: normalizeSourceUrl(raw.sourceUrl ?? null),
     };
   }
 
@@ -432,8 +451,10 @@ function normalizeParsedEvent(raw: Partial<ParsedEvent>): ParsedEvent | null {
     eventAction: signature.eventAction,
     eventObject: signature.eventObject,
     eventDate: signature.eventDate,
+    title,
     oneLiner,
     qualityScore: normalizeScore(raw.qualityScore, 50),
+    sourceUrl: normalizeSourceUrl(raw.sourceUrl ?? null),
   };
 }
 
@@ -560,6 +581,25 @@ function normalizeEventType(value: string | null | undefined): AiEventSignature[
 function normalizeEventDate(value: string | null | undefined): string | null {
   const trimmed = value?.trim() ?? "";
   return /^\d{4}-\d{2}-\d{2}$/.test(trimmed) ? trimmed : null;
+}
+
+function normalizeSourceUrl(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return null;
+    }
+    return parsed.toString();
+  } catch {
+    return null;
+  }
 }
 
 function buildEventSignatureFromParsed(
@@ -979,8 +1019,10 @@ export function createAiProvider(
   config: RuntimeConfig["modelApi"],
   promptOverrides?: PromptOverrides | null,
   clientOverrideArg?: OpenAICompatibleClient | null,
+  options?: AiProviderOptions,
 ): AiProvider {
   const globalClient = clientOverrideArg ?? getClient(config);
+  const aggregationSplitMaxEvents = normalizeAggregationSplitMaxEvents(options?.aggregationSplitMaxEvents);
   const clientCache = new Map<string, OpenAICompatibleClient | null>();
   const itemSummaryConfig = resolvePromptConfig(
     DEFAULT_ITEM_SUMMARY_PROMPT,
@@ -1144,6 +1186,7 @@ export function createAiProvider(
       const userContent = renderPromptTemplate(itemAggregationConfig.promptTemplate, {
         title: metadata.title,
         sourceName: metadata.sourceName ?? "未知来源",
+        maxEvents: aggregationSplitMaxEvents,
         inputText,
       });
       const output = await completeTextWithCircuitBreaker(
@@ -1158,7 +1201,7 @@ export function createAiProvider(
         return fallback;
       }
 
-      return parseAggregationOutput(output, fallback);
+      return parseAggregationOutput(output, fallback, aggregationSplitMaxEvents);
     },
     async enrichContent(inputText, metadata) {
       const fallback = getFallbackEnrichment(metadata);

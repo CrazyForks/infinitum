@@ -60,6 +60,7 @@ export type AdminSettingsSnapshot = {
     sourceConcurrency: number;
     fullTextFetchThreshold: number;
     perSourceItemLimit: number;
+    aggregationSplitMaxEvents: number;
     dailyReportCandidateLimit: number;
     dailyReportOffsetDays: number;
     dailyReportAutoPublish: boolean;
@@ -82,6 +83,7 @@ export type AdminSettingsSnapshot = {
     sourceConcurrency: number;
     fullTextFetchThreshold: number;
     perSourceItemLimit: number;
+    aggregationSplitMaxEvents: number;
     dailyReportCandidateLimit: number;
     dailyReportOffsetDays: number;
     dailyReportAutoPublish: boolean;

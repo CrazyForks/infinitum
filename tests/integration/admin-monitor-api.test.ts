@@ -172,6 +172,7 @@ describe("/api/admin/monitor", () => {
       cronExpression: "*/15 * * * *",
       sourceConcurrency: 4,
       fullTextFetchThreshold: 120,
+      aggregationSplitMaxEvents: 12,
       timezone: "Asia/Shanghai",
       lastHeartbeatAt: null,
       lastRunStartedAt: null,
@@ -190,6 +191,7 @@ describe("/api/admin/monitor", () => {
           sourceConcurrency: 4,
           fullTextFetchThreshold: 120,
           perSourceItemLimit: 50,
+          aggregationSplitMaxEvents: 12,
         }),
         headers: { "content-type": "application/json" },
       }),
@@ -203,12 +205,14 @@ describe("/api/admin/monitor", () => {
       sourceConcurrency: 4,
       fullTextFetchThreshold: 120,
       perSourceItemLimit: 50,
+      aggregationSplitMaxEvents: 12,
       processingStartAt: null,
     });
     expect(json.schedule.enabled).toBe(false);
     expect(json.schedule.cronExpression).toBe("*/15 * * * *");
     expect(json.schedule.sourceConcurrency).toBe(4);
     expect(json.schedule.fullTextFetchThreshold).toBe(120);
+    expect(json.schedule.aggregationSplitMaxEvents).toBe(12);
   });
 
   it("requests cancellation for a running task", async () => {

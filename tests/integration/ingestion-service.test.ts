@@ -55,7 +55,6 @@ function buildAiProviderMock(
 
 describe("runIngestion", () => {
   beforeEach(async () => {
-    await prisma.itemParsedEvent.deleteMany();
     await prisma.item.deleteMany();
     await prisma.fetchRun.deleteMany();
     await prisma.backgroundTaskRun.deleteMany();
@@ -371,11 +370,12 @@ describe("runIngestion", () => {
         ],
       }),
     };
+    const articleFetcher = vi.fn().mockResolvedValue("Full article fetched even when AI parsing is disabled.");
 
     const result = await runIngestion({
       trigger: "manual",
       parser,
-      articleFetcher: vi.fn(),
+      articleFetcher,
       aiProvider: buildAiProviderMock(),
       sourceConfigs: [
         {
@@ -393,7 +393,9 @@ describe("runIngestion", () => {
     const storedItem = await prisma.item.findFirstOrThrow();
 
     expect(result.status).toBe("succeeded");
+    expect(articleFetcher).toHaveBeenCalledWith("https://blog.google/products-and-platforms/products/search/spring-fashion-shopping-tips/");
     expect(storedItem.author).toBe("Megan Stoner");
+    expect(storedItem.fullText).toBe("Full article fetched even when AI parsing is disabled.");
   });
 
   it("updates the existing item when duplicate feed entries race on the same url hash", async () => {
@@ -2540,7 +2542,9 @@ describe("runIngestion", () => {
             isoDate: url.includes("source-b") ? "2026-04-10T09:05:00.000Z" : "2026-04-10T09:00:00.000Z",
             content: url.includes("source-b")
               ? "A market roundup covers the same OpenAI Toolkit launch and Anthropic Console update from another source."
-              : "A developer roundup covers OpenAI Toolkit launch and Anthropic Console update.",
+              : `A developer roundup covers
+                <a href="https://tracking.tldrnewsletter.com/CL0/https:%2F%2Fopenai.com%2Ftoolkit%3Futm_source=tldrdev/1/test">OpenAI Toolkit launch</a>
+                and Anthropic Console update.`,
           },
         ],
       })),
@@ -2560,8 +2564,10 @@ describe("runIngestion", () => {
           eventAction: "发布",
           eventObject: "Toolkit",
           eventDate: "2026-04-10",
+          title: "OpenAI 推出 Toolkit",
           oneLiner: "OpenAI 发布 Toolkit",
           qualityScore: 92,
+          sourceUrl: null,
         },
         {
           eventType: "update",
@@ -2569,8 +2575,10 @@ describe("runIngestion", () => {
           eventAction: "更新",
           eventObject: "Console",
           eventDate: "2026-04-10",
+          title: "Anthropic 更新 Console",
           oneLiner: "Anthropic 更新 Console",
           qualityScore: 84,
+          sourceUrl: "https://source.example.com/",
         },
       ],
     });
@@ -2589,6 +2597,7 @@ describe("runIngestion", () => {
       summarizeCluster: vi.fn().mockResolvedValue("聚合事件摘要"),
       matchClusterCandidate: vi.fn().mockResolvedValue(null),
     });
+    const createItemSpy = vi.spyOn(prisma.item, "create");
 
     const taskRun = await startIngestionTask({ triggerType: "manual" });
     await runIngestionTask(taskRun, {
@@ -2618,13 +2627,12 @@ describe("runIngestion", () => {
       now: new Date("2026-04-10T10:00:00.000Z"),
     });
 
+    // Parents (isAggregation=true) + 2 child items per parent = 2 + 4 = 6 rows.
     const items = await prisma.item.findMany({
-      orderBy: { originalUrl: "asc" },
-      include: { parsedEvents: { orderBy: { eventIndex: "asc" } } },
+      orderBy: [{ isAggregation: "desc" }, { originalUrl: "asc" }],
     });
-    const parsedEvents = await prisma.itemParsedEvent.findMany({
-      orderBy: [{ itemId: "asc" }, { eventIndex: "asc" }],
-    });
+    const parents = items.filter((item) => item.isAggregation);
+    const children = items.filter((item) => !item.isAggregation);
     const storedTaskRun = await prisma.backgroundTaskRun.findUniqueOrThrow({
       where: { id: taskRun.id },
     });
@@ -2632,19 +2640,26 @@ describe("runIngestion", () => {
       storedTaskRun.taskTimelineJson ?? "[]",
     ) as Array<{ key: string; metrics: Array<{ label: string; value: number }> }>;
 
-    expect(items).toHaveLength(2);
-    expect(items.every((item) => item.isAggregation)).toBe(true);
-    expect(items.every((item) => item.aggregationParseStatus === "parsed")).toBe(true);
-    expect(items.every((item) => item.clusterId === null)).toBe(true);
-    expect(items.every((item) => item.parsedEvents.length === 2)).toBe(true);
-    expect(parsedEvents).toHaveLength(4);
-    expect(new Set(parsedEvents.map((event) => event.itemId)).size).toBe(2);
-    expect(new Set(parsedEvents.map((event) => event.fingerprint)).size).toBe(2);
+    expect(parents).toHaveLength(2);
+    expect(parents.every((item) => item.aggregationParseStatus === "parsed")).toBe(true);
+    expect(parents.every((item) => item.clusterId === null)).toBe(true);
+    expect(children).toHaveLength(4);
+    expect(children.every((child) => child.parentItemId !== null)).toBe(true);
+    expect(new Set(children.map((child) => child.parentItemId)).size).toBe(2);
+    expect(children.some((child) => child.originalTitle === "OpenAI 推出 Toolkit")).toBe(true);
+    expect(children.some((child) => child.originalUrl === "https://source-a.example.com/roundup")).toBe(true);
+    // Each parent produced 2 children sharing the same fingerprint namespace.
+    expect(children.every((child) => Boolean(child.summaryText && child.summaryText.length > 0))).toBe(true);
+    expect(children.every((child) => child.status === "processed")).toBe(true);
     expect(taskTimeline.find((node) => node.key === "item_aggregation")?.metrics).toEqual([
       { label: "拆分成功", value: 2 },
       { label: "拆分失败", value: 0 },
       { label: "子事件", value: 4 },
     ]);
+    expect(parseAggregation.mock.calls.map((call) => call[0]).join("\n")).toContain(
+      "OpenAI Toolkit launch (link: https://openai.com/toolkit?utm_source=tldrdev)",
+    );
+    expect(createItemSpy).toHaveBeenCalledTimes(2);
     expect(aiProvider.enrichContent).not.toHaveBeenCalled();
     expect(aiProvider.summarizeCluster).not.toHaveBeenCalled();
     expect(aiProvider.matchClusterCandidate).not.toHaveBeenCalled();
@@ -2704,9 +2719,10 @@ describe("runIngestion", () => {
     const item = await prisma.item.findFirstOrThrow();
 
     expect(enrichContent).toHaveBeenCalledOnce();
-    expect(item.isAggregation).toBe(true);
+    // Empty parse failure degrades the parent to a regular item.
+    expect(item.isAggregation).toBe(false);
     expect(item.aggregationParseStatus).toBe("failed");
     expect(item.analysisStatus).toBe("succeeded");
-    expect(await prisma.itemParsedEvent.count()).toBe(0);
+    expect(await prisma.item.count({ where: { parentItemId: item.id } })).toBe(0);
   });
 });

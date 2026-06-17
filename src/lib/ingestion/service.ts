@@ -148,8 +148,12 @@ async function resolveRunOptions(options?: Partial<RunIngestionOptions>): Promis
               clusterSummary: runtimeConfig.selectedPromptConfigs.clusterSummary,
               clusterMatch: runtimeConfig.selectedPromptConfigs.clusterMatch,
               clusterMerge: runtimeConfig.selectedPromptConfigs.clusterMerge,
-            }
+          }
           : undefined,
+        undefined,
+        {
+          aggregationSplitMaxEvents: runtimeConfig?.ingestion.aggregationSplitMaxEvents,
+        },
       ),
     sourceConfigs: options?.sourceConfigs ?? runtimeConfig?.rssSources ?? [],
     blacklist: options?.blacklist ?? runtimeConfig?.blacklistKeywords ?? [],

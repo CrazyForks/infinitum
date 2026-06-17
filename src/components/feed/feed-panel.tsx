@@ -1970,6 +1970,17 @@ export function FeedPanel({
                                 <GroupBadge group={clusterItem.group} />
                                 <span className={neutralBadgeClassName}>{formatScore(clusterItem.score)}</span>
                                 <span className={metaTextClassName}>{formatMetaLabel("来源", clusterItem.sourceName)}</span>
+                                {isAdmin && clusterItem.aggregationParent ? (
+                                  <a
+                                    className={`${metaTextClassName} underline decoration-transparent underline-offset-4 hover:decoration-[var(--accent)]`}
+                                    href={clusterItem.aggregationParent.originalUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    title={`拆条来源：${clusterItem.aggregationParent.title}`}
+                                  >
+                                    {formatMetaLabel("拆条来源", clusterItem.aggregationParent.title)}
+                                  </a>
+                                ) : null}
                                 {getVisibleAuthorLabel(clusterItem.author) ? (
                                   <span className={`${metaTextClassName} min-w-0 truncate`}>
                                     {formatMetaLabel("作者", getVisibleAuthorLabel(clusterItem.author) ?? "")}
@@ -2096,6 +2107,17 @@ export function FeedPanel({
                       <GroupBadge group={entry.group} />
                       <span className={neutralBadgeClassName}>{formatScore(entry.score)}</span>
                       <span className={metaTextClassName}>{formatMetaLabel("来源", entry.sourceName)}</span>
+                      {isAdmin && entry.aggregationParent ? (
+                        <a
+                          className={`${metaTextClassName} underline decoration-transparent underline-offset-4 hover:decoration-[var(--accent)]`}
+                          href={entry.aggregationParent.originalUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          title={`拆条来源：${entry.aggregationParent.title}`}
+                        >
+                          {formatMetaLabel("拆条来源", entry.aggregationParent.title)}
+                        </a>
+                      ) : null}
                       {getVisibleAuthorLabel(entry.author) ? (
                         <span className={`${metaTextClassName} min-w-0 truncate`}>
                           {formatMetaLabel("作者", getVisibleAuthorLabel(entry.author) ?? "")}

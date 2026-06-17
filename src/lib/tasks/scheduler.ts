@@ -7,6 +7,7 @@ export const DEFAULT_SCHEDULE_CRON_EXPRESSION = "0 * * * *";
 export const DEFAULT_SOURCE_CONCURRENCY = 2;
 export const DEFAULT_FULL_TEXT_FETCH_THRESHOLD = 80;
 export const DEFAULT_PER_SOURCE_ITEM_LIMIT = 20;
+export const DEFAULT_AGGREGATION_SPLIT_MAX_EVENTS = 20;
 export const DEFAULT_DAILY_REPORT_CANDIDATE_LIMIT = 120;
 export const DEFAULT_DAILY_REPORT_OFFSET_DAYS = 0;
 export const MIN_SOURCE_CONCURRENCY = 1;
@@ -15,6 +16,8 @@ export const MIN_FULL_TEXT_FETCH_THRESHOLD = 0;
 export const MAX_FULL_TEXT_FETCH_THRESHOLD = 5000;
 export const MIN_PER_SOURCE_ITEM_LIMIT = 1;
 export const MAX_PER_SOURCE_ITEM_LIMIT = 200;
+export const MIN_AGGREGATION_SPLIT_MAX_EVENTS = 1;
+export const MAX_AGGREGATION_SPLIT_MAX_EVENTS = 50;
 export const MIN_DAILY_REPORT_CANDIDATE_LIMIT = 2;
 export const MAX_DAILY_REPORT_CANDIDATE_LIMIT = 500;
 export const MIN_DAILY_REPORT_OFFSET_DAYS = 0;
@@ -83,12 +86,26 @@ export function normalizeScheduleInput(input: ScheduleUpdateInput): ScheduleUpda
     );
   }
 
+  const aggregationSplitMaxEvents =
+    input.aggregationSplitMaxEvents ?? DEFAULT_AGGREGATION_SPLIT_MAX_EVENTS;
+
+  if (
+    !Number.isInteger(aggregationSplitMaxEvents) ||
+    aggregationSplitMaxEvents < MIN_AGGREGATION_SPLIT_MAX_EVENTS ||
+    aggregationSplitMaxEvents > MAX_AGGREGATION_SPLIT_MAX_EVENTS
+  ) {
+    throw new Error(
+      `Aggregation split max events must be an integer between ${MIN_AGGREGATION_SPLIT_MAX_EVENTS} and ${MAX_AGGREGATION_SPLIT_MAX_EVENTS}.`,
+    );
+  }
+
   return {
     enabled: input.enabled,
     cronExpression,
     sourceConcurrency: input.sourceConcurrency,
     fullTextFetchThreshold: input.fullTextFetchThreshold,
     perSourceItemLimit: input.perSourceItemLimit,
+    aggregationSplitMaxEvents,
     processingStartAt: normalizeProcessingStartAt(input.processingStartAt ?? null),
   };
 }

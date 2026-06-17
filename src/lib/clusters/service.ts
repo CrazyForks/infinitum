@@ -35,21 +35,16 @@ import {
 import {
   type ClusterAssignmentCandidate,
   createContentCluster,
-  createParsedEvents,
   deleteCluster,
-  deleteParsedEventsForItem,
   findActiveClusterByFingerprint,
   findActiveClusterByTitle,
-  getClusterParsedEvents,
   findRecentActiveClusterCandidates,
   getClusterWithItems,
   setItemCluster,
-  setParsedEventCluster,
   updateClusterStatus,
   updateClusterSummary,
 } from "@/lib/clusters/repository";
-import { normalizeEventSignatureForStorage,
-  normalizeStoredEventType } from "@/lib/clusters/normalization";
+import { normalizeEventSignatureForStorage } from "@/lib/clusters/normalization";
 import { prisma } from "@/lib/db";
 import { invalidateFeedCache } from "@/lib/feed/cache";
 import { getDisplayTitle } from "@/lib/feed/presentation";
@@ -74,35 +69,6 @@ export type ClusterRecomputeResult = {
   summaryAttempted: boolean;
   summarySucceeded: boolean;
 };
-
-type ClusterParsedEvent = Awaited<ReturnType<typeof getClusterParsedEvents>>[number];
-
-function buildParsedEventClusterStats(parsedEvents: ClusterParsedEvent[]) {
-  if (parsedEvents.length === 0) {
-    return null;
-  }
-
-  const primaryEvent = parsedEvents[0]!;
-  const eventSignature = normalizeEventSignatureForStorage({
-    eventType: normalizeStoredEventType(primaryEvent.eventType),
-    eventSubject: primaryEvent.eventSubject,
-    eventAction: primaryEvent.eventAction,
-    eventObject: primaryEvent.eventObject,
-    eventDate: primaryEvent.eventDate,
-  });
-
-  return {
-    score: Math.max(...parsedEvents.map((event) => event.qualityScore)),
-    itemCount: parsedEvents.length,
-    latestPublishedAt: primaryEvent.item.publishedAt,
-    eventType: eventSignature?.eventType ?? null,
-    eventSubject: eventSignature?.eventSubject ?? null,
-    eventAction: eventSignature?.eventAction ?? null,
-    eventObject: eventSignature?.eventObject ?? null,
-    eventDate: eventSignature?.eventDate ?? null,
-  };
-}
-
 
 async function findClusterForItem(
   item: ItemWithSource,
@@ -402,137 +368,6 @@ export async function assignItemToCluster(
   });
 }
 
-export async function assignParsedEventToCluster(
-  parsedEventId: string,
-  options: {
-    eventSignature: AiEventSignature;
-    latestPublishedAt: Date;
-    qualityScore?: number;
-  },
-): Promise<{
-  clusterId: string;
-  fingerprint: string;
-  createdNewCluster: boolean;
-}> {
-  const resolvedEventSignature = normalizeEventSignatureForStorage(options.eventSignature);
-  const fingerprintSeed = buildClusterFingerprintSeed({ eventSignature: resolvedEventSignature });
-  const fingerprint = fingerprintSeed ? normalizeFingerprint(fingerprintSeed) : "";
-  const since = new Date(options.latestPublishedAt.getTime() - CLUSTER_LOOKBACK_MS);
-  const until = new Date(options.latestPublishedAt.getTime() + CLUSTER_LOOKBACK_MS);
-
-  if (!fingerprint || !hasCompleteClusterMatchSignature(resolvedEventSignature)) {
-    return { clusterId: "", fingerprint, createdNewCluster: false };
-  }
-
-  const existing = await findActiveClusterByFingerprint(fingerprint, since, until);
-  let cluster: { id: string };
-  let createdNewCluster = false;
-
-  if (existing) {
-    cluster = existing;
-  } else {
-    cluster = await createContentCluster({
-      fingerprint,
-      title: buildEventDisplayTitle(resolvedEventSignature) || `聚合事件 ${fingerprint.slice(0, 16)}`,
-      summary: "聚合内容拆出的子事件，等待汇总。",
-      score: options.qualityScore ?? 50,
-      itemCount: 1,
-      latestPublishedAt: options.latestPublishedAt,
-      eventType: resolvedEventSignature?.eventType ?? null,
-      eventSubject: resolvedEventSignature?.eventSubject ?? null,
-      eventAction: resolvedEventSignature?.eventAction ?? null,
-      eventObject: resolvedEventSignature?.eventObject ?? null,
-      eventDate: resolvedEventSignature?.eventDate ?? null,
-    });
-    createdNewCluster = true;
-  }
-
-  await setParsedEventCluster(parsedEventId, cluster.id);
-
-  return { clusterId: cluster.id, fingerprint, createdNewCluster };
-}
-
-export async function persistParsedAggregationForItem(
-  item: { id: string; publishedAt: Date },
-  parsedAggregation: {
-    mainEvent: AiEventSignature | null;
-    events: Array<AiEventSignature & { oneLiner: string; qualityScore: number }>;
-  },
-): Promise<{ mainEvent: AiEventSignature | null; assignedEvents: number; createdClusters: number }> {
-  if (!item.id) {
-    return { mainEvent: parsedAggregation.mainEvent, assignedEvents: 0, createdClusters: 0 };
-  }
-
-  await deleteParsedEventsForItem(item.id);
-
-  if (parsedAggregation.events.length === 0) {
-    return { mainEvent: parsedAggregation.mainEvent, assignedEvents: 0, createdClusters: 0 };
-  }
-
-  const eventsToPersist = parsedAggregation.events.map((event, index) => ({
-    itemId: item.id,
-    eventIndex: index,
-    eventType: event.eventType ?? null,
-    eventSubject: event.eventSubject ?? null,
-    eventAction: event.eventAction ?? null,
-    eventObject: event.eventObject ?? null,
-    eventDate: event.eventDate ?? null,
-    oneLiner: event.oneLiner,
-    qualityScore: event.qualityScore,
-    fingerprint: buildParsedEventFingerprint(event),
-  }));
-
-  const created = await createParsedEvents(eventsToPersist);
-
-  let assignedEvents = 0;
-  let createdClusters = 0;
-  for (const parsedEvent of created) {
-    const signature: AiEventSignature = {
-      eventType: normalizeStoredEventType(parsedEvent.eventType),
-      eventSubject: parsedEvent.eventSubject,
-      eventAction: parsedEvent.eventAction,
-      eventObject: parsedEvent.eventObject,
-      eventDate: parsedEvent.eventDate,
-    };
-    const result = await assignParsedEventToCluster(parsedEvent.id, {
-      eventSignature: signature,
-      latestPublishedAt: item.publishedAt,
-      qualityScore: parsedEvent.qualityScore,
-    });
-    if (result.clusterId) {
-      assignedEvents += 1;
-      if (result.createdNewCluster) {
-        createdClusters += 1;
-      }
-    }
-  }
-
-  return {
-    mainEvent: parsedAggregation.mainEvent,
-    assignedEvents,
-    createdClusters,
-  };
-}
-
-export function buildParsedEventFingerprint(event: {
-  eventType?: string | null;
-  eventSubject?: string | null;
-  eventAction?: string | null;
-  eventObject?: string | null;
-  eventDate?: string | null;
-}): string {
-  return [
-    event.eventType ?? "",
-    event.eventSubject ?? "",
-    event.eventAction ?? "",
-    event.eventObject ?? "",
-    event.eventDate ?? "",
-  ]
-    .map((part) => (part ?? "").toLowerCase().replace(/\s+/g, " ").trim())
-    .filter(Boolean)
-    .join("|");
-}
-
 export async function recomputeCluster(
   clusterId: string,
   aiProvider?: AiProvider,
@@ -551,38 +386,6 @@ export async function recomputeCluster(
   }
 
   if (cluster.items.length === 0) {
-    const parsedEvents = await getClusterParsedEvents(clusterId);
-    const parsedEventStats = buildParsedEventClusterStats(parsedEvents);
-
-    if (parsedEventStats) {
-      const shouldSkipParsedEventUpdate =
-        cluster.score === parsedEventStats.score &&
-        cluster.itemCount === parsedEventStats.itemCount &&
-        cluster.latestPublishedAt.getTime() === parsedEventStats.latestPublishedAt.getTime() &&
-        cluster.eventType === parsedEventStats.eventType &&
-        cluster.eventSubject === parsedEventStats.eventSubject &&
-        cluster.eventAction === parsedEventStats.eventAction &&
-        cluster.eventObject === parsedEventStats.eventObject &&
-        cluster.eventDate === parsedEventStats.eventDate;
-
-      if (!shouldSkipParsedEventUpdate) {
-        await updateClusterSummary(clusterId, {
-          title: cluster.title,
-          summary: cluster.summary,
-          summaryInputHash: cluster.summaryInputHash,
-          ...parsedEventStats,
-        });
-      }
-
-      return {
-        clusterId,
-        deleted: false,
-        updated: !shouldSkipParsedEventUpdate,
-        summaryAttempted: false,
-        summarySucceeded: false,
-      } satisfies ClusterRecomputeResult;
-    }
-
     await deleteCluster(clusterId);
     return {
       clusterId,
@@ -661,15 +464,6 @@ async function refreshClusterStats(clusterId: string) {
   }
 
   if (cluster.items.length === 0) {
-    const parsedEventStats = buildParsedEventClusterStats(await getClusterParsedEvents(clusterId));
-
-    if (parsedEventStats) {
-      return prisma.contentCluster.update({
-        where: { id: clusterId },
-        data: parsedEventStats,
-      });
-    }
-
     await deleteCluster(clusterId);
     return null;
   }
@@ -1005,6 +799,8 @@ export async function executeClusterSummaryTask(
           itemAggregation: runtimeConfig!.selectedPromptConfigs?.itemAggregation,
           clusterSummary: runtimeConfig!.selectedPromptConfigs?.clusterSummary,
           clusterMatch: runtimeConfig!.selectedPromptConfigs?.clusterMatch,
+        }, undefined, {
+          aggregationSplitMaxEvents: runtimeConfig!.ingestion.aggregationSplitMaxEvents,
         }),
       {
         summarizeClusterEstimated: false,
@@ -1130,23 +926,14 @@ export async function executeClusterMerge(
 
   // Refresh itemCount for clusters in the lookback window.
   // Newly created clusters only get fully refreshed during cluster_finalize,
-  // which runs AFTER merge. Include parsed aggregation events here as well so
-  // event-only clusters do not get reset to 0 before later feed/report reads.
+  // which runs AFTER merge.
   await prisma.$executeRaw`
     UPDATE content_clusters
     SET itemCount = (
-      SELECT
-        (
-          SELECT COUNT(*) FROM items
-          WHERE items.clusterId = content_clusters.id
-          AND items.status = 'processed'
-          AND items.moderationStatus IN ('allowed', 'restored')
-        )
-        +
-        (
-          SELECT COUNT(*) FROM item_parsed_events
-          WHERE item_parsed_events.clusterId = content_clusters.id
-        )
+      SELECT COUNT(*) FROM items
+      WHERE items.clusterId = content_clusters.id
+      AND items.status = 'processed'
+      AND items.moderationStatus IN ('allowed', 'restored')
     )
     WHERE status = 'active'
     AND latestPublishedAt >= ${lookbackSince.getTime()}

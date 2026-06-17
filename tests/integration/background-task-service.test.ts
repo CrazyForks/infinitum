@@ -441,12 +441,14 @@ describe("background task persistence", () => {
       sourceConcurrency: 4,
       fullTextFetchThreshold: 120,
       perSourceItemLimit: 20,
+      aggregationSplitMaxEvents: 12,
     });
 
     expect(updated.enabled).toBe(false);
     expect(updated.cronExpression).toBe("*/15 * * * *");
     expect(updated.sourceConcurrency).toBe(4);
     expect(updated.fullTextFetchThreshold).toBe(120);
+    expect(updated.aggregationSplitMaxEvents).toBe(12);
   });
 
   it("builds a monitor snapshot with schedule and task lists", async () => {

@@ -40,6 +40,7 @@ describe("AdminMonitorPanel", () => {
       sourceConcurrency: 2,
       fullTextFetchThreshold: 80,
       perSourceItemLimit: 20,
+      aggregationSplitMaxEvents: 20,
       dailyReportCandidateLimit: 120,
       dailyReportOffsetDays: 0,
       dailyReportAutoPublish: false,
@@ -110,6 +111,7 @@ describe("AdminMonitorPanel", () => {
               cronExpression: "*/15 * * * *",
               sourceConcurrency: 4,
               fullTextFetchThreshold: 120,
+              aggregationSplitMaxEvents: 12,
             },
           }),
         ),
@@ -125,6 +127,8 @@ describe("AdminMonitorPanel", () => {
     await user.type(screen.getByLabelText("源抓取并发"), "4");
     await user.clear(screen.getByLabelText("正文补抓阈值"));
     await user.type(screen.getByLabelText("正文补抓阈值"), "120");
+    await user.clear(screen.getByLabelText("单条聚合拆分上限"));
+    await user.type(screen.getByLabelText("单条聚合拆分上限"), "12");
     await user.click(screen.getByLabelText("启用默认抓取任务"));
     await user.click(screen.getByRole("button", { name: "保存调度设置" }));
 
@@ -140,6 +144,7 @@ describe("AdminMonitorPanel", () => {
           sourceConcurrency: 4,
           fullTextFetchThreshold: 120,
           perSourceItemLimit: 20,
+          aggregationSplitMaxEvents: 12,
           processingStartAt: null,
         }),
       });

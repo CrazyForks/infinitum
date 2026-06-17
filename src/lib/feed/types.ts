@@ -45,6 +45,13 @@ export type FeedSingleEntryDTO = {
   downvotes: number;
   userVote: "upvote" | "downvote" | null;
   canRegenerateTranslation?: boolean;
+  aggregationParent?: FeedAggregationParentDTO | null;
+};
+
+export type FeedAggregationParentDTO = {
+  id: string;
+  title: string;
+  originalUrl: string;
 };
 
 export type FeedClusterPreviewItemDTO = {
@@ -59,6 +66,7 @@ export type FeedClusterPreviewItemDTO = {
   group?: GroupBadge | null;
   score: number;
   canRegenerateTranslation?: boolean;
+  aggregationParent?: FeedAggregationParentDTO | null;
 };
 
 export type FeedClusterEntryDTO = {
@@ -109,6 +117,47 @@ export type ClusterDTO = {
   latestItemUpdatedAt?: string;
   status: "active" | "hidden";
   items: FeedClusterPreviewItemDTO[];
+};
+
+export type AggregationSplitChildDTO = {
+  id: string;
+  title: string;
+  originalUrl: string;
+  publishedAt: string;
+  sourceName: string;
+  summary: string;
+  status: ItemStatus;
+  moderationStatus: ReviewItemDTO["moderationStatus"];
+  filterReason: string | null;
+  qualityScore: number;
+  eventType: string | null;
+  eventSubject: string | null;
+  eventAction: string | null;
+  eventObject: string | null;
+  eventDate: string | null;
+  clusterId: string | null;
+  clusterTitle: string | null;
+  usesParentUrl: boolean;
+};
+
+export type AggregationSplitParentDTO = {
+  id: string;
+  title: string;
+  originalUrl: string;
+  publishedAt: string;
+  createdAt: string;
+  aggregationCheckedAt: string | null;
+  sourceName: string;
+  summary: string;
+  status: ItemStatus;
+  moderationStatus: ReviewItemDTO["moderationStatus"];
+  aggregationParseStatus: string | null;
+  errorMessage: string | null;
+  childCount: number;
+  eventUrlCount: number;
+  parentUrlCount: number;
+  qualityScore: number;
+  children?: AggregationSplitChildDTO[];
 };
 
 export type IngestionTrigger = "scheduled" | "manual";

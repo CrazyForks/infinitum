@@ -102,6 +102,10 @@ function ftsTableExists(tableName) {
   return result === "1";
 }
 
+function tableExists(tableName) {
+  return ftsTableExists(tableName);
+}
+
 function indexStatsExist(indexName) {
   if (!ftsTableExists("sqlite_stat1")) {
     return false;
@@ -116,6 +120,33 @@ function indexStatsExist(indexName) {
   ).trim();
 
   return Number(result) > 0;
+}
+
+function migrateItemParsedEventsToChildItems() {
+  const scriptPath = path.resolve(root, "scripts", "migrate-aggregation-split.mjs");
+  execFileSync(
+    process.execPath,
+    [scriptPath],
+    {
+      cwd: root,
+      env: { ...process.env, DATABASE_URL: `file:${dbPath}` },
+      encoding: "utf8",
+      stdio: ["ignore", "inherit", "inherit"],
+    },
+  );
+}
+
+function applyPreSchemaMigrations() {
+  // Columns must be added BEFORE the schema SQL runs, because the schema
+  // defines indexes that reference new columns. Skip when items does not
+  // exist yet (fresh databases let loadSchemaSql create everything in one
+  // shot; legacy databases get the column first, then the index from the
+  // schema SQL).
+  if (tableExists("items") && !columnExists("items", "parentItemId")) {
+    runSqlite([dbPath], {
+      input: `ALTER TABLE "items" ADD COLUMN "parentItemId" TEXT;\n`,
+    });
+  }
 }
 
 function applyIncrementalMigrations() {
@@ -217,6 +248,12 @@ function applyIncrementalMigrations() {
   if (!columnExists("task_schedules", "cleanupRetentionDays")) {
     runSqlite([dbPath], {
       input: `ALTER TABLE "task_schedules" ADD COLUMN "cleanupRetentionDays" INTEGER NOT NULL DEFAULT 365;\n`,
+    });
+  }
+
+  if (!columnExists("task_schedules", "aggregationSplitMaxEvents")) {
+    runSqlite([dbPath], {
+      input: `ALTER TABLE "task_schedules" ADD COLUMN "aggregationSplitMaxEvents" INTEGER NOT NULL DEFAULT 20;\n`,
     });
   }
 
@@ -326,32 +363,20 @@ function applyIncrementalMigrations() {
     });
   }
 
-  if (!ftsTableExists("item_parsed_events")) {
+  // Migrate existing item_parsed_events rows into items as child rows.
+  // Idempotent: runs only if the legacy table still exists. We re-use the
+  // parsed event id so a partial retry re-upserts the same child item.
+  if (tableExists("item_parsed_events")) {
+    migrateItemParsedEventsToChildItems();
+
     runSqlite([dbPath], {
       input: [
-        `CREATE TABLE IF NOT EXISTS "item_parsed_events" (`,
-        `  "id" TEXT NOT NULL PRIMARY KEY,`,
-        `  "itemId" TEXT NOT NULL,`,
-        `  "eventIndex" INTEGER NOT NULL,`,
-        `  "eventType" TEXT,`,
-        `  "eventSubject" TEXT,`,
-        `  "eventAction" TEXT,`,
-        `  "eventObject" TEXT,`,
-        `  "eventDate" TEXT,`,
-        `  "oneLiner" TEXT NOT NULL,`,
-        `  "qualityScore" INTEGER NOT NULL DEFAULT 50,`,
-        `  "clusterId" TEXT,`,
-        `  "fingerprint" TEXT NOT NULL,`,
-        `  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,`,
-        `  "updatedAt" DATETIME NOT NULL,`,
-        `  FOREIGN KEY ("itemId") REFERENCES "items"("id") ON DELETE CASCADE ON UPDATE CASCADE,`,
-        `  FOREIGN KEY ("clusterId") REFERENCES "content_clusters"("id") ON DELETE SET NULL ON UPDATE CASCADE`,
-        `);`,
-        `CREATE UNIQUE INDEX IF NOT EXISTS "item_parsed_events_itemId_fingerprint_key" ON "item_parsed_events"("itemId", "fingerprint");`,
-        `CREATE INDEX IF NOT EXISTS "item_parsed_events_itemId_eventIndex_idx" ON "item_parsed_events"("itemId", "eventIndex");`,
-        `CREATE INDEX IF NOT EXISTS "item_parsed_events_fingerprint_idx" ON "item_parsed_events"("fingerprint");`,
-        `CREATE INDEX IF NOT EXISTS "item_parsed_events_clusterId_createdAt_idx" ON "item_parsed_events"("clusterId", "createdAt");`,
-        `CREATE INDEX IF NOT EXISTS "item_parsed_events_eventType_eventDate_idx" ON "item_parsed_events"("eventType", "eventDate");`,
+        `DROP TABLE IF EXISTS "item_parsed_events";`,
+        `DROP INDEX IF EXISTS "item_parsed_events_itemId_fingerprint_key";`,
+        `DROP INDEX IF EXISTS "item_parsed_events_itemId_eventIndex_idx";`,
+        `DROP INDEX IF EXISTS "item_parsed_events_fingerprint_idx";`,
+        `DROP INDEX IF EXISTS "item_parsed_events_clusterId_createdAt_idx";`,
+        `DROP INDEX IF EXISTS "item_parsed_events_eventType_eventDate_idx";`,
       ].join("\n"),
     });
   }
@@ -469,6 +494,7 @@ try {
     rmSync(`${dbPath}-wal`, { force: true });
   }
 
+  applyPreSchemaMigrations();
   const sql = `${sqliteRuntimePragmas}\n${makeSqliteSchemaIdempotent(loadSchemaSql())}\n${sqliteRuntimePragmas}\n`;
   runSqlite([dbPath], {
     input: sql,

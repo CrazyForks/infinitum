@@ -29,6 +29,7 @@ export type ScheduleUpdateInput = {
   sourceConcurrency: number;
   fullTextFetchThreshold: number;
   perSourceItemLimit: number;
+  aggregationSplitMaxEvents?: number;
   processingStartAt?: string | null;
 };
 
@@ -130,6 +131,7 @@ export type TaskScheduleSnapshot = {
   sourceConcurrency: number;
   fullTextFetchThreshold: number;
   perSourceItemLimit: number;
+  aggregationSplitMaxEvents: number;
   dailyReportCandidateLimit: number;
   dailyReportOffsetDays: number;
   dailyReportAutoPublish: boolean;

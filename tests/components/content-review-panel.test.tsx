@@ -97,6 +97,28 @@ function createCluster(overrides: Partial<Record<string, unknown>> = {}) {
   };
 }
 
+function createAggregationSplit(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: "split-parent-1",
+    title: "SpaceX buys Cursor",
+    originalUrl: "https://example.com/split-parent",
+    publishedAt: "2026-06-17T09:00:00.000Z",
+    createdAt: "2026-06-17T09:05:00.000Z",
+    aggregationCheckedAt: "2026-06-17T10:34:00.000Z",
+    sourceName: "TLTD",
+    summary: "聚合父项摘要",
+    status: "processed",
+    moderationStatus: "filtered",
+    aggregationParseStatus: "parsed",
+    errorMessage: null,
+    childCount: 12,
+    eventUrlCount: 12,
+    parentUrlCount: 0,
+    qualityScore: 80,
+    ...overrides,
+  };
+}
+
 afterEach(() => {
   pushMock.mockReset();
   refreshMock.mockReset();
@@ -276,6 +298,33 @@ describe("ContentReviewPanel", () => {
 
     expect(within(detailDialog).getByText("重点").tagName).toBe("STRONG");
     expect(within(detailDialog).getByText("背景").tagName).toBe("EM");
+  });
+
+  it("renders aggregation split management without the link column", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+      const url = getFetchUrl(input);
+
+      if (url === "/api/admin/items/aggregation?page=1&pageSize=10") {
+        return new Response(JSON.stringify({ aggregationSplits: [createAggregationSplit()], total: 1 }));
+      }
+
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderWithProviders(<ContentReviewPanel activeTab="splits" />);
+    await waitForLoaded();
+
+    expect(screen.getByText("管理聚合拆分结果")).toBeInTheDocument();
+    expect(screen.queryByText("查看聚合 item 的拆分结果并支持手动取消拆分")).not.toBeInTheDocument();
+
+    const table = screen.getByRole("table");
+    expect(within(table).getByText("拆分时间")).toBeInTheDocument();
+    expect(within(table).queryByText("链接")).not.toBeInTheDocument();
+    expect(within(table).getByText("已拆分")).toHaveClass("whitespace-nowrap");
+    expect(within(table).getByText("12 条")).toBeInTheDocument();
+    expect(within(table).getByText("06/17 18:34")).toBeInTheDocument();
   });
 
   it("keeps cluster list keyword searches restricted to multi-item clusters", async () => {

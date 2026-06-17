@@ -23,17 +23,16 @@ import {
   IconArrowUp,
   IconArrowDown,
   IconFilter,
+  IconSplit,
   IconMonitor,
 } from "@/components/ui/icons";
 import type { AdminSettingsSnapshot, PromptConfigType } from "@/lib/settings/types";
 
 type PrimaryTab = "monitoring" | "settings";
 type MonitorSubSection = "dashboard" | "content" | "tasks";
-type ContentSubSection = "filtered" | "clusters";
+type ContentSubSection = "filtered" | "clusters" | "splits";
 type SettingsSection = "blacklist" | "groups" | "sources" | "tasks" | "ai";
 type AISubSection = "model-api" | "prompt";
-
-type AdminPageProps = Record<string, never>;
 
 type AdminRouteState = {
   primaryTab: PrimaryTab;
@@ -60,7 +59,11 @@ function normalizeMonitorSubSection(value: string | null): MonitorSubSection {
 }
 
 function normalizeContentSubSection(value: string | null): ContentSubSection {
-  return value === "clusters" ? "clusters" : "filtered";
+  if (value === "clusters" || value === "splits") {
+    return value;
+  }
+
+  return "filtered";
 }
 
 function normalizeSettingsSection(value: string | null): SettingsSection {
@@ -131,7 +134,7 @@ function resolveRouteState(searchParams: AdminSearchParams): AdminRouteState {
   };
 }
 
-export function AdminPageClient(_props: AdminPageProps) {
+export function AdminPageClient() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
@@ -180,10 +183,8 @@ export function AdminPageClient(_props: AdminPageProps) {
   const selectedPromptType = normalizePromptType(searchParams.get("promptType"));
   const [collapsedSections, setCollapsedSections] = useState<{
     ai: boolean;
-    content: boolean;
   }>(() => ({
     ai: !(routeState.primaryTab === "settings" && routeState.settingsSection === "ai"),
-    content: !(routeState.primaryTab === "monitoring" && routeState.monitoringSubSection === "content"),
   }));
   const isAISectionCollapsed =
     primaryTab === "settings" && settingsSection === "ai" ? false : collapsedSections.ai;
@@ -276,10 +277,6 @@ export function AdminPageClient(_props: AdminPageProps) {
 
   const handleToggleContentSection = useCallback(() => {
     const nextCollapsed = !isContentSectionCollapsed;
-    setCollapsedSections((prev) => ({
-      ...prev,
-      content: nextCollapsed,
-    }));
     if (!nextCollapsed) {
       navigateAdmin({
         primaryTab: "monitoring",
@@ -489,6 +486,25 @@ export function AdminPageClient(_props: AdminPageProps) {
                             <span className="inline-flex items-center gap-2">
                               <IconGlobe className="h-4 w-4" />
                               <span>聚合管理</span>
+                            </span>
+                          </SelectableButton>
+                          <SelectableButton
+                            onClick={() => {
+                              navigateAdmin({
+                                primaryTab: "monitoring",
+                                monitoringSubSection: "content",
+                                contentSubSection: "splits",
+                              });
+                            }}
+                            active={
+                              monitoringSubSection === "content" &&
+                              contentSubSection === "splits"
+                            }
+                            variant="submenu"
+                          >
+                            <span className="inline-flex items-center gap-2">
+                              <IconSplit className="h-4 w-4" />
+                              <span>聚合拆分</span>
                             </span>
                           </SelectableButton>
                         </>

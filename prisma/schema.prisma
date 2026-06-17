@@ -1,5 +1,6 @@
 generator client {
   provider = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-arm64-openssl-3.0.x", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
@@ -165,13 +166,15 @@ model Item {
   isAggregation           Boolean                    @default(false)
   aggregationCheckedAt    DateTime?
   aggregationParseStatus  String?
+  parentItemId            String?
   errorMessage            String?
   createdAt               DateTime                   @default(now())
   updatedAt               DateTime                   @updatedAt
   source                  Source                     @relation(fields: [sourceId], references: [id], onDelete: Cascade)
   cluster                 ContentCluster?            @relation(fields: [clusterId], references: [id], onDelete: SetNull)
+  parent                  Item?                      @relation("ItemChildren", fields: [parentItemId], references: [id], onDelete: SetNull)
+  children                Item[]                     @relation("ItemChildren")
   dailyReportSources      DailyReportSource[]
-  parsedEvents            ItemParsedEvent[]
 
   @@index([sourceId, publishedAt])
   @@index([status, publishedAt])
@@ -181,6 +184,7 @@ model Item {
   @@index([clusterId, publishedAt])
   @@index([clusterId, status, moderationStatus, updatedAt])
   @@index([qualityScore, publishedAt])
+  @@index([parentItemId])
   @@map("items")
 }
 
@@ -208,7 +212,6 @@ model ContentCluster {
   items              Item[]
   visitorVotes       VisitorClusterVote[]
   dailyReportSources DailyReportSource[]
-  parsedEvents       ItemParsedEvent[]
 
   @@index([status, latestPublishedAt])
   @@index([upvotes, downvotes])
@@ -262,6 +265,7 @@ model TaskSchedule {
   sourceConcurrency         Int                   @default(2)
   fullTextFetchThreshold    Int                   @default(80)
   perSourceItemLimit        Int                   @default(20)
+  aggregationSplitMaxEvents Int                   @default(20)
   dailyReportCandidateLimit Int                   @default(120)
   dailyReportOffsetDays     Int                   @default(0)
   dailyReportAutoPublish    Boolean               @default(false)
@@ -493,30 +497,4 @@ model PageView {
   @@index([path, date])
   @@index([path, date, visitorId])
   @@map("page_views")
-}
-
-model ItemParsedEvent {
-  id           String          @id @default(cuid())
-  itemId       String
-  eventIndex   Int
-  eventType    String?
-  eventSubject String?
-  eventAction  String?
-  eventObject  String?
-  eventDate    String?
-  oneLiner     String
-  qualityScore Int             @default(50)
-  clusterId    String?
-  fingerprint  String
-  createdAt    DateTime        @default(now())
-  updatedAt    DateTime        @updatedAt
-  item         Item            @relation(fields: [itemId], references: [id], onDelete: Cascade)
-  cluster      ContentCluster? @relation(fields: [clusterId], references: [id], onDelete: SetNull)
-
-  @@unique([itemId, fingerprint])
-  @@index([itemId, eventIndex])
-  @@index([fingerprint])
-  @@index([clusterId, createdAt])
-  @@index([eventType, eventDate])
-  @@map("item_parsed_events")
 }

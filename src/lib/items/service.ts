@@ -7,14 +7,15 @@ import {
 import { createAiProvider, type AiEventSignature, type AiProvider, type ParsedAggregation } from "@/lib/ai/provider";
 import { retryChineseSummary } from "@/lib/ai/summary-language";
 import { invalidateDailyReportCache } from "@/lib/daily-report/cache";
+import { assignItemToCluster, recomputeCluster } from "@/lib/clusters/service";
 import {
-  assignItemToCluster,
-  persistParsedAggregationForItem,
-  recomputeCluster,
-} from "@/lib/clusters/service";
+  persistAggregationChildItems,
+  retireAggregationChildItems,
+} from "@/lib/aggregation/persist";
 import { prisma } from "@/lib/db";
 import { invalidateFeedCache } from "@/lib/feed/cache";
 import { shouldTranslateTitle, stripHtmlTags } from "@/lib/feed/presentation";
+import { buildAggregationParsingInput } from "@/lib/ingestion/model-input";
 import { normalizeStoredEventType } from "@/lib/clusters/normalization";
 import { getIngestionRuntimeConfig } from "@/lib/settings/service";
 import { createTaskAiUsageTracker } from "@/lib/tasks/ai-usage";
@@ -106,6 +107,8 @@ async function resolveAiProvider(aiProvider?: AiProvider) {
     itemAggregation: runtimeConfig.selectedPromptConfigs?.itemAggregation,
     clusterSummary: runtimeConfig.selectedPromptConfigs?.clusterSummary,
     clusterMatch: runtimeConfig.selectedPromptConfigs?.clusterMatch,
+  }, undefined, {
+    aggregationSplitMaxEvents: runtimeConfig.ingestion.aggregationSplitMaxEvents,
   });
 }
 
@@ -381,6 +384,88 @@ export async function manuallyFilterItem(itemId: string, options?: RegenerationO
 
   return prisma.item.findUniqueOrThrow({
     where: { id: filtered.id },
+    include: { source: true },
+  });
+}
+
+export async function cancelAggregationSplit(parentItemId: string, options?: RegenerationOptions) {
+  const parent = await prisma.item.findUnique({
+    where: { id: parentItemId },
+    include: {
+      source: true,
+      children: {
+        select: {
+          id: true,
+          clusterId: true,
+        },
+      },
+    },
+  });
+
+  if (!parent || !parent.isAggregation) {
+    throw new Error("Aggregation parent not found");
+  }
+
+  const affectedClusterIds = new Set<string>();
+  if (parent.clusterId) {
+    affectedClusterIds.add(parent.clusterId);
+  }
+  for (const child of parent.children) {
+    if (child.clusterId) {
+      affectedClusterIds.add(child.clusterId);
+    }
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.item.update({
+      where: { id: parent.id },
+      data: {
+        isAggregation: false,
+        aggregationParseStatus: AGGREGATION_PARSE_STATUS.manualCancelled,
+        status: "processed",
+        moderationStatus:
+          parent.moderationStatus === "filtered" ? "restored" : parent.moderationStatus,
+        restoredByAdminAt: parent.moderationStatus === "filtered" ? new Date() : parent.restoredByAdminAt,
+        clusterId: null,
+        manualClusterAssignedAt: null,
+        errorMessage: null,
+      },
+    });
+
+    await tx.item.updateMany({
+      where: { parentItemId: parent.id },
+      data: {
+        status: "filtered",
+        moderationStatus: "filtered",
+        moderationReason: "other",
+        moderationDetail: "管理员取消聚合拆分",
+        filterReason: "aggregation_split_cancelled",
+        clusterId: null,
+        manualClusterAssignedAt: null,
+        errorMessage: null,
+      },
+    });
+  });
+
+  const aiProvider = options?.aiProvider;
+  const assignment = await assignItemToCluster(parent.id, {
+    eventSignature: null,
+    aiProvider,
+  });
+
+  if (assignment.clusterId) {
+    affectedClusterIds.add(assignment.clusterId);
+  }
+
+  for (const clusterId of affectedClusterIds) {
+    await recomputeCluster(clusterId, aiProvider);
+  }
+
+  invalidateFeedCache();
+  invalidateDailyReportCache();
+
+  return prisma.item.findUniqueOrThrow({
+    where: { id: parent.id },
     include: { source: true },
   });
 }
@@ -684,7 +769,8 @@ function getAggregationReparseSourceText(input: {
   rssContent?: string | null;
   rssExcerpt?: string | null;
 }) {
-  return input.fullText?.trim() || input.rssContent?.trim() || input.rssExcerpt?.trim() || "";
+  const sourceText = input.fullText?.trim() || input.rssContent?.trim() || input.rssExcerpt?.trim() || "";
+  return buildAggregationParsingInput(sourceText);
 }
 
 function shouldWriteReparseProgress(processedCount: number, totalCandidates: number) {
@@ -737,7 +823,9 @@ export async function executeItemReparseAggregationsTask(
     },
     select: {
       id: true,
+      sourceId: true,
       originalTitle: true,
+      originalUrl: true,
       clusterId: true,
       publishedAt: true,
       fullText: true,
@@ -842,21 +930,41 @@ export async function executeItemReparseAggregationsTask(
         continue;
       }
 
-      await persistParsedAggregationForItem(
-        { id: candidate.id, publishedAt: candidate.publishedAt },
-        {
-          mainEvent: serializeParsedEventSignature(parsedAggregation.mainEvent),
-          events: parsedAggregation.events.map((event) => ({
-            eventType: event.eventType as AiEventSignature["eventType"],
-            eventSubject: event.eventSubject,
-            eventAction: event.eventAction,
-            eventObject: event.eventObject,
-            eventDate: event.eventDate,
-            oneLiner: event.oneLiner,
-            qualityScore: event.qualityScore,
-          })),
+      // 1. Retire previous child items so stale splits disappear from feed and
+      // reports while their cluster/admin history remains inspectable.
+      await retireAggregationChildItems(candidate.id);
+
+      // 2. Persist each parsed event as a full child Item.
+      const { childItemIds } = await persistAggregationChildItems({
+        sourceId: candidate.sourceId,
+        parent: {
+          id: candidate.id,
+          originalUrl: candidate.originalUrl,
+          originalTitle: candidate.originalTitle,
         },
-      );
+        publishedAt: candidate.publishedAt,
+        events: parsedAggregation.events.map((event) => ({
+          eventType: event.eventType,
+          eventSubject: event.eventSubject,
+          eventAction: event.eventAction,
+          eventObject: event.eventObject,
+          eventDate: event.eventDate,
+          title: event.title,
+          oneLiner: event.oneLiner,
+          qualityScore: event.qualityScore,
+          sourceUrl: event.sourceUrl,
+        })),
+      });
+
+      // 3. Assign each child to a cluster. Failures are non-fatal: the child item
+      //    exists, and the batch-level cluster_finalize pass recomputes clusters.
+      for (const childId of childItemIds) {
+        try {
+          await assignItemToCluster(childId, { aiProvider: trackedAiProvider });
+        } catch (assignError) {
+          console.error(`[Item Reparse] cluster assignment failed for ${childId}:`, assignError);
+        }
+      }
 
       reparsedCount += 1;
 
