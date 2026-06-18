@@ -44,9 +44,9 @@ export function buildDailyReportDetailMarkdown(report: DailyReportDetailDTO) {
   const withoutTitle = markdown.replace(/^#\s+.*(?:\n|$)/, "").trimStart();
   const normalizedHeadings = withoutTitle
     .replace(/^##\s+开场摘要\s*$/m, "## 摘要")
-    .replace(/^##\s+收尾观察\s*$/m, "## 今日观察")
+    .replace(/^##\s+收尾观察\s*$/m, "## 趋势观察")
     .replace(/^(\s*)风险级别：[^；\n]*(?:；\s*)?/gm, "$1")
-    .replace(/^(\s*)(?:摘要|开场摘要|今日观察|收尾观察|受影响|影响对象|建议|建议动作|行动建议)\s*[：:]\s*/gm, "$1")
+    .replace(/^(\s*)(?:摘要|开场摘要|今日观察|趋势观察|收尾观察|受影响|影响对象|建议|建议动作|行动建议)\s*[：:]\s*/gm, "$1")
     .replace(/^重点：\s*/gm, "**重点：** ")
     .replace(/^来源：\s*$/gm, "**来源：**");
   const withNotice = /^>\s*声明：完全使用AI生成，可能存在错误，需谨慎甄别。/m.test(normalizedHeadings)

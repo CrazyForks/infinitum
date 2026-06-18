@@ -751,7 +751,37 @@ describe("AdminSettingsPanel", () => {
     const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
     const payload = JSON.parse(String(request.body)) as { templateJson: string };
     const template = JSON.parse(payload.templateJson) as { blocks: Array<{ title: string }> };
-    expect(template.blocks[0].title).toBe("今日观察");
+    expect(template.blocks[0].title).toBe("趋势观察");
+  });
+
+  it("confirms before deleting a daily report content block", async () => {
+    const user = userEvent.setup();
+
+    renderWithProviders(
+      <AdminSettingsPanel
+        initialSettings={buildInitialSettings()}
+        activeSection="ai-prompt"
+        initialPromptType="daily_report"
+      />,
+    );
+
+    await user.click(screen.getAllByRole("button", { name: /创建配置/i })[0]);
+    const dialog = screen.getByRole("dialog", { name: "创建新提示词配置" });
+
+    expect(within(dialog).getByRole("button", { name: "摘要单段内容收起" })).toBeInTheDocument();
+
+    await user.click(within(dialog).getAllByTitle("删除内容块")[0]);
+    const confirmDialog = screen.getByRole("dialog", { name: "删除内容块" });
+    expect(within(confirmDialog).getByText("确定要删除「摘要」吗？删除后需要重新添加并配置。")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "摘要单段内容收起" })).toBeInTheDocument();
+
+    await user.click(within(confirmDialog).getByRole("button", { name: "取消" }));
+    expect(screen.queryByRole("dialog", { name: "删除内容块" })).not.toBeInTheDocument();
+
+    await user.click(within(dialog).getAllByTitle("删除内容块")[0]);
+    await user.click(within(screen.getByRole("dialog", { name: "删除内容块" })).getByRole("button", { name: "删除" }));
+
+    expect(within(dialog).queryByRole("button", { name: "摘要单段内容收起" })).not.toBeInTheDocument();
   });
 
   it("keeps prompt advanced settings collapsed when editing existing configs", async () => {

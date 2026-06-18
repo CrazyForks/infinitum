@@ -1,7 +1,7 @@
 export const DAILY_REPORT_TIMEZONE = "Asia/Shanghai";
 
 export const DEFAULT_OPENING_LABEL = "摘要";
-export const DEFAULT_CLOSING_LABEL = "今日观察";
+export const DEFAULT_CLOSING_LABEL = "趋势观察";
 
 export const DAILY_REPORT_OPENING_LABEL_MAX_LENGTH = 20;
 export const DAILY_REPORT_CLOSING_LABEL_MAX_LENGTH = 20;

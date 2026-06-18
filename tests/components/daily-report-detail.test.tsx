@@ -30,8 +30,8 @@ function buildReport(input: Partial<DailyReportDetailDTO> = {}): DailyReportDeta
     content: {
       blocks: [
         { type: "text", title: "摘要", body: "公开摘要" },
-        { type: "section", title: "今日大事", items: [] },
-        { type: "text", title: "今日观察", body: "公开观察" },
+        { type: "section", title: "热点事件", items: [] },
+        { type: "text", title: "趋势观察", body: "公开观察" },
       ],
     },
     renderedMarkdown: "# 公开日报",
@@ -45,7 +45,7 @@ function buildReport(input: Partial<DailyReportDetailDTO> = {}): DailyReportDeta
       sourceName: "Source",
       title: "来源标题",
       url: "https://example.com/source",
-      sectionName: "今日大事",
+      sectionName: "热点事件",
       topic: "主题",
     }],
     previous: null,
@@ -122,7 +122,7 @@ describe("DailyReportDetail", () => {
       renderedMarkdown: [
         "# 公开日报",
         "",
-        "## 今日大事",
+        "## 热点事件",
         "",
         "### 主题",
         "",
@@ -146,7 +146,7 @@ describe("DailyReportDetail", () => {
       renderedMarkdown: [
         "# 公开日报",
         "",
-        "## 今日大事",
+        "## 热点事件",
         "",
         "### 主题",
         "",

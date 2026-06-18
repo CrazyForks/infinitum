@@ -15,7 +15,7 @@ function safeText(value: unknown) {
 export function stripDailyReportGeneratedLabel(value: unknown) {
   return safeText(value)
     .replace(
-      /^(?:\*\*)?\s*(?:摘要|开场摘要|今日观察|收尾观察|重点|为什么重要|来源|受影响|影响对象|建议|建议动作|行动建议|风险级别|关键数字|数据|适用场景|价值)\s*[：:]\s*(?:\*\*)?\s*/,
+      /^(?:\*\*)?\s*(?:摘要|开场摘要|今日观察|趋势观察|收尾观察|重点|为什么重要|来源|受影响|影响对象|建议|建议动作|行动建议|风险级别|关键数字|数据|适用场景|价值)\s*[：:]\s*(?:\*\*)?\s*/,
       "",
     )
     .trim();

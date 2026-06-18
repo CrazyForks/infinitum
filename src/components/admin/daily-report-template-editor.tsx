@@ -6,6 +6,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { IconGrip, IconTrash } from "@/components/ui/icons";
 import { IconButton } from "@/components/ui/icon-button";
+import { ModalShell } from "@/components/ui/modal-shell";
 import { TextArea } from "@/components/ui/text-area";
 import { TextInput } from "@/components/ui/text-input";
 import {
@@ -69,6 +70,7 @@ function FormBlock({
 export function DailyReportTemplateEditor({ value, onChange, onError }: DailyReportTemplateEditorProps) {
   const [expandedBlockIndexes, setExpandedBlockIndexes] = useState<Set<number>>(() => new Set([0]));
   const [draggingBlockIndex, setDraggingBlockIndex] = useState<number | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ index: number; title: string } | null>(null);
 
   let template: DailyReportTemplateConfig;
   try {
@@ -260,7 +262,7 @@ export function DailyReportTemplateEditor({ value, onChange, onError }: DailyRep
                 variant="secondary"
                 title={template.blocks.length <= 1 ? "至少保留一个内容块" : "删除内容块"}
                 disabled={template.blocks.length <= 1}
-                onClick={() => deleteBlock(blockIndex)}
+                onClick={() => setDeleteTarget({ index: blockIndex, title: block.title || `内容块 ${blockIndex + 1}` })}
               >
                 <IconTrash className="h-4 w-4" />
               </IconButton>
@@ -413,6 +415,33 @@ export function DailyReportTemplateEditor({ value, onChange, onError }: DailyRep
           </div>
         ))}
       </div>
+      <ModalShell
+        isOpen={Boolean(deleteTarget)}
+        onClose={() => setDeleteTarget(null)}
+        title="删除内容块"
+        widthClassName="max-w-md"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button onClick={() => setDeleteTarget(null)} variant="secondary">
+              取消
+            </Button>
+            <Button
+              onClick={() => {
+                if (!deleteTarget) return;
+                deleteBlock(deleteTarget.index);
+                setDeleteTarget(null);
+              }}
+              variant="danger"
+            >
+              删除
+            </Button>
+          </div>
+        }
+      >
+        <p className="text-sm leading-6 text-[var(--text-2)]">
+          确定要删除「{deleteTarget?.title ?? ""}」吗？删除后需要重新添加并配置。
+        </p>
+      </ModalShell>
     </div>
   );
 }

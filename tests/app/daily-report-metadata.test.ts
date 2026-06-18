@@ -29,8 +29,8 @@ function buildReport(input: Partial<DailyReportDetailDTO> = {}): DailyReportDeta
     content: {
       blocks: [
         { type: "text", title: "摘要", body: "草稿摘要" },
-        { type: "section", title: "今日大事", items: [] },
-        { type: "text", title: "今日观察", body: "草稿观察" },
+        { type: "section", title: "热点事件", items: [] },
+        { type: "text", title: "趋势观察", body: "草稿观察" },
       ],
     },
     renderedMarkdown: "# 草稿日报",

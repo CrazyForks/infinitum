@@ -64,5 +64,6 @@ next-env.d.ts
 /.npm/
 /Library/
 /.playwright-mcp/
+/.playwright-cli/
 /daily-detail*.png
 /graphify-out

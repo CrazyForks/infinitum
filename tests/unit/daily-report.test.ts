@@ -66,7 +66,7 @@ const content: DailyReportContent = {
     },
     {
       type: "section",
-      title: "今日大事",
+      title: "热点事件",
       items: [
         {
           title: "OpenAI 发布新模型",
@@ -106,7 +106,7 @@ const content: DailyReportContent = {
     { type: "section", title: "数据与洞察", items: [] },
     {
       type: "text",
-      title: "今日观察",
+      title: "趋势观察",
       body: "整体来看，今天的主线仍是模型能力与工程工具继续耦合，后续需要观察实际开发效率是否随之改善。",
     },
   ],
@@ -143,10 +143,10 @@ describe("daily report utilities", () => {
     }), 2);
 
     expect(parsed).not.toHaveProperty("title");
-    expect(parsed.blocks[1]).toMatchObject({ type: "section", title: "今日大事" });
+    expect(parsed.blocks[1]).toMatchObject({ type: "section", title: "热点事件" });
     expect(() => parseDailyReportContent(JSON.stringify({
       blocks: content.blocks.map((block) =>
-        block.type === "section" && block.title === "今日大事"
+        block.type === "section" && block.title === "热点事件"
           ? { ...block, items: [{ ...block.items[0], sourceIds: [99] }] }
           : block,
       ),
@@ -163,7 +163,7 @@ describe("daily report utilities", () => {
         },
         {
           type: "section",
-          title: "今日大事",
+          title: "热点事件",
           items: [{
             title: "OpenAI 发布新模型",
             body: "OpenAI 发布新模型，带来更强的推理和工具调用能力，短期内会影响开发者选型和产品功能设计。",
@@ -173,8 +173,8 @@ describe("daily report utilities", () => {
         },
         {
           type: "text",
-          title: "今日观察",
-          body: "今日观察：整体来看，今天的主线仍是模型能力与工程工具继续耦合，后续需要观察实际开发效率是否随之改善。",
+          title: "趋势观察",
+          body: "趋势观察：整体来看，今天的主线仍是模型能力与工程工具继续耦合，后续需要观察实际开发效率是否随之改善。",
         },
       ],
     }), 2);
@@ -185,7 +185,7 @@ describe("daily report utilities", () => {
     if (section.type === "section") {
       expect(section.items[0].notes?.[0].text).toBe("模型能力继续上探");
     }
-    expect(parsed.blocks[2]).toMatchObject({ type: "text", body: expect.not.stringMatching(/^今日观察：/) });
+    expect(parsed.blocks[2]).toMatchObject({ type: "text", body: expect.not.stringMatching(/^趋势观察：/) });
   });
 
   it("allows duplicate item titles across section blocks", () => {
@@ -234,13 +234,13 @@ describe("daily report utilities", () => {
     expect(markdown).toContain("# 2026-04-24 AI 日报");
     expect(markdown).toContain("> 声明：完全使用AI生成，可能存在错误，需谨慎甄别。");
     expect(markdown).toContain("## 摘要");
-    expect(markdown).toContain("## 今日大事");
+    expect(markdown).toContain("## 热点事件");
     expect(markdown).not.toContain("风险级别");
     expect(markdown).toContain("关注 CLI 与 IDE 工作流是否需要调整。");
     expect(markdown).toContain("**重点：**");
     expect(markdown).toContain("**来源：**");
     expect(markdown).toContain("[OpenAI 发布新模型](https://example.com/a)");
-    expect(markdown).toContain("## 今日观察");
+    expect(markdown).toContain("## 趋势观察");
     expect(markdown).not.toContain("深挖");
   });
 

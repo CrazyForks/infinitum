@@ -183,7 +183,7 @@ describe("ai provider", () => {
           },
           {
             type: "section",
-            title: "今日大事",
+            title: "热点事件",
             items: [{
               title: "OpenAI 发布新模型",
               body: "当前条目摘要内容足够长。",
@@ -202,7 +202,7 @@ describe("ai provider", () => {
           },
           {
             type: "text",
-            title: "今日观察",
+            title: "趋势观察",
             body: "当前观察内容足够长，用于作为微调起点。",
           },
         ],
@@ -281,7 +281,7 @@ describe("ai provider", () => {
           },
           {
             type: "section",
-            title: "今日大事",
+            title: "热点事件",
             items: [{
               title: "OpenAI 发布新模型",
               body: "当前条目摘要内容足够长。",
@@ -291,7 +291,7 @@ describe("ai provider", () => {
           },
           {
             type: "text",
-            title: "今日观察",
+            title: "趋势观察",
             body: "当前观察内容足够长，用于作为微调起点。",
           },
         ],

@@ -14,9 +14,9 @@ describe("daily report template config", () => {
     expect(prompt).toContain('"blocks"');
     expect(prompt).toContain('"type":"text"');
     expect(prompt).toContain('"title":"摘要"');
-    expect(prompt).toContain('"title":"今日观察"');
+    expect(prompt).toContain('"title":"趋势观察"');
     expect(prompt).not.toContain('"role"');
-    expect(prompt).toContain("section block「今日大事」：输出 3-5 条");
+    expect(prompt).toContain("section block「热点事件」：输出 3-5 条");
     expect(prompt).toContain("输出 3-5 条");
     expect(prompt).toContain("section block「安全与风险」：可为空；有相关内容时输出 1-5 条");
     expect(prompt).toContain("section block「开源与工具」：可为空；有相关内容时输出 1-5 条");
@@ -26,6 +26,7 @@ describe("daily report template config", () => {
     expect(prompt).toContain("每条正文约 80-180 字");
     expect(prompt).toContain("每个 item 必须包含 title、body、sourceIds");
     expect(prompt).toContain("notes 要求：重点 必填");
+    expect(prompt).toContain("不要复述摘要或逐条回顾事件");
     expect(prompt).not.toContain("可根据管理员习惯调整");
     expect(prompt).not.toContain("openingLabel");
   });

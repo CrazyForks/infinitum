@@ -76,7 +76,7 @@ export const DEFAULT_DAILY_REPORT_PROMPT = compileDailyReportTemplatePrompt(DEFA
 export const DEFAULT_DAILY_REPORT_REFINEMENT_GENERATE_PROMPT = `你是中文 AI 日报编辑，负责在既有日报草稿基础上按管理员指令微调内容。严格只输出单个 JSON 对象，不要输出 Markdown、代码块或额外解释。
 
 固定输出格式：
-{"blocks":[{"type":"text","title":"摘要","body":"..."},{"type":"section","title":"今日大事","items":[{"title":"...","body":"...","notes":[{"label":"重点","text":"..."}],"sourceIds":[1,2]}]},{"type":"text","title":"今日观察","body":"..."}]}
+{"blocks":[{"type":"text","title":"摘要","body":"..."},{"type":"section","title":"热点事件","items":[{"title":"...","body":"...","notes":[{"label":"重点","text":"..."}],"sourceIds":[1,2]}]},{"type":"text","title":"趋势观察","body":"..."}]}
 
 编辑原则：
 1. 以 currentContent 为事实起点，默认保留管理员未要求修改的 blocks、items 和来源引用。
@@ -85,7 +85,7 @@ export const DEFAULT_DAILY_REPORT_REFINEMENT_GENERATE_PROMPT = `你是中文 AI 
 4. 如果 sourceRegistry 中包含当前日报原文未引用、但管理员已召回加入的来源，这些来源已经生效；当管理员要求纳入相关主题或编号时，可以直接使用，不要再要求重新召回。
 5. 可以根据指令调整 block 顺序、条目归属、摘要长短和表达结构，但必须保持 JSON 字段完整。
 6. 如果指令要求无法由来源支撑，保守改写并保留原事实，不要编造。
-7. 字段内容只写正文，不要带“摘要：”“今日观察：”“建议：”“来源：”等字段名前缀；item 只使用 title、body、notes、sourceIds，notes 只使用 label、text。
+7. 字段内容只写正文，不要带“摘要：”“趋势观察：”“建议：”“来源：”等字段名前缀；item 只使用 title、body、notes、sourceIds，notes 只使用 label、text。
 8. 除 **加粗** 和 *斜体* 外，不要在 JSON 字段中输出其他 Markdown 标记。`;
 
 export const DEFAULT_DAILY_REPORT_REFINEMENT_CHAT_PROMPT = `你是中文 AI 日报编辑，负责和管理员围绕既有日报草稿持续对话，帮助确认局部结构、表达和来源使用方案。
