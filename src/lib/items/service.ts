@@ -10,6 +10,7 @@ import { invalidateDailyReportCache } from "@/lib/daily-report/cache";
 import { assignItemToCluster, recomputeCluster } from "@/lib/clusters/service";
 import {
   persistAggregationChildItems,
+  reassignAggregationChildParentIfLinked,
   retireAggregationChildItems,
 } from "@/lib/aggregation/persist";
 import { prisma } from "@/lib/db";
@@ -399,6 +400,17 @@ export async function cancelAggregationSplit(parentItemId: string, options?: Reg
           clusterId: true,
         },
       },
+      aggregationSplitChildren: {
+        select: {
+          childItemId: true,
+          child: {
+            select: {
+              id: true,
+              clusterId: true,
+            },
+          },
+        },
+      },
     },
   });
 
@@ -413,6 +425,11 @@ export async function cancelAggregationSplit(parentItemId: string, options?: Reg
   for (const child of parent.children) {
     if (child.clusterId) {
       affectedClusterIds.add(child.clusterId);
+    }
+  }
+  for (const link of parent.aggregationSplitChildren) {
+    if (link.child.clusterId) {
+      affectedClusterIds.add(link.child.clusterId);
     }
   }
 
@@ -432,8 +449,40 @@ export async function cancelAggregationSplit(parentItemId: string, options?: Reg
       },
     });
 
-    await tx.item.updateMany({
+    const linkedChildIds = parent.aggregationSplitChildren.map((link) => link.childItemId);
+    await tx.aggregationSplitLink.deleteMany({
       where: { parentItemId: parent.id },
+    });
+
+    for (const childId of linkedChildIds) {
+      const hasRemainingParent = await reassignAggregationChildParentIfLinked(
+        tx,
+        childId,
+        parent.id,
+      );
+      if (hasRemainingParent) {
+        continue;
+      }
+      await tx.item.updateMany({
+        where: { id: childId },
+        data: {
+          status: "filtered",
+          moderationStatus: "filtered",
+          moderationReason: "other",
+          moderationDetail: "管理员取消聚合拆分",
+          filterReason: "aggregation_split_cancelled",
+          clusterId: null,
+          manualClusterAssignedAt: null,
+          errorMessage: null,
+        },
+      });
+    }
+
+    await tx.item.updateMany({
+      where: {
+        parentItemId: parent.id,
+        aggregationSplitParents: { none: {} },
+      },
       data: {
         status: "filtered",
         moderationStatus: "filtered",

@@ -1,5 +1,5 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
   binaryTargets = ["native", "linux-musl-arm64-openssl-3.0.x", "linux-musl-openssl-3.0.x"]
 }
 
@@ -130,51 +130,53 @@ model Source {
 }
 
 model Item {
-  id                      String                     @id @default(cuid())
-  sourceId                String
-  clusterId               String?
-  originalUrl             String
-  canonicalUrl            String
-  urlHash                 String                     @unique
-  dedupeSignature         String                     @unique
-  originalTitle           String
-  translatedTitle         String?
-  author                  String?
-  publishedAt             DateTime
-  rssExcerpt              String?
-  rssContent              String?
-  fullText                String?
-  summaryText             String?
-  language                String?
-  status                  ItemStatus                 @default(new)
-  summaryStatus           ProcessingCheckpointStatus @default(pending)
-  analysisStatus          ProcessingCheckpointStatus @default(pending)
-  filterReason            String?
-  moderationStatus        ModerationStatus           @default(allowed)
-  moderationReason        ModerationReason?
-  moderationDetail        String?
-  qualityScore            Int                        @default(50)
-  qualityRationale        String                     @default("AI analysis unavailable")
-  eventType               String?
-  eventSubject            String?
-  eventAction             String?
-  eventObject             String?
-  eventDate               String?
-  aiProcessedAt           DateTime?
-  manualClusterAssignedAt DateTime?
-  restoredByAdminAt       DateTime?
-  isAggregation           Boolean                    @default(false)
-  aggregationCheckedAt    DateTime?
-  aggregationParseStatus  String?
-  parentItemId            String?
-  errorMessage            String?
-  createdAt               DateTime                   @default(now())
-  updatedAt               DateTime                   @updatedAt
-  source                  Source                     @relation(fields: [sourceId], references: [id], onDelete: Cascade)
-  cluster                 ContentCluster?            @relation(fields: [clusterId], references: [id], onDelete: SetNull)
-  parent                  Item?                      @relation("ItemChildren", fields: [parentItemId], references: [id], onDelete: SetNull)
-  children                Item[]                     @relation("ItemChildren")
-  dailyReportSources      DailyReportSource[]
+  id                       String                     @id @default(cuid())
+  sourceId                 String
+  clusterId                String?
+  originalUrl              String
+  canonicalUrl             String
+  urlHash                  String                     @unique
+  dedupeSignature          String                     @unique
+  originalTitle            String
+  translatedTitle          String?
+  author                   String?
+  publishedAt              DateTime
+  rssExcerpt               String?
+  rssContent               String?
+  fullText                 String?
+  summaryText              String?
+  language                 String?
+  status                   ItemStatus                 @default(new)
+  summaryStatus            ProcessingCheckpointStatus @default(pending)
+  analysisStatus           ProcessingCheckpointStatus @default(pending)
+  filterReason             String?
+  moderationStatus         ModerationStatus           @default(allowed)
+  moderationReason         ModerationReason?
+  moderationDetail         String?
+  qualityScore             Int                        @default(50)
+  qualityRationale         String                     @default("AI analysis unavailable")
+  eventType                String?
+  eventSubject             String?
+  eventAction              String?
+  eventObject              String?
+  eventDate                String?
+  aiProcessedAt            DateTime?
+  manualClusterAssignedAt  DateTime?
+  restoredByAdminAt        DateTime?
+  isAggregation            Boolean                    @default(false)
+  aggregationCheckedAt     DateTime?
+  aggregationParseStatus   String?
+  parentItemId             String?
+  errorMessage             String?
+  createdAt                DateTime                   @default(now())
+  updatedAt                DateTime                   @updatedAt
+  source                   Source                     @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  cluster                  ContentCluster?            @relation(fields: [clusterId], references: [id], onDelete: SetNull)
+  parent                   Item?                      @relation("ItemChildren", fields: [parentItemId], references: [id], onDelete: SetNull)
+  children                 Item[]                     @relation("ItemChildren")
+  aggregationSplitParents  AggregationSplitLink[]     @relation("AggregationSplitChild")
+  aggregationSplitChildren AggregationSplitLink[]     @relation("AggregationSplitParent")
+  dailyReportSources       DailyReportSource[]
 
   @@index([sourceId, publishedAt])
   @@index([status, publishedAt])
@@ -186,6 +188,27 @@ model Item {
   @@index([qualityScore, publishedAt])
   @@index([parentItemId])
   @@map("items")
+}
+
+model AggregationSplitLink {
+  id           String   @id @default(cuid())
+  parentItemId String
+  childItemId  String
+  eventIndex   Int
+  fingerprint  String
+  title        String?
+  oneLiner     String
+  sourceUrl    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  parent       Item     @relation("AggregationSplitParent", fields: [parentItemId], references: [id], onDelete: Cascade)
+  child        Item     @relation("AggregationSplitChild", fields: [childItemId], references: [id], onDelete: Cascade)
+
+  @@unique([parentItemId, eventIndex])
+  @@index([childItemId])
+  @@index([parentItemId, fingerprint])
+  @@index([parentItemId, createdAt])
+  @@map("aggregation_split_links")
 }
 
 model ContentCluster {

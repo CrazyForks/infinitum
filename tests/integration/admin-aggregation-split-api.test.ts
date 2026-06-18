@@ -20,6 +20,7 @@ afterEach(() => {
 
 describe("/api/admin/items/aggregation", () => {
   beforeEach(async () => {
+    await prisma.aggregationSplitLink.deleteMany();
     await prisma.item.deleteMany();
     await prisma.contentCluster.deleteMany();
     await prisma.fetchRun.deleteMany();
@@ -219,5 +220,89 @@ describe("/api/admin/items/aggregation", () => {
     });
     expect(child.moderationStatus).toBe("filtered");
     expect(child.filterReason).toBe("aggregation_split_cancelled");
+  });
+
+  it("cancels only the selected split link without filtering a child reused by another parent", async () => {
+    requireAdmin.mockResolvedValue(undefined);
+
+    const source = await prisma.source.findFirstOrThrow({
+      where: { name: "Split Feed" },
+    });
+    const secondParent = await prisma.item.create({
+      data: {
+        id: "split-parent-second",
+        sourceId: source.id,
+        originalUrl: "https://split.example.com/posts/parent-second",
+        canonicalUrl: "https://split.example.com/posts/parent-second",
+        urlHash: "hash-parent-second",
+        dedupeSignature: "split|parent|second",
+        originalTitle: "Split Parent Second",
+        translatedTitle: "第二个拆分父项",
+        publishedAt: new Date("2026-04-11T09:00:00.000Z"),
+        summaryText: "第二个父项摘要",
+        status: "processed",
+        moderationStatus: "allowed",
+        qualityScore: 81,
+        qualityRationale: "高质量",
+        isAggregation: true,
+        aggregationParseStatus: "parsed",
+        aggregationCheckedAt: new Date("2026-04-11T10:00:00.000Z"),
+        language: "en",
+      },
+    });
+    await prisma.aggregationSplitLink.createMany({
+      data: [
+        {
+          parentItemId: "split-parent",
+          childItemId: "split-child-1",
+          eventIndex: 0,
+          fingerprint: "shared-event",
+          oneLiner: "共享事件",
+          sourceUrl: "https://split.example.com/posts/event-1",
+        },
+        {
+          parentItemId: secondParent.id,
+          childItemId: "split-child-1",
+          eventIndex: 0,
+          fingerprint: "shared-event",
+          oneLiner: "共享事件",
+          sourceUrl: "https://split.example.com/posts/event-1",
+        },
+      ],
+    });
+
+    const { POST } = await import("@/app/api/admin/items/aggregation/[id]/cancel/route");
+    const response = await POST(
+      new Request("http://localhost/api/admin/items/aggregation/split-parent/cancel", {
+        method: "POST",
+      }),
+      {
+        params: Promise.resolve({ id: "split-parent" }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(
+      prisma.aggregationSplitLink.findFirstOrThrow({
+        where: {
+          parentItemId: secondParent.id,
+          childItemId: "split-child-1",
+        },
+      }),
+    ).resolves.toBeTruthy();
+    expect(
+      await prisma.aggregationSplitLink.count({
+        where: {
+          parentItemId: "split-parent",
+        },
+      }),
+    ).toBe(0);
+
+    const sharedChild = await prisma.item.findUniqueOrThrow({
+      where: { id: "split-child-1" },
+    });
+    expect(sharedChild.status).toBe("processed");
+    expect(sharedChild.moderationStatus).toBe("allowed");
+    expect(sharedChild.parentItemId).toBe(secondParent.id);
   });
 });

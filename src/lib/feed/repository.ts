@@ -47,9 +47,15 @@ type AggregationSplitChildWithSource = Item & {
   cluster?: { id: string; title: string } | null;
 };
 
+type AggregationSplitLinkWithChild = {
+  eventIndex: number;
+  child: AggregationSplitChildWithSource;
+};
+
 type AggregationSplitParentWithChildren = Item & {
   source: Pick<Source, "name">;
   children: AggregationSplitChildWithSource[];
+  aggregationSplitChildren: AggregationSplitLinkWithChild[];
 };
 
 type FeedEntryRow = {
@@ -540,7 +546,9 @@ function mapAggregationSplitParentToDto(
   parent: AggregationSplitParentWithChildren,
   options?: { includeChildren?: boolean },
 ): AggregationSplitParentDTO {
-  const children = parent.children.map((child) => mapAggregationSplitChildToDto(child, parent));
+  const linkedChildren = parent.aggregationSplitChildren.map((link) => link.child);
+  const sourceChildren = linkedChildren.length > 0 ? linkedChildren : parent.children;
+  const children = sourceChildren.map((child) => mapAggregationSplitChildToDto(child, parent));
   const parentUrlCount = children.filter((child) => child.usesParentUrl).length;
 
   return {
@@ -1477,6 +1485,19 @@ function buildAggregationSplitWhere(filters?: AggregationSplitQuery): Prisma.Ite
             { rssExcerpt: { contains: search } },
             { source: { is: { name: { contains: search } } } },
             {
+              aggregationSplitChildren: {
+                some: {
+                  child: {
+                    OR: [
+                      { originalTitle: { contains: search } },
+                      { translatedTitle: { contains: search } },
+                      { summaryText: { contains: search } },
+                    ],
+                  },
+                },
+              },
+            },
+            {
               children: {
                 some: {
                   OR: [
@@ -1514,6 +1535,26 @@ const aggregationSplitParentInclude = {
       },
     },
     orderBy: [{ publishedAt: "desc" }, { createdAt: "desc" }],
+  },
+  aggregationSplitChildren: {
+    include: {
+      child: {
+        include: {
+          source: {
+            select: {
+              name: true,
+            },
+          },
+          cluster: {
+            select: {
+              id: true,
+              title: true,
+            },
+          },
+        },
+      },
+    },
+    orderBy: [{ eventIndex: "asc" }, { createdAt: "asc" }],
   },
 } satisfies Prisma.ItemInclude;
 

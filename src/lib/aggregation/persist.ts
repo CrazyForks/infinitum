@@ -19,6 +19,43 @@ export type AggregationChildEventInput = {
 
 type PrismaTransaction = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
 
+function buildSemanticEventFingerprint(event: AggregationChildEventInput) {
+  return crypto
+    .createHash("sha256")
+    .update(
+      [
+        event.eventType ?? "",
+        event.eventSubject ?? "",
+        event.eventAction ?? "",
+        event.eventObject ?? "",
+        event.eventDate ?? "",
+      ]
+        .join("|")
+        .toLowerCase(),
+    )
+    .digest("hex");
+}
+
+function buildStableChildDedupeKey({
+  sourceId,
+  eventFingerprint,
+  sourceUrl,
+}: {
+  sourceId: string;
+  eventFingerprint: string;
+  sourceUrl: string | null;
+}) {
+  if (sourceUrl && isSpecificContentUrl(sourceUrl)) {
+    try {
+      return `source-url:${normalizeUrlForComparison(sourceUrl)}`;
+    } catch {
+      return `source-url:${sourceUrl}`;
+    }
+  }
+
+  return `semantic:${sourceId}|${eventFingerprint}`;
+}
+
 function buildAggregationChildItemInput({
   sourceId,
   parent,
@@ -30,37 +67,29 @@ function buildAggregationChildItemInput({
   publishedAt: Date;
   event: AggregationChildEventInput;
 }): Prisma.ItemUncheckedCreateInput {
-  const eventFingerprint =
-    event.fingerprint ??
-    crypto
-      .createHash("sha256")
-      .update(
-        [
-          event.eventType ?? "",
-          event.eventSubject ?? "",
-          event.eventAction ?? "",
-          event.eventObject ?? "",
-          event.eventDate ?? "",
-        ]
-          .join("|")
-          .toLowerCase(),
-      )
-      .digest("hex");
+  const eventFingerprint = event.fingerprint ?? buildSemanticEventFingerprint(event);
   const normalizedSourceUrl = normalizeHttpUrl(event.sourceUrl);
   const normalizedParentUrl = normalizeHttpUrl(parent.originalUrl) ?? parent.originalUrl;
-  const displayUrl =
+  const independentSourceUrl =
     normalizedSourceUrl &&
     isSpecificContentUrl(normalizedSourceUrl) &&
     !areEquivalentContentUrls(normalizedSourceUrl, normalizedParentUrl)
       ? normalizedSourceUrl
-      : normalizedParentUrl;
-  // Keep the user-facing URL as the best available original article. Use a
-  // separate internal key with a per-event fragment so children of the same
-  // parent stay distinct under the urlHash unique index.
-  const childUrlKey = `${displayUrl}#event-${eventFingerprint.slice(0, 32)}`;
+      : null;
+  const displayUrl = independentSourceUrl ?? normalizedParentUrl;
+  const stableDedupeKey = buildStableChildDedupeKey({
+    sourceId,
+    eventFingerprint,
+    sourceUrl: independentSourceUrl,
+  });
+  const stableDedupeHash = crypto.createHash("sha256").update(stableDedupeKey).digest("hex");
+  // Keep the user-facing URL as the best available article. Use a separate
+  // internal key derived from the dedupe key so urlHash follows the same
+  // stability rules as dedupeSignature.
+  const childUrlKey = `${displayUrl}#event-${stableDedupeHash.slice(0, 32)}`;
   const urlHash = crypto.createHash("sha256").update(childUrlKey).digest("hex");
   const canonicalUrl = displayUrl.split("#")[0] ?? displayUrl;
-  const dedupeSignature = `${eventFingerprint}|${sourceId}|${publishedAt.toISOString()}`;
+  const dedupeSignature = stableDedupeKey;
   const childTitle =
     normalizeChildTitle(event.title) ||
     normalizeChildTitle(event.oneLiner) ||
@@ -179,7 +208,7 @@ async function upsertItemInTx(
   if (existing) {
     return tx.item.update({
       where: { id: existing.id },
-      data,
+      data: buildAggregationChildItemUpdateInput(data),
       select: { id: true },
     });
   }
@@ -196,13 +225,74 @@ async function upsertItemInTx(
       if (conflict) {
         return tx.item.update({
           where: { id: conflict.id },
-          data,
+          data: buildAggregationChildItemUpdateInput(data),
           select: { id: true },
         });
       }
     }
     throw error;
   }
+}
+
+function buildAggregationChildItemUpdateInput(
+  data: Prisma.ItemUncheckedCreateInput,
+): Prisma.ItemUncheckedUpdateInput {
+  return {
+    originalUrl: data.originalUrl,
+    canonicalUrl: data.canonicalUrl,
+    urlHash: data.urlHash,
+    dedupeSignature: data.dedupeSignature,
+    originalTitle: data.originalTitle,
+    summaryText: data.summaryText,
+    summaryStatus: data.summaryStatus,
+    analysisStatus: data.analysisStatus,
+    moderationStatus: data.moderationStatus,
+    moderationReason: data.moderationReason,
+    moderationDetail: data.moderationDetail,
+    qualityScore: data.qualityScore,
+    qualityRationale: data.qualityRationale,
+    eventType: data.eventType,
+    eventSubject: data.eventSubject,
+    eventAction: data.eventAction,
+    eventObject: data.eventObject,
+    eventDate: data.eventDate,
+    language: data.language,
+    status: data.status,
+    filterReason: data.filterReason,
+    aiProcessedAt: data.aiProcessedAt,
+    isAggregation: data.isAggregation,
+    aggregationCheckedAt: data.aggregationCheckedAt,
+    aggregationParseStatus: data.aggregationParseStatus,
+    errorMessage: data.errorMessage,
+  };
+}
+
+export async function reassignAggregationChildParentIfLinked(
+  tx: PrismaTransaction,
+  childItemId: string,
+  removedParentId: string,
+): Promise<boolean> {
+  const replacementLink = await tx.aggregationSplitLink.findFirst({
+    where: { childItemId },
+    orderBy: [{ createdAt: "asc" }, { eventIndex: "asc" }],
+    select: { parentItemId: true },
+  });
+
+  if (!replacementLink) {
+    return false;
+  }
+
+  await tx.item.updateMany({
+    where: {
+      id: childItemId,
+      OR: [{ parentItemId: removedParentId }, { parentItemId: null }],
+    },
+    data: {
+      parentItemId: replacementLink.parentItemId,
+    },
+  });
+
+  return true;
 }
 
 export type PersistAggregationResult = {
@@ -234,16 +324,56 @@ export async function persistAggregationChildItems({
   }
   const childItemIds: string[] = [];
   await prisma.$transaction(async (tx) => {
-    for (const event of events) {
+    const linkedDedupeSignatures = new Set<string>();
+    const retainedEventIndexes: number[] = [];
+    for (const [eventIndex, event] of events.entries()) {
       const childInput = buildAggregationChildItemInput({
         sourceId,
         parent,
         publishedAt,
         event,
       });
+      const dedupeSignature = String(childInput.dedupeSignature);
+      if (linkedDedupeSignatures.has(dedupeSignature)) {
+        continue;
+      }
+      linkedDedupeSignatures.add(dedupeSignature);
       const child = await upsertItemInTx(tx, childInput);
+      const fingerprint = event.fingerprint ?? buildSemanticEventFingerprint(event);
+      await tx.aggregationSplitLink.upsert({
+        where: {
+          parentItemId_eventIndex: {
+            parentItemId: parent.id,
+            eventIndex,
+          },
+        },
+        create: {
+          parentItemId: parent.id,
+          childItemId: child.id,
+          eventIndex,
+          fingerprint,
+          title: event.title ?? null,
+          oneLiner: event.oneLiner,
+          sourceUrl: normalizeHttpUrl(event.sourceUrl),
+        },
+        update: {
+          childItemId: child.id,
+          fingerprint,
+          title: event.title ?? null,
+          oneLiner: event.oneLiner,
+          sourceUrl: normalizeHttpUrl(event.sourceUrl),
+        },
+      });
+      retainedEventIndexes.push(eventIndex);
       childItemIds.push(child.id);
     }
+
+    await tx.aggregationSplitLink.deleteMany({
+      where: {
+        parentItemId: parent.id,
+        eventIndex: { notIn: retainedEventIndexes },
+      },
+    });
   });
   return { childItemIds };
 }
@@ -253,21 +383,61 @@ export async function persistAggregationChildItems({
  * to hide stale splits while preserving cluster history and admin auditability.
  */
 export async function retireAggregationChildItems(parentId: string): Promise<number> {
-  const result = await prisma.item.updateMany({
-    where: {
-      parentItemId: parentId,
-      OR: [
-        { status: { not: "filtered" } },
-        { moderationStatus: { not: "filtered" } },
-        { filterReason: { not: "reparsed_parent" } },
-      ],
-    },
-    data: {
-      status: "filtered",
-      moderationStatus: "filtered",
-      filterReason: "reparsed_parent",
-      errorMessage: null,
-    },
+  return prisma.$transaction(async (tx) => {
+    const links = await tx.aggregationSplitLink.findMany({
+      where: { parentItemId: parentId },
+      select: { childItemId: true },
+    });
+    await tx.aggregationSplitLink.deleteMany({
+      where: { parentItemId: parentId },
+    });
+
+    let retiredCount = 0;
+    for (const { childItemId } of links) {
+      const hasRemainingParent = await reassignAggregationChildParentIfLinked(
+        tx,
+        childItemId,
+        parentId,
+      );
+      if (hasRemainingParent) {
+        continue;
+      }
+      const result = await tx.item.updateMany({
+        where: {
+          id: childItemId,
+          OR: [
+            { status: { not: "filtered" } },
+            { moderationStatus: { not: "filtered" } },
+            { filterReason: { not: "reparsed_parent" } },
+          ],
+        },
+        data: {
+          status: "filtered",
+          moderationStatus: "filtered",
+          filterReason: "reparsed_parent",
+          errorMessage: null,
+        },
+      });
+      retiredCount += result.count;
+    }
+
+    const legacyResult = await tx.item.updateMany({
+      where: {
+        parentItemId: parentId,
+        aggregationSplitParents: { none: {} },
+        OR: [
+          { status: { not: "filtered" } },
+          { moderationStatus: { not: "filtered" } },
+          { filterReason: { not: "reparsed_parent" } },
+        ],
+      },
+      data: {
+        status: "filtered",
+        moderationStatus: "filtered",
+        filterReason: "reparsed_parent",
+        errorMessage: null,
+      },
+    });
+    return retiredCount + legacyResult.count;
   });
-  return result.count;
 }
