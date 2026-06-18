@@ -37,11 +37,12 @@ describe("runtime config defaults", () => {
     expect(defaults.prompts.clusterSummary).toContain("*斜体*");
     expect(defaults.prompts.clusterMatch.length).toBeGreaterThan(0);
     expect(defaults.prompts.clusterMatch).toContain('{"clusterId":"候选组ID"}');
-    expect(defaults.prompts.dailyReport).toContain("candidateScore 是综合质量、聚合热度和时效排序后的参考分");
-    expect(defaults.prompts.dailyReport).toContain("sourceCount 表示不同来源数量");
-    expect(defaults.prompts.dailyReport).toContain("多个 sourceIds 只能用于同一事件的多来源互证");
-    expect(defaults.prompts.dailyReport).toContain("Anthropic Claude Security 公开测试和 Mistral Medium 3.5/Vibe 发布不是同一事件");
-    expect(defaults.prompts.dailyReport).toContain("同一事件不得同时出现在多个栏目");
+    expect(defaults.prompts.dailyReport).toContain("优先综合参考 candidateScore、sourceCount、itemCount 和日期相关性");
+    expect(defaults.prompts.dailyReport).toContain("items 为空数组时会在渲染时自动隐藏");
+    expect(defaults.prompts.dailyReport).toContain("说明变化内容、适用对象、实践价值或可能影响");
+    expect(defaults.prompts.dailyReport).toContain("多个来源只能用于同一事件的互证");
+    expect(defaults.prompts.dailyReport).toContain("只使用输入候选内容和合法来源编号");
+    expect(defaults.prompts.dailyReport).toContain("同一事件只出现一次，避免跨栏目重复");
   });
 
   it("returns fresh copies for mutable arrays", () => {

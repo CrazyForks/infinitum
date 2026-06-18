@@ -472,6 +472,7 @@ model PromptConfig {
   type             PromptConfigType
   prompt           String
   systemPrompt     String?
+  templateJson     String?
   temperature      Float?
   maxTokens        Int?
   topP             Float?

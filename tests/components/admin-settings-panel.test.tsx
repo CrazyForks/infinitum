@@ -49,6 +49,7 @@ function buildInitialSettings(): AdminSettingsSnapshot {
         type: "item_summary" as const,
         prompt: "标题：{{title}}\n来源：{{sourceName}}\n正文：{{inputText}}",
         systemPrompt: "请总结单条内容。",
+        templateJson: null,
         temperature: 0.2,
         maxTokens: 300,
         topP: 1,
@@ -66,6 +67,7 @@ function buildInitialSettings(): AdminSettingsSnapshot {
         type: "item_analysis" as const,
         prompt: "标题：{{title}}\n正文：{{inputText}}",
         systemPrompt: "请分析内容并输出 JSON。",
+        templateJson: null,
         temperature: 0.2,
         maxTokens: 900,
         topP: 1,
@@ -83,6 +85,7 @@ function buildInitialSettings(): AdminSettingsSnapshot {
         type: "item_aggregation" as const,
         prompt: "标题：{{title}}\n来源：{{sourceName}}\n正文：{{inputText}}",
         systemPrompt: "请拆分聚合信息并输出 JSON。",
+        templateJson: null,
         temperature: 0,
         maxTokens: 8000,
         topP: null,
@@ -582,6 +585,7 @@ describe("AdminSettingsPanel", () => {
             type: "cluster_summary",
             prompt: "主题：{{title}}",
             systemPrompt: "总结多条内容",
+            templateJson: null,
             temperature: null,
             maxTokens: null,
             topP: null,
@@ -623,6 +627,7 @@ describe("AdminSettingsPanel", () => {
           type: "item_summary",
           prompt: "标题：{{title}}\n来源：{{sourceName}}\n正文：{{inputText}}",
           systemPrompt: "总结单条内容",
+          templateJson: null,
           temperature: null,
           maxTokens: null,
           topP: null,
@@ -681,6 +686,90 @@ describe("AdminSettingsPanel", () => {
       ),
     ).toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "取消" }));
+  });
+
+  it("keeps prompt advanced settings collapsed and reorders daily report blocks by drag", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          config: {
+            id: "prompt-daily",
+            name: "日报拖拽测试",
+            type: "daily_report",
+            prompt: "日期：{{date}}\n候选内容 JSON：{{articlesJson}}",
+            systemPrompt: "compiled",
+            templateJson: "{}",
+            temperature: null,
+            maxTokens: null,
+            topP: null,
+            modelApiConfigId: null,
+            modelApiConfigName: null,
+            isUsingDefaultModel: true,
+            isEnabled: true,
+            isDefault: false,
+            createdAt: "2026-04-20T11:00:00.000Z",
+            updatedAt: "2026-04-20T11:00:00.000Z",
+          },
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderWithProviders(
+      <AdminSettingsPanel
+        initialSettings={buildInitialSettings()}
+        activeSection="ai-prompt"
+        initialPromptType="daily_report"
+      />,
+    );
+
+    await user.click(screen.getAllByRole("button", { name: /创建配置/i })[0]);
+    const dialog = screen.getByRole("dialog", { name: "创建新提示词配置" });
+
+    expect(within(dialog).queryByLabelText("温度")).not.toBeInTheDocument();
+
+    const dragHandles = within(dialog).getAllByTitle("拖动调整顺序");
+    const dataTransfer = {
+      effectAllowed: "",
+      setData: vi.fn(),
+    };
+    fireEvent.dragStart(dragHandles[dragHandles.length - 1], { dataTransfer });
+    fireEvent.dragOver(dragHandles[0], { dataTransfer });
+    fireEvent.drop(dragHandles[0], { dataTransfer });
+
+    await user.clear(within(dialog).getByLabelText(/配置名称/));
+    await user.type(within(dialog).getByLabelText(/配置名称/), "日报拖拽测试");
+    fireEvent.change(within(dialog).getByLabelText(/提示词模板/), {
+      target: { value: "日期：{{date}}\n候选内容 JSON：{{articlesJson}}" },
+    });
+    await user.click(within(dialog).getByRole("button", { name: "创建" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/admin/settings/prompt-configs", expect.any(Object));
+    });
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    const payload = JSON.parse(String(request.body)) as { templateJson: string };
+    const template = JSON.parse(payload.templateJson) as { blocks: Array<{ title: string }> };
+    expect(template.blocks[0].title).toBe("今日观察");
+  });
+
+  it("keeps prompt advanced settings collapsed when editing existing configs", async () => {
+    const user = userEvent.setup();
+
+    renderWithProviders(
+      <AdminSettingsPanel
+        initialSettings={buildInitialSettings()}
+        activeSection="ai-prompt"
+        initialPromptType="item_summary"
+      />,
+    );
+
+    await user.click(screen.getByTitle("编辑"));
+    const dialog = screen.getByRole("dialog", { name: "编辑提示词配置" });
+
+    expect(within(dialog).queryByLabelText("温度")).not.toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: /高级设置（可选）/ })).toBeInTheDocument();
   });
 
   it("uses the normalized RSS URL returned by resolve when creating a source", async () => {

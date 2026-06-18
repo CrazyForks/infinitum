@@ -37,6 +37,7 @@ export type AdminPromptConfig = {
   type: PromptConfigType;
   prompt: string;
   systemPrompt: string | null;
+  templateJson: string | null;
   temperature: number | null;
   maxTokens: number | null;
   topP: number | null;

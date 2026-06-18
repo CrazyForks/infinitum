@@ -144,8 +144,8 @@ describe("ai provider", () => {
 
   it("streams daily report refinement with current content and source registry context", async () => {
     async function* streamChunks() {
-      yield { choices: [{ delta: { content: "{\"openingSummary\":" } }] };
-      yield { choices: [{ delta: { content: "\"微调摘要\"}" } }] };
+      yield { choices: [{ delta: { content: "{\"blocks\":[" } }] };
+      yield { choices: [{ delta: { content: "{\"type\":\"text\",\"title\":\"摘要\",\"body\":\"微调摘要内容\"}]}" } }] };
     }
 
     const create = vi.fn().mockReturnValue(streamChunks());
@@ -175,24 +175,37 @@ describe("ai provider", () => {
       date: "2026-04-24",
       timezone: "Asia/Shanghai",
       currentContent: {
-        openingSummary: "当前摘要内容足够长，用于作为微调起点，确保模型不是重新生成整篇日报。",
-        sections: {
-          今日大事: [{
-            topic: "OpenAI 发布新模型",
-            summary: "当前条目摘要",
-            whyImportant: "模型能力提升",
-            sourceIds: [1],
-          }],
-          变更与实践: [{
-            topic: "开发者工具更新",
-            action: "当前行动建议",
-            sourceIds: [1],
-          }],
-          安全与风险: [],
-          开源与工具: [],
-          数据与洞察: [],
-        },
-        closingThought: "当前观察内容足够长，用于作为微调起点。",
+        blocks: [
+          {
+            type: "text",
+            title: "摘要",
+            body: "当前摘要内容足够长，用于作为微调起点，确保模型不是重新生成整篇日报。",
+          },
+          {
+            type: "section",
+            title: "今日大事",
+            items: [{
+              title: "OpenAI 发布新模型",
+              body: "当前条目摘要内容足够长。",
+              notes: [{ label: "重点", text: "模型能力提升" }],
+              sourceIds: [1],
+            }],
+          },
+          {
+            type: "section",
+            title: "变更与实践",
+            items: [{
+              title: "开发者工具更新",
+              body: "当前行动建议内容足够长。",
+              sourceIds: [1],
+            }],
+          },
+          {
+            type: "text",
+            title: "今日观察",
+            body: "当前观察内容足够长，用于作为微调起点。",
+          },
+        ],
       },
       sourceRegistry: [{
         sourceNumber: 1,
@@ -217,7 +230,7 @@ describe("ai provider", () => {
       output += delta;
     }
 
-    expect(output).toBe("{\"openingSummary\":\"微调摘要\"}");
+    expect(output).toBe("{\"blocks\":[{\"type\":\"text\",\"title\":\"摘要\",\"body\":\"微调摘要内容\"}]}");
     expect(create).toHaveBeenCalledTimes(1);
     expect(create.mock.calls[0]?.[0]?.stream).toBe(true);
     expect(create.mock.calls[0]?.[0]?.response_format).toEqual({ type: "json_object" });
@@ -260,20 +273,28 @@ describe("ai provider", () => {
       date: "2026-04-24",
       timezone: "Asia/Shanghai",
       currentContent: {
-        openingSummary: "当前摘要内容足够长，用于作为微调起点，确保模型不是重新生成整篇日报。",
-        sections: {
-          今日大事: [{
-            topic: "OpenAI 发布新模型",
-            summary: "当前条目摘要",
-            whyImportant: "模型能力提升",
-            sourceIds: [1],
-          }],
-          变更与实践: [],
-          安全与风险: [],
-          开源与工具: [],
-          数据与洞察: [],
-        },
-        closingThought: "当前观察内容足够长，用于作为微调起点。",
+        blocks: [
+          {
+            type: "text",
+            title: "摘要",
+            body: "当前摘要内容足够长，用于作为微调起点，确保模型不是重新生成整篇日报。",
+          },
+          {
+            type: "section",
+            title: "今日大事",
+            items: [{
+              title: "OpenAI 发布新模型",
+              body: "当前条目摘要内容足够长。",
+              notes: [{ label: "重点", text: "模型能力提升" }],
+              sourceIds: [1],
+            }],
+          },
+          {
+            type: "text",
+            title: "今日观察",
+            body: "当前观察内容足够长，用于作为微调起点。",
+          },
+        ],
       },
       sourceRegistry: [{
         sourceNumber: 1,

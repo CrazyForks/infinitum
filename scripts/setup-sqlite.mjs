@@ -150,6 +150,28 @@ function applyRuntimeSqliteObjects() {
   }
 }
 
+function tableColumnExists(tableName, columnName) {
+  const escapedTableName = tableName.replace(/'/g, "''");
+  const escapedColumnName = columnName.replace(/'/g, "''");
+  const result = execFileSync(
+    "sqlite3",
+    [dbPath, `SELECT COUNT(*) FROM pragma_table_info('${escapedTableName}') WHERE name='${escapedColumnName}'`],
+    {
+      encoding: "utf8",
+    },
+  ).trim();
+
+  return Number(result) > 0;
+}
+
+function applyAdditiveSchemaUpgrades() {
+  if (ftsTableExists("prompt_configs") && !tableColumnExists("prompt_configs", "templateJson")) {
+    runSqlite([dbPath], {
+      input: `ALTER TABLE "prompt_configs" ADD COLUMN "templateJson" TEXT;\n`,
+    });
+  }
+}
+
 function sleep(ms) {
   if (ms <= 0) {
     return;
@@ -219,6 +241,7 @@ try {
   runSqlite([dbPath], {
     input: sql,
   });
+  applyAdditiveSchemaUpgrades();
   applyRuntimeSqliteObjects();
 
   if (testHoldMs > 0) {

@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/db";
+import { normalizeDailyReportContent } from "@/lib/daily-report/content";
 import { withDailyReportCache } from "@/lib/daily-report/cache";
 import { getDailyReportDateRange } from "@/lib/daily-report/date";
 import {
@@ -311,7 +312,7 @@ export async function listRecentDailyReportSourceSnapshots(
 }
 
 function parseContent(summaryJson: string): DailyReportContent {
-  return JSON.parse(summaryJson) as DailyReportContent;
+  return normalizeDailyReportContent(JSON.parse(summaryJson));
 }
 
 function countDailyReportSourceItems(sources?: Array<{

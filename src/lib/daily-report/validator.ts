@@ -1,8 +1,7 @@
 import {
-  DAILY_REPORT_CLOSING_LABEL_MAX_LENGTH,
-  DAILY_REPORT_OPENING_LABEL_MAX_LENGTH,
   type DailyReportContent,
   type DailyReportItem,
+  type DailyReportItemNote,
 } from "@/lib/daily-report/types";
 
 function stripCodeFence(value: string) {
@@ -34,21 +33,6 @@ function normalizeIds(value: unknown, maxId: number) {
   );
 }
 
-function normalizeOptionalLabel(value: unknown, maxLength: number): string | undefined {
-  const text = safeText(value);
-  if (!text) return undefined;
-  return text.length > maxLength ? text.slice(0, maxLength) : text;
-}
-
-const DAILY_REPORT_LABEL_STRIPPED_ITEM_FIELDS = new Set([
-  "summary",
-  "whyImportant",
-  "action",
-  "affected",
-  "reason",
-  "keyNumbers",
-]);
-
 export function parseDailyReportContent(rawContent: string, maxSourceId: number): DailyReportContent {
   const parsed = JSON.parse(stripCodeFence(rawContent)) as unknown;
 
@@ -57,17 +41,14 @@ export function parseDailyReportContent(rawContent: string, maxSourceId: number)
   }
 
   const input = parsed as Record<string, unknown>;
-  const sectionsInput = input.sections && typeof input.sections === "object"
-    ? input.sections as Record<string, unknown>
-    : {};
   const errors: string[] = [];
 
-  const requireTopic = (item: Record<string, unknown>, path: string) => {
-    const topic = safeText(item.topic);
-    if (topic.length < 4) {
-      errors.push(`${path}.topic 太短`);
+  const requireTitle = (value: unknown, path: string) => {
+    const title = stripDailyReportGeneratedLabel(value);
+    if (title.length < 4) {
+      errors.push(`${path}.title 太短`);
     }
-    return topic;
+    return title;
   };
 
   const requireSourceIds = (item: Record<string, unknown>, path: string) => {
@@ -78,62 +59,98 @@ export function parseDailyReportContent(rawContent: string, maxSourceId: number)
     return sourceIds;
   };
 
-  const sections: Record<string, DailyReportItem[]> = {};
-  let totalItems = 0;
-
-  for (const [sectionName, rawList] of Object.entries(sectionsInput)) {
-    if (!Array.isArray(rawList)) continue;
-    const items: DailyReportItem[] = [];
-    rawList.forEach((rawItem, index) => {
-      if (!rawItem || typeof rawItem !== "object") {
-        errors.push(`sections.${sectionName}[${index}] 不是对象`);
+  const parseNotes = (value: unknown, path: string): DailyReportItemNote[] | undefined => {
+    if (value == null) return undefined;
+    if (!Array.isArray(value)) {
+      errors.push(`${path}.notes 必须是数组`);
+      return undefined;
+    }
+    const notes: DailyReportItemNote[] = [];
+    value.forEach((rawNote, index) => {
+      if (!rawNote || typeof rawNote !== "object") {
+        errors.push(`${path}.notes[${index}] 不是对象`);
         return;
       }
-      const item = rawItem as Record<string, unknown>;
-      const path = `sections.${sectionName}[${index}]`;
-      const topic = requireTopic(item, path);
-      const sourceIds = requireSourceIds(item, path);
-      const normalized: DailyReportItem = {
-        topic: stripDailyReportGeneratedLabel(topic),
-        sourceIds,
-      };
-      for (const [key, value] of Object.entries(item)) {
-        if (key === "topic" || key === "sourceIds") continue;
-        normalized[key] = typeof value === "string" && DAILY_REPORT_LABEL_STRIPPED_ITEM_FIELDS.has(key)
-          ? stripDailyReportGeneratedLabel(value)
-          : value;
-      }
-      items.push(normalized);
+      const note = rawNote as Record<string, unknown>;
+      const label = safeText(note.label);
+      const text = stripDailyReportGeneratedLabel(note.text);
+      if (!label) errors.push(`${path}.notes[${index}].label 不能为空`);
+      if (!text) errors.push(`${path}.notes[${index}].text 不能为空`);
+      if (label && text) notes.push({ label, text });
     });
-    sections[sectionName] = items;
-    totalItems += items.length;
-  }
+    return notes.length > 0 ? notes : undefined;
+  };
 
-  const openingLabel = normalizeOptionalLabel(input.openingLabel, DAILY_REPORT_OPENING_LABEL_MAX_LENGTH);
-  const closingLabel = normalizeOptionalLabel(input.closingLabel, DAILY_REPORT_CLOSING_LABEL_MAX_LENGTH);
-  const openingSummary = stripDailyReportGeneratedLabel(input.openingSummary);
-  const closingThought = stripDailyReportGeneratedLabel(input.closingThought);
+  const parseItem = (rawItem: unknown, path: string): DailyReportItem | null => {
+    if (!rawItem || typeof rawItem !== "object") {
+      errors.push(`${path} 不是对象`);
+      return null;
+    }
+    const item = rawItem as Record<string, unknown>;
+    const title = requireTitle(item.title, path);
+    const body = stripDailyReportGeneratedLabel(item.body);
+    const sourceIds = requireSourceIds(item, path);
+    if (body.length < 10) errors.push(`${path}.body 太短`);
+    if (!title || !body) return null;
+    const normalized: DailyReportItem = {
+      title,
+      body,
+      sourceIds,
+    };
+    const notes = parseNotes(item.notes, path);
+    if (notes) normalized.notes = notes;
+    return normalized;
+  };
 
-  if (typeof input.openingLabel === "string" && input.openingLabel.trim().length > DAILY_REPORT_OPENING_LABEL_MAX_LENGTH) {
-    errors.push(`openingLabel 超过 ${DAILY_REPORT_OPENING_LABEL_MAX_LENGTH} 字`);
+  const blocks: DailyReportContent["blocks"] = [];
+  let totalItems = 0;
+
+  if (Array.isArray(input.blocks)) {
+    input.blocks.forEach((rawBlock, blockIndex) => {
+      const path = `blocks[${blockIndex}]`;
+      if (!rawBlock || typeof rawBlock !== "object") {
+        errors.push(`${path} 不是对象`);
+        return;
+      }
+      const block = rawBlock as Record<string, unknown>;
+      if (block.type === "text") {
+        const title = safeText(block.title);
+        const body = stripDailyReportGeneratedLabel(block.body);
+        if (!title) errors.push(`${path}.title 不能为空`);
+        if (body.length < 30) errors.push(`${path}.body 太短`);
+        if (title && body) {
+          const textBlock: DailyReportContent["blocks"][number] = {
+            type: "text",
+            title,
+            body,
+          };
+          blocks.push(textBlock);
+        }
+        return;
+      }
+      if (block.type === "section") {
+        const title = safeText(block.title);
+        if (!title) errors.push(`${path}.title 不能为空`);
+        const items = Array.isArray(block.items)
+          ? block.items
+            .map((rawItem, itemIndex) => parseItem(rawItem, `${path}.items[${itemIndex}]`))
+            .filter((entry): entry is DailyReportItem => Boolean(entry))
+          : [];
+        if (!Array.isArray(block.items)) errors.push(`${path}.items 必须是数组`);
+        totalItems += items.length;
+        if (title) blocks.push({ type: "section", title, items });
+        return;
+      }
+      errors.push(`${path}.type 必须是 text 或 section`);
+    });
+  } else {
+    errors.push("blocks 必须是数组");
   }
-  if (typeof input.closingLabel === "string" && input.closingLabel.trim().length > DAILY_REPORT_CLOSING_LABEL_MAX_LENGTH) {
-    errors.push(`closingLabel 超过 ${DAILY_REPORT_CLOSING_LABEL_MAX_LENGTH} 字`);
-  }
-  if (openingSummary.length < 40) errors.push("openingSummary 太短");
-  if (closingThought.length < 30) errors.push("closingThought 太短");
   if (totalItems < 1) errors.push("所有 section 合计至少需要 1 条 item");
 
   if (errors.length > 0) {
     throw new Error(`日报输出校验失败：${errors.slice(0, 8).join("；")}`);
   }
 
-  const content: DailyReportContent = {
-    openingSummary,
-    sections,
-    closingThought,
-  };
-  if (openingLabel) content.openingLabel = openingLabel;
-  if (closingLabel) content.closingLabel = closingLabel;
-  return content;
+  return { blocks };
 }

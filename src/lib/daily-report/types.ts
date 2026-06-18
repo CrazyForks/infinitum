@@ -30,51 +30,39 @@ export type DailyReportCandidate = {
   eventDate: string | null;
 };
 
-export type DailyReportTopItem = {
-  topic: string;
-  summary: string;
-  whyImportant: string;
-  sourceIds: number[];
+export type DailyReportTextBlock = {
+  type: "text";
+  title: string;
+  body: string;
 };
 
-export type DailyReportActionItem = {
-  topic: string;
-  action: string;
-  sourceIds: number[];
-};
-
-export type DailyReportRiskItem = {
-  topic: string;
-  affected: string;
-  action: string;
-  sourceIds: number[];
-};
-
-export type DailyReportToolItem = {
-  topic: string;
-  reason: string;
-  sourceIds: number[];
-};
-
-export type DailyReportInsightItem = {
-  topic: string;
-  keyNumbers: string;
-  reason: string;
-  sourceIds: number[];
+export type DailyReportItemNote = {
+  label: string;
+  text: string;
 };
 
 export type DailyReportItem = {
-  topic: string;
+  title: string;
+  body: string;
+  notes?: DailyReportItemNote[];
   sourceIds: number[];
-  [key: string]: unknown;
 };
 
+export type DailyReportSectionBlock = {
+  type: "section";
+  title: string;
+  items: DailyReportItem[];
+};
+
+export type DailyReportBlock = DailyReportTextBlock | DailyReportSectionBlock;
+
 export type DailyReportContent = {
+  blocks: DailyReportBlock[];
   openingLabel?: string;
-  openingSummary: string;
-  sections: Record<string, DailyReportItem[]>;
+  openingSummary?: string;
+  sections?: Record<string, DailyReportItem[]>;
   closingLabel?: string;
-  closingThought: string;
+  closingThought?: string;
 };
 
 export type DailyReportSourceDTO = {

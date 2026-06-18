@@ -1,8 +1,5 @@
-import {
-  DEFAULT_CLOSING_LABEL,
-  DEFAULT_OPENING_LABEL,
-  type DailyReportDetailDTO,
-} from "@/lib/daily-report/types";
+import type { DailyReportDetailDTO } from "@/lib/daily-report/types";
+import { normalizeDailyReportContent } from "@/lib/daily-report/content";
 import { renderDailyReportItemBody } from "@/lib/daily-report/item-renderer";
 import { DAILY_REPORT_AI_NOTICE } from "@/lib/daily-report/renderer";
 
@@ -15,23 +12,26 @@ function hasLevelTwoHeading(markdown: string, heading: string) {
 }
 
 function buildFallbackMarkdown(report: DailyReportDetailDTO) {
-  const openingHeading = report.content.openingLabel ?? DEFAULT_OPENING_LABEL;
-  const closingHeading = report.content.closingLabel ?? DEFAULT_CLOSING_LABEL;
-  const lines: string[] = [`> ${DAILY_REPORT_AI_NOTICE}`, "", `## ${openingHeading}`, "", report.content.openingSummary, ""];
+  const content = normalizeDailyReportContent(report.content);
+  const lines: string[] = [`> ${DAILY_REPORT_AI_NOTICE}`, ""];
 
-  for (const [sectionName, items] of Object.entries(report.content.sections)) {
-    if (items.length === 0) continue;
-
-    lines.push(`## ${sectionName}`, "");
-    for (const item of items) {
-      lines.push(`### ${item.topic}`);
+  for (const block of content.blocks) {
+    if (block.type === "text") {
+      lines.push(`## ${block.title}`, "", block.body, "");
+      continue;
+    }
+    if (block.items.length === 0) {
+      continue;
+    }
+    lines.push(`## ${block.title}`, "");
+    for (const item of block.items) {
+      lines.push(`### ${item.title}`);
       const body = renderDailyReportItemBody(item);
       if (body.length > 0) lines.push(...body);
       lines.push("");
     }
   }
 
-  lines.push(`## ${closingHeading}`, "", report.content.closingThought);
   return lines.join("\n").replace(/\n{3,}/g, "\n\n");
 }
 
@@ -46,17 +46,18 @@ export function buildDailyReportDetailMarkdown(report: DailyReportDetailDTO) {
     .replace(/^##\s+开场摘要\s*$/m, "## 摘要")
     .replace(/^##\s+收尾观察\s*$/m, "## 今日观察")
     .replace(/^(\s*)风险级别：[^；\n]*(?:；\s*)?/gm, "$1")
-    .replace(/^(\s*)(?:\*\*)?(?:摘要|开场摘要|今日观察|收尾观察|受影响|影响对象|建议|建议动作|行动建议)\s*[：:]\s*(?:\*\*)?\s*/gm, "$1")
+    .replace(/^(\s*)(?:摘要|开场摘要|今日观察|收尾观察|受影响|影响对象|建议|建议动作|行动建议)\s*[：:]\s*/gm, "$1")
     .replace(/^重点：\s*/gm, "**重点：** ")
     .replace(/^来源：\s*$/gm, "**来源：**");
   const withNotice = /^>\s*声明：完全使用AI生成，可能存在错误，需谨慎甄别。/m.test(normalizedHeadings)
     ? normalizedHeadings
     : `> ${DAILY_REPORT_AI_NOTICE}\n\n${normalizedHeadings}`;
-  const openingHeading = report.content.openingLabel ?? DEFAULT_OPENING_LABEL;
-  if (hasLevelTwoHeading(normalizedHeadings, openingHeading)) {
+  const content = normalizeDailyReportContent(report.content);
+  const firstTitle = content.blocks[0]?.title;
+  if (firstTitle && hasLevelTwoHeading(normalizedHeadings, firstTitle)) {
     return withNotice;
   }
-  return `> ${DAILY_REPORT_AI_NOTICE}\n\n## ${openingHeading}\n\n${normalizedHeadings}`;
+  return withNotice;
 }
 
 export function buildDailyReportExportMarkdown(report: DailyReportDetailDTO) {

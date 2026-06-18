@@ -28,15 +28,11 @@ function buildReport(input: Partial<DailyReportDetailDTO> = {}): DailyReportDeta
     errorMessage: null,
     closingThought: "公开观察",
     content: {
-      openingSummary: "公开摘要",
-      sections: {
-        今日大事: [],
-        变更与实践: [],
-        安全与风险: [],
-        开源与工具: [],
-        数据与洞察: [],
-      },
-      closingThought: "公开观察",
+      blocks: [
+        { type: "text", title: "摘要", body: "公开摘要" },
+        { type: "section", title: "今日大事", items: [] },
+        { type: "text", title: "今日观察", body: "公开观察" },
+      ],
     },
     renderedMarkdown: "# 公开日报",
     sources: [{

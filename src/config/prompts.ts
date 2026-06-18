@@ -1,3 +1,5 @@
+import { compileDailyReportTemplatePrompt, DEFAULT_DAILY_REPORT_TEMPLATE } from "@/lib/daily-report/template";
+
 export const DEFAULT_ITEM_SUMMARY_PROMPT = `你是单条新闻内容助手。只基于输入标题、来源和正文判断，严格输出单个 JSON 对象，不要输出 Markdown、代码块或额外解释。
 
 固定输出格式：
@@ -69,36 +71,21 @@ export const DEFAULT_CLUSTER_SUMMARY_PROMPT =
 export const DEFAULT_CLUSTER_MATCH_PROMPT =
   '你是内容归组助手。请判断当前内容是否属于给定候选聚合组中的某一个，只返回 JSON：{"clusterId":"候选组ID"} 或 {"clusterId":null}。只有当当前内容与候选组描述的是同一具体事件时才匹配，例如同一发布、同一公告、同一收购、同一融资、同一漏洞披露、同一论文、同一产品上线或同一监管动作。判断时优先看事件主体、动作、关键对象、时间窗口和结果是否一致；如果只是主题接近、赛道相同、公司相同、产品类别相近、方法论相似或都属于同一抽象话题，一律返回 null。当前内容缺少明确事件线索时，也优先返回 null。';
 
-export const DEFAULT_DAILY_REPORT_PROMPT = `你是中文 AI 新闻日报编辑。只基于输入候选内容生成一份 Briefing 型 AI 日报，严格输出单个 JSON 对象，不要输出 Markdown、代码块或额外解释。
-
-固定输出格式：
-{"openingLabel":"摘要","openingSummary":"...","sections":{"今日大事":[{"topic":"...","summary":"...","whyImportant":"...","sourceIds":[1,2]}],"变更与实践":[{"topic":"...","action":"...","sourceIds":[1,2]}],"安全与风险":[{"topic":"...","affected":"...","action":"...","sourceIds":[1,2]}],"开源与工具":[{"topic":"...","reason":"...","sourceIds":[1]}],"数据与洞察":[{"topic":"...","keyNumbers":"...","reason":"...","sourceIds":[1]}]},"closingLabel":"今日观察","closingThought":"..."}
-
-输出要求：
-1. openingLabel：可选，1-20 字的首段标题，默认"摘要"，可按栏目习惯改名。openingSummary：100-180 字，概括当天 AI 领域最关键的事项和主线变化，优先覆盖重大发布、模型/产品进展、产业合作、安全风险、开源工具或关键数据。格式固定为”{{date}} AI 领域呈现...,值得关注的信息：...“，例如：“2026-04-29 AI 领域呈现多线并进格局，值得关注的信息：...”。可使用有限 Markdown 行内标记突出关键信息：用 **加粗** 标注事件主体、关键变化、数字或结论，用 *斜体* 标注必要背景或不确定性；不要使用链接、图片、标题、表格或列表。
-2. 今日大事：3-5 条，每条 summary 120-260 字，whyImportant 不超过 30 字。选题时将输入 articles 中的 candidateScore、sourceCount、itemCount 和日期相关性作为重要参考：candidateScore 是综合质量、聚合热度和时效排序后的参考分；sourceCount 表示不同来源数量，itemCount 表示同一事件聚合到的条目数，数值越高通常说明事件更热或被多源确认。在新闻价值、影响范围和可信度接近时，倾向优先选择 candidateScore 更高、sourceCount/itemCount 更多的事件，或 eventDate 明确等于用户输入日期的事项；其次考虑 publishedAt 或正文摘要能明确判断发生、发布、生效于用户输入日期的事项。如果某个热点事件虽无明确当天日期但影响范围、时效性或行业关注度明显更高，可以纳入今日大事。不要机械按日期排序，也不要仅因热度更高而忽略足够重要且明确发生在日报当天的事项。summary 和 whyImportant 可使用有限 Markdown 行内标记：**加粗** 用于主体、关键结果、数字或建议，*斜体* 用于背景或不确定性。
-3. 变更与实践：2-5 条，聚焦产品、模型、工程实践和生态变化，action 写可执行观察或建议。每条同样只覆盖一个独立事件或实践变化；不要为了压缩篇幅把无关更新并列到同一条。
-4. 安全与风险、开源与工具、数据与洞察可为空数组；有内容时必须字段完整。安全与风险不要输出 severity、riskLevel、风险级别等风险等级字段；只输出 topic、affected、action、sourceIds。
-5. closingLabel：可选，1-20 字的尾段标题，默认"今日观察"，可按栏目习惯改名。closingThought：80-140 字，总结当天值得持续关注的主线，重点说明这些变化可能如何影响普通用户、开发者、内容创作者、企业采购或日常工作流，并适当给出 1-2 个短期发展预测；不引入新的来源或深挖选题。可使用有限 Markdown 行内标记突出关键信息。
-6. 每个事件只能围绕一个清晰的独立事件、产品、漏洞、模型、政策或研究成果；不要把不同公司、不同产品或不同事件合并成一条“并列简讯”。多个 sourceIds 只能用于同一事件的多来源互证，必须满足主体、动作、对象高度一致；如果只是同属“模型发布”“安全工具”“开源项目”等主题相近但不是同一事件，必须拆成不同条目或只保留最相关的一个来源。例如 Anthropic Claude Security 公开测试和 Mistral Medium 3.5/Vibe 发布不是同一事件，禁止放进同一条。
-7. sourceIds 只能使用输入 articles 中的 id，不要编造来源，不要输出输入之外的事实。
-8. 字段内容只写正文，不要带栏目名或字段名前缀。例如 openingSummary 不要以“摘要：”“开场摘要：”开头，closingThought 不要以“今日观察：”“收尾观察：”开头，affected 不要以“受影响：”开头，action 不要以“建议：”“行动建议：”开头，whyImportant 不要以“重点：”开头。
-9. 除 openingSummary 和 closingThought 可以概括全文主线外，同一事件不得同时出现在多个栏目；如果某事件已进入“今日大事”，不要再放入“安全与风险”“开源与工具”“数据与洞察”或“变更与实践”。
-10. 除 **加粗** 和 *斜体* 外，不要在 JSON 字段中输出其他 Markdown 标记。`;
+export const DEFAULT_DAILY_REPORT_PROMPT = compileDailyReportTemplatePrompt(DEFAULT_DAILY_REPORT_TEMPLATE);
 
 export const DEFAULT_DAILY_REPORT_REFINEMENT_GENERATE_PROMPT = `你是中文 AI 日报编辑，负责在既有日报草稿基础上按管理员指令微调内容。严格只输出单个 JSON 对象，不要输出 Markdown、代码块或额外解释。
 
-固定输出格式必须与输入 currentContent 完全一致：
-{"openingLabel":"摘要","openingSummary":"...","sections":{"今日大事":[{"topic":"...","summary":"...","whyImportant":"...","sourceIds":[1,2]}],"变更与实践":[{"topic":"...","action":"...","sourceIds":[1,2]}],"安全与风险":[{"topic":"...","affected":"...","action":"...","sourceIds":[1,2]}],"开源与工具":[{"topic":"...","reason":"...","sourceIds":[1]}],"数据与洞察":[{"topic":"...","keyNumbers":"...","reason":"...","sourceIds":[1]}]},"closingLabel":"今日观察","closingThought":"..."}
+固定输出格式：
+{"blocks":[{"type":"text","title":"摘要","body":"..."},{"type":"section","title":"今日大事","items":[{"title":"...","body":"...","notes":[{"label":"重点","text":"..."}],"sourceIds":[1,2]}]},{"type":"text","title":"今日观察","body":"..."}]}
 
 编辑原则：
-1. 以 currentContent 为事实起点，默认保留管理员未要求修改的章节、条目和来源引用。
+1. 以 currentContent 为事实起点，默认保留管理员未要求修改的 blocks、items 和来源引用。
 2. 只基于 sourceRegistry 中的来源背景改写，不要输出来源之外的新事实。
 3. sourceIds 只能使用 sourceRegistry 中存在的 sourceNumber，不要编造来源编号。
 4. 如果 sourceRegistry 中包含当前日报原文未引用、但管理员已召回加入的来源，这些来源已经生效；当管理员要求纳入相关主题或编号时，可以直接使用，不要再要求重新召回。
-5. 可以根据指令调整章节顺序、条目归属、摘要长短和表达结构，但必须保持 JSON 字段完整。
+5. 可以根据指令调整 block 顺序、条目归属、摘要长短和表达结构，但必须保持 JSON 字段完整。
 6. 如果指令要求无法由来源支撑，保守改写并保留原事实，不要编造。
-7. 字段内容只写正文，不要带“摘要：”“今日观察：”“建议：”“来源：”等字段名前缀。
+7. 字段内容只写正文，不要带“摘要：”“今日观察：”“建议：”“来源：”等字段名前缀；item 只使用 title、body、notes、sourceIds，notes 只使用 label、text。
 8. 除 **加粗** 和 *斜体* 外，不要在 JSON 字段中输出其他 Markdown 标记。`;
 
 export const DEFAULT_DAILY_REPORT_REFINEMENT_CHAT_PROMPT = `你是中文 AI 日报编辑，负责和管理员围绕既有日报草稿持续对话，帮助确认局部结构、表达和来源使用方案。

@@ -7,6 +7,12 @@ import { prisma } from "@/lib/db";
 import { getDailyReportDateRange, getTodayDailyReportDate, normalizeDailyReportDate } from "@/lib/daily-report/date";
 import { invalidateDailyReportCache } from "@/lib/daily-report/cache";
 import {
+  getDailyReportClosingThought,
+  getDailyReportOpeningSummary,
+  getDailyReportSectionBlocks,
+  normalizeDailyReportContent,
+} from "@/lib/daily-report/content";
+import {
   listDailyReportCandidates,
   listRecentDailyReportSourceSnapshots,
   type RecentDailyReportSourceSnapshot,
@@ -75,10 +81,10 @@ function buildInputHash(date: string, candidates: DailyReportCandidate[], groupI
 function getSectionSourceIds(content: DailyReportContent) {
   const rows: Array<{ sectionName: string; topic: string; sourceId: number }> = [];
 
-  for (const [sectionName, items] of Object.entries(content.sections)) {
-    for (const item of items as DailyReportItem[]) {
+  for (const section of getDailyReportSectionBlocks(content)) {
+    for (const item of section.items as DailyReportItem[]) {
       for (const sourceId of item.sourceIds) {
-        rows.push({ sectionName, topic: item.topic, sourceId });
+        rows.push({ sectionName: section.title, topic: item.title, sourceId });
       }
     }
   }
@@ -453,7 +459,7 @@ function countSelectedDailyReportCandidates(content: DailyReportContent) {
 }
 
 function parseSavedDailyReportContent(value: string): DailyReportContent {
-  return JSON.parse(value) as DailyReportContent;
+  return normalizeDailyReportContent(JSON.parse(value));
 }
 
 function getDailyReportContentSourceIds(content: DailyReportContent) {
@@ -1032,8 +1038,8 @@ export async function generateDailyReport(input: {
       update: {
         status: shouldAutoPublish ? "published" : "draft",
         title,
-        openingSummary: content.openingSummary,
-        closingThought: content.closingThought,
+        openingSummary: getDailyReportOpeningSummary(content),
+        closingThought: getDailyReportClosingThought(content),
         summaryJson: JSON.stringify(content),
         renderedMarkdown,
         inputHash,
@@ -1049,8 +1055,8 @@ export async function generateDailyReport(input: {
         timezone: DAILY_REPORT_TIMEZONE,
         status: shouldAutoPublish ? "published" : "draft",
         title,
-        openingSummary: content.openingSummary,
-        closingThought: content.closingThought,
+        openingSummary: getDailyReportOpeningSummary(content),
+        closingThought: getDailyReportClosingThought(content),
         summaryJson: JSON.stringify(content),
         renderedMarkdown,
         inputHash,
@@ -1639,8 +1645,8 @@ export async function saveDailyReportRefinementCandidate(input: {
     const updated = await tx.dailyReport.update({
       where: { id: report.id },
       data: {
-        openingSummary: content.openingSummary,
-        closingThought: content.closingThought,
+        openingSummary: getDailyReportOpeningSummary(content),
+        closingThought: getDailyReportClosingThought(content),
         summaryJson: JSON.stringify(content),
         renderedMarkdown,
         generatedAt: new Date(),

@@ -13,6 +13,7 @@ const promptConfigSchema = z.object({
   type: z.enum(PROMPT_CONFIG_TYPES),
   prompt: z.string().min(1),
   systemPrompt: z.string().min(1),
+  templateJson: z.string().nullable().optional(),
   temperature: z.number().min(0).max(2).nullable().optional(),
   maxTokens: z.number().int().positive().nullable().optional(),
   topP: z.number().min(0).max(1).nullable().optional(),

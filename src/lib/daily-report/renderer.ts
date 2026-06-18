@@ -1,9 +1,8 @@
 import {
-  DEFAULT_CLOSING_LABEL,
-  DEFAULT_OPENING_LABEL,
   type DailyReportCandidate,
   type DailyReportContent,
 } from "@/lib/daily-report/types";
+import { normalizeDailyReportContent } from "@/lib/daily-report/content";
 import { renderDailyReportItemBody } from "@/lib/daily-report/item-renderer";
 
 export const DAILY_REPORT_AI_NOTICE = "声明：完全使用AI生成，可能存在错误，需谨慎甄别。";
@@ -40,6 +39,7 @@ export function renderDailyReportMarkdown(
     sourceName: candidate.sourceName,
   })),
 ) {
+  content = normalizeDailyReportContent(content);
   const sourcesByNumber = new Map<number, DailyReportMarkdownSource[]>();
   for (const source of sources) {
     const existing = sourcesByNumber.get(source.sourceNumber) ?? [];
@@ -48,27 +48,24 @@ export function renderDailyReportMarkdown(
     }
     sourcesByNumber.set(source.sourceNumber, existing);
   }
-  const openingHeading = escapeMarkdown(content.openingLabel ?? DEFAULT_OPENING_LABEL);
-  const closingHeading = escapeMarkdown(content.closingLabel ?? DEFAULT_CLOSING_LABEL);
   const lines: string[] = [
     `# ${escapeMarkdown(title)}`,
     "",
     `> ${DAILY_REPORT_AI_NOTICE}`,
     "",
-    `## ${openingHeading}`,
-    "",
-    content.openingSummary,
-    "",
   ];
 
-  for (const [sectionName, items] of Object.entries(content.sections)) {
-    if (items.length === 0) {
+  for (const block of content.blocks) {
+    if (block.type === "text") {
+      lines.push(`## ${escapeMarkdown(block.title)}`, "", block.body, "");
       continue;
     }
-
-    lines.push(`## ${escapeMarkdown(sectionName)}`, "");
-    for (const item of items) {
-      lines.push(`### ${escapeMarkdown(item.topic)}`);
+    if (block.items.length === 0) {
+      continue;
+    }
+    lines.push(`## ${escapeMarkdown(block.title)}`, "");
+    for (const item of block.items) {
+      lines.push(`### ${escapeMarkdown(item.title)}`);
       const body = renderDailyReportItemBody(item, { formatText: escapeMarkdown });
       if (body.length > 0) {
         lines.push(...body);
@@ -81,6 +78,5 @@ export function renderDailyReportMarkdown(
     }
   }
 
-  lines.push(`## ${closingHeading}`, "", content.closingThought, "");
   return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim() + "\n";
 }

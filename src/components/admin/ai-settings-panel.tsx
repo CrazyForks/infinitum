@@ -14,6 +14,7 @@ import {
   updateModelApiConfig,
   updatePromptConfig,
 } from "@/components/admin/ai-settings-panel.api";
+import { DailyReportTemplateEditor } from "@/components/admin/daily-report-template-editor";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import {
@@ -40,6 +41,14 @@ import {
   PROMPT_TYPE_OPTIONS,
   getPromptTypeLabel,
 } from "@/lib/settings/ai-config";
+import {
+  compileDailyReportTemplatePrompt,
+  DAILY_REPORT_SYSTEM_ROLE_PROMPT,
+  DEFAULT_DAILY_REPORT_TEMPLATE,
+  DEFAULT_DAILY_REPORT_TEMPLATE_JSON,
+  parseDailyReportTemplateJson,
+  stringifyDailyReportTemplate,
+} from "@/lib/daily-report/template";
 import type {
   AdminModelApiConfig,
   AdminPromptConfig,
@@ -75,6 +84,7 @@ type PromptFormState = {
   type: PromptConfigType;
   prompt: string;
   systemPrompt: string;
+  templateJson: string;
   temperature: string;
   maxTokens: string;
   topP: string;
@@ -159,11 +169,14 @@ function maskHeaderValue(value: string) {
 }
 
 function buildEmptyPromptForm(type: PromptConfigType): PromptFormState {
+  const templateJson = type === "daily_report" ? DEFAULT_DAILY_REPORT_TEMPLATE_JSON : "";
+
   return {
     name: "",
     type,
     prompt: "",
-    systemPrompt: "",
+    systemPrompt: type === "daily_report" ? compileDailyReportTemplatePrompt(DEFAULT_DAILY_REPORT_TEMPLATE) : "",
+    templateJson,
     temperature: "",
     maxTokens: "",
     topP: "",
@@ -171,6 +184,23 @@ function buildEmptyPromptForm(type: PromptConfigType): PromptFormState {
     isEnabled: true,
     isDefault: false,
   };
+}
+
+function getPreviewSystemPrompt(config: AdminPromptConfig) {
+  if (config.type !== "daily_report") {
+    return config.systemPrompt || "未设置（必填）";
+  }
+
+  if (config.templateJson?.trim()) {
+    try {
+      const template = parseDailyReportTemplateJson(config.templateJson);
+      if (template) return compileDailyReportTemplatePrompt(template);
+    } catch {
+      return config.systemPrompt || DAILY_REPORT_SYSTEM_ROLE_PROMPT;
+    }
+  }
+
+  return config.systemPrompt || DAILY_REPORT_SYSTEM_ROLE_PROMPT;
 }
 
 async function writeClipboardText(value: string): Promise<boolean> {
@@ -489,6 +519,7 @@ export function AiSettingsPanel({ initialSettings, mode, initialPromptType = "it
       type: config.type,
       prompt: config.prompt,
       systemPrompt: config.systemPrompt ?? "",
+      templateJson: config.templateJson ?? "",
       temperature: config.temperature == null ? "" : String(config.temperature),
       maxTokens: config.maxTokens == null ? "" : String(config.maxTokens),
       topP: config.topP == null ? "" : String(config.topP),
@@ -497,11 +528,7 @@ export function AiSettingsPanel({ initialSettings, mode, initialPromptType = "it
       isEnabled: config.isEnabled,
       isDefault: config.isDefault,
     });
-    setShowPromptAdvanced(
-      config.temperature != null ||
-        config.maxTokens != null ||
-        config.topP != null,
-    );
+    setShowPromptAdvanced(false);
     setShowPromptModal(true);
   };
 
@@ -513,6 +540,7 @@ export function AiSettingsPanel({ initialSettings, mode, initialPromptType = "it
       type: config.type,
       prompt: config.prompt,
       systemPrompt: config.systemPrompt ?? "",
+      templateJson: config.templateJson ?? "",
       temperature: config.temperature == null ? "" : String(config.temperature),
       maxTokens: config.maxTokens == null ? "" : String(config.maxTokens),
       topP: config.topP == null ? "" : String(config.topP),
@@ -521,7 +549,7 @@ export function AiSettingsPanel({ initialSettings, mode, initialPromptType = "it
       isEnabled: config.isEnabled,
       isDefault: false,
     });
-    setShowPromptAdvanced(true);
+    setShowPromptAdvanced(false);
     setShowPromptModal(true);
   };
 
@@ -541,11 +569,25 @@ export function AiSettingsPanel({ initialSettings, mode, initialPromptType = "it
 
     setPromptSaving(true);
     try {
+      let systemPrompt = promptForm.systemPrompt;
+      let templateJson: string | null = null;
+
+      if (promptForm.type === "daily_report" && promptForm.templateJson.trim()) {
+        const template = parseDailyReportTemplateJson(promptForm.templateJson);
+        if (!template) {
+          showToast("请先配置日报模板。", "error");
+          return;
+        }
+        templateJson = stringifyDailyReportTemplate(template);
+        systemPrompt = compileDailyReportTemplatePrompt(template);
+      }
+
       const payload = {
         name: promptForm.name,
         type: promptForm.type,
         prompt: promptForm.prompt,
-        systemPrompt: promptForm.systemPrompt,
+        systemPrompt,
+        templateJson,
         temperature,
         maxTokens,
         topP,
@@ -1163,7 +1205,14 @@ export function AiSettingsPanel({ initialSettings, mode, initialPromptType = "it
                             <span>{config.modelApiConfigName}</span>
                           </div>
                         ) : null}
-                        {config.systemPrompt ? (
+                        {config.type === "daily_report" ? (
+                          <div>
+                            <span className="font-medium">系统角色：</span>
+                            <code className="mt-1 block max-h-20 overflow-y-auto rounded bg-[var(--bg-muted)] px-2 py-1 text-xs">
+                              {DAILY_REPORT_SYSTEM_ROLE_PROMPT}
+                            </code>
+                          </div>
+                        ) : config.systemPrompt ? (
                           <div>
                             <span className="font-medium">系统提示词：</span>
                             <code className="mt-1 block max-h-20 overflow-y-auto rounded bg-[var(--bg-muted)] px-2 py-1 text-xs">
@@ -1272,11 +1321,12 @@ export function AiSettingsPanel({ initialSettings, mode, initialPromptType = "it
           />
         </FormBlock>
 
-        <FormBlock label="系统提示词" required>
+        <FormBlock label={promptForm.type === "daily_report" ? "系统角色" : "系统提示词"} required>
           <TextArea
-            className="min-h-[8rem] resize-y"
-            rows={4}
-            value={promptForm.systemPrompt}
+            className="min-h-[5rem] resize-y"
+            rows={promptForm.type === "daily_report" ? 3 : 4}
+            value={promptForm.type === "daily_report" ? DAILY_REPORT_SYSTEM_ROLE_PROMPT : promptForm.systemPrompt}
+            readOnly={promptForm.type === "daily_report"}
             onChange={(event) =>
               setPromptForm((current) => ({
                 ...current,
@@ -1285,6 +1335,26 @@ export function AiSettingsPanel({ initialSettings, mode, initialPromptType = "it
             }
           />
         </FormBlock>
+
+        {promptForm.type === "daily_report" ? (
+          <div className="space-y-2">
+            <span className={labelClassName}>
+              日报输出结构<span className="text-[var(--danger-ink)]"> *</span>
+            </span>
+            <DailyReportTemplateEditor
+              key={`${promptModalMode}-${editingPromptConfig?.id ?? "new"}`}
+              value={promptForm.templateJson}
+              onChange={(next) =>
+                setPromptForm((current) => ({
+                  ...current,
+                  templateJson: next.templateJson,
+                  systemPrompt: next.systemPrompt,
+                }))
+              }
+              onError={(message) => showToast(message, "error")}
+            />
+          </div>
+        ) : null}
 
         <FormBlock label="提示词模板" required>
           <TextArea
@@ -1452,7 +1522,7 @@ export function AiSettingsPanel({ initialSettings, mode, initialPromptType = "it
             <div>
               <label className="mb-2 block text-sm font-medium text-[var(--text-2)]">系统提示词</label>
               <pre className="w-full whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-lg border border-[color:var(--line)] bg-[var(--bg-muted)] p-4 text-sm font-mono text-[var(--text-1)]">
-                {showPromptPreview.systemPrompt || "未设置（必填）"}
+                {getPreviewSystemPrompt(showPromptPreview)}
               </pre>
             </div>
 

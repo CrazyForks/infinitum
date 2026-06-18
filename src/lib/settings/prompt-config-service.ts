@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import {
   coerceNullableNumber,
   ensureRuntimeConfigSeeded,
+  resolveTemplateJsonForSave,
   type SavePromptConfigInput,
   serializeAdminPromptConfig,
   validatePromptConfigInput,
@@ -64,6 +65,7 @@ export async function getPromptConfig(id: string) {
 export async function createPromptConfig(input: SavePromptConfigInput) {
   await ensureRuntimeConfigSeeded();
   await validatePromptConfigInput(input);
+  const templateSave = resolveTemplateJsonForSave(input);
 
   return prisma.$transaction(async (tx) => {
     if (input.isDefault) {
@@ -83,7 +85,8 @@ export async function createPromptConfig(input: SavePromptConfigInput) {
         name: normalizeText(input.name),
         type: input.type,
         prompt: input.prompt.trim(),
-        systemPrompt: input.systemPrompt?.trim() || null,
+        systemPrompt: templateSave?.systemPrompt ?? (input.systemPrompt?.trim() || null),
+        templateJson: templateSave?.templateJson ?? null,
         temperature: coerceNullableNumber(input.temperature),
         maxTokens: coerceNullableNumber(input.maxTokens),
         topP: coerceNullableNumber(input.topP),
@@ -116,6 +119,7 @@ export async function updatePromptConfig(id: string, input: SavePromptConfigInpu
   }
 
   await validatePromptConfigInput(input, id);
+  const templateSave = resolveTemplateJsonForSave(input);
 
   return prisma.$transaction(async (tx) => {
     if (input.isDefault) {
@@ -137,7 +141,8 @@ export async function updatePromptConfig(id: string, input: SavePromptConfigInpu
         name: normalizeText(input.name),
         type: input.type,
         prompt: input.prompt.trim(),
-        systemPrompt: input.systemPrompt?.trim() || null,
+        systemPrompt: templateSave?.systemPrompt ?? (input.systemPrompt?.trim() || null),
+        templateJson: templateSave?.templateJson ?? null,
         temperature: coerceNullableNumber(input.temperature),
         maxTokens: coerceNullableNumber(input.maxTokens),
         topP: coerceNullableNumber(input.topP),

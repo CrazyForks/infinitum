@@ -1,4 +1,5 @@
 import type { DailyReportContent, DailyReportItem } from "@/lib/daily-report/types";
+import { getDailyReportSectionBlocks, normalizeDailyReportContent } from "@/lib/daily-report/content";
 import { prisma } from "@/lib/db";
 
 export type CandidateSnapshotEntry = {
@@ -100,7 +101,7 @@ function getDateRange(days: number, now = new Date()) {
 
 function parseContentSafely(json: string, label: string): DailyReportContent | null {
   try {
-    return JSON.parse(json) as DailyReportContent;
+    return normalizeDailyReportContent(JSON.parse(json));
   } catch (error) {
     console.warn(`[daily-report-quality] failed to parse summaryJson for ${label}:`, error);
     return null;
@@ -125,7 +126,7 @@ function buildKey(input: { itemId: string | null; clusterId: string | null; url:
   return null;
 }
 function collectSections(content: DailyReportContent): Array<[string, DailyReportItem[]]> {
-  return Object.entries(content.sections);
+  return getDailyReportSectionBlocks(content).map((section) => [section.title, section.items]);
 }
 
 function computeSectionFillRate(reports: ReportWithRelations[]): SectionFillRateBucket[] {

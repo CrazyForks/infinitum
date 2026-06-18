@@ -5,7 +5,11 @@ import {
   DEFAULT_ITEM_AGGREGATION_ANALYSIS_PROMPT,
 } from "@/config/prompts";
 import { prisma } from "@/lib/db";
-import { LEGACY_DAILY_REPORT_PROMPT } from "@/lib/settings/core";
+import {
+  DEFAULT_DAILY_REPORT_TEMPLATE_JSON,
+  parseDailyReportTemplateJson,
+  stringifyDailyReportTemplate,
+} from "@/lib/daily-report/template";
 import * as settingsService from "@/lib/settings/service";
 import {
   createModelApiConfig,
@@ -58,8 +62,11 @@ describe("admin settings service", () => {
     expect(settings.taskSchedule.aggregationSplitMaxEvents).toBe(20);
     expect(settings.promptConfigs).toHaveLength(9);
     expect(settings.promptConfigs.find((config) => config.type === "daily_report")?.systemPrompt).toContain("AI 新闻日报");
+    expect(settings.promptConfigs.find((config) => config.type === "daily_report")?.templateJson).toBe(
+      DEFAULT_DAILY_REPORT_TEMPLATE_JSON,
+    );
     expect(settings.promptConfigs.find((config) => config.type === "daily_report")?.systemPrompt).toContain(
-      "candidateScore 是综合质量、聚合热度和时效排序后的参考分",
+      "优先综合参考 candidateScore、sourceCount、itemCount 和日期相关性",
     );
     expect(settings.promptConfigs.find((config) => config.type === "daily_report_refinement_chat")?.name).toBe(
       "默认日报微调对话提示词",
@@ -167,9 +174,42 @@ describe("admin settings service", () => {
     const dailyReportConfig = runtimeConfig.selectedPromptConfigs?.dailyReport;
 
     expect(dailyReportConfig?.systemPrompt).toBe(DEFAULT_DAILY_REPORT_PROMPT);
-    expect(dailyReportConfig?.systemPrompt).toContain("sourceCount 表示不同来源数量");
-    expect(dailyReportConfig?.systemPrompt).toContain("如果只是同属“模型发布”“安全工具”“开源项目”等主题相近但不是同一事件");
-    expect(dailyReportConfig?.systemPrompt).toContain("同一事件不得同时出现在多个栏目");
+    expect(dailyReportConfig?.systemPrompt).toContain("items 为空数组时会在渲染时自动隐藏");
+    expect(dailyReportConfig?.systemPrompt).toContain("说明变化内容、适用对象、实践价值或可能影响");
+    expect(dailyReportConfig?.systemPrompt).toContain("多个来源只能用于同一事件的互证");
+    expect(dailyReportConfig?.systemPrompt).toContain("同一事件只出现一次，避免跨栏目重复");
+  });
+
+  it("compiles and stores daily report templateJson when saving prompt configs", async () => {
+    const template = parseDailyReportTemplateJson(DEFAULT_DAILY_REPORT_TEMPLATE_JSON)!;
+    const opening = template.blocks.find((block) => block.type === "text");
+    if (opening?.type === "text") opening.title = "开场";
+    const firstSection = template.blocks.find((block) => block.type === "section");
+    if (firstSection?.type === "section") firstSection.title = "核心动态";
+    const templateJson = stringifyDailyReportTemplate(template);
+
+    const config = await createPromptConfig({
+      name: "结构化日报提示词",
+      type: "daily_report",
+      systemPrompt: "旧系统提示词不应生效",
+      templateJson,
+      prompt: "日期：{{date}}\n候选内容 JSON：{{articlesJson}}",
+      temperature: 0,
+      maxTokens: 8000,
+      topP: null,
+      modelApiConfigId: null,
+      isEnabled: true,
+      isDefault: true,
+    });
+
+    expect(config.templateJson).toBe(templateJson);
+    expect(config.systemPrompt).toContain('"title":"开场"');
+    expect(config.systemPrompt).toContain('"核心动态"');
+
+    const runtimeConfig = await getIngestionRuntimeConfig();
+    expect(runtimeConfig.selectedPromptConfigs?.dailyReport.systemPrompt).toContain('"title":"开场"');
+    expect(runtimeConfig.prompts.dailyReport).toContain('"核心动态"');
+    expect(runtimeConfig.prompts.dailyReport).not.toContain("旧系统提示词不应生效");
   });
 
   it("uses enabled default configs to build the runtime mapping", async () => {
@@ -449,30 +489,6 @@ describe("admin settings service", () => {
     expect(settingsAfterDeletion.sources).toHaveLength(0);
   });
 
-  it("upgrades an untouched legacy 5-section daily_report systemPrompt to the new default", async () => {
-    await getIngestionRuntimeConfig();
-    // Replace the seeded systemPrompt with the legacy fingerprint
-    await prisma.promptConfig.updateMany({
-      where: { type: "daily_report", isDefault: true },
-      data: {
-        systemPrompt: LEGACY_DAILY_REPORT_PROMPT,
-        maxTokens: 1024,
-        temperature: 0.7,
-        topP: 0.9,
-      },
-    });
-
-    await ensureRuntimeConfigSeeded();
-
-    const config = await prisma.promptConfig.findFirst({
-      where: { type: "daily_report", isDefault: true },
-    });
-    expect(config?.systemPrompt).toBe(DEFAULT_DAILY_REPORT_PROMPT);
-    expect(config?.systemPrompt).toContain("openingLabel");
-    expect(config?.systemPrompt).toContain("closingLabel");
-    expect(config?.systemPrompt).toContain("固定输出格式");
-  });
-
   it("keeps a user-customized daily_report systemPrompt untouched", async () => {
     await getIngestionRuntimeConfig();
     const customPrompt = "用户自定 daily_report systemPrompt - 保留我的修改";
@@ -493,52 +509,7 @@ describe("admin settings service", () => {
     expect(config?.maxTokens).toBe(2048);
   });
 
-  it("keeps a customized daily_report systemPrompt even when it contains the legacy marker", async () => {
-    await getIngestionRuntimeConfig();
-    const customizedLegacyPrompt = `${LEGACY_DAILY_REPORT_PROMPT}\n\n补充要求：只输出我关注的企业新闻。`;
-    await prisma.promptConfig.updateMany({
-      where: { type: "daily_report", isDefault: true },
-      data: {
-        systemPrompt: customizedLegacyPrompt,
-        maxTokens: 2048,
-      },
-    });
-
-    await ensureRuntimeConfigSeeded();
-
-    const config = await prisma.promptConfig.findFirst({
-      where: { type: "daily_report", isDefault: true },
-    });
-    expect(config?.systemPrompt).toBe(customizedLegacyPrompt);
-    expect(config?.maxTokens).toBe(2048);
-  });
-
-  it("leaves non-default daily_report systemPrompts untouched", async () => {
-    await getIngestionRuntimeConfig();
-    const legacy = LEGACY_DAILY_REPORT_PROMPT;
-    await prisma.promptConfig.create({
-      data: {
-        name: "实验日报 prompt",
-        type: "daily_report",
-        prompt: "模板",
-        systemPrompt: legacy,
-        temperature: 0.3,
-        maxTokens: 600,
-        topP: null,
-        isDefault: false,
-        isEnabled: true,
-      },
-    });
-
-    await ensureRuntimeConfigSeeded();
-
-    const nonDefault = await prisma.promptConfig.findFirst({
-      where: { type: "daily_report", isDefault: false },
-    });
-    expect(nonDefault?.systemPrompt).toBe(legacy);
-  });
-
-  it("preserves null daily_report systemPrompts during upgrade", async () => {
+  it("preserves null daily_report systemPrompts when reseeding", async () => {
     await getIngestionRuntimeConfig();
     await prisma.promptConfig.updateMany({
       where: { type: "daily_report", isDefault: true },
@@ -551,27 +522,5 @@ describe("admin settings service", () => {
       where: { type: "daily_report", isDefault: true },
     });
     expect(config?.systemPrompt).toBeNull();
-  });
-
-  it("runs the legacy upgrade idempotently across repeated seeds", async () => {
-    await getIngestionRuntimeConfig();
-    const legacy = LEGACY_DAILY_REPORT_PROMPT;
-    await prisma.promptConfig.updateMany({
-      where: { type: "daily_report", isDefault: true },
-      data: { systemPrompt: legacy, maxTokens: 1500 },
-    });
-
-    await ensureRuntimeConfigSeeded();
-    const first = await prisma.promptConfig.findFirst({
-      where: { type: "daily_report", isDefault: true },
-    });
-
-    await ensureRuntimeConfigSeeded();
-    const second = await prisma.promptConfig.findFirst({
-      where: { type: "daily_report", isDefault: true },
-    });
-
-    expect(first?.systemPrompt).toBe(second?.systemPrompt);
-    expect(first?.maxTokens).toBe(second?.maxTokens);
   });
 });

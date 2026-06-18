@@ -291,6 +291,49 @@ describe("/api/admin/settings", () => {
     });
   });
 
+  it("passes daily report templateJson to the prompt config service", async () => {
+    requireAdmin.mockResolvedValue(undefined);
+    createPromptConfig.mockResolvedValue({ id: "prompt-daily" });
+
+    const { POST } = await import("@/app/api/admin/settings/prompt-configs/route");
+    const response = await POST(
+      new Request("http://localhost/api/admin/settings/prompt-configs", {
+        method: "POST",
+        body: JSON.stringify({
+          name: "结构化日报提示词",
+          type: "daily_report",
+          prompt: "日期：{{date}}\n候选内容 JSON：{{articlesJson}}",
+          systemPrompt: "编译后的系统提示词",
+          templateJson: "{\"opening\":{\"label\":\"摘要\"}}",
+          temperature: 0,
+          maxTokens: 8000,
+          topP: null,
+          modelApiConfigId: null,
+          isEnabled: true,
+          isDefault: true,
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    expect(createPromptConfig).toHaveBeenCalledWith({
+      name: "结构化日报提示词",
+      type: "daily_report",
+      prompt: "日期：{{date}}\n候选内容 JSON：{{articlesJson}}",
+      systemPrompt: "编译后的系统提示词",
+      templateJson: "{\"opening\":{\"label\":\"摘要\"}}",
+      temperature: 0,
+      maxTokens: 8000,
+      topP: null,
+      modelApiConfigId: null,
+      isEnabled: true,
+      isDefault: true,
+    });
+  });
+
   it("updates cluster merge prompt configs", async () => {
     requireAdmin.mockResolvedValue(undefined);
     updatePromptConfig.mockResolvedValue({ id: "prompt-merge" });
