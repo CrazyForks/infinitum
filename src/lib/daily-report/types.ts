@@ -1,14 +1,10 @@
 export const DAILY_REPORT_TIMEZONE = "Asia/Shanghai";
 
-export const DAILY_REPORT_SECTION_NAMES = [
-  "今日大事",
-  "变更与实践",
-  "安全与风险",
-  "开源与工具",
-  "数据与洞察",
-] as const;
+export const DEFAULT_OPENING_LABEL = "摘要";
+export const DEFAULT_CLOSING_LABEL = "今日观察";
 
-export type DailyReportSectionName = (typeof DAILY_REPORT_SECTION_NAMES)[number];
+export const DAILY_REPORT_OPENING_LABEL_MAX_LENGTH = 20;
+export const DAILY_REPORT_CLOSING_LABEL_MAX_LENGTH = 20;
 
 export type DailyReportStatus = "draft" | "published" | "failed";
 
@@ -67,15 +63,17 @@ export type DailyReportInsightItem = {
   sourceIds: number[];
 };
 
+export type DailyReportItem = {
+  topic: string;
+  sourceIds: number[];
+  [key: string]: unknown;
+};
+
 export type DailyReportContent = {
+  openingLabel?: string;
   openingSummary: string;
-  sections: {
-    今日大事: DailyReportTopItem[];
-    变更与实践: DailyReportActionItem[];
-    安全与风险: DailyReportRiskItem[];
-    开源与工具: DailyReportToolItem[];
-    数据与洞察: DailyReportInsightItem[];
-  };
+  sections: Record<string, DailyReportItem[]>;
+  closingLabel?: string;
   closingThought: string;
 };
 

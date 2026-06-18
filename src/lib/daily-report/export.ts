@@ -1,37 +1,37 @@
+import {
+  DEFAULT_CLOSING_LABEL,
+  DEFAULT_OPENING_LABEL,
+  type DailyReportDetailDTO,
+} from "@/lib/daily-report/types";
+import { renderDailyReportItemBody } from "@/lib/daily-report/item-renderer";
 import { DAILY_REPORT_AI_NOTICE } from "@/lib/daily-report/renderer";
-import type { DailyReportDetailDTO } from "@/lib/daily-report/types";
-import { DAILY_REPORT_SECTION_NAMES } from "@/lib/daily-report/types";
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function hasLevelTwoHeading(markdown: string, heading: string) {
+  return new RegExp(`^##\\s+${escapeRegExp(heading)}\\s*$`, "m").test(markdown);
+}
 
 function buildFallbackMarkdown(report: DailyReportDetailDTO) {
-  const lines: string[] = [`> ${DAILY_REPORT_AI_NOTICE}`, "", "## 摘要", "", report.content.openingSummary, ""];
+  const openingHeading = report.content.openingLabel ?? DEFAULT_OPENING_LABEL;
+  const closingHeading = report.content.closingLabel ?? DEFAULT_CLOSING_LABEL;
+  const lines: string[] = [`> ${DAILY_REPORT_AI_NOTICE}`, "", `## ${openingHeading}`, "", report.content.openingSummary, ""];
 
-  for (const sectionName of DAILY_REPORT_SECTION_NAMES) {
-    const items = report.content.sections[sectionName];
+  for (const [sectionName, items] of Object.entries(report.content.sections)) {
     if (items.length === 0) continue;
 
     lines.push(`## ${sectionName}`, "");
     for (const item of items) {
       lines.push(`### ${item.topic}`);
-      if ("summary" in item) {
-        lines.push(item.summary);
-      } else if ("affected" in item) {
-        if (item.affected) lines.push(item.affected);
-        if (item.action) lines.push(item.action);
-      } else if ("keyNumbers" in item) {
-        lines.push(`${item.reason}${item.keyNumbers ? `（${item.keyNumbers}）` : ""}`);
-      } else if ("action" in item) {
-        lines.push(item.action);
-      } else {
-        lines.push(item.reason);
-      }
-      if ("whyImportant" in item && item.whyImportant) {
-        lines.push("", `**重点：** ${item.whyImportant}`);
-      }
+      const body = renderDailyReportItemBody(item);
+      if (body.length > 0) lines.push(...body);
       lines.push("");
     }
   }
 
-  lines.push("## 今日观察", "", report.content.closingThought);
+  lines.push(`## ${closingHeading}`, "", report.content.closingThought);
   return lines.join("\n").replace(/\n{3,}/g, "\n\n");
 }
 
@@ -52,10 +52,11 @@ export function buildDailyReportDetailMarkdown(report: DailyReportDetailDTO) {
   const withNotice = /^>\s*声明：完全使用AI生成，可能存在错误，需谨慎甄别。/m.test(normalizedHeadings)
     ? normalizedHeadings
     : `> ${DAILY_REPORT_AI_NOTICE}\n\n${normalizedHeadings}`;
-  if (/^##\s+摘要/m.test(normalizedHeadings)) {
+  const openingHeading = report.content.openingLabel ?? DEFAULT_OPENING_LABEL;
+  if (hasLevelTwoHeading(normalizedHeadings, openingHeading)) {
     return withNotice;
   }
-  return `> ${DAILY_REPORT_AI_NOTICE}\n\n## 摘要\n\n${normalizedHeadings}`;
+  return `> ${DAILY_REPORT_AI_NOTICE}\n\n## ${openingHeading}\n\n${normalizedHeadings}`;
 }
 
 export function buildDailyReportExportMarkdown(report: DailyReportDetailDTO) {

@@ -5,6 +5,7 @@ import {
   DEFAULT_ITEM_AGGREGATION_ANALYSIS_PROMPT,
 } from "@/config/prompts";
 import { prisma } from "@/lib/db";
+import { LEGACY_DAILY_REPORT_PROMPT } from "@/lib/settings/core";
 import * as settingsService from "@/lib/settings/service";
 import {
   createModelApiConfig,
@@ -446,5 +447,131 @@ describe("admin settings service", () => {
     const settingsAfterDeletion = await getAdminSettings();
 
     expect(settingsAfterDeletion.sources).toHaveLength(0);
+  });
+
+  it("upgrades an untouched legacy 5-section daily_report systemPrompt to the new default", async () => {
+    await getIngestionRuntimeConfig();
+    // Replace the seeded systemPrompt with the legacy fingerprint
+    await prisma.promptConfig.updateMany({
+      where: { type: "daily_report", isDefault: true },
+      data: {
+        systemPrompt: LEGACY_DAILY_REPORT_PROMPT,
+        maxTokens: 1024,
+        temperature: 0.7,
+        topP: 0.9,
+      },
+    });
+
+    await ensureRuntimeConfigSeeded();
+
+    const config = await prisma.promptConfig.findFirst({
+      where: { type: "daily_report", isDefault: true },
+    });
+    expect(config?.systemPrompt).toBe(DEFAULT_DAILY_REPORT_PROMPT);
+    expect(config?.systemPrompt).toContain("openingLabel");
+    expect(config?.systemPrompt).toContain("closingLabel");
+    expect(config?.systemPrompt).toContain("固定输出格式");
+  });
+
+  it("keeps a user-customized daily_report systemPrompt untouched", async () => {
+    await getIngestionRuntimeConfig();
+    const customPrompt = "用户自定 daily_report systemPrompt - 保留我的修改";
+    await prisma.promptConfig.updateMany({
+      where: { type: "daily_report", isDefault: true },
+      data: {
+        systemPrompt: customPrompt,
+        maxTokens: 2048,
+      },
+    });
+
+    await ensureRuntimeConfigSeeded();
+
+    const config = await prisma.promptConfig.findFirst({
+      where: { type: "daily_report", isDefault: true },
+    });
+    expect(config?.systemPrompt).toBe(customPrompt);
+    expect(config?.maxTokens).toBe(2048);
+  });
+
+  it("keeps a customized daily_report systemPrompt even when it contains the legacy marker", async () => {
+    await getIngestionRuntimeConfig();
+    const customizedLegacyPrompt = `${LEGACY_DAILY_REPORT_PROMPT}\n\n补充要求：只输出我关注的企业新闻。`;
+    await prisma.promptConfig.updateMany({
+      where: { type: "daily_report", isDefault: true },
+      data: {
+        systemPrompt: customizedLegacyPrompt,
+        maxTokens: 2048,
+      },
+    });
+
+    await ensureRuntimeConfigSeeded();
+
+    const config = await prisma.promptConfig.findFirst({
+      where: { type: "daily_report", isDefault: true },
+    });
+    expect(config?.systemPrompt).toBe(customizedLegacyPrompt);
+    expect(config?.maxTokens).toBe(2048);
+  });
+
+  it("leaves non-default daily_report systemPrompts untouched", async () => {
+    await getIngestionRuntimeConfig();
+    const legacy = LEGACY_DAILY_REPORT_PROMPT;
+    await prisma.promptConfig.create({
+      data: {
+        name: "实验日报 prompt",
+        type: "daily_report",
+        prompt: "模板",
+        systemPrompt: legacy,
+        temperature: 0.3,
+        maxTokens: 600,
+        topP: null,
+        isDefault: false,
+        isEnabled: true,
+      },
+    });
+
+    await ensureRuntimeConfigSeeded();
+
+    const nonDefault = await prisma.promptConfig.findFirst({
+      where: { type: "daily_report", isDefault: false },
+    });
+    expect(nonDefault?.systemPrompt).toBe(legacy);
+  });
+
+  it("preserves null daily_report systemPrompts during upgrade", async () => {
+    await getIngestionRuntimeConfig();
+    await prisma.promptConfig.updateMany({
+      where: { type: "daily_report", isDefault: true },
+      data: { systemPrompt: null },
+    });
+
+    await ensureRuntimeConfigSeeded();
+
+    const config = await prisma.promptConfig.findFirst({
+      where: { type: "daily_report", isDefault: true },
+    });
+    expect(config?.systemPrompt).toBeNull();
+  });
+
+  it("runs the legacy upgrade idempotently across repeated seeds", async () => {
+    await getIngestionRuntimeConfig();
+    const legacy = LEGACY_DAILY_REPORT_PROMPT;
+    await prisma.promptConfig.updateMany({
+      where: { type: "daily_report", isDefault: true },
+      data: { systemPrompt: legacy, maxTokens: 1500 },
+    });
+
+    await ensureRuntimeConfigSeeded();
+    const first = await prisma.promptConfig.findFirst({
+      where: { type: "daily_report", isDefault: true },
+    });
+
+    await ensureRuntimeConfigSeeded();
+    const second = await prisma.promptConfig.findFirst({
+      where: { type: "daily_report", isDefault: true },
+    });
+
+    expect(first?.systemPrompt).toBe(second?.systemPrompt);
+    expect(first?.maxTokens).toBe(second?.maxTokens);
   });
 });

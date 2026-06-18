@@ -13,14 +13,13 @@ import {
 } from "@/lib/daily-report/repository";
 import { renderDailyReportMarkdown } from "@/lib/daily-report/renderer";
 import {
-  DAILY_REPORT_SECTION_NAMES,
   DAILY_REPORT_TIMEZONE,
   type DailyReportCandidate,
   type DailyReportContent,
+  type DailyReportItem,
   type DailyReportRefineMode,
   type DailyReportRefinementSourceSearchResult,
   type DailyReportSourceRegistryEntry,
-  type DailyReportSectionName,
 } from "@/lib/daily-report/types";
 import { parseDailyReportContent } from "@/lib/daily-report/validator";
 import { normalizeEventSignatureForStorage } from "@/lib/clusters/normalization";
@@ -74,10 +73,10 @@ function buildInputHash(date: string, candidates: DailyReportCandidate[], groupI
 }
 
 function getSectionSourceIds(content: DailyReportContent) {
-  const rows: Array<{ sectionName: DailyReportSectionName; topic: string; sourceId: number }> = [];
+  const rows: Array<{ sectionName: string; topic: string; sourceId: number }> = [];
 
-  for (const sectionName of DAILY_REPORT_SECTION_NAMES) {
-    for (const item of content.sections[sectionName]) {
+  for (const [sectionName, items] of Object.entries(content.sections)) {
+    for (const item of items as DailyReportItem[]) {
       for (const sourceId of item.sourceIds) {
         rows.push({ sectionName, topic: item.topic, sourceId });
       }

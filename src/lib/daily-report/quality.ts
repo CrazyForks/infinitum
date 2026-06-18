@@ -1,4 +1,4 @@
-import { DAILY_REPORT_SECTION_NAMES, type DailyReportContent } from "@/lib/daily-report/types";
+import type { DailyReportContent, DailyReportItem } from "@/lib/daily-report/types";
 import { prisma } from "@/lib/db";
 
 export type CandidateSnapshotEntry = {
@@ -124,23 +124,24 @@ function buildKey(input: { itemId: string | null; clusterId: string | null; url:
   if (input.url) return `url:${input.url.trim().toLowerCase()}`;
   return null;
 }
+function collectSections(content: DailyReportContent): Array<[string, DailyReportItem[]]> {
+  return Object.entries(content.sections);
+}
+
 function computeSectionFillRate(reports: ReportWithRelations[]): SectionFillRateBucket[] {
   const buckets: Record<string, { counts: number[]; distribution: Record<number, number> }> = {};
-  for (const name of DAILY_REPORT_SECTION_NAMES) {
-    buckets[name] = { counts: [], distribution: {} };
-  }
   for (const report of reports) {
     const content = parseContentSafely(report.summaryJson, `report ${report.date} (${report.id})`);
     if (!content) continue;
-    for (const name of DAILY_REPORT_SECTION_NAMES) {
-      const count = content.sections[name]?.length ?? 0;
-      const bucket = buckets[name];
+    for (const [name, items] of collectSections(content)) {
+      const bucket = buckets[name] ?? { counts: [], distribution: {} };
+      const count = items.length;
       bucket.counts.push(count);
       bucket.distribution[count] = (bucket.distribution[count] ?? 0) + 1;
+      buckets[name] = bucket;
     }
   }
-  return DAILY_REPORT_SECTION_NAMES.map((name) => {
-    const { counts, distribution } = buckets[name];
+  return Object.entries(buckets).map(([name, { counts, distribution }]) => {
     const reportCount = counts.length;
     const avgCount = reportCount > 0 ? counts.reduce((sum, n) => sum + n, 0) / reportCount : 0;
     const maxCount = counts.length > 0 ? Math.max(...counts) : 0;

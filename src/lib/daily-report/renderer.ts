@@ -1,8 +1,10 @@
 import {
-  DAILY_REPORT_SECTION_NAMES,
+  DEFAULT_CLOSING_LABEL,
+  DEFAULT_OPENING_LABEL,
   type DailyReportCandidate,
   type DailyReportContent,
 } from "@/lib/daily-report/types";
+import { renderDailyReportItemBody } from "@/lib/daily-report/item-renderer";
 
 export const DAILY_REPORT_AI_NOTICE = "声明：完全使用AI生成，可能存在错误，需谨慎甄别。";
 
@@ -46,40 +48,30 @@ export function renderDailyReportMarkdown(
     }
     sourcesByNumber.set(source.sourceNumber, existing);
   }
+  const openingHeading = escapeMarkdown(content.openingLabel ?? DEFAULT_OPENING_LABEL);
+  const closingHeading = escapeMarkdown(content.closingLabel ?? DEFAULT_CLOSING_LABEL);
   const lines: string[] = [
     `# ${escapeMarkdown(title)}`,
     "",
     `> ${DAILY_REPORT_AI_NOTICE}`,
     "",
-    "## 摘要",
+    `## ${openingHeading}`,
     "",
     content.openingSummary,
     "",
   ];
 
-  for (const sectionName of DAILY_REPORT_SECTION_NAMES) {
-    const items = content.sections[sectionName];
+  for (const [sectionName, items] of Object.entries(content.sections)) {
     if (items.length === 0) {
       continue;
     }
 
-    lines.push(`## ${sectionName}`, "");
+    lines.push(`## ${escapeMarkdown(sectionName)}`, "");
     for (const item of items) {
       lines.push(`### ${escapeMarkdown(item.topic)}`);
-      if ("summary" in item) {
-        lines.push(escapeMarkdown(item.summary));
-      } else if ("affected" in item) {
-        if (item.affected) lines.push(escapeMarkdown(item.affected));
-        if (item.action) lines.push(escapeMarkdown(item.action));
-      } else if ("keyNumbers" in item) {
-        lines.push(`${escapeMarkdown(item.reason)}${item.keyNumbers ? `（${escapeMarkdown(item.keyNumbers)}）` : ""}`);
-      } else if ("action" in item) {
-        lines.push(escapeMarkdown(item.action));
-      } else {
-        lines.push(escapeMarkdown(item.reason));
-      }
-      if ("whyImportant" in item && item.whyImportant) {
-        lines.push("", `**重点：** ${escapeMarkdown(item.whyImportant)}`);
+      const body = renderDailyReportItemBody(item, { formatText: escapeMarkdown });
+      if (body.length > 0) {
+        lines.push(...body);
       }
       const sourceLines = formatSources(item.sourceIds, sourcesByNumber);
       if (sourceLines.length > 0) {
@@ -89,6 +81,6 @@ export function renderDailyReportMarkdown(
     }
   }
 
-  lines.push("## 今日观察", "", content.closingThought, "");
+  lines.push(`## ${closingHeading}`, "", content.closingThought, "");
   return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim() + "\n";
 }

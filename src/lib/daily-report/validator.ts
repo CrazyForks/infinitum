@@ -1,7 +1,8 @@
 import {
-  DAILY_REPORT_SECTION_NAMES,
+  DAILY_REPORT_CLOSING_LABEL_MAX_LENGTH,
+  DAILY_REPORT_OPENING_LABEL_MAX_LENGTH,
   type DailyReportContent,
-  type DailyReportSectionName,
+  type DailyReportItem,
 } from "@/lib/daily-report/types";
 
 function stripCodeFence(value: string) {
@@ -33,6 +34,21 @@ function normalizeIds(value: unknown, maxId: number) {
   );
 }
 
+function normalizeOptionalLabel(value: unknown, maxLength: number): string | undefined {
+  const text = safeText(value);
+  if (!text) return undefined;
+  return text.length > maxLength ? text.slice(0, maxLength) : text;
+}
+
+const DAILY_REPORT_LABEL_STRIPPED_ITEM_FIELDS = new Set([
+  "summary",
+  "whyImportant",
+  "action",
+  "affected",
+  "reason",
+  "keyNumbers",
+]);
+
 export function parseDailyReportContent(rawContent: string, maxSourceId: number): DailyReportContent {
   const parsed = JSON.parse(stripCodeFence(rawContent)) as unknown;
 
@@ -62,62 +78,62 @@ export function parseDailyReportContent(rawContent: string, maxSourceId: number)
     return sourceIds;
   };
 
-  const normalizeList = (name: DailyReportSectionName) => {
-    const value = sectionsInput[name];
-    return Array.isArray(value) ? value.filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === "object")) : [];
-  };
+  const sections: Record<string, DailyReportItem[]> = {};
+  let totalItems = 0;
 
-  const content: DailyReportContent = {
-    openingSummary: stripDailyReportGeneratedLabel(input.openingSummary),
-    closingThought: stripDailyReportGeneratedLabel(input.closingThought),
-    sections: {
-      今日大事: normalizeList("今日大事").slice(0, 5).map((item, index) => ({
-        topic: stripDailyReportGeneratedLabel(requireTopic(item, `sections.今日大事[${index}]`)),
-        summary: stripDailyReportGeneratedLabel(item.summary),
-        whyImportant: stripDailyReportGeneratedLabel(item.whyImportant).slice(0, 30),
-        sourceIds: requireSourceIds(item, `sections.今日大事[${index}]`),
-      })),
-      变更与实践: normalizeList("变更与实践").slice(0, 5).map((item, index) => ({
-        topic: stripDailyReportGeneratedLabel(requireTopic(item, `sections.变更与实践[${index}]`)),
-        action: stripDailyReportGeneratedLabel(item.action),
-        sourceIds: requireSourceIds(item, `sections.变更与实践[${index}]`),
-      })),
-      安全与风险: normalizeList("安全与风险").slice(0, 5).map((item, index) => ({
-        topic: stripDailyReportGeneratedLabel(requireTopic(item, `sections.安全与风险[${index}]`)),
-        affected: stripDailyReportGeneratedLabel(item.affected),
-        action: stripDailyReportGeneratedLabel(item.action),
-        sourceIds: requireSourceIds(item, `sections.安全与风险[${index}]`),
-      })),
-      开源与工具: normalizeList("开源与工具").slice(0, 5).map((item, index) => ({
-        topic: stripDailyReportGeneratedLabel(requireTopic(item, `sections.开源与工具[${index}]`)),
-        reason: stripDailyReportGeneratedLabel(item.reason),
-        sourceIds: requireSourceIds(item, `sections.开源与工具[${index}]`),
-      })),
-      数据与洞察: normalizeList("数据与洞察").slice(0, 5).map((item, index) => ({
-        topic: stripDailyReportGeneratedLabel(requireTopic(item, `sections.数据与洞察[${index}]`)),
-        keyNumbers: stripDailyReportGeneratedLabel(item.keyNumbers),
-        reason: stripDailyReportGeneratedLabel(item.reason),
-        sourceIds: requireSourceIds(item, `sections.数据与洞察[${index}]`),
-      })),
-    },
-  };
-
-  if (content.openingSummary.length < 40) errors.push("openingSummary 太短");
-  if (content.closingThought.length < 30) errors.push("closingThought 太短");
-  if (content.sections.今日大事.length < 1) errors.push("今日大事至少需要 1 条");
-  if (content.sections.变更与实践.length < 1) errors.push("变更与实践至少需要 1 条");
-
-  for (const name of DAILY_REPORT_SECTION_NAMES) {
-    for (const [index, item] of content.sections[name].entries()) {
-      if (!item.topic) {
-        errors.push(`${name}[${index}] topic 不能为空`);
+  for (const [sectionName, rawList] of Object.entries(sectionsInput)) {
+    if (!Array.isArray(rawList)) continue;
+    const items: DailyReportItem[] = [];
+    rawList.forEach((rawItem, index) => {
+      if (!rawItem || typeof rawItem !== "object") {
+        errors.push(`sections.${sectionName}[${index}] 不是对象`);
+        return;
       }
-    }
+      const item = rawItem as Record<string, unknown>;
+      const path = `sections.${sectionName}[${index}]`;
+      const topic = requireTopic(item, path);
+      const sourceIds = requireSourceIds(item, path);
+      const normalized: DailyReportItem = {
+        topic: stripDailyReportGeneratedLabel(topic),
+        sourceIds,
+      };
+      for (const [key, value] of Object.entries(item)) {
+        if (key === "topic" || key === "sourceIds") continue;
+        normalized[key] = typeof value === "string" && DAILY_REPORT_LABEL_STRIPPED_ITEM_FIELDS.has(key)
+          ? stripDailyReportGeneratedLabel(value)
+          : value;
+      }
+      items.push(normalized);
+    });
+    sections[sectionName] = items;
+    totalItems += items.length;
   }
+
+  const openingLabel = normalizeOptionalLabel(input.openingLabel, DAILY_REPORT_OPENING_LABEL_MAX_LENGTH);
+  const closingLabel = normalizeOptionalLabel(input.closingLabel, DAILY_REPORT_CLOSING_LABEL_MAX_LENGTH);
+  const openingSummary = stripDailyReportGeneratedLabel(input.openingSummary);
+  const closingThought = stripDailyReportGeneratedLabel(input.closingThought);
+
+  if (typeof input.openingLabel === "string" && input.openingLabel.trim().length > DAILY_REPORT_OPENING_LABEL_MAX_LENGTH) {
+    errors.push(`openingLabel 超过 ${DAILY_REPORT_OPENING_LABEL_MAX_LENGTH} 字`);
+  }
+  if (typeof input.closingLabel === "string" && input.closingLabel.trim().length > DAILY_REPORT_CLOSING_LABEL_MAX_LENGTH) {
+    errors.push(`closingLabel 超过 ${DAILY_REPORT_CLOSING_LABEL_MAX_LENGTH} 字`);
+  }
+  if (openingSummary.length < 40) errors.push("openingSummary 太短");
+  if (closingThought.length < 30) errors.push("closingThought 太短");
+  if (totalItems < 1) errors.push("所有 section 合计至少需要 1 条 item");
 
   if (errors.length > 0) {
     throw new Error(`日报输出校验失败：${errors.slice(0, 8).join("；")}`);
   }
 
+  const content: DailyReportContent = {
+    openingSummary,
+    sections,
+    closingThought,
+  };
+  if (openingLabel) content.openingLabel = openingLabel;
+  if (closingLabel) content.closingLabel = closingLabel;
   return content;
 }

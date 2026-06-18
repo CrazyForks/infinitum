@@ -6,8 +6,9 @@ import {
   getDailyReportDateRange,
   normalizeDailyReportDate,
 } from "@/lib/daily-report/date";
+import { buildDailyReportDetailMarkdown, buildDailyReportExportMarkdown } from "@/lib/daily-report/export";
 import { renderDailyReportMarkdown } from "@/lib/daily-report/renderer";
-import type { DailyReportCandidate, DailyReportContent } from "@/lib/daily-report/types";
+import type { DailyReportCandidate, DailyReportContent, DailyReportDetailDTO } from "@/lib/daily-report/types";
 import { parseDailyReportContent } from "@/lib/daily-report/validator";
 
 const candidates: DailyReportCandidate[] = [
@@ -149,10 +150,13 @@ describe("daily report utilities", () => {
 
     expect(parsed.openingSummary).not.toMatch(/^摘要：/);
     expect(parsed.closingThought).not.toMatch(/^今日观察：/);
-    expect(parsed.sections.今日大事[0]?.whyImportant).toBe("模型能力继续上探");
-    expect(parsed.sections.安全与风险[0]).not.toHaveProperty("severity");
-    expect(parsed.sections.安全与风险[0]?.affected).toBe("使用相关模型的普通用户和企业团队");
-    expect(parsed.sections.安全与风险[0]?.action).toBe("关注官方修复说明并避免上传敏感数据");
+    const topItem = parsed.sections.今日大事[0] as Record<string, unknown>;
+    expect(topItem.whyImportant).toBe("模型能力继续上探");
+    const riskItem = parsed.sections.安全与风险[0] as Record<string, unknown>;
+    // 通用化后，validator 保留所有用户自定义字段（包括 severity），由 prompt 约束输出
+    expect(riskItem.severity).toBe("critical");
+    expect(riskItem.affected).toBe("使用相关模型的普通用户和企业团队");
+    expect(riskItem.action).toBe("关注官方修复说明并避免上传敏感数据");
   });
 
   it("allows duplicate topics across sections", () => {
@@ -245,5 +249,184 @@ describe("daily report utilities", () => {
     expect(markdown).toContain(
       "[\\[相关\\]\\*特性\\*\\_汇总\\_ \\`AI\\` \\(v1\\)! #1 + A-B | <tag>](https://example.com/a)",
     );
+  });
+});
+
+describe("daily report template flexibility", () => {
+  it("accepts custom section names with arbitrary item fields", () => {
+    const parsed = parseDailyReportContent(JSON.stringify({
+      openingLabel: "今日速览",
+      openingSummary: "本期聚焦模型发布、产业合作与开源工具三条主线，需要结合企业实际诉求评估对产品规划和工程实践的影响。",
+      sections: {
+        模型动态: [
+          {
+            topic: "新模型发布",
+            summary: "模型能力继续上探，对工程实践与下游选型都有影响。",
+            impact: "价值：成本和稳定性需要重新评估。",
+            sourceIds: [1],
+          },
+        ],
+        产业合作: [
+          {
+            topic: "厂商合作",
+            action: "关注合作公告对集成方案的影响。",
+            priority: "high",
+            sourceIds: [2],
+          },
+        ],
+      },
+      closingLabel: "编辑视角",
+      closingThought: "整体来看主线还是收敛在模型能力和工程工具上，后续需要持续观察实际落地情况。",
+    }), 2);
+
+    expect(parsed.openingLabel).toBe("今日速览");
+    expect(parsed.closingLabel).toBe("编辑视角");
+    expect(Object.keys(parsed.sections)).toEqual(["模型动态", "产业合作"]);
+    const topItem = parsed.sections["模型动态"]?.[0] as Record<string, unknown>;
+    expect(topItem.impact).toBe("价值：成本和稳定性需要重新评估。");
+    const actionItem = parsed.sections["产业合作"]?.[0] as Record<string, unknown>;
+    expect(actionItem.priority).toBe("high");
+  });
+
+  it("falls back to default opening/closing labels when none provided", () => {
+    const parsed = parseDailyReportContent(JSON.stringify({
+      openingSummary: "本期覆盖模型发布、产业合作与开源工具三条主线，附带工程实践与生态影响评估，值得长期跟踪其对产品决策的作用。",
+      sections: {
+        头条: [
+          {
+            topic: "头条事件",
+            summary: "头条事件摘要。",
+            sourceIds: [1],
+          },
+        ],
+      },
+      closingThought: "今天主线集中在产品与生态变化上，下一阶段需要持续观察开发者反馈和落地效果。",
+    }), 1);
+
+    expect(parsed.openingLabel).toBeUndefined();
+    expect(parsed.closingLabel).toBeUndefined();
+  });
+
+  it("rejects opening/closing labels that exceed 20 characters", () => {
+    expect(() => parseDailyReportContent(JSON.stringify({
+      openingLabel: "一".repeat(21),
+      openingSummary: "本期覆盖模型发布、产业合作与开源工具三条主线，附带工程实践与生态影响评估，值得长期跟踪其对产品决策的作用。",
+      sections: {
+        头条: [
+          { topic: "头条事件", summary: "头条摘要。", sourceIds: [1] },
+        ],
+      },
+      closingThought: "今天主线集中在产品与生态变化上，下一阶段需要持续观察开发者反馈和落地效果。",
+    }), 1)).toThrow(/openingLabel/);
+
+    expect(() => parseDailyReportContent(JSON.stringify({
+      openingSummary: "本期覆盖模型发布、产业合作与开源工具三条主线，附带工程实践与生态影响评估，值得长期跟踪其对产品决策的作用。",
+      sections: {
+        头条: [
+          { topic: "头条事件", summary: "头条摘要。", sourceIds: [1] },
+        ],
+      },
+      closingLabel: "二".repeat(21),
+      closingThought: "今天主线集中在产品与生态变化上，下一阶段需要持续观察开发者反馈和落地效果。",
+    }), 1)).toThrow(/closingLabel/);
+  });
+
+  it("rejects empty sections when no items are present", () => {
+    expect(() => parseDailyReportContent(JSON.stringify({
+      openingSummary: "本期覆盖模型发布、产业合作与开源工具三条主线，附带工程实践与生态影响评估，值得长期跟踪其对产品决策的作用。",
+      sections: {},
+      closingThought: "今天主线集中在产品与生态变化上，下一阶段需要持续观察开发者反馈和落地效果。",
+    }), 1)).toThrow(/section/);
+  });
+
+  it("renders custom section names with unknown item fields", () => {
+    const customContent: DailyReportContent = {
+      openingLabel: "今日速览",
+      openingSummary: "本期覆盖模型发布、产业合作与开源工具三条主线，附带工程实践与生态影响评估。",
+      sections: {
+        模型动态: [
+          {
+            topic: "新模型发布",
+            summary: "模型能力继续上探，对工程实践与下游选型都有影响。",
+            impact: "成本和稳定性需要重新评估。",
+            sourceIds: [1],
+          },
+        ],
+      },
+      closingLabel: "编辑视角",
+      closingThought: "整体来看主线还是收敛在模型能力和工程工具上，后续需要持续观察实际落地情况。",
+    };
+
+    const markdown = renderDailyReportMarkdown(customContent, candidates, "2026-04-24 AI 日报");
+
+    expect(markdown).toContain("## 今日速览");
+    expect(markdown).toContain("## 模型动态");
+    expect(markdown).toContain("### 新模型发布");
+    expect(markdown).toContain("模型能力继续上探，对工程实践与下游选型都有影响。");
+    expect(markdown).toContain("**impact：**");
+    expect(markdown).toContain("## 编辑视角");
+    expect(markdown).not.toContain("## 摘要");
+    expect(markdown).not.toContain("## 今日观察");
+  });
+
+  it("falls back to default opening/closing headings when labels are absent", () => {
+    const fallbackContent: DailyReportContent = {
+      openingSummary: "本期覆盖模型发布、产业合作与开源工具三条主线，附带工程实践与生态影响评估。",
+      sections: {
+        头条: [
+          { topic: "头条事件", summary: "头条摘要。", sourceIds: [1] },
+        ],
+      },
+      closingThought: "今天主线集中在产品与生态变化上，下一阶段需要持续观察开发者反馈和落地效果。",
+    };
+
+    const markdown = renderDailyReportMarkdown(fallbackContent, candidates, "2026-04-24 AI 日报");
+
+    expect(markdown).toContain("## 摘要");
+    expect(markdown).toContain("## 头条");
+    expect(markdown).toContain("## 今日观察");
+  });
+
+  it("keeps custom opening and closing labels in detail and export markdown", () => {
+    const customContent: DailyReportContent = {
+      openingLabel: "今日速览",
+      openingSummary: "本期覆盖模型发布、产业合作与开源工具三条主线，附带工程实践与生态影响评估。",
+      sections: {
+        模型动态: [
+          { topic: "新模型发布", summary: "模型能力继续上探。", sourceIds: [1] },
+        ],
+      },
+      closingLabel: "编辑视角",
+      closingThought: "整体来看主线还是收敛在模型能力和工程工具上，后续需要持续观察实际落地情况。",
+    };
+    const renderedMarkdown = renderDailyReportMarkdown(customContent, candidates, "2026-04-24 AI 日报");
+    const report: DailyReportDetailDTO = {
+      id: "report-1",
+      date: "2026-04-24",
+      timezone: "Asia/Shanghai",
+      status: "published",
+      title: "2026-04-24 AI 日报",
+      openingSummary: customContent.openingSummary,
+      sourceCount: 1,
+      generatedAt: "2026-04-24T00:00:00.000Z",
+      publishedAt: "2026-04-24T01:00:00.000Z",
+      errorMessage: null,
+      closingThought: customContent.closingThought,
+      content: customContent,
+      renderedMarkdown,
+      sources: [],
+      previous: null,
+      next: null,
+    };
+
+    const detailMarkdown = buildDailyReportDetailMarkdown(report);
+    const exportMarkdown = buildDailyReportExportMarkdown(report);
+
+    expect(detailMarkdown).toContain("## 今日速览");
+    expect(detailMarkdown).toContain("## 编辑视角");
+    expect(detailMarkdown).not.toContain("## 摘要\n\n## 今日速览");
+    expect(exportMarkdown).toContain("# 2026-04-24 AI 日报");
+    expect(exportMarkdown).toContain("## 今日速览");
+    expect(exportMarkdown).toContain("## 编辑视角");
   });
 });
