@@ -216,6 +216,35 @@ function hasAnalysisInputsChanged(
   );
 }
 
+function isCompletedExistingItem(existing?: {
+  status?: string | null;
+  summaryStatus?: string | null;
+  summaryText?: string | null;
+  analysisStatus?: string | null;
+} | null) {
+  if (!existing) {
+    return false;
+  }
+
+  if (existing.status === "filtered") {
+    return true;
+  }
+
+  return existing.status === "processed" && hasSucceededSummary(existing) && hasSucceededAnalysis(existing);
+}
+
+function canReuseExistingByUrl(
+  existing: Item | null | undefined,
+  lookup: PreparedFeedItemLookup | null,
+) {
+  return Boolean(
+    existing &&
+      lookup &&
+      existing.urlHash === lookup.dedupeKeys.urlHash &&
+      isCompletedExistingItem(existing),
+  );
+}
+
 export function buildPreparedFeedItemLookup(preparedItem: PreparedFeedItem, now: Date): PreparedFeedItemLookup | null {
   const originalTitle = preparedItem.item.title?.trim();
   const originalUrl = preparedItem.item.link?.trim();
@@ -268,35 +297,16 @@ export function estimatePreparedItemAiWork(
     return { summary: false, analysis: false };
   }
 
+  if (canReuseExistingByUrl(existing, lookup)) {
+    return { summary: false, analysis: false };
+  }
+
   const inputsChanged = existing ? hasAnalysisInputsChanged(existing, lookup) : true;
 
   return {
     summary: !Boolean(existing && !inputsChanged && hasSucceededSummary(existing)),
     analysis: !Boolean(existing && !inputsChanged && hasSucceededAnalysis(existing)),
   };
-}
-
-function shouldWriteReusableExistingItem(
-  existing: Item,
-  lookup: PreparedFeedItemLookup,
-  input: {
-    sourceId: string;
-    author: string | null;
-  },
-) {
-  return (
-    existing.sourceId !== input.sourceId ||
-    existing.originalUrl !== lookup.originalUrl ||
-    existing.canonicalUrl !== lookup.dedupeKeys.canonicalUrl ||
-    existing.urlHash !== lookup.dedupeKeys.urlHash ||
-    existing.dedupeSignature !== lookup.dedupeKeys.signature ||
-    existing.originalTitle !== lookup.originalTitle ||
-    existing.author !== input.author ||
-    existing.publishedAt.getTime() !== lookup.publishedAt.getTime() ||
-    (existing.rssExcerpt ?? null) !== lookup.rssExcerpt ||
-    (existing.rssContent ?? null) !== lookup.rssContent ||
-    existing.errorMessage !== null
-  );
 }
 
 export async function processFeedItem({
@@ -404,13 +414,12 @@ export async function processFeedItem({
   };
   const contentForFullTextDecision = fullText || rssContent || rssExcerpt || "";
   const canReuseExistingAnalysis = Boolean(
-    existing &&
-      !analysisInputsChanged &&
-      hasSucceededSummary(existing) &&
-      hasSucceededAnalysis(existing) &&
-      existing.status !== "new" &&
-      existing.status !== "fetched" &&
-      existing.status !== "failed",
+    canReuseExistingByUrl(existing, lookup) ||
+      (existing &&
+        !analysisInputsChanged &&
+        hasSucceededSummary(existing) &&
+        hasSucceededAnalysis(existing) &&
+        isCompletedExistingItem(existing)),
   );
   const initialRuleFilterStartedAt = Date.now();
   const initialRuleFilter = evaluateRuleFilter({
@@ -484,61 +493,7 @@ export async function processFeedItem({
   }
 
   if (canReuseExistingAnalysis && existing) {
-    const language = existing?.language ?? (shouldTranslateTitle(originalTitle) ? "en" : "unknown");
-    const shouldWriteReusable = shouldWriteReusableExistingItem(existing, lookup, {
-      sourceId,
-      author,
-    });
-    const dbWriteStartedAt = shouldWriteReusable ? Date.now() : 0;
-    const stored = shouldWriteReusable
-      ? await upsertItem(
-          {
-            id: existing.id,
-            urlHash: dedupeKeys.urlHash,
-            dedupeSignature: dedupeKeys.signature,
-          },
-          {
-            sourceId,
-            originalUrl,
-            canonicalUrl: dedupeKeys.canonicalUrl,
-            urlHash: dedupeKeys.urlHash,
-            dedupeSignature: dedupeKeys.signature,
-            originalTitle,
-            translatedTitle,
-            author,
-            publishedAt,
-            rssExcerpt,
-            rssContent,
-            fullText,
-            summaryText,
-            language,
-            status,
-            summaryStatus,
-            analysisStatus,
-            filterReason,
-            moderationStatus,
-            moderationReason,
-            moderationDetail,
-            qualityScore,
-            qualityRationale,
-            eventType: eventSignature?.eventType ?? null,
-            eventSubject: eventSignature?.eventSubject ?? null,
-            eventAction: eventSignature?.eventAction ?? null,
-            eventObject: eventSignature?.eventObject ?? null,
-            eventDate: eventSignature?.eventDate ?? null,
-            isAggregation: existing.isAggregation ?? false,
-            aggregationCheckedAt: existing.aggregationCheckedAt,
-            aggregationParseStatus: existing.aggregationParseStatus,
-            aiProcessedAt: existing.aiProcessedAt,
-            clusterId: existing.clusterId ?? null,
-            manualClusterAssignedAt: existing.manualClusterAssignedAt,
-            errorMessage: null,
-          },
-        )
-      : existing;
-    if (shouldWriteReusable) {
-      addElapsed(timings, "dbWriteMs", dbWriteStartedAt);
-    }
+    const stored = existing;
 
     return {
       id: stored.id,

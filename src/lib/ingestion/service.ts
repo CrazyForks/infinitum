@@ -280,13 +280,12 @@ async function markSourceHealth(
 function getExistingItemForLookup(
   lookup: PreparedFeedItemLookup | null,
   existingByUrlHash: Map<string, Item>,
-  existingByDedupeSignature: Map<string, Item>,
 ) {
   if (!lookup) {
     return null;
   }
 
-  return existingByUrlHash.get(lookup.dedupeKeys.urlHash) ?? existingByDedupeSignature.get(lookup.dedupeKeys.signature) ?? null;
+  return existingByUrlHash.get(lookup.dedupeKeys.urlHash) ?? null;
 }
 
 function dedupePreparedLookupsByDedupeKey<T extends { lookup: PreparedFeedItemLookup | null }>(entries: T[]) {
@@ -300,7 +299,7 @@ function dedupePreparedLookupsByDedupeKey<T extends { lookup: PreparedFeedItemLo
       continue;
     }
 
-    const dedupeKey = `${entry.lookup.dedupeKeys.urlHash}:${entry.lookup.dedupeKeys.signature}`;
+    const dedupeKey = entry.lookup.dedupeKeys.urlHash;
     if (seen.has(dedupeKey)) {
       continue;
     }
@@ -500,10 +499,9 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
       })),
   );
   const existingByUrlHash = new Map(existingItems.map((item) => [item.urlHash, item]));
-  const existingByDedupeSignature = new Map(existingItems.map((item) => [item.dedupeSignature, item]));
   const estimatedAiWork = preparedLookups.reduce(
     (total, entry) => {
-      const existing = getExistingItemForLookup(entry.lookup, existingByUrlHash, existingByDedupeSignature);
+      const existing = getExistingItemForLookup(entry.lookup, existingByUrlHash);
       const estimate = estimatePreparedItemAiWork(entry.preparedItem, entry.lookup, existing, blacklist);
       return {
         summaries: total.summaries + (estimate.summary ? 1 : 0),
@@ -691,7 +689,7 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
     await runWithConcurrency(
       preparedLookups.map(({ preparedItem, lookup }) => async () => {
         try {
-          const existingItem = getExistingItemForLookup(lookup, existingByUrlHash, existingByDedupeSignature);
+          const existingItem = getExistingItemForLookup(lookup, existingByUrlHash);
           const result = await processFeedItem({
             ...preparedItem,
             lookup,
