@@ -43,12 +43,76 @@ type ClusterReassignmentResult = {
   skippedIncompleteSignature: boolean;
 };
 
+type ItemSummaryResolution = {
+  summary: string | null;
+  isAggregation: boolean | null;
+};
+
+type AggregationReparseCandidate = {
+  id: string;
+  sourceId: string;
+  originalTitle: string;
+  originalUrl: string;
+  clusterId: string | null;
+  publishedAt: Date;
+  fullText: string | null;
+  rssContent: string | null;
+  rssExcerpt: string | null;
+  source: { name: string };
+};
+
+type AggregationReparseResult = {
+  status: "parsed" | "not_aggregation" | "failed";
+  childItemIds: string[];
+  affectedClusterIds: Set<string>;
+  errorMessage: string | null;
+};
+
 function getItemSourceText(item: Item): string {
   return item.fullText || item.rssContent || item.rssExcerpt || item.originalTitle;
 }
 
 function normalizeSummary(summary: string | null | undefined): string | null {
   return stripHtmlTags(summary) || null;
+}
+
+async function resolveItemSummaryResult(
+  aiProvider: AiProvider,
+  item: Item & { source: { name: string } },
+  options?: {
+    reuseExisting?: boolean;
+  },
+): Promise<ItemSummaryResolution> {
+  const existingSummary = options?.reuseExisting ? normalizeSummary(item.summaryText) : null;
+
+  if (existingSummary) {
+    return {
+      summary: existingSummary,
+      isAggregation: item.isAggregation,
+    };
+  }
+
+  const inputText = getItemSourceText(item);
+  let isAggregation: boolean | null = null;
+
+  const summary = normalizeSummary(
+    await retryChineseSummary(
+      async (metadata) => {
+        const result = await aiProvider.summarizeItem(inputText, metadata);
+        isAggregation = result.isAggregation;
+        return result.summary;
+      },
+      {
+        title: item.originalTitle,
+        sourceName: item.source.name,
+      },
+    ),
+  );
+
+  return {
+    summary,
+    isAggregation,
+  };
 }
 
 async function resolveItemSummary(
@@ -58,26 +122,8 @@ async function resolveItemSummary(
     reuseExisting?: boolean;
   },
 ): Promise<string | null> {
-  const existingSummary = options?.reuseExisting ? normalizeSummary(item.summaryText) : null;
-
-  if (existingSummary) {
-    return existingSummary;
-  }
-
-  const inputText = getItemSourceText(item);
-
-  return normalizeSummary(
-    await retryChineseSummary(
-      async (metadata) => {
-        const result = await aiProvider.summarizeItem(inputText, metadata);
-        return result.summary;
-      },
-      {
-        title: item.originalTitle,
-        sourceName: item.source.name,
-      },
-    ),
-  );
+  const result = await resolveItemSummaryResult(aiProvider, item, options);
+  return result.summary;
 }
 
 function serializeEventSignature(eventSignature?: {
@@ -558,16 +604,90 @@ async function reanalyzeItem(itemId: string, options?: RegenerationOptions) {
   }
 
   const aiProvider = await resolveAiProvider(options?.aiProvider);
-  const summaryText = (await resolveItemSummary(aiProvider, item)) || item.originalTitle;
+  const summaryResult = await resolveItemSummaryResult(aiProvider, item);
+  const summaryText = summaryResult.summary || item.originalTitle;
+  const previousClusterId = item.clusterId;
+  const aggregationDetectionEnabled = item.source.aggregationDetectionEnabled === true;
+  const candidate: AggregationReparseCandidate = {
+    id: item.id,
+    sourceId: item.sourceId,
+    originalTitle: item.originalTitle,
+    originalUrl: item.originalUrl,
+    clusterId: item.clusterId,
+    publishedAt: item.publishedAt,
+    fullText: item.fullText,
+    rssContent: item.rssContent,
+    rssExcerpt: item.rssExcerpt,
+    source: { name: item.source.name },
+  };
+  const affectedClusterIds = new Set<string>();
+  let fallbackAggregationParseStatus: string = AGGREGATION_PARSE_STATUS.notAggregation;
+
+  if (aggregationDetectionEnabled && summaryResult.isAggregation === true) {
+    await prisma.item.update({
+      where: { id: item.id },
+      data: {
+        summaryText: summaryText || item.summaryText,
+        summaryStatus: "succeeded",
+        analysisStatus: "pending",
+        status: "processed",
+        moderationStatus: "allowed",
+        moderationReason: null,
+        moderationDetail: null,
+        isAggregation: true,
+        aggregationCheckedAt: new Date(),
+        aggregationParseStatus: AGGREGATION_PARSE_STATUS.detected,
+        errorMessage: null,
+      },
+    });
+
+    const reparseResult = await reparseAggregationCandidate(candidate, {
+      aiProvider,
+      retireExistingChildrenOnNotAggregation: false,
+      retireExistingChildrenOnFailure: false,
+      trackRetiredChildClusters: true,
+    });
+
+    if (reparseResult.status === "parsed") {
+      for (const clusterId of reparseResult.affectedClusterIds) {
+        await recomputeCluster(clusterId, aiProvider);
+      }
+
+      invalidateFeedCache();
+      invalidateDailyReportCache();
+
+      return prisma.item.findUniqueOrThrow({
+        where: { id: item.id },
+        include: { source: true },
+      });
+    }
+
+    for (const clusterId of reparseResult.affectedClusterIds) {
+      affectedClusterIds.add(clusterId);
+    }
+    fallbackAggregationParseStatus =
+      reparseResult.status === "failed"
+        ? AGGREGATION_PARSE_STATUS.failed
+        : AGGREGATION_PARSE_STATUS.notAggregation;
+  } else if (aggregationDetectionEnabled) {
+    fallbackAggregationParseStatus = AGGREGATION_PARSE_STATUS.notAggregation;
+  }
+
   const analysis = await aiProvider.enrichContent(summaryText, {
     title: item.originalTitle,
     sourceName: item.source.name,
     translateTitle: shouldTranslateTitle(item.originalTitle),
   });
 
-  const previousClusterId = item.clusterId;
   const moderationStatus = analysis.moderationStatus === "restored" ? "allowed" : analysis.moderationStatus;
   const nextStatus = moderationStatus === "filtered" ? "filtered" : "processed";
+  const regularAggregationFields = aggregationDetectionEnabled
+    ? {
+        isAggregation: false,
+        aggregationCheckedAt: new Date(),
+        aggregationParseStatus: fallbackAggregationParseStatus,
+      }
+    : {};
 
   const updated = await prisma.item.update({
     where: { id: item.id },
@@ -588,13 +708,21 @@ async function reanalyzeItem(itemId: string, options?: RegenerationOptions) {
       clusterId: moderationStatus === "filtered" ? null : item.clusterId,
       manualClusterAssignedAt: moderationStatus === "filtered" ? null : item.manualClusterAssignedAt,
       errorMessage: null,
+      ...regularAggregationFields,
     },
     include: { source: true },
   });
 
+  if (aggregationDetectionEnabled) {
+    for (const clusterId of await collectAggregationChildClusterIds(item.id)) {
+      affectedClusterIds.add(clusterId);
+    }
+    await retireAggregationChildItems(item.id);
+  }
+
   if (moderationStatus === "filtered") {
     if (previousClusterId) {
-      await recomputeCluster(previousClusterId, aiProvider);
+      affectedClusterIds.add(previousClusterId);
     }
   } else {
     await assignItemToCluster(updated.id, {
@@ -604,10 +732,17 @@ async function reanalyzeItem(itemId: string, options?: RegenerationOptions) {
   }
 
   if (previousClusterId && previousClusterId !== updated.clusterId) {
-    await recomputeCluster(previousClusterId, aiProvider);
+    affectedClusterIds.add(previousClusterId);
+  }
+
+  for (const clusterId of affectedClusterIds) {
+    await recomputeCluster(clusterId, aiProvider);
   }
 
   invalidateFeedCache();
+  if (aggregationDetectionEnabled) {
+    invalidateDailyReportCache();
+  }
 
   return prisma.item.findUniqueOrThrow({
     where: { id: updated.id },
@@ -626,10 +761,12 @@ export async function executeItemReanalyzeTask(
   // Estimated call budget for reanalyze:
   //   - enrichContent (the actual reanalyze pass)
   //   - summarizeItem (if a cached summary doesn't exist)
+  //   - parseAggregation (when source-level aggregation detection identifies a roundup)
   //   - summarizeCluster (1-2x via recomputeCluster, only if hash changed)
   // Actual counts are always tracked by wrapProvider regardless of estimate.
   const aiUsage = createTaskAiUsageTracker(1, "item_analysis");
   aiUsage.addEstimated(1, "item_summary");
+  aiUsage.addEstimated(1, "item_aggregation");
   aiUsage.addEstimated(2, "cluster_summary");
   const trackedAiProvider = aiUsage.wrapProvider(
     await resolveAiProvider(options?.aiProvider),
@@ -822,6 +959,199 @@ function getAggregationReparseSourceText(input: {
   return buildAggregationParsingInput(sourceText);
 }
 
+async function collectAggregationChildClusterIds(parentItemId: string) {
+  const [linkedChildren, legacyChildren] = await Promise.all([
+    prisma.aggregationSplitLink.findMany({
+      where: { parentItemId },
+      select: {
+        child: {
+          select: {
+            clusterId: true,
+          },
+        },
+      },
+    }),
+    prisma.item.findMany({
+      where: { parentItemId },
+      select: { clusterId: true },
+    }),
+  ]);
+
+  return [
+    ...linkedChildren.map((link) => link.child.clusterId),
+    ...legacyChildren.map((child) => child.clusterId),
+  ].filter((clusterId): clusterId is string => Boolean(clusterId));
+}
+
+async function markAggregationCandidateNotAggregation(
+  candidate: AggregationReparseCandidate,
+  options?: { retireExistingChildren?: boolean },
+) {
+  const affectedClusterIds = new Set<string>();
+  if (candidate.clusterId) {
+    affectedClusterIds.add(candidate.clusterId);
+  }
+
+  if (options?.retireExistingChildren) {
+    for (const clusterId of await collectAggregationChildClusterIds(candidate.id)) {
+      affectedClusterIds.add(clusterId);
+    }
+    await retireAggregationChildItems(candidate.id);
+  }
+
+  await prisma.item.update({
+    where: { id: candidate.id },
+    data: {
+      isAggregation: false,
+      aggregationCheckedAt: new Date(),
+      aggregationParseStatus: AGGREGATION_PARSE_STATUS.notAggregation,
+    },
+  });
+
+  return affectedClusterIds;
+}
+
+async function reparseAggregationCandidate(
+  candidate: AggregationReparseCandidate,
+  options: {
+    aiProvider: AiProvider;
+    retireExistingChildrenOnNotAggregation?: boolean;
+    retireExistingChildrenOnFailure?: boolean;
+    trackRetiredChildClusters?: boolean;
+  },
+): Promise<AggregationReparseResult> {
+  const affectedClusterIds = new Set<string>();
+  if (candidate.clusterId) {
+    affectedClusterIds.add(candidate.clusterId);
+  }
+
+  const inputText = getAggregationReparseSourceText(candidate);
+
+  if (inputText.length < REPARSE_AGGREGATIONS_MIN_TEXT_CHARS) {
+    const retiredClusterIds = await markAggregationCandidateNotAggregation(candidate, {
+      retireExistingChildren: options.retireExistingChildrenOnNotAggregation,
+    });
+    for (const clusterId of retiredClusterIds) {
+      affectedClusterIds.add(clusterId);
+    }
+    return {
+      status: "not_aggregation",
+      childItemIds: [],
+      affectedClusterIds,
+      errorMessage: null,
+    };
+  }
+
+  try {
+    const parsedAggregation = await options.aiProvider.parseAggregation(inputText, {
+      title: candidate.originalTitle,
+      sourceName: candidate.source.name,
+    });
+
+    if (!isCompleteParsedAggregation(parsedAggregation)) {
+      const retiredClusterIds = await markAggregationCandidateNotAggregation(candidate, {
+        retireExistingChildren: options.retireExistingChildrenOnNotAggregation,
+      });
+      for (const clusterId of retiredClusterIds) {
+        affectedClusterIds.add(clusterId);
+      }
+      return {
+        status: "not_aggregation",
+        childItemIds: [],
+        affectedClusterIds,
+        errorMessage: null,
+      };
+    }
+
+    if (options.trackRetiredChildClusters) {
+      for (const clusterId of await collectAggregationChildClusterIds(candidate.id)) {
+        affectedClusterIds.add(clusterId);
+      }
+    }
+    await retireAggregationChildItems(candidate.id);
+
+    const { childItemIds } = await persistAggregationChildItems({
+      sourceId: candidate.sourceId,
+      parent: {
+        id: candidate.id,
+        originalUrl: candidate.originalUrl,
+        originalTitle: candidate.originalTitle,
+      },
+      publishedAt: candidate.publishedAt,
+      events: parsedAggregation.events.map((event) => ({
+        eventType: event.eventType,
+        eventSubject: event.eventSubject,
+        eventAction: event.eventAction,
+        eventObject: event.eventObject,
+        eventDate: event.eventDate,
+        title: event.title,
+        oneLiner: event.oneLiner,
+        qualityScore: event.qualityScore,
+        sourceUrl: event.sourceUrl,
+      })),
+    });
+
+    for (const childId of childItemIds) {
+      try {
+        await assignItemToCluster(childId, { aiProvider: options.aiProvider });
+      } catch (assignError) {
+        console.error(`[Item Reparse] cluster assignment failed for ${childId}:`, assignError);
+      }
+    }
+
+    const mainEvent = serializeParsedEventSignature(parsedAggregation.mainEvent);
+    await prisma.item.update({
+      where: { id: candidate.id },
+      data: {
+        isAggregation: true,
+        aggregationCheckedAt: new Date(),
+        aggregationParseStatus: AGGREGATION_PARSE_STATUS.parsed,
+        eventType: mainEvent?.eventType ?? null,
+        eventSubject: mainEvent?.eventSubject ?? null,
+        eventAction: mainEvent?.eventAction ?? null,
+        eventObject: mainEvent?.eventObject ?? null,
+        eventDate: mainEvent?.eventDate ?? null,
+        clusterId: null,
+        manualClusterAssignedAt: null,
+        qualityScore: Math.max(...parsedAggregation.events.map((event) => event.qualityScore)),
+        qualityRationale: "聚合内容重拆后取主事件签名",
+        aiProcessedAt: new Date(),
+      },
+    });
+
+    return {
+      status: "parsed",
+      childItemIds,
+      affectedClusterIds,
+      errorMessage: null,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown reparse error";
+
+    if (options.retireExistingChildrenOnFailure) {
+      for (const clusterId of await collectAggregationChildClusterIds(candidate.id)) {
+        affectedClusterIds.add(clusterId);
+      }
+      await retireAggregationChildItems(candidate.id);
+    }
+
+    await prisma.item.update({
+      where: { id: candidate.id },
+      data: {
+        aggregationCheckedAt: new Date(),
+        aggregationParseStatus: AGGREGATION_PARSE_STATUS.failed,
+      },
+    });
+
+    return {
+      status: "failed",
+      childItemIds: [],
+      affectedClusterIds,
+      errorMessage: message,
+    };
+  }
+}
+
 function shouldWriteReparseProgress(processedCount: number, totalCandidates: number) {
   return processedCount === totalCandidates ||
     processedCount % REPARSE_AGGREGATIONS_PROGRESS_UPDATE_INTERVAL === 0;
@@ -933,123 +1263,20 @@ export async function executeItemReparseAggregationsTask(
     }
 
     processedCount += 1;
-    const inputText = getAggregationReparseSourceText(candidate);
+    const reparseResult = await reparseAggregationCandidate(candidate, {
+      aiProvider: trackedAiProvider,
+    });
 
-    if (inputText.length < REPARSE_AGGREGATIONS_MIN_TEXT_CHARS) {
-      await prisma.item.update({
-        where: { id: candidate.id },
-        data: {
-          isAggregation: false,
-          aggregationCheckedAt: new Date(),
-          aggregationParseStatus: AGGREGATION_PARSE_STATUS.notAggregation,
-        },
-      });
-      if (shouldWriteReparseProgress(processedCount, totalCandidates)) {
-        await updateTaskRun(taskRun.id, {
-          progressCurrent: processedCount,
-          progressTotal: totalCandidates,
-          progressLabel: `已扫描 ${processedCount}/${totalCandidates} 条，识别 ${reparsedCount} 条聚合`,
-        });
-      }
-      continue;
+    if (reparseResult.status === "parsed") {
+      reparsedCount += 1;
+    } else if (reparseResult.status === "failed") {
+      const message = reparseResult.errorMessage ?? "Unknown reparse error";
+      issues.push(`${candidate.id}: ${message}`);
+      console.error(`[Item Reparse] Failed for ${candidate.id}:`, message);
     }
 
-    try {
-      const parsedAggregation = await trackedAiProvider.parseAggregation(inputText, {
-        title: candidate.originalTitle,
-        sourceName: candidate.source.name,
-      });
-
-      if (!isCompleteParsedAggregation(parsedAggregation)) {
-        await prisma.item.update({
-          where: { id: candidate.id },
-          data: {
-            isAggregation: false,
-            aggregationCheckedAt: new Date(),
-            aggregationParseStatus: AGGREGATION_PARSE_STATUS.notAggregation,
-          },
-        });
-        if (shouldWriteReparseProgress(processedCount, totalCandidates)) {
-          await updateTaskRun(taskRun.id, {
-            progressCurrent: processedCount,
-            progressTotal: totalCandidates,
-            progressLabel: `已扫描 ${processedCount}/${totalCandidates} 条，识别 ${reparsedCount} 条聚合`,
-          });
-        }
-        continue;
-      }
-
-      // 1. Retire previous child items so stale splits disappear from feed and
-      // reports while their cluster/admin history remains inspectable.
-      await retireAggregationChildItems(candidate.id);
-
-      // 2. Persist each parsed event as a full child Item.
-      const { childItemIds } = await persistAggregationChildItems({
-        sourceId: candidate.sourceId,
-        parent: {
-          id: candidate.id,
-          originalUrl: candidate.originalUrl,
-          originalTitle: candidate.originalTitle,
-        },
-        publishedAt: candidate.publishedAt,
-        events: parsedAggregation.events.map((event) => ({
-          eventType: event.eventType,
-          eventSubject: event.eventSubject,
-          eventAction: event.eventAction,
-          eventObject: event.eventObject,
-          eventDate: event.eventDate,
-          title: event.title,
-          oneLiner: event.oneLiner,
-          qualityScore: event.qualityScore,
-          sourceUrl: event.sourceUrl,
-        })),
-      });
-
-      // 3. Assign each child to a cluster. Failures are non-fatal: the child item
-      //    exists, and the batch-level cluster_finalize pass recomputes clusters.
-      for (const childId of childItemIds) {
-        try {
-          await assignItemToCluster(childId, { aiProvider: trackedAiProvider });
-        } catch (assignError) {
-          console.error(`[Item Reparse] cluster assignment failed for ${childId}:`, assignError);
-        }
-      }
-
-      reparsedCount += 1;
-
-      if (candidate.clusterId) {
-        affectedClusterIds.add(candidate.clusterId);
-      }
-
-      const mainEvent = serializeParsedEventSignature(parsedAggregation.mainEvent);
-      await prisma.item.update({
-        where: { id: candidate.id },
-        data: {
-          isAggregation: true,
-          aggregationCheckedAt: new Date(),
-          aggregationParseStatus: AGGREGATION_PARSE_STATUS.parsed,
-          eventType: mainEvent?.eventType ?? null,
-          eventSubject: mainEvent?.eventSubject ?? null,
-          eventAction: mainEvent?.eventAction ?? null,
-          eventObject: mainEvent?.eventObject ?? null,
-          eventDate: mainEvent?.eventDate ?? null,
-          clusterId: null,
-          manualClusterAssignedAt: null,
-          qualityRationale: "聚合内容重拆后取主事件签名",
-          aiProcessedAt: new Date(),
-        },
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown reparse error";
-      issues.push(`${candidate.id}: ${message}`);
-      console.error(`[Item Reparse] Failed for ${candidate.id}:`, error);
-      await prisma.item.update({
-        where: { id: candidate.id },
-        data: {
-          aggregationCheckedAt: new Date(),
-          aggregationParseStatus: AGGREGATION_PARSE_STATUS.failed,
-        },
-      });
+    for (const clusterId of reparseResult.affectedClusterIds) {
+      affectedClusterIds.add(clusterId);
     }
 
     if (shouldWriteReparseProgress(processedCount, totalCandidates)) {
