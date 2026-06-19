@@ -42,9 +42,9 @@ function buildMonitorSnapshot(): BackgroundTaskMonitorSnapshot {
         status: "running",
         label: "默认抓取任务",
         entityId: null,
-        progressCurrent: 1,
+        progressCurrent: 2,
         progressTotal: 10,
-        progressLabel: "已处理 1/10 条内容，来自 1 个源，失败 0 项，正文补抓 2 篇",
+        progressLabel: "已处理 2/10 条内容，来自 1 个源，失败 0 项，正文补抓 2 篇",
         itemsAdded: 1,
         fullTextFetchedCount: 2,
         aiCallCountActual: 1,
@@ -256,7 +256,7 @@ describe("TaskMonitorPanel", () => {
     expect(dialog.querySelector(".overflow-y-auto.p-6")).toBeTruthy();
     expect(within(dialog).queryByText("AI 调用")).not.toBeInTheDocument();
     expect(within(dialog).getByText("信息抓取")).toBeInTheDocument();
-    expect(within(dialog).getByText("规则过滤")).toBeInTheDocument();
+    expect(within(dialog).getAllByText("规则过滤").length).toBeGreaterThan(0);
     expect(within(dialog).getByText("条目摘要 · 模型 gpt-4.1-mini-summary")).toBeInTheDocument();
     expect(within(dialog).getByText("聚合拆分 · 模型 gpt-4.1-mini-aggregation")).toBeInTheDocument();
     expect(within(dialog).getByText("内容分析 · 模型 gpt-4.1-mini-analysis")).toBeInTheDocument();
@@ -264,8 +264,12 @@ describe("TaskMonitorPanel", () => {
     expect(within(dialog).getByText("聚合合并 · 模型 gpt-4.1-mini-merge")).toBeInTheDocument();
     expect(within(dialog).getByText("聚合收尾 · 模型 gpt-4.1-mini-cluster")).toBeInTheDocument();
     expect(within(dialog).queryByText("进度")).not.toBeInTheDocument();
+    expect(within(dialog).getByText("摘要")).toBeInTheDocument();
+    expect(
+      within(dialog).getByText("6/10 已有结果 = 1 (最终新增) + 2 (AI 过滤) + 0 (更新/重处理) + 1 (重复过滤) + 2 (规则过滤)"),
+    ).toBeInTheDocument();
     expect(within(dialog).getByText("抓取 1 个源 · 10 篇内容 · 正文补抓 2 篇")).toBeInTheDocument();
-    expect(within(dialog).getByText("黑名单 2 · 复用 1")).toBeInTheDocument();
+    expect(within(dialog).getByText("规则过滤 2 · 复用 1")).toBeInTheDocument();
     expect(within(dialog).getByText("完成 5 · 失败 1")).toBeInTheDocument();
     expect(within(dialog).getByText("成功 1 · 失败 0 · 子事件 12")).toBeInTheDocument();
     expect(within(dialog).getByText("完成 4 · 过滤 2")).toBeInTheDocument();
@@ -518,7 +522,10 @@ describe("TaskMonitorPanel", () => {
       await within(dialog).findByText("抓取 1 个源 · 10 篇内容 · 正文补抓 3 篇"),
     ).toBeInTheDocument();
     expect(
-      within(dialog).getByText("黑名单 2 · 复用 1"),
+      within(dialog).getByText("规则过滤 2 · 复用 1"),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).getByText("6/10 已有结果 = 3 (最终新增) + 0 (AI 过滤) + 0 (更新/重处理) + 1 (重复过滤) + 2 (规则过滤)"),
     ).toBeInTheDocument();
   });
 });

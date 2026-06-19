@@ -103,9 +103,69 @@ function formatDuration(durationMs: number | null) {
   return `${minutes}分 ${seconds}s`;
 }
 
+function getTaskTimelineNode(task: TaskRunSnapshot, key: NonNullable<TaskRunSnapshot["taskTimeline"]>[number]["key"]) {
+  return task.taskTimeline?.find((node) => node.key === key) ?? null;
+}
+
+function getTaskTimelineMetric(
+  task: TaskRunSnapshot,
+  key: NonNullable<TaskRunSnapshot["taskTimeline"]>[number]["key"],
+  labels: string | string[],
+) {
+  const node = getTaskTimelineNode(task, key);
+  const labelList = Array.isArray(labels) ? labels : [labels];
+  return node?.metrics.find((metric) => labelList.includes(metric.label))?.value ?? 0;
+}
+
+function parseFailureCount(progressLabel: string | null) {
+  const match = progressLabel?.match(/失败\s*(\d+)\s*项/);
+  return match ? Number(match[1]) : 0;
+}
+
+function buildIngestionSummaryDetail(task: TaskRunSnapshot) {
+  if (task.kind !== "ingestion") {
+    return null;
+  }
+
+  const failureCount = parseFailureCount(task.progressLabel);
+  const fetched = getTaskTimelineMetric(task, "source_fetch", "抓取内容") || task.progressTotal;
+  const reusedExisting = getTaskTimelineMetric(task, "rule_filter", "复用已有处理");
+  const ruleFiltered = getTaskTimelineMetric(task, "rule_filter", ["命中规则过滤", "命中黑名单"]);
+  const aiFiltered = getTaskTimelineMetric(task, "item_analysis", "过滤");
+  const nonFilteredProcessed = task.progressCurrent;
+  const updatedExisting = Math.max(0, nonFilteredProcessed - task.itemsAdded - reusedExisting);
+  const accountedTotal = task.itemsAdded + aiFiltered + updatedExisting + reusedExisting + ruleFiltered + failureCount;
+  const parts = [
+    `${task.itemsAdded} (最终新增)`,
+    `${aiFiltered} (AI 过滤)`,
+    `${updatedExisting} (更新/重处理)`,
+    `${reusedExisting} (重复过滤)`,
+  ];
+
+  if (ruleFiltered > 0) {
+    parts.push(`${ruleFiltered} (规则过滤)`);
+  }
+
+  if (failureCount > 0) {
+    parts.push(`${failureCount} (失败)`);
+  }
+
+  const leftSide = accountedTotal === fetched ? String(fetched) : `${accountedTotal}/${fetched} 已有结果`;
+  return `${leftSide} = ${parts.join(" + ")}`;
+}
+
 function formatTaskTimelineDetail(task: TaskRunSnapshot, node: NonNullable<TaskRunSnapshot["taskTimeline"]>[number]) {
   const metricMap = new Map(node.metrics.map((metric) => [metric.label, metric.value]));
-  const getValue = (label: string) => metricMap.get(label) ?? 0;
+  const getValue = (label: string | string[]) => {
+    const labels = Array.isArray(label) ? label : [label];
+    for (const currentLabel of labels) {
+      const value = metricMap.get(currentLabel);
+      if (value !== undefined) {
+        return value;
+      }
+    }
+    return 0;
+  };
 
   switch (node.key) {
     case "daily_report_generate":
@@ -115,7 +175,7 @@ function formatTaskTimelineDetail(task: TaskRunSnapshot, node: NonNullable<TaskR
     case "source_fetch":
       return `抓取 ${getValue("抓取源")} 个源 · ${getValue("抓取内容")} 篇内容 · 正文补抓 ${getValue("正文补抓")} 篇`;
     case "rule_filter":
-      return `黑名单 ${getValue("命中黑名单")} · 复用 ${getValue("复用已有处理")}`;
+      return `规则过滤 ${getValue(["命中规则过滤", "命中黑名单"])} · 复用 ${getValue("复用已有处理")}`;
     case "item_summary":
       return `完成 ${getValue("完成")} · 失败 ${getValue("失败")}`;
     case "item_aggregation":
@@ -298,6 +358,8 @@ function TaskDetailModal({
 }: TaskDetailModalProps) {
   if (!task) return null;
 
+  const summaryDetail = buildIngestionSummaryDetail(task);
+
   return (
     <ModalShell
       isOpen={isOpen}
@@ -370,6 +432,17 @@ function TaskDetailModal({
             ) : null}
           </div>
         </div>
+
+        {summaryDetail ? (
+          <section className="space-y-2">
+            <h4 className="text-sm font-semibold text-[var(--text-1)]">
+              摘要
+            </h4>
+            <div className="rounded-md border border-[color:var(--line)] bg-[var(--bg-muted)] px-3 py-2 text-sm text-[var(--text-2)]">
+              {summaryDetail}
+            </div>
+          </section>
+        ) : null}
 
         {/* Timeline */}
         <div className="space-y-2">
