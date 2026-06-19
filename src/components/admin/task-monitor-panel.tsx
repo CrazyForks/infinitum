@@ -127,13 +127,20 @@ function buildIngestionSummaryDetail(task: TaskRunSnapshot) {
     return null;
   }
 
+  const isFinished = !["queued", "running"].includes(task.status);
   const failureCount = parseFailureCount(task.progressLabel);
   const fetched = getTaskTimelineMetric(task, "source_fetch", "抓取内容") || task.progressTotal;
   const reusedExisting = getTaskTimelineMetric(task, "rule_filter", "复用已有处理");
   const ruleFiltered = getTaskTimelineMetric(task, "rule_filter", ["命中规则过滤", "命中黑名单"]);
+  const analyzed = getTaskTimelineMetric(task, "item_analysis", "完成");
   const aiFiltered = getTaskTimelineMetric(task, "item_analysis", "过滤");
-  const nonFilteredProcessed = task.progressCurrent;
-  const updatedExisting = Math.max(0, nonFilteredProcessed - task.itemsAdded - reusedExisting);
+  const knownTotal = isFinished
+    ? fetched
+    : Math.max(task.progressCurrent, analyzed + reusedExisting + ruleFiltered + failureCount);
+  const updatedExisting = Math.max(
+    0,
+    knownTotal - task.itemsAdded - aiFiltered - reusedExisting - ruleFiltered - failureCount,
+  );
   const accountedTotal = task.itemsAdded + aiFiltered + updatedExisting + reusedExisting + ruleFiltered + failureCount;
   const parts = [
     `${task.itemsAdded} (最终新增)`,

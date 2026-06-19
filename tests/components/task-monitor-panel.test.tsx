@@ -266,7 +266,7 @@ describe("TaskMonitorPanel", () => {
     expect(within(dialog).queryByText("进度")).not.toBeInTheDocument();
     expect(within(dialog).getByText("摘要")).toBeInTheDocument();
     expect(
-      within(dialog).getByText("6/10 已有结果 = 1 (最终新增) + 2 (AI 过滤) + 0 (更新/重处理) + 1 (重复过滤) + 2 (规则过滤)"),
+      within(dialog).getByText("7/10 已有结果 = 1 (最终新增) + 2 (AI 过滤) + 1 (更新/重处理) + 1 (重复过滤) + 2 (规则过滤)"),
     ).toBeInTheDocument();
     expect(within(dialog).getByText("抓取 1 个源 · 10 篇内容 · 正文补抓 2 篇")).toBeInTheDocument();
     expect(within(dialog).getByText("规则过滤 2 · 复用 1")).toBeInTheDocument();
@@ -276,6 +276,73 @@ describe("TaskMonitorPanel", () => {
     expect(within(dialog).getByText("指纹命中 1 · 本地直连 2 · AI归组 1 · 跳过 0 · 新建 1")).toBeInTheDocument();
     expect(within(dialog).getByText("候选 12/18 · Dirty 5 · Hash跳过 4 · AI返回 2 · 移动 6 · 失败 1 · 已合并 · 合并后 9 组")).toBeInTheDocument();
     expect(within(dialog).getByText("参与重算 2 · 完成更新 2 · 摘要完成 1 · 摘要失败 0 · 已删除 0")).toBeInTheDocument();
+  });
+
+  it("keeps finished ingestion summaries closed when reused items include filtered records", async () => {
+    renderWithProviders(
+      <TaskMonitorPanel
+        runningTasks={[]}
+        recentTasks={[
+          {
+            ...buildMonitorSnapshot().runningTasks[0],
+            id: "task-production-regression",
+            status: "succeeded",
+            progressCurrent: 74,
+            progressTotal: 91,
+            progressLabel: "已处理 74/91 条内容，来自 113 个源，失败 0 项，正文补抓 18 篇",
+            itemsAdded: 10,
+            fullTextFetchedCount: 18,
+            startedAt: "2026-06-19T09:00:00.909Z",
+            finishedAt: "2026-06-19T09:21:21.854Z",
+            taskTimeline: [
+              {
+                key: "source_fetch",
+                label: "信息抓取",
+                status: "succeeded",
+                startedAt: "2026-06-19T09:00:00.950Z",
+                finishedAt: "2026-06-19T09:02:15.358Z",
+                durationMs: 134_408,
+                metrics: [
+                  { label: "抓取源", value: 113 },
+                  { label: "抓取内容", value: 91 },
+                  { label: "正文补抓", value: 18 },
+                ],
+              },
+              {
+                key: "rule_filter",
+                label: "规则过滤",
+                status: "succeeded",
+                startedAt: "2026-06-19T09:02:15.456Z",
+                finishedAt: "2026-06-19T09:17:06.032Z",
+                durationMs: 890_576,
+                metrics: [
+                  { label: "命中规则过滤", value: 0 },
+                  { label: "复用已有处理", value: 57 },
+                ],
+              },
+              {
+                key: "item_analysis",
+                label: "内容分析",
+                status: "succeeded",
+                startedAt: "2026-06-19T09:02:15.456Z",
+                finishedAt: "2026-06-19T09:17:06.032Z",
+                durationMs: 890_576,
+                metrics: [
+                  { label: "完成", value: 34 },
+                  { label: "过滤", value: 5 },
+                ],
+              },
+            ],
+          },
+        ]}
+        initialFocusTaskId="task-production-regression"
+      />,
+    );
+
+    const dialog = await screen.findByRole("dialog", { name: "任务详情" });
+    expect(
+      within(dialog).getByText("91 = 10 (最终新增) + 5 (AI 过滤) + 19 (更新/重处理) + 57 (重复过滤)"),
+    ).toBeInTheDocument();
   });
 
   it("shows item or cluster title in regeneration task details", async () => {
