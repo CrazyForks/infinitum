@@ -38,7 +38,13 @@ export type RssParserLike = {
   ): Promise<ParsedFeed>;
 };
 
-export type ArticleFetcher = (url: string) => Promise<string | null>;
+export type ArticleFetchContext = {
+  rssContent?: string | null;
+  rssExcerpt?: string | null;
+  reason?: "short_content" | "rss_html";
+};
+
+export type ArticleFetcher = (url: string, context?: ArticleFetchContext) => Promise<string | null>;
 
 export type ProcessedItemRecord = {
   id: string;
@@ -77,6 +83,7 @@ export type RunIngestionOptions = {
   itemConcurrency: number;
   sourceConcurrency: number;
   fullTextFetchThreshold: number;
+  contentExtraction: import("@/config/runtime").RuntimeConfig["contentExtraction"];
   perSourceItemLimit: number;
   processingStartAt?: Date | null;
   now?: Date;

@@ -19,6 +19,7 @@ import {
   IconPlug,
   IconShield,
   IconGlobe,
+  IconLink,
   IconClock,
   IconArrowUp,
   IconArrowDown,
@@ -31,8 +32,10 @@ import type { AdminSettingsSnapshot, PromptConfigType } from "@/lib/settings/typ
 type PrimaryTab = "monitoring" | "settings";
 type MonitorSubSection = "dashboard" | "content" | "tasks";
 type ContentSubSection = "filtered" | "clusters" | "splits";
-type SettingsSection = "blacklist" | "groups" | "sources" | "tasks" | "ai";
+type SettingsSection = "groups" | "sources" | "ai" | "content" | "tasks";
 type AISubSection = "model-api" | "prompt";
+type ContentSettingsSubSection = "blacklist" | "content-extraction";
+type TaskSettingsSubSection = "ingestion" | "daily-report" | "cleanup";
 
 type AdminRouteState = {
   primaryTab: PrimaryTab;
@@ -40,6 +43,8 @@ type AdminRouteState = {
   contentSubSection: ContentSubSection;
   settingsSection: SettingsSection;
   aiSubSection: AISubSection;
+  contentSettingsSubSection: ContentSettingsSubSection;
+  taskSettingsSubSection: TaskSettingsSubSection;
 };
 
 type AdminSearchParams = {
@@ -67,15 +72,41 @@ function normalizeContentSubSection(value: string | null): ContentSubSection {
 }
 
 function normalizeSettingsSection(value: string | null): SettingsSection {
-  if (value === "blacklist" || value === "groups" || value === "sources" || value === "tasks" || value === "ai") {
+  if (
+    value === "groups" ||
+    value === "sources" ||
+    value === "ai" ||
+    value === "content" ||
+    value === "tasks"
+  ) {
     return value;
   }
 
-  return "ai";
+  return "groups";
+}
+
+function normalizeContentSettingsSubSection(value: string | null): ContentSettingsSubSection {
+  if (value === "blacklist") {
+    return "blacklist";
+  }
+
+  if (value === "content-extraction") {
+    return "content-extraction";
+  }
+
+  return "blacklist";
 }
 
 function normalizeAISubSection(value: string | null): AISubSection {
   return value === "prompt" ? "prompt" : "model-api";
+}
+
+function normalizeTaskSettingsSubSection(value: string | null): TaskSettingsSubSection {
+  if (value === "daily-report" || value === "cleanup") {
+    return value;
+  }
+
+  return "ingestion";
 }
 
 function normalizePromptType(value: string | null): PromptConfigType {
@@ -117,18 +148,32 @@ function resolveRouteState(searchParams: AdminSearchParams): AdminRouteState {
       primaryTab,
       monitoringSubSection,
       contentSubSection: normalizeContentSubSection(searchParams.get("view")),
-      settingsSection: "ai",
+      settingsSection: "groups",
       aiSubSection: "model-api",
+      contentSettingsSubSection: "blacklist",
+      taskSettingsSubSection: "ingestion",
     };
   }
 
   const settingsSection = normalizeSettingsSection(searchParams.get("section"));
+  const settingsView = searchParams.get("view");
   return {
     primaryTab,
     monitoringSubSection: "dashboard",
     contentSubSection: "filtered",
     settingsSection,
-    aiSubSection: normalizeAISubSection(searchParams.get("view")),
+    aiSubSection: normalizeAISubSection(settingsView),
+    contentSettingsSubSection: normalizeContentSettingsSubSection(settingsView),
+    taskSettingsSubSection: normalizeTaskSettingsSubSection(settingsView),
+  };
+}
+
+function resolveCollapsedSections(routeState: AdminRouteState) {
+  return {
+    monitoringContent: !(routeState.primaryTab === "monitoring" && routeState.monitoringSubSection === "content"),
+    ai: !(routeState.primaryTab === "settings" && routeState.settingsSection === "ai"),
+    content: !(routeState.primaryTab === "settings" && routeState.settingsSection === "content"),
+    tasks: !(routeState.primaryTab === "settings" && routeState.settingsSection === "tasks"),
   };
 }
 
@@ -146,6 +191,8 @@ export function AdminPageClient() {
     contentSubSection,
     settingsSection,
     aiSubSection,
+    contentSettingsSubSection,
+    taskSettingsSubSection,
   } = routeState;
 
   // Fetch settings eagerly so all settings sections have data.
@@ -161,33 +208,33 @@ export function AdminPageClient() {
     return () => { cancelled = true; };
   }, []);
 
-  // Sync route state on browser back/forward (popstate). We listen to
-  // popstate directly rather than depending on useSearchParams to avoid
-  // reference-churn re-render loops.
-  useEffect(() => {
-    const handlePopState = () => {
-      const nextSearchParams = new URLSearchParams(window.location.search);
-      setRouteState(resolveRouteState(nextSearchParams));
-    };
-    window.addEventListener("popstate", handlePopState);
-    return () => window.removeEventListener("popstate", handlePopState);
-  }, []);
-
   const focusedTaskId = normalizeTaskId(searchParams.get("task"));
   const taskPage = normalizePositiveInteger(searchParams.get("taskPage"));
   const taskPageSize = normalizePositiveInteger(searchParams.get("taskPageSize"));
   const contentPage = normalizePositiveInteger(searchParams.get("contentPage"));
   const contentPageSize = normalizePositiveInteger(searchParams.get("contentPageSize"));
   const selectedPromptType = normalizePromptType(searchParams.get("promptType"));
-  const [collapsedSections, setCollapsedSections] = useState<{
-    ai: boolean;
-  }>(() => ({
-    ai: !(routeState.primaryTab === "settings" && routeState.settingsSection === "ai"),
-  }));
-  const isAISectionCollapsed =
-    primaryTab === "settings" && settingsSection === "ai" ? false : collapsedSections.ai;
-  const isContentSectionCollapsed =
-    !(primaryTab === "monitoring" && monitoringSubSection === "content");
+  const [collapsedSections, setCollapsedSections] = useState(() =>
+    resolveCollapsedSections(routeState),
+  );
+  const isAISectionCollapsed = collapsedSections.ai;
+  const isSettingsContentSectionCollapsed = collapsedSections.content;
+  const isTaskSettingsSectionCollapsed = collapsedSections.tasks;
+  const isContentSectionCollapsed = collapsedSections.monitoringContent;
+
+  // Sync route state on browser back/forward (popstate). We listen to
+  // popstate directly rather than depending on useSearchParams to avoid
+  // reference-churn re-render loops.
+  useEffect(() => {
+    const handlePopState = () => {
+      const nextSearchParams = new URLSearchParams(window.location.search);
+      const nextRouteState = resolveRouteState(nextSearchParams);
+      setRouteState(nextRouteState);
+      setCollapsedSections(resolveCollapsedSections(nextRouteState));
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
 
   const navigateAdmin = useCallback((nextState: Partial<AdminRouteState>) => {
     setRouteState((prev) => ({
@@ -196,6 +243,8 @@ export function AdminPageClient() {
       contentSubSection: nextState.contentSubSection ?? prev.contentSubSection,
       settingsSection: nextState.settingsSection ?? prev.settingsSection,
       aiSubSection: nextState.aiSubSection ?? prev.aiSubSection,
+      contentSettingsSubSection: nextState.contentSettingsSubSection ?? prev.contentSettingsSubSection,
+      taskSettingsSubSection: nextState.taskSettingsSubSection ?? prev.taskSettingsSubSection,
     }));
   }, []);
 
@@ -215,6 +264,10 @@ export function AdminPageClient() {
       params.set("section", routeState.settingsSection);
       if (routeState.settingsSection === "ai") {
         params.set("view", routeState.aiSubSection);
+      } else if (routeState.settingsSection === "content") {
+        params.set("view", routeState.contentSettingsSubSection);
+      } else if (routeState.settingsSection === "tasks") {
+        params.set("view", routeState.taskSettingsSubSection);
       }
     }
 
@@ -261,20 +314,58 @@ export function AdminPageClient() {
 
   const handleToggleAISection = useCallback(() => {
     const nextCollapsed = !isAISectionCollapsed;
-    setCollapsedSections((prev) => ({
-      ...prev,
-      ai: nextCollapsed,
-    }));
+    setCollapsedSections((prev) =>
+      nextCollapsed
+        ? { ...prev, ai: true }
+        : { ...prev, ai: false, content: true, tasks: true },
+    );
     if (!nextCollapsed) {
       navigateAdmin({
         primaryTab: "settings",
         settingsSection: "ai",
+        aiSubSection: aiSubSection,
       });
     }
-  }, [isAISectionCollapsed, navigateAdmin]);
+  }, [aiSubSection, isAISectionCollapsed, navigateAdmin]);
+
+  const handleToggleSettingsContentSection = useCallback(() => {
+    const nextCollapsed = !isSettingsContentSectionCollapsed;
+    setCollapsedSections((prev) =>
+      nextCollapsed
+        ? { ...prev, content: true }
+        : { ...prev, ai: true, content: false, tasks: true },
+    );
+    if (!nextCollapsed) {
+      navigateAdmin({
+        primaryTab: "settings",
+        settingsSection: "content",
+        contentSettingsSubSection,
+      });
+    }
+  }, [contentSettingsSubSection, isSettingsContentSectionCollapsed, navigateAdmin]);
+
+  const handleToggleTaskSettingsSection = useCallback(() => {
+    const nextCollapsed = !isTaskSettingsSectionCollapsed;
+    setCollapsedSections((prev) =>
+      nextCollapsed
+        ? { ...prev, tasks: true }
+        : { ...prev, ai: true, content: true, tasks: false },
+    );
+    if (!nextCollapsed) {
+      navigateAdmin({
+        primaryTab: "settings",
+        settingsSection: "tasks",
+        taskSettingsSubSection,
+      });
+    }
+  }, [isTaskSettingsSectionCollapsed, navigateAdmin, taskSettingsSubSection]);
 
   const handleToggleContentSection = useCallback(() => {
     const nextCollapsed = !isContentSectionCollapsed;
+    setCollapsedSections((prev) => ({
+      ...prev,
+      monitoringContent: nextCollapsed,
+    }));
     if (!nextCollapsed) {
       navigateAdmin({
         primaryTab: "monitoring",
@@ -352,8 +443,12 @@ export function AdminPageClient() {
       }
     }
 
-    // Settings - Blacklist
-    if (primaryTab === "settings" && settingsSection === "blacklist") {
+    // Settings - Content Management
+    if (
+      primaryTab === "settings" &&
+      settingsSection === "content" &&
+      contentSettingsSubSection === "blacklist"
+    ) {
       return <AdminSettingsPanel initialSettings={settings!} activeSection="blacklist" embedMode />;
     }
 
@@ -367,8 +462,24 @@ export function AdminPageClient() {
       return <AdminSettingsPanel initialSettings={settings!} activeSection="sources" embedMode />;
     }
 
+    if (
+      primaryTab === "settings" &&
+      settingsSection === "content" &&
+      contentSettingsSubSection === "content-extraction"
+    ) {
+      return <AdminSettingsPanel initialSettings={settings!} activeSection="content-extraction" embedMode />;
+    }
+
     if (primaryTab === "settings" && settingsSection === "tasks") {
-      return <AdminSettingsPanel initialSettings={settings!} activeSection="tasks" embedMode />;
+      if (taskSettingsSubSection === "daily-report") {
+        return <AdminSettingsPanel initialSettings={settings!} activeSection="task-daily-report" embedMode />;
+      }
+
+      if (taskSettingsSubSection === "cleanup") {
+        return <AdminSettingsPanel initialSettings={settings!} activeSection="task-cleanup" embedMode />;
+      }
+
+      return <AdminSettingsPanel initialSettings={settings!} activeSection="task-ingestion" embedMode />;
     }
 
     return null;
@@ -382,6 +493,10 @@ export function AdminPageClient() {
           <div className="flex gap-1 border-b border-[color:var(--line)]">
             <SelectableButton
               onClick={() => {
+                setCollapsedSections((prev) => ({
+                  ...prev,
+                  monitoringContent: true,
+                }));
                 navigateAdmin({
                   primaryTab: "monitoring",
                   monitoringSubSection: "dashboard",
@@ -394,10 +509,15 @@ export function AdminPageClient() {
             </SelectableButton>
             <SelectableButton
               onClick={() => {
+                setCollapsedSections((prev) => ({
+                  ...prev,
+                  ai: true,
+                  content: true,
+                  tasks: true,
+                }));
                 navigateAdmin({
                   primaryTab: "settings",
-                  settingsSection: "ai",
-                  aiSubSection: "model-api",
+                  settingsSection: "groups",
                 });
               }}
               active={primaryTab === "settings"}
@@ -409,8 +529,8 @@ export function AdminPageClient() {
         </div>
 
         <div className="max-w-7xl mx-auto w-full flex-1 px-4 sm:px-6 lg:px-8 py-6">
-          <div className="flex min-w-0 gap-6">
-            <aside className="w-64 flex-shrink-0">
+          <div className="flex min-w-0 flex-col gap-6 lg:flex-row">
+            <aside className="w-full flex-shrink-0 lg:w-64">
               <div className="bg-[var(--surface)] rounded-lg shadow-[var(--shadow-sm)] border border-[color:var(--line)] p-4">
                 <h2 className="font-semibold text-[var(--foreground)] mb-4">
                   {primaryTab === "monitoring" ? "监控模块" : "设置模块"}
@@ -420,6 +540,10 @@ export function AdminPageClient() {
                     <>
                       <SelectableButton
                         onClick={() => {
+                          setCollapsedSections((prev) => ({
+                            ...prev,
+                            monitoringContent: true,
+                          }));
                           navigateAdmin({
                             primaryTab: "monitoring",
                             monitoringSubSection: "dashboard",
@@ -450,6 +574,10 @@ export function AdminPageClient() {
                         <>
                           <SelectableButton
                             onClick={() => {
+                              setCollapsedSections((prev) => ({
+                                ...prev,
+                                monitoringContent: false,
+                              }));
                               navigateAdmin({
                                 primaryTab: "monitoring",
                                 monitoringSubSection: "content",
@@ -469,6 +597,10 @@ export function AdminPageClient() {
                           </SelectableButton>
                           <SelectableButton
                             onClick={() => {
+                              setCollapsedSections((prev) => ({
+                                ...prev,
+                                monitoringContent: false,
+                              }));
                               navigateAdmin({
                                 primaryTab: "monitoring",
                                 monitoringSubSection: "content",
@@ -488,6 +620,10 @@ export function AdminPageClient() {
                           </SelectableButton>
                           <SelectableButton
                             onClick={() => {
+                              setCollapsedSections((prev) => ({
+                                ...prev,
+                                monitoringContent: false,
+                              }));
                               navigateAdmin({
                                 primaryTab: "monitoring",
                                 monitoringSubSection: "content",
@@ -510,6 +646,10 @@ export function AdminPageClient() {
 
                       <SelectableButton
                         onClick={() => {
+                          setCollapsedSections((prev) => ({
+                            ...prev,
+                            monitoringContent: true,
+                          }));
                           navigateAdmin({
                             primaryTab: "monitoring",
                             monitoringSubSection: "tasks",
@@ -526,6 +666,50 @@ export function AdminPageClient() {
                     </>
                   ) : (
                     <>
+                      <SelectableButton
+                        onClick={() => {
+                          setCollapsedSections((prev) => ({
+                            ...prev,
+                            ai: true,
+                            content: true,
+                            tasks: true,
+                          }));
+                          navigateAdmin({
+                            primaryTab: "settings",
+                            settingsSection: "groups",
+                          });
+                        }}
+                        active={settingsSection === "groups"}
+                        variant="menu"
+                      >
+                        <span className="inline-flex items-center gap-2">
+                          <IconTag className="h-4 w-4" />
+                          <span>分组管理</span>
+                        </span>
+                      </SelectableButton>
+
+                      <SelectableButton
+                        onClick={() => {
+                          setCollapsedSections((prev) => ({
+                            ...prev,
+                            ai: true,
+                            content: true,
+                            tasks: true,
+                          }));
+                          navigateAdmin({
+                            primaryTab: "settings",
+                            settingsSection: "sources",
+                          });
+                        }}
+                        active={settingsSection === "sources"}
+                        variant="menu"
+                      >
+                        <span className="inline-flex items-center gap-2">
+                          <IconGlobe className="h-4 w-4" />
+                          <span>信息源管理</span>
+                        </span>
+                      </SelectableButton>
+
                       <SectionToggleButton
                         label="AI配置"
                         active={settingsSection === "ai"}
@@ -542,6 +726,12 @@ export function AdminPageClient() {
                         <>
                           <SelectableButton
                             onClick={() => {
+                              setCollapsedSections((prev) => ({
+                                ...prev,
+                                ai: false,
+                                content: true,
+                                tasks: true,
+                              }));
                               navigateAdmin({
                                 primaryTab: "settings",
                                 settingsSection: "ai",
@@ -561,6 +751,12 @@ export function AdminPageClient() {
                           </SelectableButton>
                           <SelectableButton
                             onClick={() => {
+                              setCollapsedSections((prev) => ({
+                                ...prev,
+                                ai: false,
+                                content: true,
+                                tasks: true,
+                              }));
                               navigateAdmin({
                                 primaryTab: "settings",
                                 settingsSection: "ai",
@@ -581,69 +777,164 @@ export function AdminPageClient() {
                         </>
                       )}
 
-                      <SelectableButton
-                        onClick={() =>
-                          navigateAdmin({
-                            primaryTab: "settings",
-                            settingsSection: "blacklist",
-                          })
-                        }
-                        active={settingsSection === "blacklist"}
-                        variant="menu"
-                      >
-                        <span className="inline-flex items-center gap-2">
-                          <IconShield className="h-4 w-4" />
-                          <span>黑名单</span>
-                        </span>
-                      </SelectableButton>
+                      <SectionToggleButton
+                        label="内容管理"
+                        active={settingsSection === "content"}
+                        expanded={!isSettingsContentSectionCollapsed}
+                        onMainClick={handleToggleSettingsContentSection}
+                        onToggle={handleToggleSettingsContentSection}
+                        toggleAriaLabel={isSettingsContentSectionCollapsed ? "展开" : "收起"}
+                        icon={<IconShield className="h-4 w-4" />}
+                        expandedIndicator={<IconArrowUp className="h-4 w-4" />}
+                        collapsedIndicator={<IconArrowDown className="h-4 w-4" />}
+                      />
 
-                      <SelectableButton
-                        onClick={() =>
-                          navigateAdmin({
-                            primaryTab: "settings",
-                            settingsSection: "groups",
-                          })
-                        }
-                        active={settingsSection === "groups"}
-                        variant="menu"
-                      >
-                        <span className="inline-flex items-center gap-2">
-                          <IconTag className="h-4 w-4" />
-                          <span>分组管理</span>
-                        </span>
-                      </SelectableButton>
+                      {!isSettingsContentSectionCollapsed && (
+                        <>
+                          <SelectableButton
+                            onClick={() => {
+                              setCollapsedSections((prev) => ({
+                                ...prev,
+                                ai: true,
+                                content: false,
+                                tasks: true,
+                              }));
+                              navigateAdmin({
+                                primaryTab: "settings",
+                                settingsSection: "content",
+                                contentSettingsSubSection: "blacklist",
+                              });
+                            }}
+                            active={
+                              settingsSection === "content" &&
+                              contentSettingsSubSection === "blacklist"
+                            }
+                            variant="submenu"
+                          >
+                            <span className="inline-flex items-center gap-2">
+                              <IconShield className="h-4 w-4" />
+                              <span>黑名单</span>
+                            </span>
+                          </SelectableButton>
+                          <SelectableButton
+                            onClick={() => {
+                              setCollapsedSections((prev) => ({
+                                ...prev,
+                                ai: true,
+                                content: false,
+                                tasks: true,
+                              }));
+                              navigateAdmin({
+                                primaryTab: "settings",
+                                settingsSection: "content",
+                                contentSettingsSubSection: "content-extraction",
+                              });
+                            }}
+                            active={
+                              settingsSection === "content" &&
+                              contentSettingsSubSection === "content-extraction"
+                            }
+                            variant="submenu"
+                          >
+                            <span className="inline-flex items-center gap-2">
+                              <IconLink className="h-4 w-4" />
+                              <span>正文解析</span>
+                            </span>
+                          </SelectableButton>
+                        </>
+                      )}
 
-                      <SelectableButton
-                        onClick={() =>
-                          navigateAdmin({
-                            primaryTab: "settings",
-                            settingsSection: "sources",
-                          })
-                        }
-                        active={settingsSection === "sources"}
-                        variant="menu"
-                      >
-                        <span className="inline-flex items-center gap-2">
-                          <IconGlobe className="h-4 w-4" />
-                          <span>信息源管理</span>
-                        </span>
-                      </SelectableButton>
-
-                      <SelectableButton
-                        onClick={() =>
-                          navigateAdmin({
-                            primaryTab: "settings",
-                            settingsSection: "tasks",
-                          })
-                        }
+                      <SectionToggleButton
+                        label="任务配置"
                         active={settingsSection === "tasks"}
-                        variant="menu"
-                      >
-                        <span className="inline-flex items-center gap-2">
-                          <IconClock className="h-4 w-4" />
-                          <span>任务配置</span>
-                        </span>
-                      </SelectableButton>
+                        expanded={!isTaskSettingsSectionCollapsed}
+                        onMainClick={handleToggleTaskSettingsSection}
+                        onToggle={handleToggleTaskSettingsSection}
+                        toggleAriaLabel={isTaskSettingsSectionCollapsed ? "展开" : "收起"}
+                        icon={<IconClock className="h-4 w-4" />}
+                        expandedIndicator={<IconArrowUp className="h-4 w-4" />}
+                        collapsedIndicator={<IconArrowDown className="h-4 w-4" />}
+                      />
+
+                      {!isTaskSettingsSectionCollapsed && (
+                        <>
+                          <SelectableButton
+                            onClick={() => {
+                              setCollapsedSections((prev) => ({
+                                ...prev,
+                                ai: true,
+                                content: true,
+                                tasks: false,
+                              }));
+                              navigateAdmin({
+                                primaryTab: "settings",
+                                settingsSection: "tasks",
+                                taskSettingsSubSection: "ingestion",
+                              });
+                            }}
+                            active={
+                              settingsSection === "tasks" &&
+                              taskSettingsSubSection === "ingestion"
+                            }
+                            variant="submenu"
+                          >
+                            <span className="inline-flex items-center gap-2">
+                              <IconList className="h-4 w-4" />
+                              <span>采集任务</span>
+                            </span>
+                          </SelectableButton>
+                          <SelectableButton
+                            onClick={() => {
+                              setCollapsedSections((prev) => ({
+                                ...prev,
+                                ai: true,
+                                content: true,
+                                tasks: false,
+                              }));
+                              navigateAdmin({
+                                primaryTab: "settings",
+                                settingsSection: "tasks",
+                                taskSettingsSubSection: "daily-report",
+                              });
+                            }}
+                            active={
+                              settingsSection === "tasks" &&
+                              taskSettingsSubSection === "daily-report"
+                            }
+                            variant="submenu"
+                          >
+                            <span className="inline-flex items-center gap-2">
+                              <IconNote className="h-4 w-4" />
+                              <span>日报任务</span>
+                            </span>
+                          </SelectableButton>
+                          <SelectableButton
+                            onClick={() => {
+                              setCollapsedSections((prev) => ({
+                                ...prev,
+                                ai: true,
+                                content: true,
+                                tasks: false,
+                              }));
+                              navigateAdmin({
+                                primaryTab: "settings",
+                                settingsSection: "tasks",
+                                taskSettingsSubSection: "cleanup",
+                              });
+                            }}
+                            active={
+                              settingsSection === "tasks" &&
+                              taskSettingsSubSection === "cleanup"
+                            }
+                            variant="submenu"
+                          >
+                            <span className="inline-flex items-center gap-2">
+                              <IconClock className="h-4 w-4" />
+                              <span>清理任务</span>
+                            </span>
+                          </SelectableButton>
+                        </>
+                      )}
                     </>
                   )}
                 </div>

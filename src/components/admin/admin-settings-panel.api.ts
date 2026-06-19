@@ -34,6 +34,11 @@ type ItemCleanupSchedulePayload = {
   schedule?: AdminSettingsSnapshot["itemCleanupSchedule"];
 };
 
+type ContentExtractionPayload = {
+  error?: string;
+  config?: AdminSettingsSnapshot["contentExtraction"];
+};
+
 type GroupReorderPayload = {
   error?: string;
   groups?: AdminSettingsSnapshot["groups"];
@@ -158,6 +163,32 @@ export async function saveDefaultItemCleanupSchedule(input: {
   }
 
   return payload.schedule;
+}
+
+export async function saveContentExtractionConfig(input: {
+  jinaEnabled: boolean;
+  jinaBaseUrl: string;
+  jinaApiKey: string;
+  jinaApiKeyMode: "replace" | "clear" | "keep";
+  timeoutMs: number;
+  concurrency: number;
+  rpmLimit: number;
+  maxPerRun: number;
+  minChars: number;
+  maxChars: number;
+}) {
+  const payload = await requestAdminSettingsJson<ContentExtractionPayload>(
+    "/api/admin/settings/content-extraction",
+    "PATCH",
+    input,
+    "正文解析设置保存失败。",
+  );
+
+  if (!payload.config) {
+    throw new Error("正文解析设置保存失败。");
+  }
+
+  return payload.config;
 }
 
 export async function reorderSourceGroups(groupIds: string[]) {

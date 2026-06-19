@@ -182,7 +182,7 @@ export function parseOpmlSources(opmlText: string): ParsedOpmlSource[] {
   return sources;
 }
 
-function maskApiKey(apiKey: string): string {
+export function maskApiKey(apiKey: string): string {
   if (!apiKey) {
     return "";
   }

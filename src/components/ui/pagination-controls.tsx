@@ -41,14 +41,14 @@ export function PaginationControls({
   const showJump = jumpValue !== undefined && onJumpValueChange && onJump;
 
   return (
-    <div className={cx("flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between", className)}>
-      <div className="flex flex-wrap items-center gap-2 text-sm text-[var(--muted)]">
+    <div className={cx("flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between", className)}>
+      <div className="flex flex-wrap items-center gap-3 text-sm text-[var(--muted)]">
         <span>每页显示</span>
         <SelectField
           aria-label="每页显示"
           value={pageSize}
           onChange={(value) => onPageSizeChange(Number(value))}
-          className="w-20"
+          style={{ width: 80 }}
           compact
           disabled={disabled}
           showSearch={false}
@@ -57,7 +57,7 @@ export function PaginationControls({
             label: String(option),
           }))}
         />
-        <span>条，共 {totalItems} 条</span>
+        <span className="whitespace-nowrap">条，共 {totalItems} 条</span>
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <Button variant="secondary" size="sm" onClick={() => onPageChange(Math.max(1, page - 1))} disabled={!canGoPrevious}>

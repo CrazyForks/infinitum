@@ -306,6 +306,23 @@ model TaskSchedule {
   @@map("task_schedules")
 }
 
+model ContentExtractionConfig {
+  id                    String   @id @default(cuid())
+  jinaEnabled           Boolean  @default(false)
+  jinaBaseUrl           String   @default("https://r.jina.ai/")
+  jinaApiKey            String?
+  timeoutMs             Int      @default(15000)
+  concurrency           Int      @default(1)
+  rpmLimit              Int      @default(10)
+  maxPerRun             Int      @default(20)
+  minChars              Int      @default(500)
+  maxChars              Int      @default(32000)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@map("content_extraction_configs")
+}
+
 model BackgroundTaskRun {
   id                   String                @id @default(cuid())
   kind                 BackgroundTaskKind

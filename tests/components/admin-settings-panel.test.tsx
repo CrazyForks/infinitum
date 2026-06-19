@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, waitForElementToBeRemoved, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -98,6 +98,21 @@ function buildInitialSettings(): AdminSettingsSnapshot {
         updatedAt: "2026-04-20T10:00:00.000Z",
       },
     ],
+    contentExtraction: {
+      id: "content-extraction-1",
+      jinaEnabled: false,
+      jinaBaseUrl: "https://r.jina.ai/",
+      jinaApiKeyMasked: "",
+      hasJinaApiKey: false,
+      timeoutMs: 15000,
+      concurrency: 1,
+      rpmLimit: 10,
+      maxPerRun: 20,
+      minChars: 500,
+      maxChars: 32000,
+      createdAt: "2026-04-20T10:00:00.000Z",
+      updatedAt: "2026-04-20T10:00:00.000Z",
+    },
     blacklistKeywords: ["layoffs"],
     taskSchedule: {
       key: "ingestion_default",
@@ -1328,8 +1343,11 @@ describe("AdminSettingsPanel", () => {
 
     renderWithProviders(<AdminSettingsPanel initialSettings={buildInitialSettings()} />);
 
+    expect(screen.getByRole("tab", { name: "正文解析" })).toBeInTheDocument();
     const tabs = screen.getAllByRole("tab");
-    expect(tabs.at(-1)).toHaveAccessibleName("采集任务");
+    expect(tabs.at(-3)).toHaveAccessibleName("采集任务");
+    expect(tabs.at(-2)).toHaveAccessibleName("日报任务");
+    expect(tabs.at(-1)).toHaveAccessibleName("清理任务");
 
     await user.click(screen.getByRole("tab", { name: "采集任务" }));
 
@@ -1375,6 +1393,59 @@ describe("AdminSettingsPanel", () => {
     });
   });
 
+  it("submits content extraction settings from the dedicated section", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          config: {
+            ...buildInitialSettings().contentExtraction,
+            jinaEnabled: true,
+            timeoutMs: 20000,
+          },
+        }),
+      ),
+    );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderWithProviders(<AdminSettingsPanel initialSettings={buildInitialSettings()} />);
+
+    await user.click(screen.getByRole("tab", { name: "正文解析" }));
+
+    const panel = screen.getByRole("tabpanel");
+    expect(within(panel).getByText("正文解析")).toBeInTheDocument();
+
+    await user.selectOptions(within(panel).getByLabelText("解析策略"), "jina");
+    await user.type(within(panel).getByLabelText("API Key"), "jina_test_key");
+    await user.clear(within(panel).getByLabelText("请求超时"));
+    await user.type(within(panel).getByLabelText("请求超时"), "20000");
+    await user.click(within(panel).getByRole("button", { name: "保存配置" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/admin/settings/content-extraction", {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          jinaEnabled: true,
+          jinaBaseUrl: "https://r.jina.ai/",
+          jinaApiKey: "jina_test_key",
+          jinaApiKeyMode: "replace",
+          timeoutMs: 20000,
+          concurrency: 1,
+          rpmLimit: 10,
+          maxPerRun: 20,
+          minChars: 500,
+          maxChars: 32000,
+        }),
+      });
+    });
+    await screen.findByText("正文解析设置已保存。");
+    await waitForElementToBeRemoved(() => screen.queryByText("正文解析设置已保存。"), { timeout: 4000 });
+  });
+
   it("submits the daily report schedule candidate limit", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
@@ -1397,7 +1468,7 @@ describe("AdminSettingsPanel", () => {
 
     renderWithProviders(<AdminSettingsPanel initialSettings={buildInitialSettings()} />);
 
-    await user.click(screen.getByRole("tab", { name: "采集任务" }));
+    await user.click(screen.getByRole("tab", { name: "日报任务" }));
 
     const taskPanel = screen.getByRole("tabpanel");
 

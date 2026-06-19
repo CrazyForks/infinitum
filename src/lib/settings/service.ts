@@ -8,6 +8,13 @@ export type {
   SourceMetadataOptions,
 } from "@/lib/settings/core";
 export {
+  ensureContentExtractionConfig,
+  updateContentExtractionConfig,
+} from "@/lib/settings/content-extraction-service";
+export type {
+  SaveContentExtractionConfigInput,
+} from "@/lib/settings/content-extraction-service";
+export {
   createModelApiConfig,
   deleteModelApiConfig,
   fetchModelApiModels,

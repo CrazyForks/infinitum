@@ -393,7 +393,10 @@ describe("runIngestion", () => {
     const storedItem = await prisma.item.findFirstOrThrow();
 
     expect(result.status).toBe("succeeded");
-    expect(articleFetcher).toHaveBeenCalledWith("https://blog.google/products-and-platforms/products/search/spring-fashion-shopping-tips/");
+    expect(articleFetcher).toHaveBeenCalledWith(
+      "https://blog.google/products-and-platforms/products/search/spring-fashion-shopping-tips/",
+      expect.objectContaining({ reason: "short_content" }),
+    );
     expect(storedItem.author).toBe("Megan Stoner");
     expect(storedItem.fullText).toBe("Full article fetched even when AI parsing is disabled.");
   });

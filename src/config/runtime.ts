@@ -27,6 +27,17 @@ export type RuntimeConfig = {
     aggregationSplitMaxEvents: number;
     processingStartAt: Date | null;
   };
+  contentExtraction: {
+    jinaEnabled: boolean;
+    jinaBaseUrl: string;
+    jinaApiKey: string | null;
+    timeoutMs: number;
+    concurrency: number;
+    rpmLimit: number;
+    maxPerRun: number;
+    minChars: number;
+    maxChars: number;
+  };
   modelApi: {
     apiKey: string;
     baseURL: string;
@@ -120,6 +131,17 @@ export function getRuntimeConfig(): RuntimeConfig {
       perSourceItemLimit: DEFAULT_PER_SOURCE_ITEM_LIMIT,
       aggregationSplitMaxEvents: DEFAULT_AGGREGATION_SPLIT_MAX_EVENTS,
       processingStartAt: null,
+    },
+    contentExtraction: {
+      jinaEnabled: false,
+      jinaBaseUrl: "https://r.jina.ai/",
+      jinaApiKey: null,
+      timeoutMs: 15_000,
+      concurrency: 1,
+      rpmLimit: 10,
+      maxPerRun: 20,
+      minChars: 500,
+      maxChars: 32_000,
     },
     modelApi: {
       apiKey: "",

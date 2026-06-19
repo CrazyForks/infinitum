@@ -3,6 +3,11 @@ import { PromptConfigType } from "@prisma/client";
 import type { RuntimeConfig } from "@/config/runtime";
 import { prisma } from "@/lib/db";
 import {
+  ensureContentExtractionConfig,
+  serializeAdminContentExtractionConfig,
+  serializeRuntimeContentExtractionConfig,
+} from "@/lib/settings/content-extraction-service";
+import {
   ensureRuntimeConfigSeeded,
   pickPromptConfigByType,
   resolvePromptSystemPrompt,
@@ -18,7 +23,7 @@ import { ensureDefaultDailyReportSchedule, ensureDefaultIngestionSchedule, ensur
 export async function getIngestionRuntimeConfig(): Promise<RuntimeConfig> {
   await ensureRuntimeConfigSeeded();
 
-  const [sources, blacklist, defaultModelConfig, promptConfigs, taskSchedule] = await Promise.all([
+  const [sources, blacklist, defaultModelConfig, promptConfigs, taskSchedule, contentExtractionConfig] = await Promise.all([
     prisma.source.findMany({
       where: { enabled: true },
       orderBy: { name: "asc" },
@@ -44,6 +49,7 @@ export async function getIngestionRuntimeConfig(): Promise<RuntimeConfig> {
       orderBy: [{ createdAt: "asc" }],
     }),
     ensureDefaultIngestionSchedule(),
+    ensureContentExtractionConfig(),
   ]);
 
   if (!defaultModelConfig) {
@@ -69,6 +75,7 @@ export async function getIngestionRuntimeConfig(): Promise<RuntimeConfig> {
       aggregationSplitMaxEvents: taskSchedule.aggregationSplitMaxEvents,
       processingStartAt: taskSchedule.processingStartAt,
     },
+    contentExtraction: serializeRuntimeContentExtractionConfig(contentExtractionConfig),
     modelApi: serializeRuntimeModelApi(defaultModelConfig),
     prompts: {
       itemSummary: resolvePromptSystemPrompt(itemSummaryConfig),
@@ -94,7 +101,17 @@ export async function getIngestionRuntimeConfig(): Promise<RuntimeConfig> {
 export async function getAdminSettings(): Promise<AdminSettingsSnapshot> {
   await ensureRuntimeConfigSeeded();
 
-  const [modelApiConfigs, promptConfigs, blacklist, groups, sources, taskSchedule, dailyReportSchedule, cleanupSchedule] = await Promise.all([
+  const [
+    modelApiConfigs,
+    promptConfigs,
+    blacklist,
+    groups,
+    sources,
+    taskSchedule,
+    dailyReportSchedule,
+    cleanupSchedule,
+    contentExtractionConfig,
+  ] = await Promise.all([
     prisma.modelApiConfig.findMany({
       orderBy: [{ isDefault: "desc" }, { createdAt: "desc" }],
     }),
@@ -121,6 +138,7 @@ export async function getAdminSettings(): Promise<AdminSettingsSnapshot> {
     ensureDefaultIngestionSchedule(),
     ensureDefaultDailyReportSchedule(),
     ensureDefaultItemCleanupSchedule(),
+    ensureContentExtractionConfig(),
   ]);
 
   const defaultModelConfig = modelApiConfigs.find((config) => config.isDefault);
@@ -138,6 +156,7 @@ export async function getAdminSettings(): Promise<AdminSettingsSnapshot> {
   return {
     modelApiConfigs: modelApiConfigs.map(serializeAdminModelApiConfig),
     promptConfigs: promptConfigs.map((config) => serializeAdminPromptConfig(config, defaultModelConfig)),
+    contentExtraction: serializeAdminContentExtractionConfig(contentExtractionConfig),
     blacklistKeywords: blacklist.map((entry) => entry.keyword),
     taskSchedule: toTaskScheduleSnapshot(taskSchedule) as AdminSettingsSnapshot["taskSchedule"],
     dailyReportSchedule: toTaskScheduleSnapshot(dailyReportSchedule) as AdminSettingsSnapshot["dailyReportSchedule"],

@@ -22,6 +22,7 @@ import {
   importSourcesFromOpmlText,
   reorderSourceGroups,
   resolveSourceFromRssUrl,
+  saveContentExtractionConfig,
   saveDefaultDailyReportSchedule,
   saveDefaultIngestionSchedule,
   saveDefaultItemCleanupSchedule,
@@ -79,7 +80,10 @@ type AdminSettingsSection =
   | "blacklist"
   | "groups"
   | "sources"
-  | "tasks";
+  | "content-extraction"
+  | "task-ingestion"
+  | "task-daily-report"
+  | "task-cleanup";
 
 const surfaceCardClassName =
   "rounded-[1.1rem] border border-[color:var(--line)] bg-[color-mix(in_srgb,var(--surface)_96%,transparent)] shadow-[var(--shadow-sm)]";
@@ -95,7 +99,10 @@ const settingsNavItems: Array<{
   { key: "blacklist", label: "黑名单" },
   { key: "groups", label: "分组" },
   { key: "sources", label: "信息源" },
-  { key: "tasks", label: "采集任务" },
+  { key: "content-extraction", label: "正文解析" },
+  { key: "task-ingestion", label: "采集任务" },
+  { key: "task-daily-report", label: "日报任务" },
+  { key: "task-cleanup", label: "清理任务" },
 ] as const;
 
 function toDateTimeLocalValue(value: string | null | undefined) {
@@ -308,6 +315,35 @@ export function AdminSettingsPanel({
   );
   const [cleanupScheduleSnapshot, setCleanupScheduleSnapshot] = useState(
     initialSettings.itemCleanupSchedule,
+  );
+  const [contentExtractionSnapshot, setContentExtractionSnapshot] = useState(
+    initialSettings.contentExtraction,
+  );
+  const [contentExtractionProvider, setContentExtractionProvider] = useState<"local" | "jina">(
+    initialSettings.contentExtraction.jinaEnabled ? "jina" : "local",
+  );
+  const [contentExtractionBaseUrl, setContentExtractionBaseUrl] = useState(
+    initialSettings.contentExtraction.jinaBaseUrl,
+  );
+  const [contentExtractionApiKey, setContentExtractionApiKey] = useState("");
+  const [contentExtractionApiKeyTouched, setContentExtractionApiKeyTouched] = useState(false);
+  const [contentExtractionTimeoutMs, setContentExtractionTimeoutMs] = useState(
+    String(initialSettings.contentExtraction.timeoutMs),
+  );
+  const [contentExtractionConcurrency, setContentExtractionConcurrency] = useState(
+    String(initialSettings.contentExtraction.concurrency),
+  );
+  const [contentExtractionRpmLimit, setContentExtractionRpmLimit] = useState(
+    String(initialSettings.contentExtraction.rpmLimit),
+  );
+  const [contentExtractionMaxPerRun, setContentExtractionMaxPerRun] = useState(
+    String(initialSettings.contentExtraction.maxPerRun),
+  );
+  const [contentExtractionMinChars, setContentExtractionMinChars] = useState(
+    String(initialSettings.contentExtraction.minChars),
+  );
+  const [contentExtractionMaxChars, setContentExtractionMaxChars] = useState(
+    String(initialSettings.contentExtraction.maxChars),
   );
   const normalizedBlacklistKeywords = blacklistText
     .split("\n")
@@ -832,6 +868,80 @@ export function AdminSettingsPanel({
       }
     });
   };
+
+  const saveContentExtractionSettings = () => {
+    const parsedTimeoutMs = Number.parseInt(contentExtractionTimeoutMs.trim(), 10);
+    const parsedConcurrency = Number.parseInt(contentExtractionConcurrency.trim(), 10);
+    const parsedRpmLimit = Number.parseInt(contentExtractionRpmLimit.trim(), 10);
+    const parsedMaxPerRun = Number.parseInt(contentExtractionMaxPerRun.trim(), 10);
+    const parsedMinChars = Number.parseInt(contentExtractionMinChars.trim(), 10);
+    const parsedMaxChars = Number.parseInt(contentExtractionMaxChars.trim(), 10);
+
+    if (!contentExtractionBaseUrl.trim()) {
+      showToast("请填写 Jina Reader API 地址。", "error");
+      return;
+    }
+
+    const numericFields: Array<[number, number, number, string]> = [
+      [parsedTimeoutMs, 3_000, 60_000, "请求超时"],
+      [parsedConcurrency, 1, 5, "Jina 并发"],
+      [parsedRpmLimit, 1, 500, "每分钟调用上限"],
+      [parsedMaxPerRun, 0, 200, "单次任务调用上限"],
+      [parsedMinChars, 0, 10_000, "最小有效字符数"],
+      [parsedMaxChars, 1_000, 100_000, "最大保留字符数"],
+    ];
+
+    for (const [value, min, max, label] of numericFields) {
+      if (!Number.isInteger(value) || value < min || value > max) {
+        showToast(`${label}需为 ${min}-${max} 的整数。`, "error");
+        return;
+      }
+    }
+
+    if (parsedMaxChars <= parsedMinChars) {
+      showToast("最大保留字符数必须大于最小有效字符数。", "error");
+      return;
+    }
+
+    startTransition(async () => {
+      try {
+        const normalizedApiKey = contentExtractionApiKey.trim();
+        const jinaApiKeyMode = normalizedApiKey
+          ? "replace"
+          : contentExtractionApiKeyTouched
+            ? "clear"
+            : "keep";
+        const config = await saveContentExtractionConfig({
+          jinaEnabled: contentExtractionProvider === "jina",
+          jinaBaseUrl: contentExtractionBaseUrl,
+          jinaApiKey: normalizedApiKey,
+          jinaApiKeyMode,
+          timeoutMs: parsedTimeoutMs,
+          concurrency: parsedConcurrency,
+          rpmLimit: parsedRpmLimit,
+          maxPerRun: parsedMaxPerRun,
+          minChars: parsedMinChars,
+          maxChars: parsedMaxChars,
+        });
+
+        setContentExtractionSnapshot(config);
+        setContentExtractionProvider(config.jinaEnabled ? "jina" : "local");
+        setContentExtractionBaseUrl(config.jinaBaseUrl);
+        setContentExtractionApiKey("");
+        setContentExtractionApiKeyTouched(false);
+        setContentExtractionTimeoutMs(String(config.timeoutMs));
+        setContentExtractionConcurrency(String(config.concurrency));
+        setContentExtractionRpmLimit(String(config.rpmLimit));
+        setContentExtractionMaxPerRun(String(config.maxPerRun));
+        setContentExtractionMinChars(String(config.minChars));
+        setContentExtractionMaxChars(String(config.maxChars));
+        showToast("正文解析设置已保存。", "success");
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : "正文解析设置保存失败。", "error");
+      }
+    });
+  };
+
   const saveDailyReportSchedule = () => {
     const parsedDailyReportCandidateLimit = Number.parseInt(dailyReportCandidateLimit.trim(), 10);
     const parsedDailyReportOffsetDays = Number.parseInt(dailyReportOffsetDays.trim(), 10);
@@ -940,6 +1050,17 @@ export function AdminSettingsPanel({
     taskSchedulePerSourceItemLimit.trim() !== String(taskScheduleSnapshot.perSourceItemLimit) ||
     taskScheduleAggregationSplitMaxEvents.trim() !== String(taskScheduleSnapshot.aggregationSplitMaxEvents) ||
     taskScheduleProcessingStartAt.trim() !== toDateTimeLocalValue(taskScheduleSnapshot.processingStartAt);
+  const contentExtractionIsDirty =
+    (contentExtractionProvider === "jina") !== contentExtractionSnapshot.jinaEnabled ||
+    contentExtractionBaseUrl.trim() !== contentExtractionSnapshot.jinaBaseUrl ||
+    contentExtractionApiKeyTouched ||
+    contentExtractionApiKey.trim().length > 0 ||
+    contentExtractionTimeoutMs.trim() !== String(contentExtractionSnapshot.timeoutMs) ||
+    contentExtractionConcurrency.trim() !== String(contentExtractionSnapshot.concurrency) ||
+    contentExtractionRpmLimit.trim() !== String(contentExtractionSnapshot.rpmLimit) ||
+    contentExtractionMaxPerRun.trim() !== String(contentExtractionSnapshot.maxPerRun) ||
+    contentExtractionMinChars.trim() !== String(contentExtractionSnapshot.minChars) ||
+    contentExtractionMaxChars.trim() !== String(contentExtractionSnapshot.maxChars);
   const dailyReportScheduleIsDirty =
     dailyReportScheduleEnabled !== dailyReportScheduleSnapshot.enabled ||
     dailyReportScheduleCronExpression.trim() !== dailyReportScheduleSnapshot.cronExpression ||
@@ -1651,7 +1772,192 @@ export function AdminSettingsPanel({
           </div>
         ) : null}
 
-        {activeSection === "tasks" ? (
+        {activeSection === "content-extraction" ? (
+          <div
+            className={cx(
+              "w-full min-w-0",
+              embedMode
+                ? ""
+                : "rounded-sm border border-[color:var(--line)] bg-[var(--surface)] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.06)]",
+            )}
+          >
+            <div className="space-y-5">
+              <div className="flex flex-col gap-3 border-b border-[color:var(--line)] pb-5 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0 space-y-1">
+                  <h2 className="text-lg font-semibold text-[var(--text-1)]">
+                    正文解析
+                  </h2>
+                  <p className="text-sm text-[var(--text-3)]">
+                    配置正文解析策略
+                  </p>
+                </div>
+                <Button
+                  variant="primary"
+                  size="md"
+                  className="w-full sm:w-auto"
+                  onClick={saveContentExtractionSettings}
+                  disabled={isPending || !contentExtractionIsDirty}
+                >
+                  保存配置
+                </Button>
+              </div>
+
+              <div className="space-y-5">
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                  <div className="space-y-1.5">
+                    <label htmlFor="content-extraction-provider" className="block text-sm text-[var(--muted)]">
+                      解析策略
+                    </label>
+                    <SelectField
+                      id="content-extraction-provider"
+                      aria-label="解析策略"
+                      value={contentExtractionProvider}
+                      onChange={(value) => setContentExtractionProvider(value === "jina" ? "jina" : "local")}
+                      options={[
+                        { value: "local", label: "本地" },
+                        { value: "jina", label: "Jina" },
+                      ]}
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label htmlFor="content-extraction-base-url" className="block text-sm text-[var(--muted)]">
+                      API 地址
+                    </label>
+                    <TextInput
+                      id="content-extraction-base-url"
+                      value={contentExtractionBaseUrl}
+                      onChange={(event) => setContentExtractionBaseUrl(event.target.value)}
+                      placeholder="https://r.jina.ai/"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label htmlFor="content-extraction-api-key" className="block text-sm text-[var(--muted)]">
+                      API Key
+                    </label>
+                    <TextInput
+                      id="content-extraction-api-key"
+                      type="password"
+                      value={contentExtractionApiKey}
+                      onChange={(event) => {
+                        setContentExtractionApiKeyTouched(true);
+                        setContentExtractionApiKey(event.target.value);
+                      }}
+                      placeholder={
+                        contentExtractionSnapshot.hasJinaApiKey
+                          ? "已配置 Key，留空保持当前 Key"
+                          : "留空表示无 Key 调用"
+                      }
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                  <div className="space-y-1.5">
+                    <label htmlFor="content-extraction-timeout-ms" className="block text-sm text-[var(--muted)]">
+                      请求超时
+                    </label>
+                    <TextInput
+                      id="content-extraction-timeout-ms"
+                      type="number"
+                      inputMode="numeric"
+                      min={3000}
+                      max={60000}
+                      step={1000}
+                      value={contentExtractionTimeoutMs}
+                      onChange={(event) => setContentExtractionTimeoutMs(event.target.value)}
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label htmlFor="content-extraction-concurrency" className="block text-sm text-[var(--muted)]">
+                      并发数
+                    </label>
+                    <TextInput
+                      id="content-extraction-concurrency"
+                      type="number"
+                      inputMode="numeric"
+                      min={1}
+                      max={5}
+                      step={1}
+                      value={contentExtractionConcurrency}
+                      onChange={(event) => setContentExtractionConcurrency(event.target.value)}
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label htmlFor="content-extraction-rpm-limit" className="block text-sm text-[var(--muted)]">
+                      每分钟调用上限
+                    </label>
+                    <TextInput
+                      id="content-extraction-rpm-limit"
+                      type="number"
+                      inputMode="numeric"
+                      min={1}
+                      max={500}
+                      step={1}
+                      value={contentExtractionRpmLimit}
+                      onChange={(event) => setContentExtractionRpmLimit(event.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                  <div className="space-y-1.5">
+                    <label htmlFor="content-extraction-max-per-run" className="block text-sm text-[var(--muted)]">
+                      单次任务调用上限
+                    </label>
+                    <TextInput
+                      id="content-extraction-max-per-run"
+                      type="number"
+                      inputMode="numeric"
+                      min={0}
+                      max={200}
+                      step={1}
+                      value={contentExtractionMaxPerRun}
+                      onChange={(event) => setContentExtractionMaxPerRun(event.target.value)}
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label htmlFor="content-extraction-min-chars" className="block text-sm text-[var(--muted)]">
+                      最小有效字符数
+                    </label>
+                    <TextInput
+                      id="content-extraction-min-chars"
+                      type="number"
+                      inputMode="numeric"
+                      min={0}
+                      max={10000}
+                      step={1}
+                      value={contentExtractionMinChars}
+                      onChange={(event) => setContentExtractionMinChars(event.target.value)}
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label htmlFor="content-extraction-max-chars" className="block text-sm text-[var(--muted)]">
+                      最大保留字符数
+                    </label>
+                    <TextInput
+                      id="content-extraction-max-chars"
+                      type="number"
+                      inputMode="numeric"
+                      min={1000}
+                      max={100000}
+                      step={1000}
+                      value={contentExtractionMaxChars}
+                      onChange={(event) => setContentExtractionMaxChars(event.target.value)}
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {activeSection === "task-ingestion" || activeSection === "task-daily-report" ? (
           <div
             className={cx(
               "w-full min-w-0 space-y-6",
@@ -1660,7 +1966,10 @@ export function AdminSettingsPanel({
                 : "rounded-sm border border-[color:var(--line)] bg-[var(--surface)] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.06)]",
             )}
           >
-            <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className={cx(
+              "flex flex-wrap items-start justify-between gap-3",
+              activeSection !== "task-ingestion" ? "hidden" : "",
+            )}>
               <div className="space-y-1">
                 <h2 className="text-lg font-semibold text-[var(--text-1)]">
                   采集任务
@@ -1681,7 +1990,10 @@ export function AdminSettingsPanel({
               </div>
             </div>
 
-            <div className="space-y-6">
+            <div className={cx(
+              "space-y-6",
+              activeSection !== "task-ingestion" ? "hidden" : "",
+            )}>
               {/* Row 1: 任务开关 + Cron 表达式 + 处理开始时间点 */}
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
                 <div className="space-y-1.5">
@@ -1824,7 +2136,13 @@ export function AdminSettingsPanel({
               ) : null}
             </div>
 
-            <div className="border-t border-[color:var(--line)] pt-6">
+            <div
+              className={cx(
+                activeSection === "task-daily-report"
+                  ? "pt-0"
+                  : "hidden",
+              )}
+            >
               <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
                 <div className="space-y-1">
                   <h2 className="text-lg font-semibold text-[var(--text-1)]">
@@ -1968,8 +2286,15 @@ export function AdminSettingsPanel({
           </div>
         ) : null}
 
-        {activeSection === "tasks" ? (
-          <div className="border-t border-[color:var(--line)] pt-6">
+        {activeSection === "task-cleanup" ? (
+          <div
+            className={cx(
+              "w-full min-w-0",
+              embedMode
+                ? ""
+                : "rounded-sm border border-[color:var(--line)] bg-[var(--surface)] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.06)]",
+            )}
+          >
             <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
               <div className="space-y-1">
                 <h2 className="text-lg font-semibold text-[var(--text-1)]">

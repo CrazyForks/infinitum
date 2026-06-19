@@ -63,6 +63,21 @@ function buildInitialSettings(): AdminSettingsSnapshot {
   return {
     modelApiConfigs: [],
     promptConfigs: [],
+    contentExtraction: {
+      id: "content-extraction-1",
+      jinaEnabled: false,
+      jinaBaseUrl: "https://r.jina.ai/",
+      jinaApiKeyMasked: "",
+      hasJinaApiKey: false,
+      timeoutMs: 15000,
+      concurrency: 1,
+      rpmLimit: 10,
+      maxPerRun: 20,
+      minChars: 500,
+      maxChars: 32000,
+      createdAt: "2026-04-20T10:00:00.000Z",
+      updatedAt: "2026-04-20T10:00:00.000Z",
+    },
     blacklistKeywords: [],
     taskSchedule: {
       key: "ingestion_default",
@@ -160,7 +175,29 @@ describe("AdminPageClient", () => {
     await waitFor(() => {
       expect(screen.getByText("设置模块")).toBeInTheDocument();
     });
-    expect(screen.getByText("设置面板:tasks")).toBeInTheDocument();
+    expect(screen.getByText("设置面板:task-ingestion")).toBeInTheDocument();
+  });
+
+  it("restores the content extraction settings section from the url query", async () => {
+    searchParamsState.value = "tab=settings&section=content&view=content-extraction";
+
+    renderAdminPageClient();
+
+    await waitFor(() => {
+      expect(screen.getByText("设置模块")).toBeInTheDocument();
+    });
+    expect(screen.getByText("设置面板:content-extraction")).toBeInTheDocument();
+  });
+
+  it("restores task subsections from the url query", async () => {
+    searchParamsState.value = "tab=settings&section=tasks&view=daily-report";
+
+    renderAdminPageClient();
+
+    await waitFor(() => {
+      expect(screen.getByText("设置模块")).toBeInTheDocument();
+    });
+    expect(screen.getByText("设置面板:task-daily-report")).toBeInTheDocument();
   });
 
   it("restores the current monitoring sub tab from the url query", () => {
@@ -202,8 +239,101 @@ describe("AdminPageClient", () => {
     expect(replaceStateSpy).toHaveBeenLastCalledWith(
       null,
       "",
-      "/admin?tab=settings&section=tasks",
+      "/admin?tab=settings&section=tasks&view=ingestion",
     );
+  });
+
+  it("shows content extraction in the settings menu and updates the url when selected", async () => {
+    const user = userEvent.setup();
+    searchParamsState.value = "tab=settings&section=ai&view=model-api";
+
+    renderAdminPageClient();
+
+    await waitFor(() => {
+      expect(screen.getByText("设置面板:ai-model-api")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "内容管理" }));
+    await user.click(screen.getByRole("button", { name: "正文解析" }));
+
+    expect(screen.getByText("设置面板:content-extraction")).toBeInTheDocument();
+    expect(replaceStateSpy).toHaveBeenLastCalledWith(
+      null,
+      "",
+      "/admin?tab=settings&section=content&view=content-extraction",
+    );
+  });
+
+  it("collapses an expanded settings group when clicking it again", async () => {
+    const user = userEvent.setup();
+    searchParamsState.value = "tab=settings&section=ai&view=model-api";
+
+    renderAdminPageClient();
+
+    await waitFor(() => {
+      expect(screen.getByText("设置面板:ai-model-api")).toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: "模型API" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "AI配置" }));
+
+    expect(screen.queryByRole("button", { name: "模型API" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "提示词" })).not.toBeInTheDocument();
+  });
+
+  it("collapses unrelated settings groups when switching sections", async () => {
+    const user = userEvent.setup();
+    searchParamsState.value = "tab=settings&section=content&view=content-extraction";
+
+    renderAdminPageClient();
+
+    await waitFor(() => {
+      expect(screen.getByText("设置面板:content-extraction")).toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: "黑名单" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "正文解析" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "任务配置" }));
+
+    expect(screen.queryByRole("button", { name: "黑名单" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "正文解析" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "采集任务" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "日报任务" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "清理任务" })).toBeInTheDocument();
+  });
+
+  it("collapses monitoring content review when clicking it again", async () => {
+    const user = userEvent.setup();
+    searchParamsState.value = "tab=monitoring&section=content&view=filtered";
+
+    renderAdminPageClient();
+
+    expect(screen.getByText("内容审核:filtered:none:none")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "过滤内容" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "聚合管理" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "内容审核" }));
+
+    expect(screen.queryByRole("button", { name: "过滤内容" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "聚合管理" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "聚合拆分" })).not.toBeInTheDocument();
+  });
+
+  it("collapses monitoring content review when switching to task monitoring", async () => {
+    const user = userEvent.setup();
+    searchParamsState.value = "tab=monitoring&section=content&view=clusters";
+
+    renderAdminPageClient();
+
+    expect(screen.getByText("内容审核:clusters:none:none")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "聚合管理" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "任务监控" }));
+
+    expect(screen.getByText("任务监控面板:none")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "过滤内容" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "聚合管理" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "聚合拆分" })).not.toBeInTheDocument();
   });
 
   it("updates the url when selecting a monitoring sub tab", async () => {

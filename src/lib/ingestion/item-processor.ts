@@ -62,6 +62,12 @@ function getBestContent(item: ParsedFeedItem): string {
   return item["content:encoded"] || item.content || item.contentSnippet || "";
 }
 
+const HTML_TAG_DETECTION_PATTERN = /<\/?[a-z][\s\S]*>/i;
+
+function looksLikeHtmlContent(value: string | null | undefined) {
+  return Boolean(value && HTML_TAG_DETECTION_PATTERN.test(value));
+}
+
 function normalizeFeedAuthor(value: unknown): string | null {
   if (typeof value === "string") {
     return value.trim() || null;
@@ -289,6 +295,7 @@ export async function processFeedItem({
   aiProvider,
   clusterAssignmentCoordinator,
   fullTextFetchThreshold,
+  contentExtraction,
   now,
 }: {
   item: ParsedFeedItem;
@@ -304,6 +311,7 @@ export async function processFeedItem({
   aiProvider: RunIngestionOptions["aiProvider"];
   clusterAssignmentCoordinator: ClusterAssignmentCoordinator;
   fullTextFetchThreshold: number;
+  contentExtraction: RunIngestionOptions["contentExtraction"];
   now: Date;
 }): Promise<ProcessedItemRecord | null> {
   const lookup = providedLookup ?? buildPreparedFeedItemLookup({
@@ -511,9 +519,17 @@ export async function processFeedItem({
     };
   }
 
-  if (!fullText && shouldFetchFullText(contentForFullTextDecision, fullTextFetchThreshold)) {
+  const shouldFetchBecauseContentIsShort = shouldFetchFullText(contentForFullTextDecision, fullTextFetchThreshold);
+  const shouldFetchBecauseRssHtml = contentExtraction.jinaEnabled && looksLikeHtmlContent(rssContent);
+
+  if (!fullText && (shouldFetchBecauseContentIsShort || shouldFetchBecauseRssHtml)) {
     try {
-      const fetchedFullText = await articleFetcher(originalUrl);
+      const fetchContext = {
+        rssContent,
+        rssExcerpt,
+        reason: shouldFetchBecauseRssHtml ? "rss_html" as const : "short_content" as const,
+      };
+      const fetchedFullText = await articleFetcher(originalUrl, fetchContext);
       fullText = fetchedFullText;
       status = "fetched";
       fullTextFetched = Boolean(fetchedFullText && fetchedFullText.trim());

@@ -51,6 +51,21 @@ export type AdminPromptConfig = {
 export type AdminSettingsSnapshot = {
   modelApiConfigs: AdminModelApiConfig[];
   promptConfigs: AdminPromptConfig[];
+  contentExtraction: {
+    id: string;
+    jinaEnabled: boolean;
+    jinaBaseUrl: string;
+    jinaApiKeyMasked: string;
+    hasJinaApiKey: boolean;
+    timeoutMs: number;
+    concurrency: number;
+    rpmLimit: number;
+    maxPerRun: number;
+    minChars: number;
+    maxChars: number;
+    createdAt: string;
+    updatedAt: string;
+  };
   blacklistKeywords: string[];
   taskSchedule: {
     key: "ingestion_default";

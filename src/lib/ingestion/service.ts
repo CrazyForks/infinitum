@@ -22,7 +22,7 @@ import {
   updateFetchRunProgress,
 } from "@/lib/feed/repository";
 import { invalidateFeedCache } from "@/lib/feed/cache";
-import { fetchArticleContent } from "@/lib/ingestion/article";
+import { createConfiguredArticleFetcher, fetchArticleContent } from "@/lib/ingestion/article";
 import {
   deriveSourceConcurrency,
   buildPreparedFeedItemLookup,
@@ -135,7 +135,19 @@ async function resolveRunOptions(options?: Partial<RunIngestionOptions>): Promis
   return {
     trigger: options?.trigger ?? "manual",
     parser: options?.parser ?? createRssParser(),
-    articleFetcher: options?.articleFetcher ?? fetchArticleContent,
+    articleFetcher:
+      options?.articleFetcher ??
+      createConfiguredArticleFetcher(runtimeConfig?.contentExtraction ?? {
+        jinaEnabled: false,
+        jinaBaseUrl: "https://r.jina.ai/",
+        jinaApiKey: null,
+        timeoutMs: 15_000,
+        concurrency: 1,
+        rpmLimit: 10,
+        maxPerRun: 20,
+        minChars: 500,
+        maxChars: 32_000,
+      }, fetchArticleContent),
     aiProvider:
       options?.aiProvider ??
       createAiProvider(
@@ -166,6 +178,19 @@ async function resolveRunOptions(options?: Partial<RunIngestionOptions>): Promis
       options?.fullTextFetchThreshold ??
       runtimeConfig?.ingestion.fullTextFetchThreshold ??
       DEFAULT_FULL_TEXT_FETCH_THRESHOLD,
+    contentExtraction:
+      options?.contentExtraction ??
+      runtimeConfig?.contentExtraction ?? {
+        jinaEnabled: false,
+        jinaBaseUrl: "https://r.jina.ai/",
+        jinaApiKey: null,
+        timeoutMs: 15_000,
+        concurrency: 1,
+        rpmLimit: 10,
+        maxPerRun: 20,
+        minChars: 500,
+        maxChars: 32_000,
+      },
     perSourceItemLimit:
       options?.perSourceItemLimit ?? runtimeConfig?.ingestion.perSourceItemLimit ?? 20,
     processingStartAt:
@@ -295,6 +320,7 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
     itemConcurrency,
     sourceConcurrency,
     fullTextFetchThreshold,
+    contentExtraction,
     perSourceItemLimit,
     processingStartAt,
     now,
@@ -628,6 +654,7 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
             aiProvider: trackedAiProvider,
             clusterAssignmentCoordinator,
             fullTextFetchThreshold,
+            contentExtraction,
             now,
           });
 

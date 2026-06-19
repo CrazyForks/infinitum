@@ -21,6 +21,7 @@ import {
   ensureRuntimeConfigSeeded,
   getAdminSettings,
   getIngestionRuntimeConfig,
+  updateContentExtractionConfig,
 } from "@/lib/settings/service";
 
 describe("admin settings service", () => {
@@ -33,6 +34,7 @@ describe("admin settings service", () => {
     await prisma.source.deleteMany();
     await prisma.sourceGroup.deleteMany();
     await prisma.blacklistKeyword.deleteMany();
+    await prisma.contentExtractionConfig.deleteMany();
   });
 
   it("seeds code defaults into model and prompt tables when the database is empty", async () => {
@@ -109,6 +111,36 @@ describe("admin settings service", () => {
       maxTokens: 80,
       topP: null,
     });
+  });
+
+  it("saves content extraction connection and limits", async () => {
+    const config = await updateContentExtractionConfig({
+      jinaEnabled: true,
+      jinaBaseUrl: "https://reader.example.com/",
+      jinaApiKey: "jina_secret",
+      jinaApiKeyMode: "replace",
+      timeoutMs: 20_000,
+      concurrency: 2,
+      rpmLimit: 60,
+      maxPerRun: 30,
+      minChars: 300,
+      maxChars: 20_000,
+    });
+
+    expect(config).toMatchObject({
+      jinaEnabled: true,
+      jinaBaseUrl: "https://reader.example.com/",
+      hasJinaApiKey: true,
+      timeoutMs: 20_000,
+      concurrency: 2,
+      rpmLimit: 60,
+      maxPerRun: 30,
+      minChars: 300,
+      maxChars: 20_000,
+    });
+
+    const stored = await prisma.contentExtractionConfig.findFirstOrThrow();
+    expect(stored.jinaApiKey).toBe("jina_secret");
   });
 
   it("cleans removed daily report refinement prompt configs before reading settings", async () => {

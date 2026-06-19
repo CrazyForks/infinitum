@@ -70,6 +70,7 @@ export function SelectField({
     : normalizeSingleSelectOptions(options as Array<Record<string, unknown>> | undefined);
   const resolvedValue = isMultiMode ? value : normalizeSingleSelectValue(value);
   const resolvedStyle: CSSProperties = {
+    width: "100%",
     ...(multiline && isMultiMode ? { minHeight: height } : { height }),
     ...style,
   };
