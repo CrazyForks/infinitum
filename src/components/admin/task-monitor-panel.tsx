@@ -107,14 +107,22 @@ function getTaskTimelineNode(task: TaskRunSnapshot, key: NonNullable<TaskRunSnap
   return task.taskTimeline?.find((node) => node.key === key) ?? null;
 }
 
-function getTaskTimelineMetric(
+function findTaskTimelineMetric(
   task: TaskRunSnapshot,
   key: NonNullable<TaskRunSnapshot["taskTimeline"]>[number]["key"],
   labels: string | string[],
 ) {
   const node = getTaskTimelineNode(task, key);
   const labelList = Array.isArray(labels) ? labels : [labels];
-  return node?.metrics.find((metric) => labelList.includes(metric.label))?.value ?? 0;
+  return node?.metrics.find((metric) => labelList.includes(metric.label))?.value ?? null;
+}
+
+function getTaskTimelineMetric(
+  task: TaskRunSnapshot,
+  key: NonNullable<TaskRunSnapshot["taskTimeline"]>[number]["key"],
+  labels: string | string[],
+) {
+  return findTaskTimelineMetric(task, key, labels) ?? 0;
 }
 
 function parseFailureCount(progressLabel: string | null) {
@@ -122,30 +130,53 @@ function parseFailureCount(progressLabel: string | null) {
   return match ? Number(match[1]) : 0;
 }
 
+function parseItemFailureCount(progressLabel: string | null, sourceFailureCount: number) {
+  const explicitItemFailureMatch = progressLabel?.match(/内容失败\s*(\d+)\s*项/);
+  if (explicitItemFailureMatch) {
+    return Number(explicitItemFailureMatch[1]);
+  }
+
+  return Math.max(0, parseFailureCount(progressLabel) - sourceFailureCount);
+}
+
+function parseSourceFailureCount(errorSummary: string | null) {
+  if (!errorSummary) {
+    return 0;
+  }
+
+  return errorSummary
+    .split(/\s+\|\s+/)
+    .filter((entry) => /RSS fetch failed/i.test(entry))
+    .length;
+}
+
+function getSourceFailureCount(task: TaskRunSnapshot) {
+  return findTaskTimelineMetric(task, "source_fetch", "失败源") ?? parseSourceFailureCount(task.errorSummary);
+}
+
 function buildIngestionSummaryDetail(task: TaskRunSnapshot) {
   if (task.kind !== "ingestion") {
     return null;
   }
 
-  const isFinished = !["queued", "running"].includes(task.status);
-  const failureCount = parseFailureCount(task.progressLabel);
+  const sourceFailureCount = getSourceFailureCount(task);
+  const itemFailureCount = parseItemFailureCount(task.progressLabel, sourceFailureCount);
   const fetched = getTaskTimelineMetric(task, "source_fetch", "抓取内容") || task.progressTotal;
   const reusedExisting = getTaskTimelineMetric(task, "rule_filter", "复用已有处理");
   const ruleFiltered = getTaskTimelineMetric(task, "rule_filter", ["命中规则过滤", "命中黑名单"]);
-  const analyzed = getTaskTimelineMetric(task, "item_analysis", "完成");
   const aiFiltered = getTaskTimelineMetric(task, "item_analysis", "过滤");
-  const knownTotal = isFinished
-    ? fetched
-    : Math.max(task.progressCurrent, analyzed + reusedExisting + ruleFiltered + failureCount);
-  const updatedExisting = Math.max(
-    0,
-    knownTotal - task.itemsAdded - aiFiltered - reusedExisting - ruleFiltered - failureCount,
-  );
-  const accountedTotal = task.itemsAdded + aiFiltered + updatedExisting + reusedExisting + ruleFiltered + failureCount;
+  const updatedExisting = findTaskTimelineMetric(task, "item_analysis", "更新/重处理");
+  const accountedTotal =
+    task.itemsAdded +
+    aiFiltered +
+    (updatedExisting ?? 0) +
+    reusedExisting +
+    ruleFiltered +
+    itemFailureCount;
   const parts = [
     `${task.itemsAdded} (最终新增)`,
     `${aiFiltered} (AI 过滤)`,
-    `${updatedExisting} (更新/重处理)`,
+    updatedExisting === null ? "更新/重处理暂无精确数据" : `${updatedExisting} (更新/重处理)`,
     `${reusedExisting} (重复过滤)`,
   ];
 
@@ -153,12 +184,15 @@ function buildIngestionSummaryDetail(task: TaskRunSnapshot) {
     parts.push(`${ruleFiltered} (规则过滤)`);
   }
 
-  if (failureCount > 0) {
-    parts.push(`${failureCount} (失败)`);
+  if (itemFailureCount > 0) {
+    parts.push(`${itemFailureCount} (处理失败)`);
   }
 
-  const leftSide = accountedTotal === fetched ? String(fetched) : `${accountedTotal}/${fetched} 已有结果`;
-  return `${leftSide} = ${parts.join(" + ")}`;
+  const leftSide = updatedExisting !== null && accountedTotal === fetched
+    ? String(fetched)
+    : `${accountedTotal}/${fetched} 已精确分类`;
+  const sourceFailureDetail = sourceFailureCount > 0 ? `；源抓取失败 ${sourceFailureCount} 个` : "";
+  return `${leftSide} = ${parts.join(" + ")}${sourceFailureDetail}`;
 }
 
 function formatTaskTimelineDetail(task: TaskRunSnapshot, node: NonNullable<TaskRunSnapshot["taskTimeline"]>[number]) {
@@ -179,8 +213,15 @@ function formatTaskTimelineDetail(task: TaskRunSnapshot, node: NonNullable<TaskR
       return `总候选数 ${getValue("总候选数")}`;
     case "task_finished":
       return `最后入选数 ${getValue("最后入选数")}`;
-    case "source_fetch":
-      return `抓取 ${getValue("抓取源")} 个源 · ${getValue("抓取内容")} 篇内容 · 正文补抓 ${getValue("正文补抓")} 篇`;
+    case "source_fetch": {
+      const sourceFailureCount = getSourceFailureCount(task);
+      const parts = [`抓取 ${getValue("抓取源")} 个源`];
+      if (sourceFailureCount > 0) {
+        parts.push(`失败 ${sourceFailureCount} 个源`);
+      }
+      parts.push(`${getValue("抓取内容")} 篇内容`, `正文补抓 ${getValue("正文补抓")} 篇`);
+      return parts.join(" · ");
+    }
     case "rule_filter":
       return `规则过滤 ${getValue(["命中规则过滤", "命中黑名单"])} · 复用 ${getValue("复用已有处理")}`;
     case "item_summary":
@@ -188,7 +229,7 @@ function formatTaskTimelineDetail(task: TaskRunSnapshot, node: NonNullable<TaskR
     case "item_aggregation":
       return `成功 ${getValue("拆分成功")} · 失败 ${getValue("拆分失败")} · 子事件 ${getValue("子事件")}`;
     case "item_analysis":
-      return `完成 ${getValue("完成")} · 过滤 ${getValue("过滤")}`;
+      return `完成 ${getValue("完成")} · 过滤 ${getValue("过滤")} · 更新/重处理 ${getValue("更新/重处理")}`;
     case "cluster_assignment":
       return `指纹命中 ${getValue("指纹命中")} · 本地直连 ${getValue("本地直连")} · AI归组 ${getValue("AI归组")} · 跳过 ${getValue("跳过")} · 新建 ${getValue("新建")}`;
     case "cluster_merge": {

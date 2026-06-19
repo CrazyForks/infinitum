@@ -184,27 +184,37 @@ describe("runIngestion", () => {
       "cluster_merge",
       "cluster_finalize",
     ]);
-    expect(taskTimeline[0]?.metrics).toEqual([
+    expect(taskTimeline[0]?.metrics).toEqual(expect.arrayContaining([
       { label: "抓取源", value: 1 },
+      { label: "失败源", value: 0 },
       { label: "抓取内容", value: 2 },
       { label: "正文补抓", value: 0 },
-    ]);
-    expect(taskTimeline[2]?.metrics).toEqual([
+    ]));
+    expect(taskTimeline[0]?.metrics.find((metric) => metric.label === "补抓累计耗时ms")?.value).toEqual(expect.any(Number));
+    expect(taskTimeline[1]?.metrics.find((metric) => metric.label === "条目累计耗时ms")?.value).toEqual(expect.any(Number));
+    expect(taskTimeline[2]?.metrics).toEqual(expect.arrayContaining([
       { label: "完成", value: 2 },
       { label: "失败", value: 0 },
-    ]);
-    expect(taskTimeline[3]?.metrics).toEqual([
+    ]));
+    expect(taskTimeline[2]?.metrics.find((metric) => metric.label === "累计耗时ms")?.value).toEqual(expect.any(Number));
+    expect(taskTimeline[3]?.metrics).toEqual(expect.arrayContaining([
       { label: "拆分成功", value: 0 },
       { label: "拆分失败", value: 0 },
       { label: "子事件", value: 0 },
-    ]);
-    expect(taskTimeline[5]?.metrics).toEqual([
+    ]));
+    expect(taskTimeline[4]?.metrics).toEqual(expect.arrayContaining([
+      { label: "完成", value: 2 },
+      { label: "过滤", value: 0 },
+      { label: "更新/重处理", value: 0 },
+    ]));
+    expect(taskTimeline[5]?.metrics).toEqual(expect.arrayContaining([
       { label: "指纹命中", value: 1 },
       { label: "本地直连", value: 0 },
       { label: "AI归组", value: 0 },
       { label: "跳过", value: 0 },
       { label: "新建", value: 1 },
-    ]);
+    ]));
+    expect(taskTimeline[5]?.metrics.find((metric) => metric.label === "累计耗时ms")?.value).toEqual(expect.any(Number));
     expect(taskTimeline[7]?.metrics).toEqual([
       { label: "参与重算", value: 1 },
       { label: "完成更新", value: 1 },
@@ -212,6 +222,71 @@ describe("runIngestion", () => {
       { label: "摘要失败", value: 0 },
       { label: "已删除", value: 0 },
     ]);
+  });
+
+  it("records source fetch failures in the ingestion task timeline", async () => {
+    const taskRun = await startIngestionTask({ triggerType: "manual" });
+    const parser = {
+      parseURL: vi.fn().mockImplementation(async (url: string) => {
+        if (url === "https://failed.example.com/feed.xml") {
+          throw new Error("RSS fetch failed with status 502");
+        }
+
+        return {
+          items: [
+            {
+              title: "OpenAI ships a new agent toolkit",
+              link: "https://example.com/posts/openai-toolkit",
+              isoDate: "2026-04-10T09:00:00.000Z",
+              contentSnippet: "Brief summary",
+              creator: "Alex",
+            },
+          ],
+        };
+      }),
+    };
+
+    await runIngestionTask(taskRun, {
+      parser,
+      articleFetcher: vi.fn(),
+      aiProvider: buildAiProviderMock(),
+      sourceConfigs: [
+        {
+          name: "Healthy Feed",
+          rssUrl: "https://example.com/feed.xml",
+          siteUrl: "https://example.com",
+          enabled: true,
+          aiParsingEnabled: true,
+        },
+        {
+          name: "Broken Feed",
+          rssUrl: "https://failed.example.com/feed.xml",
+          siteUrl: "https://failed.example.com",
+          enabled: true,
+          aiParsingEnabled: true,
+        },
+      ],
+      blacklist: [],
+      now: new Date("2026-04-10T10:30:00.000Z"),
+    });
+
+    const storedTaskRun = await prisma.backgroundTaskRun.findUniqueOrThrow({
+      where: { id: taskRun.id },
+    });
+    const taskTimeline = JSON.parse(
+      storedTaskRun.taskTimelineJson ?? "[]",
+    ) as Array<{ key: string; status: string; metrics: Array<{ label: string; value: number }> }>;
+    const sourceFetchNode = taskTimeline.find((node) => node.key === "source_fetch");
+
+    expect(storedTaskRun.status).toBe("partial");
+    expect(storedTaskRun.progressLabel).toBe("已处理 1/1 条内容，来自 2 个源，内容失败 0 项，源失败 1 个，正文补抓 0 篇");
+    expect(storedTaskRun.errorSummary).toBe("Broken Feed: RSS fetch failed with status 502");
+    expect(sourceFetchNode?.status).toBe("partial");
+    expect(sourceFetchNode?.metrics).toEqual(expect.arrayContaining([
+      { label: "抓取源", value: 2 },
+      { label: "失败源", value: 1 },
+      { label: "抓取内容", value: 1 },
+    ]));
   });
 
   it("cleans and caps item summary input before calling the model", async () => {
@@ -411,11 +486,12 @@ describe("runIngestion", () => {
     expect(storedTaskRun.progressTotal).toBe(1);
     expect(storedTaskRun.progressLabel).toBe("已处理 1/1 条内容，来自 1 个源，失败 0 项，正文补抓 0 篇");
     expect(storedFetchRun.itemCount).toBe(1);
-    expect(taskTimeline[0]?.metrics).toEqual([
+    expect(taskTimeline[0]?.metrics).toEqual(expect.arrayContaining([
       { label: "抓取源", value: 1 },
+      { label: "失败源", value: 0 },
       { label: "抓取内容", value: 1 },
       { label: "正文补抓", value: 0 },
-    ]);
+    ]));
     expect(storedItems).toHaveLength(1);
     expect(storedItems[0]?.originalUrl).toBe("https://example.com/posts/fresh");
   });
@@ -2320,8 +2396,8 @@ describe("runIngestion", () => {
       matchClusterCandidate: vi.fn().mockResolvedValue(null),
     });
 
-    await runIngestion({
-      trigger: "manual",
+    const taskRun = await startIngestionTask({ triggerType: "manual" });
+    await runIngestionTask(taskRun, {
       parser,
       articleFetcher: vi.fn(),
       aiProvider,
@@ -2345,9 +2421,22 @@ describe("runIngestion", () => {
     const storedItem = await prisma.item.findFirstOrThrow({
       where: { sourceId: source.id },
     });
+    const storedTaskRun = await prisma.backgroundTaskRun.findUniqueOrThrow({
+      where: { id: taskRun.id },
+    });
+    const taskTimeline = JSON.parse(
+      storedTaskRun.taskTimelineJson ?? "[]",
+    ) as Array<{ key: string; metrics: Array<{ label: string; value: number }> }>;
+    const itemAnalysisNode = taskTimeline.find((node) => node.key === "item_analysis");
+
     expect(storedItem.originalTitle).toBe(newTitle);
     expect(storedItem.summaryText).toBe("更新后的摘要");
     expect(storedItem.qualityScore).toBe(95);
+    expect(itemAnalysisNode?.metrics).toEqual(expect.arrayContaining([
+      { label: "完成", value: 1 },
+      { label: "过滤", value: 0 },
+      { label: "更新/重处理", value: 1 },
+    ]));
   });
 
   it("reuses succeeded summary but reruns failed analysis when inputs are unchanged", async () => {
@@ -2827,11 +2916,11 @@ describe("runIngestion", () => {
     // Each parent produced 2 children sharing the same fingerprint namespace.
     expect(children.every((child) => Boolean(child.summaryText && child.summaryText.length > 0))).toBe(true);
     expect(children.every((child) => child.status === "processed")).toBe(true);
-    expect(taskTimeline.find((node) => node.key === "item_aggregation")?.metrics).toEqual([
+    expect(taskTimeline.find((node) => node.key === "item_aggregation")?.metrics).toEqual(expect.arrayContaining([
       { label: "拆分成功", value: 2 },
       { label: "拆分失败", value: 0 },
       { label: "子事件", value: 4 },
-    ]);
+    ]));
     expect(parseAggregation.mock.calls.map((call) => call[0]).join("\n")).toContain(
       "OpenAI Toolkit launch (link: https://openai.com/toolkit?utm_source=tldrdev)",
     );

@@ -165,6 +165,7 @@ function buildMonitorSnapshot(): BackgroundTaskMonitorSnapshot {
             metrics: [
               { label: "完成", value: 4 },
               { label: "过滤", value: 2 },
+              { label: "更新/重处理", value: 1 },
             ],
           },
           {
@@ -266,13 +267,13 @@ describe("TaskMonitorPanel", () => {
     expect(within(dialog).queryByText("进度")).not.toBeInTheDocument();
     expect(within(dialog).getByText("摘要")).toBeInTheDocument();
     expect(
-      within(dialog).getByText("7/10 已有结果 = 1 (最终新增) + 2 (AI 过滤) + 1 (更新/重处理) + 1 (重复过滤) + 2 (规则过滤)"),
+      within(dialog).getByText("7/10 已精确分类 = 1 (最终新增) + 2 (AI 过滤) + 1 (更新/重处理) + 1 (重复过滤) + 2 (规则过滤)"),
     ).toBeInTheDocument();
     expect(within(dialog).getByText("抓取 1 个源 · 10 篇内容 · 正文补抓 2 篇")).toBeInTheDocument();
     expect(within(dialog).getByText("规则过滤 2 · 复用 1")).toBeInTheDocument();
     expect(within(dialog).getByText("完成 5 · 失败 1")).toBeInTheDocument();
     expect(within(dialog).getByText("成功 1 · 失败 0 · 子事件 12")).toBeInTheDocument();
-    expect(within(dialog).getByText("完成 4 · 过滤 2")).toBeInTheDocument();
+    expect(within(dialog).getByText("完成 4 · 过滤 2 · 更新/重处理 1")).toBeInTheDocument();
     expect(within(dialog).getByText("指纹命中 1 · 本地直连 2 · AI归组 1 · 跳过 0 · 新建 1")).toBeInTheDocument();
     expect(within(dialog).getByText("候选 12/18 · Dirty 5 · Hash跳过 4 · AI返回 2 · 移动 6 · 失败 1 · 已合并 · 合并后 9 组")).toBeInTheDocument();
     expect(within(dialog).getByText("参与重算 2 · 完成更新 2 · 摘要完成 1 · 摘要失败 0 · 已删除 0")).toBeInTheDocument();
@@ -330,6 +331,7 @@ describe("TaskMonitorPanel", () => {
                 metrics: [
                   { label: "完成", value: 34 },
                   { label: "过滤", value: 5 },
+                  { label: "更新/重处理", value: 19 },
                 ],
               },
             ],
@@ -342,6 +344,146 @@ describe("TaskMonitorPanel", () => {
     const dialog = await screen.findByRole("dialog", { name: "任务详情" });
     expect(
       within(dialog).getByText("91 = 10 (最终新增) + 5 (AI 过滤) + 19 (更新/重处理) + 57 (重复过滤)"),
+    ).toBeInTheDocument();
+  });
+
+  it("separates source fetch failures from the content processing summary", async () => {
+    renderWithProviders(
+      <TaskMonitorPanel
+        runningTasks={[]}
+        recentTasks={[
+          {
+            ...buildMonitorSnapshot().runningTasks[0],
+            id: "task-source-failure-regression",
+            status: "partial",
+            progressCurrent: 43,
+            progressTotal: 55,
+            progressLabel: "已处理 43/55 条内容，来自 113 个源，失败 3 项，正文补抓 7 篇",
+            itemsAdded: 5,
+            fullTextFetchedCount: 7,
+            errorSummary: "TLTD: RSS fetch failed with status 502 | AI Breakfast: RSS fetch failed with status 502 | AI Valley: RSS fetch failed with status 502",
+            startedAt: "2026-06-19T12:00:00.684Z",
+            finishedAt: "2026-06-19T12:12:10.000Z",
+            taskTimeline: [
+              {
+                key: "source_fetch",
+                label: "信息抓取",
+                status: "succeeded",
+                startedAt: "2026-06-19T12:00:00.711Z",
+                finishedAt: "2026-06-19T12:05:05.867Z",
+                durationMs: 305_156,
+                metrics: [
+                  { label: "抓取源", value: 113 },
+                  { label: "抓取内容", value: 55 },
+                  { label: "正文补抓", value: 7 },
+                ],
+              },
+              {
+                key: "rule_filter",
+                label: "规则过滤",
+                status: "succeeded",
+                startedAt: "2026-06-19T12:05:05.919Z",
+                finishedAt: "2026-06-19T12:08:03.750Z",
+                durationMs: 177_831,
+                metrics: [
+                  { label: "命中规则过滤", value: 0 },
+                  { label: "复用已有处理", value: 36 },
+                ],
+              },
+              {
+                key: "item_analysis",
+                label: "内容分析",
+                status: "succeeded",
+                startedAt: "2026-06-19T12:05:05.919Z",
+                finishedAt: "2026-06-19T12:08:03.750Z",
+                durationMs: 177_831,
+                metrics: [
+                  { label: "完成", value: 19 },
+                  { label: "过滤", value: 0 },
+                ],
+              },
+            ],
+          },
+        ]}
+        initialFocusTaskId="task-source-failure-regression"
+      />,
+    );
+
+    const dialog = await screen.findByRole("dialog", { name: "任务详情" });
+    expect(
+      within(dialog).getByText("41/55 已精确分类 = 5 (最终新增) + 0 (AI 过滤) + 更新/重处理暂无精确数据 + 36 (重复过滤)；源抓取失败 3 个"),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).getByText("抓取 113 个源 · 失败 3 个源 · 55 篇内容 · 正文补抓 7 篇"),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps explicit content failures when source failures are also present", async () => {
+    renderWithProviders(
+      <TaskMonitorPanel
+        runningTasks={[]}
+        recentTasks={[
+          {
+            ...buildMonitorSnapshot().runningTasks[0],
+            id: "task-mixed-failures",
+            status: "partial",
+            progressCurrent: 55,
+            progressTotal: 55,
+            progressLabel: "已处理 55/55 条内容，来自 113 个源，内容失败 2 项，源失败 3 个，正文补抓 7 篇",
+            itemsAdded: 5,
+            fullTextFetchedCount: 7,
+            errorSummary: "TLTD: RSS fetch failed with status 502 | AI Breakfast: RSS fetch failed with status 502 | AI Valley: RSS fetch failed with status 502",
+            startedAt: "2026-06-19T12:00:00.684Z",
+            finishedAt: "2026-06-19T12:12:10.000Z",
+            taskTimeline: [
+              {
+                key: "source_fetch",
+                label: "信息抓取",
+                status: "partial",
+                startedAt: "2026-06-19T12:00:00.711Z",
+                finishedAt: "2026-06-19T12:05:05.867Z",
+                durationMs: 305_156,
+                metrics: [
+                  { label: "抓取源", value: 113 },
+                  { label: "失败源", value: 3 },
+                  { label: "抓取内容", value: 55 },
+                  { label: "正文补抓", value: 7 },
+                ],
+              },
+              {
+                key: "rule_filter",
+                label: "规则过滤",
+                status: "succeeded",
+                startedAt: "2026-06-19T12:05:05.919Z",
+                finishedAt: "2026-06-19T12:08:03.750Z",
+                durationMs: 177_831,
+                metrics: [
+                  { label: "命中规则过滤", value: 0 },
+                  { label: "复用已有处理", value: 36 },
+                ],
+              },
+              {
+                key: "item_analysis",
+                label: "内容分析",
+                status: "partial",
+                startedAt: "2026-06-19T12:05:05.919Z",
+                finishedAt: "2026-06-19T12:08:03.750Z",
+                durationMs: 177_831,
+                metrics: [
+                  { label: "过滤", value: 0 },
+                  { label: "更新/重处理", value: 12 },
+                ],
+              },
+            ],
+          },
+        ]}
+        initialFocusTaskId="task-mixed-failures"
+      />,
+    );
+
+    const dialog = await screen.findByRole("dialog", { name: "任务详情" });
+    expect(
+      within(dialog).getByText("55 = 5 (最终新增) + 0 (AI 过滤) + 12 (更新/重处理) + 36 (重复过滤) + 2 (处理失败)；源抓取失败 3 个"),
     ).toBeInTheDocument();
   });
 
@@ -592,7 +734,7 @@ describe("TaskMonitorPanel", () => {
       within(dialog).getByText("规则过滤 2 · 复用 1"),
     ).toBeInTheDocument();
     expect(
-      within(dialog).getByText("6/10 已有结果 = 3 (最终新增) + 0 (AI 过滤) + 0 (更新/重处理) + 1 (重复过滤) + 2 (规则过滤)"),
+      within(dialog).getByText("6/10 已精确分类 = 3 (最终新增) + 0 (AI 过滤) + 更新/重处理暂无精确数据 + 1 (重复过滤) + 2 (规则过滤)"),
     ).toBeInTheDocument();
   });
 });

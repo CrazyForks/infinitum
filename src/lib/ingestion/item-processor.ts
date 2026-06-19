@@ -24,6 +24,8 @@ import type {
   RunIngestionOptions,
 } from "@/lib/ingestion/types";
 
+type ItemProcessingTimings = NonNullable<NonNullable<ProcessedItemRecord["metrics"]>["timings"]>;
+
 export type PreparedFeedItem = {
   item: ParsedFeedItem;
   sourceId: string;
@@ -117,6 +119,27 @@ function normalizeUrl(url: string): string {
 function appendIssue(issues: string[], error: unknown, fallbackMessage: string) {
   console.error(`[Item Processor] ${fallbackMessage}:`, error);
   issues.push(error instanceof Error ? error.message : fallbackMessage);
+}
+
+function createItemProcessingTimings() {
+  return {
+    totalMs: 0,
+    fullTextFetchMs: 0,
+    ruleFilterMs: 0,
+    summaryMs: 0,
+    aggregationMs: 0,
+    analysisMs: 0,
+    clusterAssignmentMs: 0,
+    dbWriteMs: 0,
+  } satisfies Required<ItemProcessingTimings>;
+}
+
+function addElapsed(
+  timings: Required<ItemProcessingTimings>,
+  key: keyof Required<ItemProcessingTimings>,
+  startedAt: number,
+) {
+  timings[key] += Date.now() - startedAt;
 }
 
 export function deriveSourceConcurrency(itemConcurrency: number) {
@@ -373,6 +396,12 @@ export async function processFeedItem({
   let aggregationParseStatus: string | null = existing?.aggregationParseStatus ?? null;
   let storedItemId = existing?.id ?? null;
   const issues: string[] = [];
+  const processingStartedAt = Date.now();
+  const timings = createItemProcessingTimings();
+  const finalizeTimings = () => {
+    timings.totalMs = Date.now() - processingStartedAt;
+    return timings;
+  };
   const contentForFullTextDecision = fullText || rssContent || rssExcerpt || "";
   const canReuseExistingAnalysis = Boolean(
     existing &&
@@ -383,6 +412,7 @@ export async function processFeedItem({
       existing.status !== "fetched" &&
       existing.status !== "failed",
   );
+  const initialRuleFilterStartedAt = Date.now();
   const initialRuleFilter = evaluateRuleFilter({
     title: originalTitle,
     content: [rssContent, rssExcerpt].filter(Boolean).join("\n"),
@@ -390,8 +420,10 @@ export async function processFeedItem({
     sourceName,
     blacklist,
   });
+  addElapsed(timings, "ruleFilterMs", initialRuleFilterStartedAt);
 
   if (initialRuleFilter.filtered) {
+    const dbWriteStartedAt = Date.now();
     const stored = await upsertItem(
       {
         id: existing?.id,
@@ -436,6 +468,7 @@ export async function processFeedItem({
         errorMessage: null,
       },
     );
+    addElapsed(timings, "dbWriteMs", dbWriteStartedAt);
 
     return {
       id: stored.id,
@@ -445,16 +478,19 @@ export async function processFeedItem({
       fullTextFetched,
       metrics: {
         blacklistFiltered: true,
+        timings: finalizeTimings(),
       },
     };
   }
 
   if (canReuseExistingAnalysis && existing) {
     const language = existing?.language ?? (shouldTranslateTitle(originalTitle) ? "en" : "unknown");
-    const stored = shouldWriteReusableExistingItem(existing, lookup, {
+    const shouldWriteReusable = shouldWriteReusableExistingItem(existing, lookup, {
       sourceId,
       author,
-    })
+    });
+    const dbWriteStartedAt = shouldWriteReusable ? Date.now() : 0;
+    const stored = shouldWriteReusable
       ? await upsertItem(
           {
             id: existing.id,
@@ -500,6 +536,9 @@ export async function processFeedItem({
           },
         )
       : existing;
+    if (shouldWriteReusable) {
+      addElapsed(timings, "dbWriteMs", dbWriteStartedAt);
+    }
 
     return {
       id: stored.id,
@@ -508,6 +547,7 @@ export async function processFeedItem({
       fullTextFetched,
       metrics: {
         reusedExisting: true,
+        timings: finalizeTimings(),
       },
     };
   }
@@ -517,23 +557,36 @@ export async function processFeedItem({
     contentExtraction.jinaEnabled &&
     !shouldSkipJinaForUrl(originalUrl) &&
     looksLikeHtmlContent(rssContent);
+  const fullTextFetchReason = shouldFetchBecauseRssHtml ? "rss_html" as const : "short_content" as const;
+  let fullTextFetchAttempted = false;
+  const fullTextFetchMetrics = {
+    localAttempted: false,
+    jinaAttempted: false,
+    used: null as "local" | "jina" | null,
+  };
 
   if (!fullText && (shouldFetchBecauseContentIsShort || shouldFetchBecauseRssHtml)) {
+    fullTextFetchAttempted = true;
+    const fetchStartedAt = Date.now();
     try {
       const fetchContext = {
         rssContent,
         rssExcerpt,
-        reason: shouldFetchBecauseRssHtml ? "rss_html" as const : "short_content" as const,
+        reason: fullTextFetchReason,
+        metrics: fullTextFetchMetrics,
       };
       const fetchedFullText = await articleFetcher(originalUrl, fetchContext);
+      addElapsed(timings, "fullTextFetchMs", fetchStartedAt);
       fullText = fetchedFullText;
       status = "fetched";
       fullTextFetched = Boolean(fetchedFullText && fetchedFullText.trim());
     } catch (error) {
+      addElapsed(timings, "fullTextFetchMs", fetchStartedAt);
       appendIssue(issues, error, "Unknown article fetch error");
     }
   }
 
+  const ruleFilterStartedAt = Date.now();
   const ruleFilter = evaluateRuleFilter({
     title: originalTitle,
     content: [rssContent, rssExcerpt, fullText].filter(Boolean).join("\n"),
@@ -541,6 +594,7 @@ export async function processFeedItem({
     sourceName,
     blacklist,
   });
+  addElapsed(timings, "ruleFilterMs", ruleFilterStartedAt);
 
   if (ruleFilter.filtered) {
     status = "filtered";
@@ -560,11 +614,13 @@ export async function processFeedItem({
       summaryText = stripHtmlTags(existing?.summaryText) || buildFallbackSummary(rssExcerpt, fullText || rssContent);
       summaryStatus = "succeeded";
     } else {
+      const summaryStartedAt = Date.now();
       try {
         const summaryOutput = await aiProvider.summarizeItem(summarySourceText, {
           title: originalTitle,
           sourceName,
         });
+        addElapsed(timings, "summaryMs", summaryStartedAt);
 
         summaryText = stripHtmlTags(summaryOutput.summary) || buildFallbackSummary(rssExcerpt, fullText || rssContent);
         isAggregation = aggregationDetectionEnabled && summaryOutput.isAggregation === true;
@@ -575,6 +631,7 @@ export async function processFeedItem({
         summaryCompleted = true;
         summaryStatus = "succeeded";
       } catch (error) {
+        addElapsed(timings, "summaryMs", summaryStartedAt);
         appendIssue(issues, error, "Unknown item summary error");
         summaryFailed = true;
         summaryStatus = "failed";
@@ -590,12 +647,16 @@ export async function processFeedItem({
       // Sub-events are now persisted as full child Item rows (one per event) so they appear
       // in the main feed, FTS, and cluster pipeline. The parent is hidden from the feed by
       // buildFeedEntryCandidatesCte's isAggregation=false filter.
+      const aggregationStartedAt = Date.now();
+      let aggregationMeasured = false;
       try {
         const aggregationSourceText = buildAggregationParsingInput(fullText || rssContent || rssExcerpt || originalTitle) || originalTitle;
         const aggregationResult = await aiProvider.parseAggregation(aggregationSourceText, {
           title: originalTitle,
           sourceName,
         });
+        addElapsed(timings, "aggregationMs", aggregationStartedAt);
+        aggregationMeasured = true;
         const mainEventSig = aggregationResult.mainEvent;
         const events = aggregationResult.events ?? [];
         if (events.length === 0) {
@@ -604,6 +665,7 @@ export async function processFeedItem({
 
         // 1. Pre-upsert the parent so we can use its id as parentItemId.
         //    Final upsert below will overwrite with complete fields.
+        const preUpsertStartedAt = Date.now();
         const preUpsert = await upsertItem(
           {
             id: existing?.id,
@@ -649,30 +711,36 @@ export async function processFeedItem({
             errorMessage: null,
           },
         );
+        addElapsed(timings, "dbWriteMs", preUpsertStartedAt);
         storedItemId = preUpsert.id;
 
         // 2. Persist each parsed event as a full child Item inside a single transaction.
         //    The transaction guarantees that an aggregation parent always has either 0 or
         //    all N child items; partial states can't be observed by readers.
+        const childPersistStartedAt = Date.now();
         const { childItemIds } = await persistAggregationChildItems({
           sourceId,
           parent: preUpsert,
           publishedAt,
           events,
         });
+        addElapsed(timings, "dbWriteMs", childPersistStartedAt);
 
         // 3. Assign each child to a cluster. Done outside the upsert transaction because
         //    assignItemToCluster acquires its own window-level lock and may invoke AI for
         //    cluster matching. Failures here are non-fatal: the child item exists, and the
         //    batch-level cluster_finalize pass will recompute affected clusters.
         for (const childId of childItemIds) {
+          const childClusterAssignmentStartedAt = Date.now();
           try {
             await assignItemToCluster(childId, {
               aiProvider,
               coordinator: clusterAssignmentCoordinator,
               aggregationEnabled,
             });
+            addElapsed(timings, "clusterAssignmentMs", childClusterAssignmentStartedAt);
           } catch (assignError) {
+            addElapsed(timings, "clusterAssignmentMs", childClusterAssignmentStartedAt);
             appendIssue(
               issues,
               assignError,
@@ -701,6 +769,9 @@ export async function processFeedItem({
         analysisStatus = "succeeded";
         aggregationSucceeded = true;
       } catch (aggregationError) {
+        if (!aggregationMeasured) {
+          addElapsed(timings, "aggregationMs", aggregationStartedAt);
+        }
         appendIssue(issues, aggregationError, "Unknown aggregation parsing error");
         aggregationParseStatus = AGGREGATION_PARSE_STATUS.failed;
         aggregationParseFailed = true;
@@ -713,12 +784,14 @@ export async function processFeedItem({
       // Skip the non-aggregation enrichContent / reuse-analysis branches below.
     } else if (!isAggregation && aggregationParseStatus === AGGREGATION_PARSE_STATUS.failed) {
       // Aggregation parse failed: run enrichContent on the parent as a regular item.
+      const analysisStartedAt = Date.now();
       try {
         const enrichment = await aiProvider.enrichContent(summaryText || originalTitle, {
           title: originalTitle,
           sourceName,
           translateTitle,
         });
+        addElapsed(timings, "analysisMs", analysisStartedAt);
         if (translateTitle) {
           translatedTitle = enrichment.translatedTitle?.trim() || originalTitle;
         }
@@ -731,6 +804,7 @@ export async function processFeedItem({
         analysisCompleted = true;
         analysisStatus = "succeeded";
       } catch (enrichError) {
+        addElapsed(timings, "analysisMs", analysisStartedAt);
         appendIssue(issues, enrichError, "Unknown ai enrichment error");
         moderationStatus = "allowed";
         moderationReason = null;
@@ -744,12 +818,14 @@ export async function processFeedItem({
     } else if (canReuseExistingCompletedAnalysis) {
       analysisStatus = "succeeded";
     } else {
+      const analysisStartedAt = Date.now();
       try {
         const enrichment = await aiProvider.enrichContent(summaryText || originalTitle, {
           title: originalTitle,
           sourceName,
           translateTitle,
         });
+        addElapsed(timings, "analysisMs", analysisStartedAt);
 
         if (translateTitle) {
           translatedTitle = enrichment.translatedTitle?.trim() || originalTitle;
@@ -764,6 +840,7 @@ export async function processFeedItem({
         analysisCompleted = true;
         analysisStatus = "succeeded";
       } catch (error) {
+        addElapsed(timings, "analysisMs", analysisStartedAt);
         appendIssue(issues, error, "Unknown ai enrichment error");
         moderationStatus = "allowed";
         moderationReason = null;
@@ -794,6 +871,7 @@ export async function processFeedItem({
     status = "processed";
   }
 
+  const dbWriteStartedAt = Date.now();
   const stored = await upsertItem(
     {
       id: storedItemId ?? undefined,
@@ -838,6 +916,7 @@ export async function processFeedItem({
       errorMessage: issues.length > 0 ? issues.join(" | ") : null,
     },
   );
+  addElapsed(timings, "dbWriteMs", dbWriteStartedAt);
 
   let affectedClusterId: string | null = null;
   let clusterAssignmentMetrics: NonNullable<ProcessedItemRecord["metrics"]>["clusterAssignment"] | undefined;
@@ -870,12 +949,14 @@ export async function processFeedItem({
       });
     }
 
+    const clusterAssignmentStartedAt = Date.now();
     const clusterAssignment = await assignItemToCluster(stored.id, {
       eventSignature,
       aiProvider,
       coordinator: clusterAssignmentCoordinator,
       aggregationEnabled,
     });
+    addElapsed(timings, "clusterAssignmentMs", clusterAssignmentStartedAt);
 
     clusterAssignmentMetrics = {
       exactMatch: clusterAssignment.matchSource === "exact_match",
@@ -906,6 +987,13 @@ export async function processFeedItem({
       analysisCompleted,
       analysisFailed,
       analysisFiltered: analysisCompleted && moderationStatus === "filtered",
+      updatedExisting: !isNew && moderationStatus !== "filtered",
+      fullTextFetchAttempted,
+      fullTextFetchReason: fullTextFetchAttempted ? fullTextFetchReason : undefined,
+      fullTextFetchLocalAttempted: fullTextFetchAttempted ? fullTextFetchMetrics.localAttempted : undefined,
+      fullTextFetchJinaAttempted: fullTextFetchAttempted ? fullTextFetchMetrics.jinaAttempted : undefined,
+      fullTextFetchSource: fullTextFetchAttempted ? fullTextFetchMetrics.used : undefined,
+      timings: finalizeTimings(),
       clusterAssignment: clusterAssignmentMetrics,
     },
   };

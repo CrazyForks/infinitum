@@ -15,25 +15,41 @@ export type IngestionStageTiming = {
 export type IngestionTimelineCounters = {
   sourceFetch: {
     sourcesFetched: number;
+    sourcesFailed: number;
     itemsFetched: number;
     fullTextFetched: number;
+    fullTextFetchAttempted: number;
+    fullTextFetchRssHtml: number;
+    fullTextFetchShortContent: number;
+    fullTextFetchLocalAttempted: number;
+    fullTextFetchJinaAttempted: number;
+    fullTextFetchLocalUsed: number;
+    fullTextFetchJinaUsed: number;
+    fullTextFetchDurationMs: number;
   };
   ruleFilter: {
     ruleFiltered: number;
     reusedExisting: number;
+    durationMs: number;
+    itemTotalDurationMs: number;
+    dbWriteDurationMs: number;
   };
   itemSummary: {
     completed: number;
     failed: number;
+    durationMs: number;
   };
   aggregationParsing: {
     parsed: number;
     failed: number;
     events: number;
+    durationMs: number;
   };
   itemAnalysis: {
     completed: number;
     filtered: number;
+    updatedExisting: number;
+    durationMs: number;
   };
   clusterAssignment: {
     exactMatch: number;
@@ -41,6 +57,7 @@ export type IngestionTimelineCounters = {
     aiMatch: number;
     skippedIncompleteSignature: number;
     newCluster: number;
+    durationMs: number;
   };
   clusterMerge: {
     baseClusters: number;
@@ -133,25 +150,41 @@ export function createIngestionTimelineCounters(): IngestionTimelineCounters {
   return {
     sourceFetch: {
       sourcesFetched: 0,
+      sourcesFailed: 0,
       itemsFetched: 0,
       fullTextFetched: 0,
+      fullTextFetchAttempted: 0,
+      fullTextFetchRssHtml: 0,
+      fullTextFetchShortContent: 0,
+      fullTextFetchLocalAttempted: 0,
+      fullTextFetchJinaAttempted: 0,
+      fullTextFetchLocalUsed: 0,
+      fullTextFetchJinaUsed: 0,
+      fullTextFetchDurationMs: 0,
     },
     ruleFilter: {
       ruleFiltered: 0,
       reusedExisting: 0,
+      durationMs: 0,
+      itemTotalDurationMs: 0,
+      dbWriteDurationMs: 0,
     },
     itemSummary: {
       completed: 0,
       failed: 0,
+      durationMs: 0,
     },
     aggregationParsing: {
       parsed: 0,
       failed: 0,
       events: 0,
+      durationMs: 0,
     },
     itemAnalysis: {
       completed: 0,
       filtered: 0,
+      updatedExisting: 0,
+      durationMs: 0,
     },
     clusterAssignment: {
       exactMatch: 0,
@@ -159,6 +192,7 @@ export function createIngestionTimelineCounters(): IngestionTimelineCounters {
       aiMatch: 0,
       skippedIncompleteSignature: 0,
       newCluster: 0,
+      durationMs: 0,
     },
     clusterMerge: {
       baseClusters: 0,
@@ -271,12 +305,26 @@ export function buildIngestionTaskTimeline(input: {
     {
       key: "source_fetch",
       label: "信息抓取",
-      status: stages.sourceSync ? (stages.sourceSync.finishedAt ? "succeeded" : "running") : "running",
+      status: resolveNodeStatusFromCounts({
+        stageTiming: stages.sourceSync,
+        successCount: Math.max(0, counters.sourceFetch.sourcesFetched - counters.sourceFetch.sourcesFailed),
+        failureCount: counters.sourceFetch.sourcesFailed,
+        allowEmptySuccess: true,
+      }),
       ...toNodeTiming(stages.sourceSync),
       metrics: [
         { label: "抓取源", value: counters.sourceFetch.sourcesFetched },
+        { label: "失败源", value: counters.sourceFetch.sourcesFailed },
         { label: "抓取内容", value: counters.sourceFetch.itemsFetched },
         { label: "正文补抓", value: counters.sourceFetch.fullTextFetched },
+        { label: "补抓尝试", value: counters.sourceFetch.fullTextFetchAttempted },
+        { label: "HTML补抓", value: counters.sourceFetch.fullTextFetchRssHtml },
+        { label: "短正文补抓", value: counters.sourceFetch.fullTextFetchShortContent },
+        { label: "本地尝试", value: counters.sourceFetch.fullTextFetchLocalAttempted },
+        { label: "Jina尝试", value: counters.sourceFetch.fullTextFetchJinaAttempted },
+        { label: "本地命中", value: counters.sourceFetch.fullTextFetchLocalUsed },
+        { label: "Jina命中", value: counters.sourceFetch.fullTextFetchJinaUsed },
+        { label: "补抓累计耗时ms", value: counters.sourceFetch.fullTextFetchDurationMs },
       ],
     },
     {
@@ -290,6 +338,9 @@ export function buildIngestionTaskTimeline(input: {
       metrics: [
         { label: "命中规则过滤", value: counters.ruleFilter.ruleFiltered },
         { label: "复用已有处理", value: counters.ruleFilter.reusedExisting },
+        { label: "累计耗时ms", value: counters.ruleFilter.durationMs },
+        { label: "条目累计耗时ms", value: counters.ruleFilter.itemTotalDurationMs },
+        { label: "DB写入累计耗时ms", value: counters.ruleFilter.dbWriteDurationMs },
       ],
     },
     {
@@ -305,6 +356,7 @@ export function buildIngestionTaskTimeline(input: {
       metrics: [
         { label: "完成", value: counters.itemSummary.completed },
         { label: "失败", value: counters.itemSummary.failed },
+        { label: "累计耗时ms", value: counters.itemSummary.durationMs },
       ],
     },
     {
@@ -321,6 +373,7 @@ export function buildIngestionTaskTimeline(input: {
         { label: "拆分成功", value: counters.aggregationParsing.parsed },
         { label: "拆分失败", value: counters.aggregationParsing.failed },
         { label: "子事件", value: counters.aggregationParsing.events },
+        { label: "累计耗时ms", value: counters.aggregationParsing.durationMs },
       ],
     },
     {
@@ -335,6 +388,8 @@ export function buildIngestionTaskTimeline(input: {
       metrics: [
         { label: "完成", value: counters.itemAnalysis.completed },
         { label: "过滤", value: counters.itemAnalysis.filtered },
+        { label: "更新/重处理", value: counters.itemAnalysis.updatedExisting },
+        { label: "累计耗时ms", value: counters.itemAnalysis.durationMs },
       ],
     },
     {
@@ -357,6 +412,7 @@ export function buildIngestionTaskTimeline(input: {
         { label: "AI归组", value: counters.clusterAssignment.aiMatch },
         { label: "跳过", value: counters.clusterAssignment.skippedIncompleteSignature },
         { label: "新建", value: counters.clusterAssignment.newCluster },
+        { label: "累计耗时ms", value: counters.clusterAssignment.durationMs },
       ],
     },
     {

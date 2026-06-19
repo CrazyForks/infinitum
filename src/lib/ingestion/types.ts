@@ -42,6 +42,11 @@ export type ArticleFetchContext = {
   rssContent?: string | null;
   rssExcerpt?: string | null;
   reason?: "short_content" | "rss_html";
+  metrics?: {
+    localAttempted?: boolean;
+    jinaAttempted?: boolean;
+    used?: "local" | "jina" | null;
+  };
 };
 
 export type ArticleFetcher = (url: string, context?: ArticleFetchContext) => Promise<string | null>;
@@ -63,6 +68,22 @@ export type ProcessedItemRecord = {
     analysisCompleted?: boolean;
     analysisFailed?: boolean;
     analysisFiltered?: boolean;
+    updatedExisting?: boolean;
+    fullTextFetchAttempted?: boolean;
+    fullTextFetchReason?: ArticleFetchContext["reason"];
+    fullTextFetchLocalAttempted?: boolean;
+    fullTextFetchJinaAttempted?: boolean;
+    fullTextFetchSource?: "local" | "jina" | null;
+    timings?: {
+      totalMs?: number;
+      fullTextFetchMs?: number;
+      ruleFilterMs?: number;
+      summaryMs?: number;
+      aggregationMs?: number;
+      analysisMs?: number;
+      clusterAssignmentMs?: number;
+      dbWriteMs?: number;
+    };
     clusterAssignment?: {
       exactMatch?: boolean;
       cheapRankDirect?: boolean;
@@ -90,6 +111,7 @@ export type RunIngestionOptions = {
   onProgress?: (snapshot: {
     status: "running" | "succeeded" | "failed" | "partial";
     sourceCount: number;
+    sourceFailureCount: number;
     itemCount: number;
     successCount: number;
     failureCount: number;

@@ -91,6 +91,7 @@ type SourceFetchMetadataUpdate = {
 class TaskRunCancellationError extends Error {
   snapshot: {
     sourceCount: number;
+    sourceFailureCount: number;
     itemCount: number;
     successCount: number;
     failureCount: number;
@@ -103,6 +104,7 @@ class TaskRunCancellationError extends Error {
 
   constructor(snapshot: {
     sourceCount: number;
+    sourceFailureCount: number;
     itemCount: number;
     successCount: number;
     failureCount: number;
@@ -353,6 +355,7 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
   const clusterAssignmentCoordinator = createClusterAssignmentCoordinator();
   const getProgressSnapshot = () => ({
     sourceCount: sources.length,
+    sourceFailureCount: timelineCounters.sourceFetch.sourcesFailed,
     itemCount: processableItemCount,
     successCount,
     failureCount,
@@ -459,6 +462,7 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
           }
         } catch (error) {
           const message = error instanceof Error ? error.message : "Unknown feed error";
+          timelineCounters.sourceFetch.sourcesFailed += 1;
           await markSourceHealth(source.id, {
             healthStatus: "failed",
             healthMessage: message,
@@ -563,6 +567,45 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
         timelineCounters.sourceFetch.fullTextFetched += 1;
       }
 
+      if (result?.metrics?.fullTextFetchAttempted) {
+        timelineCounters.sourceFetch.fullTextFetchAttempted += 1;
+      }
+
+      if (result?.metrics?.fullTextFetchReason === "rss_html") {
+        timelineCounters.sourceFetch.fullTextFetchRssHtml += 1;
+      }
+
+      if (result?.metrics?.fullTextFetchReason === "short_content") {
+        timelineCounters.sourceFetch.fullTextFetchShortContent += 1;
+      }
+
+      if (result?.metrics?.fullTextFetchLocalAttempted) {
+        timelineCounters.sourceFetch.fullTextFetchLocalAttempted += 1;
+      }
+
+      if (result?.metrics?.fullTextFetchJinaAttempted) {
+        timelineCounters.sourceFetch.fullTextFetchJinaAttempted += 1;
+      }
+
+      if (result?.metrics?.fullTextFetchSource === "local") {
+        timelineCounters.sourceFetch.fullTextFetchLocalUsed += 1;
+      }
+
+      if (result?.metrics?.fullTextFetchSource === "jina") {
+        timelineCounters.sourceFetch.fullTextFetchJinaUsed += 1;
+      }
+
+      if (result?.metrics?.timings) {
+        timelineCounters.sourceFetch.fullTextFetchDurationMs += Math.round(result.metrics.timings.fullTextFetchMs ?? 0);
+        timelineCounters.ruleFilter.durationMs += Math.round(result.metrics.timings.ruleFilterMs ?? 0);
+        timelineCounters.ruleFilter.itemTotalDurationMs += Math.round(result.metrics.timings.totalMs ?? 0);
+        timelineCounters.ruleFilter.dbWriteDurationMs += Math.round(result.metrics.timings.dbWriteMs ?? 0);
+        timelineCounters.itemSummary.durationMs += Math.round(result.metrics.timings.summaryMs ?? 0);
+        timelineCounters.aggregationParsing.durationMs += Math.round(result.metrics.timings.aggregationMs ?? 0);
+        timelineCounters.itemAnalysis.durationMs += Math.round(result.metrics.timings.analysisMs ?? 0);
+        timelineCounters.clusterAssignment.durationMs += Math.round(result.metrics.timings.clusterAssignmentMs ?? 0);
+      }
+
       if (result?.metrics?.blacklistFiltered) {
         timelineCounters.ruleFilter.ruleFiltered += 1;
       }
@@ -597,6 +640,10 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
 
       if (result?.metrics?.analysisFiltered) {
         timelineCounters.itemAnalysis.filtered += 1;
+      }
+
+      if (result?.metrics?.updatedExisting) {
+        timelineCounters.itemAnalysis.updatedExisting += 1;
       }
 
       if (result?.metrics?.clusterAssignment?.exactMatch) {
@@ -803,6 +850,7 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
   await options.onProgress?.({
     status: completedRun.status,
     sourceCount: completedRun.sourceCount,
+    sourceFailureCount: timelineCounters.sourceFetch.sourcesFailed,
     itemCount: completedRun.itemCount,
     successCount: completedRun.successCount,
     failureCount: completedRun.failureCount,
@@ -844,6 +892,7 @@ async function runExistingFetchRun(run: FetchRun, options: ResolvedRunOptions) {
       await options.onProgress?.({
         status: cancelledRun.status,
         sourceCount: cancelledRun.sourceCount,
+        sourceFailureCount: error.snapshot.sourceFailureCount,
         itemCount: cancelledRun.itemCount,
         successCount: cancelledRun.successCount,
         failureCount: cancelledRun.failureCount,
@@ -872,6 +921,7 @@ async function runExistingFetchRun(run: FetchRun, options: ResolvedRunOptions) {
     await options.onProgress?.({
       status: failedRun.status,
       sourceCount: failedRun.sourceCount,
+      sourceFailureCount: 0,
       itemCount: failedRun.itemCount,
       successCount: failedRun.successCount,
       failureCount: failedRun.failureCount,
@@ -916,22 +966,39 @@ export async function startIngestionTask(input?: { triggerType?: "scheduled" | "
 
 function buildTaskProgressLabel(snapshot: {
   sourceCount: number;
+  sourceFailureCount?: number;
   successCount: number;
   failureCount: number;
   itemCount: number;
   fullTextFetchedCount?: number;
 }) {
   const fullTextFetchedLabel = `，正文补抓 ${snapshot.fullTextFetchedCount ?? 0} 篇`;
+  const sourceFailureCount = snapshot.sourceFailureCount ?? 0;
+  const itemFailureCount = Math.max(0, snapshot.failureCount - sourceFailureCount);
+  const processedItemCount = Math.min(snapshot.itemCount, snapshot.successCount + itemFailureCount);
+  const failureLabel = sourceFailureCount > 0
+    ? `，内容失败 ${itemFailureCount} 项，源失败 ${sourceFailureCount} 个`
+    : `，失败 ${itemFailureCount} 项`;
 
   if (snapshot.sourceCount === 0) {
     return "正在同步信息源列表";
   }
 
   if (snapshot.itemCount === 0) {
-    return `已同步 ${snapshot.sourceCount} 个源，暂无可处理内容，失败 ${snapshot.failureCount} 项${fullTextFetchedLabel}`;
+    return `已同步 ${snapshot.sourceCount} 个源，暂无可处理内容${failureLabel}${fullTextFetchedLabel}`;
   }
 
-  return `已处理 ${snapshot.successCount + snapshot.failureCount}/${snapshot.itemCount} 条内容，来自 ${snapshot.sourceCount} 个源，失败 ${snapshot.failureCount} 项${fullTextFetchedLabel}`;
+  return `已处理 ${processedItemCount}/${snapshot.itemCount} 条内容，来自 ${snapshot.sourceCount} 个源${failureLabel}${fullTextFetchedLabel}`;
+}
+
+function calculateTaskProgressCurrent(snapshot: {
+  successCount: number;
+  failureCount: number;
+  sourceFailureCount?: number;
+  itemCount: number;
+}) {
+  const itemFailureCount = Math.max(0, snapshot.failureCount - (snapshot.sourceFailureCount ?? 0));
+  return Math.min(snapshot.itemCount, snapshot.successCount + itemFailureCount);
 }
 
 export async function runIngestionTask(taskRun: BackgroundTaskRun, options?: Partial<RunIngestionOptions>) {
@@ -947,6 +1014,7 @@ export async function runIngestionTask(taskRun: BackgroundTaskRun, options?: Par
   let latestStageTimings: TaskStageTimingSnapshot[] = [];
   let latestTaskTimeline: TaskTimelineNodeSnapshot[] = createInitialIngestionTaskTimeline();
   let latestFullTextFetchedCount = 0;
+  let latestSourceFailureCount = 0;
 
   await updateTaskRun(taskRun.id, {
     status: "running",
@@ -968,9 +1036,10 @@ export async function runIngestionTask(taskRun: BackgroundTaskRun, options?: Par
       latestStageTimings = snapshot.stageTimings ?? latestStageTimings;
       latestTaskTimeline = snapshot.taskTimeline ?? latestTaskTimeline;
       latestFullTextFetchedCount = snapshot.fullTextFetchedCount;
+      latestSourceFailureCount = snapshot.sourceFailureCount ?? latestSourceFailureCount;
       await updateTaskRun(taskRun.id, {
         status: snapshot.status,
-        progressCurrent: snapshot.successCount + snapshot.failureCount,
+        progressCurrent: calculateTaskProgressCurrent(snapshot),
         progressTotal: snapshot.itemCount,
         progressLabel: buildTaskProgressLabel(snapshot),
         itemsAdded: snapshot.itemsAdded,
@@ -991,13 +1060,17 @@ export async function runIngestionTask(taskRun: BackgroundTaskRun, options?: Par
 
   await updateTaskRun(taskRun.id, {
     status: completedRun.errorSummary === TASK_RUN_CANCELLED_MESSAGE ? "cancelled" : completedRun.status,
-    progressCurrent: completedRun.successCount + completedRun.failureCount,
+    progressCurrent: calculateTaskProgressCurrent({
+      ...completedRun,
+      sourceFailureCount: latestSourceFailureCount,
+    }),
     progressTotal: completedRun.itemCount,
     progressLabel:
       completedRun.errorSummary === TASK_RUN_CANCELLED_MESSAGE
         ? TASK_RUN_CANCELLED_LABEL
         : buildTaskProgressLabel({
             ...completedRun,
+            sourceFailureCount: latestSourceFailureCount,
             fullTextFetchedCount: latestFullTextFetchedCount,
           }),
     itemsAdded: completedRun.itemsAdded,

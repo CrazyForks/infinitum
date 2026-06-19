@@ -131,10 +131,19 @@ export function createConfiguredArticleFetcher(
         return null;
       }
 
+      if (context?.metrics) {
+        context.metrics.jinaAttempted = true;
+      }
       jinaCalls += 1;
       try {
         const content = await runJinaWithSlot(() => fetchJinaReaderContent(url, config, waitForJinaSlot));
-        return isValidExtractedContent(content, config.minChars) ? content : null;
+        if (!isValidExtractedContent(content, config.minChars)) {
+          return null;
+        }
+        if (context?.metrics) {
+          context.metrics.used = "jina";
+        }
+        return content;
       } catch (error) {
         console.error("[Article Fetcher] Jina Reader fetch failed:", error);
         return null;
@@ -142,9 +151,18 @@ export function createConfiguredArticleFetcher(
     };
 
     const tryLocal = async () => {
+      if (context?.metrics) {
+        context.metrics.localAttempted = true;
+      }
       try {
         const content = trimExtractedContent(await localFetcher(url, context), config.maxChars);
-        return isValidExtractedContent(content, config.minChars) ? content : null;
+        if (!isValidExtractedContent(content, config.minChars)) {
+          return null;
+        }
+        if (context?.metrics) {
+          context.metrics.used = "local";
+        }
+        return content;
       } catch (error) {
         console.error("[Article Fetcher] Local article fetch failed:", error);
         return null;
