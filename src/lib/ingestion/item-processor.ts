@@ -11,6 +11,7 @@ import {
   upsertItem,
 } from "@/lib/feed/repository";
 import { shouldTranslateTitle, stripHtmlTags } from "@/lib/feed/presentation";
+import { shouldSkipJinaForUrl } from "@/lib/ingestion/article";
 import { buildDedupeKeys, shouldFetchFullText } from "@/lib/ingestion/dedupe";
 import { evaluateRuleFilter } from "@/lib/ingestion/filtering";
 import {
@@ -512,7 +513,10 @@ export async function processFeedItem({
   }
 
   const shouldFetchBecauseContentIsShort = shouldFetchFullText(contentForFullTextDecision, fullTextFetchThreshold);
-  const shouldFetchBecauseRssHtml = contentExtraction.jinaEnabled && looksLikeHtmlContent(rssContent);
+  const shouldFetchBecauseRssHtml =
+    contentExtraction.jinaEnabled &&
+    !shouldSkipJinaForUrl(originalUrl) &&
+    looksLikeHtmlContent(rssContent);
 
   if (!fullText && (shouldFetchBecauseContentIsShort || shouldFetchBecauseRssHtml)) {
     try {

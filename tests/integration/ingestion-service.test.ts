@@ -275,6 +275,73 @@ describe("runIngestion", () => {
     expect(summaryInput).toContain("[内容过长，已截断用于摘要。]");
   });
 
+  it("does not fetch Weixin RSS HTML through the article fetcher when Jina is enabled", async () => {
+    const weixinHtmlContent = `<p>${"这是一段来自微信公众号 RSS 的正文内容。".repeat(40)}</p>`;
+    const parser = {
+      parseURL: vi.fn().mockResolvedValue({
+        items: [
+          {
+            title: "Weixin long HTML post",
+            link: "https://mp.weixin.qq.com/s/example",
+            isoDate: "2026-04-10T09:00:00.000Z",
+            "content:encoded": weixinHtmlContent,
+            contentSnippet: "Short excerpt",
+          },
+        ],
+      }),
+    };
+    const articleFetcher = vi.fn().mockResolvedValue("Jina warning page should not be stored.");
+    const summarizeItem = vi.fn().mockResolvedValue({summary: "RSS HTML 摘要", isAggregation: false});
+    const aiProvider = buildAiProviderMock({
+      summarizeItem,
+      enrichContent: vi.fn().mockResolvedValue({
+        translatedTitle: null,
+        moderationStatus: "allowed",
+        moderationReason: null,
+        moderationDetail: null,
+        qualityScore: 82,
+        qualityRationale: "内容完整",
+        eventSignature: buildEventSignature(),
+      }),
+    });
+
+    await runIngestion({
+      parser,
+      articleFetcher,
+      aiProvider,
+      sourceConfigs: [
+        {
+          name: "Weixin Feed",
+          rssUrl: "https://example.com/weixin-feed.xml",
+          siteUrl: "https://mp.weixin.qq.com",
+          enabled: true,
+          aiParsingEnabled: true,
+          aggregationEnabled: false,
+        },
+      ],
+      blacklist: [],
+      contentExtraction: {
+        jinaEnabled: true,
+        jinaBaseUrl: "https://r.jina.ai/",
+        jinaApiKey: null,
+        timeoutMs: 15_000,
+        concurrency: 1,
+        rpmLimit: 500,
+        maxPerRun: 20,
+        minChars: 20,
+        maxChars: 32_000,
+      },
+      now: new Date("2026-04-10T10:30:00.000Z"),
+    });
+
+    expect(articleFetcher).not.toHaveBeenCalled();
+    const storedItem = await prisma.item.findFirstOrThrow();
+    expect(storedItem.fullText).toBeNull();
+    expect(storedItem.rssContent).toBe(weixinHtmlContent);
+    expect(summarizeItem).toHaveBeenCalledTimes(1);
+    expect(summarizeItem.mock.calls[0]?.[0]).toContain("这是一段来自微信公众号 RSS 的正文内容");
+  });
+
   it("counts only processing-start eligible items in task progress and timeline", async () => {
     const parser = {
       parseURL: vi.fn().mockResolvedValue({

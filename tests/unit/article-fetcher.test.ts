@@ -61,6 +61,31 @@ describe("createConfiguredArticleFetcher", () => {
     expect(localFetcher).not.toHaveBeenCalled();
   });
 
+  it("uses local extraction for Weixin RSS HTML instead of Jina", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response("Jina should not be used."));
+    vi.stubGlobal("fetch", fetchMock);
+    const localFetcher = vi.fn().mockResolvedValue("Local Weixin article content with enough signal.");
+
+    const fetcher = createConfiguredArticleFetcher(buildConfig(), localFetcher);
+
+    await expect(fetcher("https://mp.weixin.qq.com/s/example", { reason: "rss_html" })).resolves.toBe(
+      "Local Weixin article content with enough signal.",
+    );
+    expect(localFetcher).toHaveBeenCalledWith("https://mp.weixin.qq.com/s/example", { reason: "rss_html" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does not fall back to Jina for Weixin pages when local extraction is too short", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response("Jina should not be used."));
+    vi.stubGlobal("fetch", fetchMock);
+    const localFetcher = vi.fn().mockResolvedValue("Too short");
+
+    const fetcher = createConfiguredArticleFetcher(buildConfig(), localFetcher);
+
+    await expect(fetcher("https://mp.weixin.qq.com/s/example")).resolves.toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("falls back to local content when Jina fails for RSS HTML", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response("bad gateway", { status: 502 }));
     vi.stubGlobal("fetch", fetchMock);

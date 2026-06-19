@@ -35,6 +35,15 @@ function isValidExtractedContent(value: string | null, minChars: number) {
   return Boolean(value && value.trim().length >= minChars);
 }
 
+export function shouldSkipJinaForUrl(url: string) {
+  try {
+    const hostname = new URL(url).hostname.toLowerCase();
+    return hostname === "weixin.qq.com" || hostname.endsWith(".weixin.qq.com");
+  } catch {
+    return false;
+  }
+}
+
 function buildJinaReaderUrl(baseUrl: string, targetUrl: string) {
   return `${baseUrl.replace(/\/+$/, "")}/${targetUrl}`;
 }
@@ -115,7 +124,7 @@ export function createConfiguredArticleFetcher(
 
   return async (url: string, context?: ArticleFetchContext) => {
     const shouldTryJinaFirst = context?.reason === "rss_html";
-    const canCallJina = () => config.maxPerRun > 0 && jinaCalls < config.maxPerRun;
+    const canCallJina = () => !shouldSkipJinaForUrl(url) && config.maxPerRun > 0 && jinaCalls < config.maxPerRun;
 
     const tryJina = async () => {
       if (!canCallJina()) {
