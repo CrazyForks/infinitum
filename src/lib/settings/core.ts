@@ -20,6 +20,7 @@ import type {
 import { normalizeKeyword, normalizeText, normalizeUrl } from "@/lib/utils/text";
 
 export const DEFAULT_MODEL_CONFIG_NAME = "默认模型配置";
+const LEGACY_DAILY_REPORT_PROMPT_MARKER = '"openingSummary":"...","sections":{"今日大事"';
 
 export type SourceInput = SourceConfig & {
   groupId?: string | null;
@@ -493,6 +494,8 @@ async function ensureModelAndPromptConfigsSeeded() {
     prisma.blacklistKeyword.count(),
   ]);
 
+  await upgradeLegacyDailyReportPrompt(fileConfig);
+
   if (
     modelConfigCount > 0 &&
     promptConfigCount > 0 &&
@@ -597,6 +600,23 @@ async function ensureModelAndPromptConfigsSeeded() {
           .map((keyword) => ({ keyword })),
       });
     }
+  });
+}
+
+async function upgradeLegacyDailyReportPrompt(fileConfig: RuntimeConfig) {
+  await prisma.promptConfig.updateMany({
+    where: {
+      type: PromptConfigType.daily_report,
+      isDefault: true,
+      templateJson: null,
+      systemPrompt: {
+        contains: LEGACY_DAILY_REPORT_PROMPT_MARKER,
+      },
+    },
+    data: {
+      systemPrompt: resolveSystemPromptByType(PromptConfigType.daily_report, fileConfig),
+      templateJson: DEFAULT_DAILY_REPORT_TEMPLATE_JSON,
+    },
   });
 }
 

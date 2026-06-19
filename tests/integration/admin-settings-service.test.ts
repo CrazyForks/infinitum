@@ -521,6 +521,32 @@ describe("admin settings service", () => {
     expect(config?.maxTokens).toBe(2048);
   });
 
+  it("upgrades legacy default daily_report prompt to the template-based format", async () => {
+    await getIngestionRuntimeConfig();
+    const legacyPrompt = `你是中文 AI 新闻日报编辑。只基于输入候选内容生成一份 Briefing 型 AI 日报。
+
+固定输出格式：
+{"openingSummary":"...","sections":{"今日大事":[{"topic":"...","summary":"...","whyImportant":"...","sourceIds":[1,2]}]},"closingThought":"..."}`;
+    await prisma.promptConfig.updateMany({
+      where: { type: "daily_report", isDefault: true },
+      data: {
+        systemPrompt: legacyPrompt,
+        templateJson: null,
+        maxTokens: 40960,
+      },
+    });
+
+    await ensureRuntimeConfigSeeded();
+
+    const config = await prisma.promptConfig.findFirst({
+      where: { type: "daily_report", isDefault: true },
+    });
+    expect(config?.templateJson).toBe(DEFAULT_DAILY_REPORT_TEMPLATE_JSON);
+    expect(config?.systemPrompt).toContain("固定输出格式：");
+    expect(config?.systemPrompt).toContain('"blocks"');
+    expect(config?.maxTokens).toBe(40960);
+  });
+
   it("preserves null daily_report systemPrompts when reseeding", async () => {
     await getIngestionRuntimeConfig();
     await prisma.promptConfig.updateMany({
