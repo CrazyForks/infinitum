@@ -636,6 +636,9 @@ describe("regenerateItemContent", () => {
     });
 
     expect(storedTaskRun.status).toBe("succeeded");
+    expect(storedTaskRun.progressLabel).toBe(
+      "已完成重新 AI 判定（非聚合 · 处理成功）",
+    );
     expect(storedTaskRun.aiCallCountActual).toBe(3);
     // 1 enrichContent + 1 summarizeItem + 1 possible parseAggregation + up to 2 summarizeCluster
     expect(storedTaskRun.aiCallCountEstimated).toBe(6);
@@ -756,6 +759,9 @@ describe("regenerateItemContent", () => {
     });
 
     expect(storedTaskRun.status).toBe("succeeded");
+    expect(storedTaskRun.progressLabel).toBe(
+      "已完成重新 AI 判定（聚合 · 子事件 2 · 处理成功）",
+    );
     expect(enrichContent).not.toHaveBeenCalled();
     expect(parseAggregation).toHaveBeenCalledTimes(1);
     expect(updatedParent).toMatchObject({

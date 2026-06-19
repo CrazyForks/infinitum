@@ -513,6 +513,37 @@ describe("TaskMonitorPanel", () => {
     expect(within(dialog).getByText("单条新闻标题")).toBeInTheDocument();
   });
 
+  it("shows reanalysis result in the completed task detail node", async () => {
+    renderWithProviders(
+      <TaskMonitorPanel
+        runningTasks={[]}
+        recentTasks={[
+          {
+            ...buildMonitorSnapshot().runningTasks[0],
+            id: "task-reanalyze-result",
+            kind: "item_reanalyze",
+            label: "重新 AI 判定",
+            entityId: "item-1",
+            entityTitle: "单条新闻标题",
+            status: "succeeded",
+            progressLabel: "已完成重新 AI 判定（聚合 · 子事件 2 · 处理成功）",
+            startedAt: "2026-04-21T00:00:00.000Z",
+            finishedAt: "2026-04-21T00:00:10.000Z",
+            stageTimings: [],
+            taskTimeline: [],
+          },
+        ]}
+        initialFocusTaskId="task-reanalyze-result"
+      />,
+    );
+
+    const dialog = await screen.findByRole("dialog", { name: "任务详情" });
+    expect(within(dialog).getByText("已完成")).toBeInTheDocument();
+    expect(
+      within(dialog).getByText("已完成重新 AI 判定（聚合 · 子事件 2 · 处理成功）"),
+    ).toBeInTheDocument();
+  });
+
   it("lists every task kind in the type filter and filters cleanup tasks precisely", async () => {
     const user = userEvent.setup();
     const baseTask = buildMonitorSnapshot().runningTasks[0];

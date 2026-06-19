@@ -68,6 +68,32 @@ type AggregationReparseResult = {
   errorMessage: string | null;
 };
 
+async function countActiveAggregationChildren(parentItemId: string) {
+  return prisma.item.count({
+    where: {
+      status: "processed",
+      moderationStatus: { not: "filtered" },
+      OR: [
+        { parentItemId },
+        {
+          aggregationSplitParents: {
+            some: { parentItemId },
+          },
+        },
+      ],
+    },
+  });
+}
+
+async function buildItemReanalyzeCompletionLabel(item: Item) {
+  if (item.isAggregation) {
+    const childCount = await countActiveAggregationChildren(item.id);
+    return `已完成重新 AI 判定（聚合 · 子事件 ${childCount} · 处理成功）`;
+  }
+
+  return "已完成重新 AI 判定（非聚合 · 处理成功）";
+}
+
 function getItemSourceText(item: Item): string {
   return item.fullText || item.rssContent || item.rssExcerpt || item.originalTitle;
 }
@@ -787,12 +813,13 @@ export async function executeItemReanalyzeTask(
       ...options,
       aiProvider: trackedAiProvider,
     });
+    const completionLabel = await buildItemReanalyzeCompletionLabel(item);
 
     await updateTaskRun(taskRun.id, {
       status: "succeeded",
       progressCurrent: 1,
       progressTotal: 1,
-      progressLabel: "已完成重新 AI 判定",
+      progressLabel: completionLabel,
       aiCallCountActual: aiUsage.snapshot().actual,
       aiCallCountEstimated: aiUsage.snapshot().estimated,
       aiCallBreakdown: aiUsage.snapshot().breakdown,
