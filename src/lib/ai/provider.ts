@@ -155,6 +155,7 @@ type CompletionResponseFormat = {
 };
 
 const DEFAULT_PARSED_AGGREGATION_MAX_EVENTS = 20;
+const TRANSIENT_MODEL_API_RETRY_COUNT = 1;
 
 type ModelApiCircuitState = {
   failures: number[];
@@ -177,6 +178,54 @@ function getClient(config: RuntimeConfig["modelApi"]): OpenAICompatibleClient | 
     baseURL: config.baseURL || undefined,
     defaultHeaders: config.customHeaders,
   }) as unknown as OpenAICompatibleClient;
+}
+
+function getErrorStatus(error: unknown): number | null {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  const maybeError = error as { status?: unknown; statusCode?: unknown; code?: unknown };
+  const rawStatus = maybeError.status ?? maybeError.statusCode ?? maybeError.code;
+
+  if (typeof rawStatus === "number" && Number.isInteger(rawStatus)) {
+    return rawStatus;
+  }
+
+  if (typeof rawStatus === "string" && /^\d+$/.test(rawStatus)) {
+    return Number(rawStatus);
+  }
+
+  return null;
+}
+
+function isTransientModelApiError(error: unknown) {
+  const status = getErrorStatus(error);
+  if (status !== null) {
+    return status === 408 || status === 429 || status >= 500;
+  }
+
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const maybeError = error as { code?: unknown; name?: unknown; message?: unknown };
+  const code = typeof maybeError.code === "string" ? maybeError.code.toLowerCase() : "";
+  const name = typeof maybeError.name === "string" ? maybeError.name.toLowerCase() : "";
+  const message = typeof maybeError.message === "string" ? maybeError.message.toLowerCase() : "";
+
+  return [
+    "abort",
+    "timeout",
+    "timed out",
+    "read timeout",
+    "gateway timeout",
+    "network",
+    "econnreset",
+    "etimedout",
+    "econnrefused",
+    "socket hang up",
+  ].some((pattern) => code.includes(pattern) || name.includes(pattern) || message.includes(pattern));
 }
 
 function getModelApiCircuitKey(config: RuntimeConfig["modelApi"]) {
@@ -948,6 +997,31 @@ async function completeText(
   return response.choices?.[0]?.message?.content?.trim() || "";
 }
 
+async function completeTextWithTransientRetry(
+  client: OpenAICompatibleClient,
+  config: RuntimeConfig["modelApi"],
+  promptConfig: PromptRuntimeConfig,
+  userContent: string,
+  options?: {
+    responseFormat?: CompletionResponseFormat;
+  },
+) {
+  let lastError: unknown = null;
+
+  for (let attempt = 0; attempt <= TRANSIENT_MODEL_API_RETRY_COUNT; attempt += 1) {
+    try {
+      return await completeText(client, config, promptConfig, userContent, options);
+    } catch (error) {
+      lastError = error;
+      if (attempt >= TRANSIENT_MODEL_API_RETRY_COUNT || !isTransientModelApiError(error)) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError;
+}
+
 export function createAiProvider(
   config: RuntimeConfig["modelApi"],
   promptOverrides?: PromptOverrides | null,
@@ -1037,7 +1111,7 @@ export function createAiProvider(
     }
 
     try {
-      const output = await completeText(selectedClient, selectedConfig, promptConfig, userContent, options);
+      const output = await completeTextWithTransientRetry(selectedClient, selectedConfig, promptConfig, userContent, options);
 
       if (!isDefaultModel && isSameModelApiConfig(selectedConfig, executionConfig)) {
         recordModelApiSuccess(executionConfig);
@@ -1060,7 +1134,7 @@ export function createAiProvider(
         throw error;
       }
 
-      return completeText(defaultClient, config, promptConfig, userContent, options);
+      return completeTextWithTransientRetry(defaultClient, config, promptConfig, userContent, options);
     }
   };
 

@@ -1057,6 +1057,58 @@ describe("ai provider", () => {
     expect(parsed.events.at(-1)?.eventSubject).toBe("Subject 19");
   });
 
+  it("retries aggregation parsing once after a transient model timeout", async () => {
+    const create = vi.fn()
+      .mockRejectedValueOnce(Object.assign(new Error("504 Gateway Timeout"), { status: 504 }))
+      .mockResolvedValueOnce({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                mainEvent: null,
+                events: [
+                  {
+                    eventType: "launch",
+                    eventSubject: "OpenAI",
+                    eventAction: "发布",
+                    eventObject: "Toolkit",
+                    eventDate: null,
+                    oneLiner: "OpenAI 发布 Toolkit",
+                    qualityScore: 92,
+                  },
+                ],
+              }),
+            },
+          },
+        ],
+      });
+
+    const provider = createAiProvider(
+      {
+        apiKey: "sk-test",
+        baseURL: "https://example.com/v1",
+        model: "test-model",
+      },
+      undefined,
+      {
+        chat: {
+          completions: {
+            create,
+          },
+        },
+      },
+    );
+
+    const parsed = await provider.parseAggregation("事件一。事件二。", {
+      title: "聚合简讯",
+      sourceName: "测试源",
+    });
+
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(parsed.events).toHaveLength(1);
+    expect(parsed.events[0]?.eventSubject).toBe("OpenAI");
+  });
+
   it("rejects invalid aggregation JSON instead of treating it as non-aggregation", async () => {
     const create = vi.fn().mockResolvedValue({
       choices: [
