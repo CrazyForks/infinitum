@@ -180,21 +180,15 @@ function hasAnalysisInputsChanged(
   existing: {
     originalTitle: string;
     publishedAt: Date;
-    rssExcerpt: string | null;
-    rssContent: string | null;
   },
   next: {
     originalTitle: string;
     publishedAt: Date;
-    rssExcerpt: string | null;
-    rssContent: string | null;
   },
 ) {
   return (
     existing.originalTitle !== next.originalTitle ||
-    existing.publishedAt.getTime() !== next.publishedAt.getTime() ||
-    (existing.rssExcerpt ?? null) !== (next.rssExcerpt ?? null) ||
-    (existing.rssContent ?? null) !== (next.rssContent ?? null)
+    existing.publishedAt.getTime() !== next.publishedAt.getTime()
   );
 }
 
@@ -345,8 +339,6 @@ export async function processFeedItem({
     ? hasAnalysisInputsChanged(existing, {
         originalTitle,
         publishedAt,
-        rssExcerpt,
-        rssContent,
       })
     : true;
 
