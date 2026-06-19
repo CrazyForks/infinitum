@@ -137,6 +137,12 @@ export async function requestRegeneration(itemId: string, target: "translation" 
   });
 }
 
+export async function requestReanalysis(itemId: string) {
+  return requestJsonWithMeta<TaskRunResponse>(`/api/admin/items/${itemId}/reanalyze`, {
+    method: "POST",
+  });
+}
+
 export async function joinCluster(itemId: string, clusterId: string) {
   return requestJsonWithMeta<ErrorResponse>(`/api/admin/items/${itemId}/join-cluster`, {
     method: "POST",

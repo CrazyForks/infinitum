@@ -25,6 +25,7 @@ import {
   requestClusterOptions,
   requestFeed,
   requestIngestionStatus,
+  requestReanalysis,
   requestRegeneration,
   voteCluster,
 } from "@/components/feed/feed-panel.api";
@@ -903,6 +904,35 @@ export function FeedPanel({
     });
   };
 
+  const runReanalysis = () => {
+    if (!regenerateDialog) {
+      return;
+    }
+
+    const { itemId, shouldAnnounceClusterRefresh } = regenerateDialog;
+    setRegenerateDialog(null);
+
+    startTransition(async () => {
+      const result = await requestReanalysis(itemId);
+
+      if (!result.ok || result.data.error) {
+        setRefreshFeedback({ tone: "error", message: result.data.error ?? "创建重新 AI 判定任务失败，请稍后重试。" });
+        return;
+      }
+
+      if (!result.data.taskRun) {
+        setRefreshFeedback({ tone: "error", message: "未返回后台任务信息。" });
+        return;
+      }
+
+      openTaskDetailInNewWindow(result.data.taskRun.id);
+
+      if (shouldAnnounceClusterRefresh) {
+        setRefreshFeedback(null);
+      }
+    });
+  };
+
   const openRegenerateDialog = (
     itemId: string,
     canRegenerateTranslation: boolean,
@@ -920,6 +950,11 @@ export function FeedPanel({
 
   const confirmRegeneration = () => {
     if (!regenerateDialog) {
+      return;
+    }
+
+    if (regenerateMode === "reanalyze") {
+      runReanalysis();
       return;
     }
 
@@ -2318,10 +2353,11 @@ export function FeedPanel({
                 className="w-full"
                 options={[
                   { value: "summary", label: "仅摘要" },
+                  { value: "reanalyze", label: "重新 AI 判定" },
                   ...(regenerateDialog?.canRegenerateTranslation
                     ? [
                         { value: "translation", label: "仅翻译" },
-                        { value: "both", label: "全部重新生成" },
+                        { value: "both", label: "重新翻译&摘要" },
                       ]
                     : []),
                 ]}
@@ -2363,7 +2399,7 @@ export function FeedPanel({
                 options={[
                   { value: "summary", label: "仅摘要" },
                   { value: "translation", label: "仅翻译" },
-                  { value: "both", label: "全部重新生成" },
+                  { value: "both", label: "重新翻译&摘要" },
                 ]}
               />
             </FormField>

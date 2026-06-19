@@ -1574,6 +1574,63 @@ describe("FeedPanel", () => {
     expect(screen.getByText("摘要内容")).toBeInTheDocument();
   });
 
+  it("can queue item reanalysis from the regenerate dialog", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
+      const url = getFetchUrl(input);
+
+      if (url === "/api/admin/items/item-1/reanalyze") {
+        expect(init?.method).toBe("POST");
+
+        return new Response(
+          JSON.stringify({
+            taskRun: {
+              id: "task-reanalyze-1",
+            },
+          }),
+          { status: 202 },
+        );
+      }
+
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <FeedPanel
+        initialItems={initialEntries}
+        initialRange="7d"
+        initialSort="time_desc"
+        initialStartDate={null}
+        initialEndDate={null}
+        initialNextCursor={null}
+        initialStatus={null}
+        isAdmin={true}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "重新生成内容" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "选择重新生成内容" });
+    await selectFilterOption(user, "重新生成范围", "重新 AI 判定");
+    await user.click(within(dialog).getByRole("button", { name: "确认" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/admin/items/item-1/reanalyze", {
+        method: "POST",
+      });
+    });
+
+    await waitFor(() => {
+      expect(openMock).toHaveBeenCalledWith(
+        "/admin?tab=monitoring&section=tasks&task=task-reanalyze-1",
+        "_blank",
+        "noopener,noreferrer",
+      );
+    });
+  });
+
   it("lets admins search clusters by title and manually join a singleton cluster from a homepage card", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
@@ -1880,7 +1937,7 @@ describe("FeedPanel", () => {
 
     await user.click(screen.getByRole("button", { name: "重新生成内容" }));
     const dialog = await screen.findByRole("dialog", { name: "选择重新生成内容" });
-    await selectFilterOption(user, "重新生成范围", "全部重新生成");
+    await selectFilterOption(user, "重新生成范围", "重新翻译&摘要");
     await user.click(within(dialog).getByRole("button", { name: "确认" }));
 
     await waitFor(() => {

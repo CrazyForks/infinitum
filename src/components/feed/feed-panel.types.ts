@@ -59,7 +59,7 @@ export type RegenerateDialogState = {
   shouldAnnounceClusterRefresh?: boolean;
 } | null;
 
-export type RegenerateMode = "summary" | "translation" | "both";
+export type RegenerateMode = "summary" | "translation" | "both" | "reanalyze";
 
 export type AssignClusterDialogState = {
   itemId: string;
