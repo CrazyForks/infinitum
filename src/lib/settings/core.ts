@@ -449,9 +449,19 @@ const ALL_PROMPT_TYPES = [
   PromptConfigType.cluster_match,
   PromptConfigType.cluster_merge,
   PromptConfigType.daily_report,
-  PromptConfigType.daily_report_refinement_chat,
-  PromptConfigType.daily_report_refinement_generate,
 ] as const;
+
+const REMOVED_PROMPT_CONFIG_TYPES = [
+  "daily_report_refinement_chat",
+  "daily_report_refinement_generate",
+] as const;
+
+async function deleteRemovedPromptConfigTypes() {
+  await prisma.$executeRawUnsafe(
+    `DELETE FROM "prompt_configs" WHERE "type" IN (${REMOVED_PROMPT_CONFIG_TYPES.map(() => "?").join(", ")})`,
+    ...REMOVED_PROMPT_CONFIG_TYPES,
+  );
+}
 
 function resolveSystemPromptByType(type: PromptConfigType, fileConfig: RuntimeConfig): string {
   switch (type) {
@@ -469,14 +479,12 @@ function resolveSystemPromptByType(type: PromptConfigType, fileConfig: RuntimeCo
       return fileConfig.prompts.clusterMerge;
     case PromptConfigType.daily_report:
       return fileConfig.prompts.dailyReport;
-    case PromptConfigType.daily_report_refinement_chat:
-      return fileConfig.prompts.dailyReportRefinementChat;
-    case PromptConfigType.daily_report_refinement_generate:
-      return fileConfig.prompts.dailyReportRefinementGenerate;
   }
 }
 
 async function ensureModelAndPromptConfigsSeeded() {
+  await deleteRemovedPromptConfigTypes();
+
   const fileConfig = getRuntimeConfig();
   const [modelConfigCount, promptConfigCount, sourceCount, blacklistCount] = await Promise.all([
     prisma.modelApiConfig.count(),

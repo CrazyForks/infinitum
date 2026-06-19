@@ -2,34 +2,23 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { prisma } from "@/lib/db";
 import {
-  addDailyReportRefinementSources,
   executeDailyReportTask,
   generateDailyReport,
-  getLatestDailyReportRefinementSession,
-  saveDailyReportRefinementCandidate,
-  searchDailyReportRefinementSources,
-  streamDailyReportRefinement,
 } from "@/lib/daily-report/service";
 import { getDailyReportByDate, listDailyReportCandidates } from "@/lib/daily-report/repository";
 
 const {
   generateDailyReportMock,
   repairDailyReportJsonMock,
-  streamDailyReportRefinementMock,
-  streamDailyReportRefinementChatMock,
 } = vi.hoisted(() => ({
   generateDailyReportMock: vi.fn(),
   repairDailyReportJsonMock: vi.fn(),
-  streamDailyReportRefinementMock: vi.fn(),
-  streamDailyReportRefinementChatMock: vi.fn(),
 }));
 
 vi.mock("@/lib/ai/provider", () => ({
   createAiProvider: vi.fn(() => ({
     generateDailyReport: generateDailyReportMock,
     repairDailyReportJson: repairDailyReportJsonMock,
-    streamDailyReportRefinement: streamDailyReportRefinementMock,
-    streamDailyReportRefinementChat: streamDailyReportRefinementChatMock,
   })),
 }));
 
@@ -37,115 +26,70 @@ const REPORT_DATE = "2026-04-24";
 
 function buildDailyReportOutput() {
   return JSON.stringify({
-    openingSummary: "今天 AI 生态的重点变化集中在模型发布、开发者工具更新与工程实践调整，值得关注其对产品迭代和开发流程的影响。",
-    sections: {
-      今日大事: [{
-        topic: "OpenAI 发布新模型",
-        summary: "OpenAI 发布新模型，带来更强的推理和工具调用能力，短期内会影响开发者选型和产品功能设计。",
-        whyImportant: "模型能力继续上探",
-        sourceIds: [1],
-      }],
-      变更与实践: [{
-        topic: "开发者工具更新",
-        action: "关注 CLI 与 IDE 工作流是否需要调整。",
-        sourceIds: [2],
-      }],
-      安全与风险: [],
-      开源与工具: [],
-      数据与洞察: [],
-    },
-    closingThought: "整体来看，今天的主线仍是模型能力与工程工具继续耦合，后续需要观察实际开发效率是否随之改善。",
+    blocks: [
+      {
+        type: "text",
+        title: "摘要",
+        body: "今天 AI 生态的重点变化集中在模型发布、开发者工具更新与工程实践调整，值得关注其对产品迭代和开发流程的影响。",
+      },
+      {
+        type: "section",
+        title: "今日大事",
+        items: [{
+          title: "OpenAI 发布新模型",
+          body: "OpenAI 发布新模型，带来更强的推理和工具调用能力，短期内会影响开发者选型和产品功能设计。",
+          notes: [{ label: "重点", text: "模型能力继续上探" }],
+          sourceIds: [1],
+        }],
+      },
+      {
+        type: "section",
+        title: "变更与实践",
+        items: [{
+          title: "开发者工具更新",
+          body: "开发者工具更新后，团队需要关注 CLI 与 IDE 工作流是否需要调整，以降低后续迁移成本。",
+          sourceIds: [2],
+        }],
+      },
+      {
+        type: "text",
+        title: "趋势观察",
+        body: "整体来看，今天的主线仍是模型能力与工程工具继续耦合，后续需要观察实际开发效率是否随之改善。",
+      },
+    ],
   });
 }
 
 function buildDailyReportOutputWithRepeatedSources() {
   const parsed = JSON.parse(buildDailyReportOutput()) as {
-    openingSummary: string;
-    sections: {
-      今日大事: Array<{ topic: string; summary: string; whyImportant: string; sourceIds: number[] }>;
-      变更与实践: Array<{ topic: string; action: string; sourceIds: number[] }>;
-      安全与风险: unknown[];
-      开源与工具: unknown[];
-      数据与洞察: Array<{ topic: string; keyNumbers: string; reason: string; sourceIds: number[] }>;
-    };
-    closingThought: string;
+    blocks: Array<
+      | { type: "text"; title: string; body: string }
+      | { type: "section"; title: string; items: Array<{ title: string; body: string; notes?: unknown[]; sourceIds: number[] }> }
+    >;
   };
 
   return JSON.stringify({
     ...parsed,
-    sections: {
-      ...parsed.sections,
-      变更与实践: [{
-        topic: "OpenAI 发布新模型实践影响",
-        action: "跟进同一事件对开发工作流的影响。",
-        sourceIds: [1],
-      }],
-      数据与洞察: [{
-        topic: "开发者工具更新数据",
-        keyNumbers: "2 个来源编号去重",
-        reason: "同一来源编号即使跨栏目出现也只应计为一个逻辑引用。",
-        sourceIds: [2],
-      }],
-    },
+    blocks: parsed.blocks.map((block) => {
+      if (block.type !== "section" || block.title !== "变更与实践") return block;
+      return {
+        ...block,
+        items: [
+          {
+            title: "OpenAI 发布新模型实践影响",
+            body: "跟进同一事件对开发工作流的影响，避免只按模型发布本身判断后续工程投入。",
+            sourceIds: [1],
+          },
+          {
+            title: "开发者工具更新数据",
+            body: "同一来源编号即使跨栏目出现也只应计为一个逻辑引用，避免日报来源数量被重复放大。",
+            notes: [{ label: "关键数字", text: "2 个来源编号去重" }],
+            sourceIds: [2],
+          },
+        ],
+      };
+    }),
   });
-}
-
-function buildRefinedDailyReportOutput() {
-  const parsed = JSON.parse(buildDailyReportOutput()) as {
-    openingSummary: string;
-    sections: {
-      今日大事: Array<{ topic: string; summary: string; whyImportant: string; sourceIds: number[] }>;
-      变更与实践: Array<{ topic: string; action: string; sourceIds: number[] }>;
-      安全与风险: unknown[];
-      开源与工具: unknown[];
-      数据与洞察: unknown[];
-    };
-    closingThought: string;
-  };
-
-  return JSON.stringify({
-    ...parsed,
-    openingSummary: "微调后，今天 AI 生态的重点变化被重新组织为更紧凑的摘要，强调模型发布与开发者工具更新对产品迭代的影响。",
-    sections: {
-      ...parsed.sections,
-      今日大事: [{
-        ...parsed.sections.今日大事[0],
-        summary: "微调后的 OpenAI 新模型条目更聚焦推理能力和工具调用变化，便于管理员快速判断发布价值。",
-      }],
-    },
-  });
-}
-
-function buildRefinedDailyReportOutputWithRecalledSource() {
-  const parsed = JSON.parse(buildDailyReportOutput()) as {
-    openingSummary: string;
-    sections: {
-      今日大事: Array<{ topic: string; summary: string; whyImportant: string; sourceIds: number[] }>;
-      变更与实践: Array<{ topic: string; action: string; sourceIds: number[] }>;
-      安全与风险: unknown[];
-      开源与工具: Array<{ topic: string; reason: string; sourceIds: number[] }>;
-      数据与洞察: unknown[];
-    };
-    closingThought: string;
-  };
-
-  return JSON.stringify({
-    ...parsed,
-    sections: {
-      ...parsed.sections,
-      开源与工具: [{
-        topic: "Claude Code 子代理工作流",
-        reason: "新增召回来源显示 Claude Code 子代理工作流正在改善复杂任务拆分和上下文协作。",
-        sourceIds: [4],
-      }],
-    },
-  });
-}
-
-function createStreamFromText(text: string) {
-  return (async function* stream() {
-    yield text;
-  })();
 }
 
 function getLastGeneratedDailyReportArticles() {
@@ -606,10 +550,6 @@ describe("daily report service", () => {
   beforeEach(async () => {
     generateDailyReportMock.mockReset();
     repairDailyReportJsonMock.mockReset();
-    streamDailyReportRefinementMock.mockReset();
-    streamDailyReportRefinementChatMock.mockReset();
-    await prisma.dailyReportRefinementMessage.deleteMany();
-    await prisma.dailyReportRefinementSession.deleteMany();
     await prisma.dailyReportSource.deleteMany();
     await prisma.dailyReport.deleteMany();
     await prisma.item.deleteMany();
@@ -675,24 +615,37 @@ describe("daily report service", () => {
   it("counts expanded cluster items as report sources", async () => {
     await createClusteredReportCandidates();
     generateDailyReportMock.mockResolvedValue(JSON.stringify({
-      openingSummary: "今天的 AI 生态重点集中在多来源确认的模型发布，多个独立来源围绕同一事件提供了互补信息，适合用于验证日报引用计数。",
-      sections: {
-        今日大事: [{
-          topic: "多来源模型发布",
-          summary: "多家来源确认同一个模型发布事件。",
-          whyImportant: "多源确认",
-          sourceIds: [1],
-        }],
-        变更与实践: [{
-          topic: "引用计数口径调整",
-          action: "按展开后的实际单条内容核算日报来源数量。",
-          sourceIds: [1],
-        }],
-        安全与风险: [],
-        开源与工具: [],
-        数据与洞察: [],
-      },
-      closingThought: "多来源引用应按展开后的单条内容计数，避免把一个聚合候选误读为一个来源。",
+      blocks: [
+        {
+          type: "text",
+          title: "摘要",
+          body: "今天的 AI 生态重点集中在多来源确认的模型发布，多个独立来源围绕同一事件提供了互补信息，适合用于验证日报引用计数。",
+        },
+        {
+          type: "section",
+          title: "今日大事",
+          items: [{
+            title: "多来源模型发布",
+            body: "多家来源确认同一个模型发布事件，可以用于观察聚合候选展开后的来源数量是否准确。",
+            notes: [{ label: "重点", text: "多源确认" }],
+            sourceIds: [1],
+          }],
+        },
+        {
+          type: "section",
+          title: "变更与实践",
+          items: [{
+            title: "引用计数口径调整",
+            body: "按展开后的实际单条内容核算日报来源数量，避免把一个聚合候选误读为一个来源。",
+            sourceIds: [1],
+          }],
+        },
+        {
+          type: "text",
+          title: "趋势观察",
+          body: "多来源引用应按展开后的单条内容计数，避免把一个聚合候选误读为一个来源。",
+        },
+      ],
     }));
 
     const result = await generateDailyReport({ date: REPORT_DATE, force: true });
@@ -984,510 +937,6 @@ describe("daily report service", () => {
     await generateDailyReport({ date: REPORT_DATE, force: true });
 
     expect(getLastGeneratedDailyReportArticles().map((article) => article.title)).toContain("Anthropic 发布 Claude 4");
-  });
-
-  it("streams a refinement candidate and saves it to a draft report", async () => {
-    await createReportCandidates();
-    generateDailyReportMock.mockResolvedValue(buildDailyReportOutput());
-    const result = await generateDailyReport({ date: REPORT_DATE, force: true });
-    streamDailyReportRefinementMock.mockReturnValue(createStreamFromText(buildRefinedDailyReportOutput()));
-
-    const events = [];
-    for await (const event of streamDailyReportRefinement({
-      date: REPORT_DATE,
-      instruction: "压缩开头摘要，保留来源。",
-      mode: "generate",
-    })) {
-      events.push(event);
-    }
-
-    const candidate = events.find((event) => event.event === "candidate");
-    expect(candidate).toMatchObject({
-      event: "candidate",
-      messageId: expect.any(String),
-    });
-    expect(streamDailyReportRefinementMock).toHaveBeenCalledWith(expect.objectContaining({
-      currentContent: expect.objectContaining({
-        openingSummary: expect.stringContaining("今天 AI 生态"),
-      }),
-      sourceRegistry: expect.arrayContaining([
-        expect.objectContaining({ sourceNumber: 1, summary: "OpenAI 发布新模型摘要" }),
-      ]),
-      instruction: "压缩开头摘要，保留来源。",
-    }));
-
-    const sessionEvent = events.find((event) => event.event === "session");
-    if (!sessionEvent || sessionEvent.event !== "session" || !candidate || candidate.event !== "candidate") {
-      throw new Error("missing refinement events");
-    }
-
-    await saveDailyReportRefinementCandidate({
-      date: REPORT_DATE,
-      sessionId: sessionEvent.sessionId,
-      messageId: candidate.messageId,
-    });
-
-    const report = await prisma.dailyReport.findUniqueOrThrow({
-      where: { id: result.report?.id },
-    });
-    const savedSources = await prisma.dailyReportSource.findMany({
-      where: { dailyReportId: report.id },
-      orderBy: { sourceNumber: "asc" },
-    });
-
-    expect(report.openingSummary).toContain("微调后");
-    expect(report.renderedMarkdown).toContain("微调后的 OpenAI 新模型条目");
-    expect(savedSources.map((source) => source.sourceNumber)).toEqual([1, 2]);
-  });
-
-  it("restores generated refinement candidates without exposing raw JSON as chat text", async () => {
-    await createReportCandidates();
-    generateDailyReportMock.mockResolvedValue(buildDailyReportOutput());
-    await generateDailyReport({ date: REPORT_DATE, force: true });
-    streamDailyReportRefinementMock.mockReturnValue(createStreamFromText(buildRefinedDailyReportOutput()));
-
-    const events = [];
-    for await (const event of streamDailyReportRefinement({
-      date: REPORT_DATE,
-      instruction: "确认，生成候选稿。",
-      mode: "generate",
-    })) {
-      events.push(event);
-    }
-
-    const candidate = events.find((event) => event.event === "candidate");
-    if (!candidate || candidate.event !== "candidate") {
-      throw new Error("missing refinement candidate");
-    }
-
-    const restoredSession = await getLatestDailyReportRefinementSession({ date: REPORT_DATE });
-
-    expect(restoredSession.session?.candidate).toMatchObject({
-      messageId: candidate.messageId,
-      content: expect.objectContaining({
-        openingSummary: expect.stringContaining("微调后"),
-      }),
-      renderedMarkdown: expect.stringContaining("微调后的 OpenAI 新模型条目"),
-    });
-    expect(restoredSession.session?.messages).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        id: candidate.messageId,
-        role: "assistant",
-        content: "候选稿已生成，可在预览区检查后保存。",
-      }),
-    ]));
-    expect(restoredSession.session?.messages.some((message) => message.content.includes("\"openingSummary\""))).toBe(false);
-  });
-
-  it("stores chat refinement turns without generating a candidate", async () => {
-    await createReportCandidates();
-    generateDailyReportMock.mockResolvedValue(buildDailyReportOutput());
-    await generateDailyReport({ date: REPORT_DATE, force: true });
-    streamDailyReportRefinementChatMock.mockReturnValue(createStreamFromText("可以先把安全风险提前，但需要确认是否压缩今日大事。"));
-
-    const events = [];
-    for await (const event of streamDailyReportRefinement({
-      date: REPORT_DATE,
-      instruction: "先讨论一下结构调整。",
-      mode: "chat",
-    })) {
-      events.push(event);
-    }
-
-    expect(events).toContainEqual(expect.objectContaining({
-      event: "message_delta",
-      text: expect.stringContaining("安全风险"),
-    }));
-    expect(events.some((event) => event.event === "candidate")).toBe(false);
-    expect(streamDailyReportRefinementChatMock).toHaveBeenCalledWith(expect.objectContaining({
-      currentContent: expect.objectContaining({
-        openingSummary: expect.stringContaining("今天 AI 生态"),
-      }),
-      sourceRegistry: expect.arrayContaining([
-        expect.objectContaining({ sourceNumber: 1, summary: "OpenAI 发布新模型摘要" }),
-      ]),
-      instruction: "先讨论一下结构调整。",
-    }));
-
-    const messages = await prisma.dailyReportRefinementMessage.findMany({
-      orderBy: { createdAt: "asc" },
-    });
-    expect(messages.map((message) => message.role)).toEqual(["user", "assistant"]);
-    expect(messages[1].candidateJson).toBeNull();
-  });
-
-  it("recalls unselected sources by keyword and allows generated candidates to cite added sources", async () => {
-    await createReportCandidates();
-    generateDailyReportMock.mockResolvedValue(buildDailyReportOutput());
-    const result = await generateDailyReport({ date: REPORT_DATE, force: true });
-
-    const selectedSearch = await searchDailyReportRefinementSources({
-      date: REPORT_DATE,
-      query: "OpenAI",
-    });
-    expect(selectedSearch.sources).toEqual([]);
-
-    const search = await searchDailyReportRefinementSources({
-      date: REPORT_DATE,
-      sessionId: selectedSearch.sessionId,
-      query: "Claude",
-    });
-    expect(search.sources).toHaveLength(1);
-    expect(search.sources[0]).toMatchObject({
-      sourceKey: expect.stringMatching(/^item:/),
-      title: "Claude Code 支持子代理工作流",
-    });
-
-    const selectedNumberSearch = await searchDailyReportRefinementSources({
-      date: REPORT_DATE,
-      sessionId: selectedSearch.sessionId,
-      query: "#1",
-    });
-    expect(selectedNumberSearch.sources).toEqual([]);
-
-    const numberSearch = await searchDailyReportRefinementSources({
-      date: REPORT_DATE,
-      sessionId: selectedSearch.sessionId,
-      query: "#4",
-    });
-    expect(numberSearch.sources).toHaveLength(1);
-    expect(numberSearch.sources[0]).toMatchObject({
-      candidateNumber: 4,
-      title: "Claude Code 支持子代理工作流",
-    });
-
-    const added = await addDailyReportRefinementSources({
-      date: REPORT_DATE,
-      sessionId: search.sessionId,
-      sourceKeys: [`parsed:${search.sources[0].itemId}`],
-    });
-    expect(added.sourceRegistry).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        sourceNumber: 4,
-        sourceKey: search.sources[0].sourceKey,
-        title: "Claude Code 支持子代理工作流",
-      }),
-    ]));
-
-    const restoredSession = await getLatestDailyReportRefinementSession({ date: REPORT_DATE });
-    expect(restoredSession.session).toMatchObject({
-      id: search.sessionId,
-      sourceRegistry: expect.arrayContaining([
-        expect.objectContaining({
-          sourceNumber: 4,
-          title: "Claude Code 支持子代理工作流",
-        }),
-      ]),
-    });
-
-    streamDailyReportRefinementChatMock.mockReturnValue(createStreamFromText("可以把 #4 纳入开源与工具，作为复杂任务拆分能力的补充背景。"));
-    for await (const event of streamDailyReportRefinement({
-      date: REPORT_DATE,
-      sessionId: search.sessionId,
-      instruction: "先基于刚加入的 Claude Code 来源讨论怎么补充。",
-      mode: "chat",
-    })) {
-      expect(event.event).toBeTruthy();
-      // Drain stream.
-    }
-
-    expect(streamDailyReportRefinementChatMock).toHaveBeenCalledWith(expect.objectContaining({
-      sourceRegistry: expect.arrayContaining([
-        expect.objectContaining({
-          sourceNumber: 4,
-          title: "Claude Code 支持子代理工作流",
-        }),
-      ]),
-      messages: expect.arrayContaining([
-        expect.objectContaining({
-          role: "system",
-          content: expect.stringContaining("#4 Claude Code 支持子代理工作流"),
-        }),
-      ]),
-    }));
-
-    streamDailyReportRefinementMock.mockReturnValue(createStreamFromText(buildRefinedDailyReportOutputWithRecalledSource()));
-    const events = [];
-    for await (const event of streamDailyReportRefinement({
-      date: REPORT_DATE,
-      sessionId: search.sessionId,
-      instruction: "把 Claude Code 子代理补到开源与工具。",
-      mode: "generate",
-    })) {
-      events.push(event);
-    }
-
-    const candidate = events.find((event) => event.event === "candidate");
-    if (!candidate || candidate.event !== "candidate") {
-      throw new Error("missing refinement candidate");
-    }
-
-    await saveDailyReportRefinementCandidate({
-      date: REPORT_DATE,
-      sessionId: search.sessionId,
-      messageId: candidate.messageId,
-    });
-
-    const savedSources = await prisma.dailyReportSource.findMany({
-      where: { dailyReportId: result.report?.id },
-      orderBy: { sourceNumber: "asc" },
-    });
-    expect(savedSources.map((source) => source.sourceNumber)).toEqual([1, 2, 4]);
-    expect(savedSources.at(-1)).toMatchObject({
-      title: "Claude Code 支持子代理工作流",
-      sourceSummary: "Claude Code 支持子代理工作流摘要",
-    });
-
-    const restoredAfterSave = await getLatestDailyReportRefinementSession({ date: REPORT_DATE });
-    expect(restoredAfterSave.session).toMatchObject({
-      id: search.sessionId,
-      sourceRegistry: expect.arrayContaining([
-        expect.objectContaining({
-          sourceNumber: 4,
-          title: "Claude Code 支持子代理工作流",
-        }),
-      ]),
-      messages: expect.arrayContaining([
-        expect.objectContaining({
-          role: "user",
-          content: "先基于刚加入的 Claude Code 来源讨论怎么补充。",
-        }),
-        expect.objectContaining({
-          role: "assistant",
-          content: expect.stringContaining("可以把 #4 纳入开源与工具"),
-        }),
-      ]),
-    });
-  });
-
-  it("uses aggregation child items for daily report candidates without duplicating the parent item", async () => {
-    const source = await prisma.source.create({
-      data: {
-        name: "Aggregation Source",
-        rssUrl: "https://aggregation.example.com/feed.xml",
-        siteUrl: "https://aggregation.example.com",
-        aggregationDetectionEnabled: true,
-      },
-    });
-    const item = await prisma.item.create({
-      data: {
-        sourceId: source.id,
-        originalUrl: "https://aggregation.example.com/roundup",
-        canonicalUrl: "https://aggregation.example.com/roundup",
-        urlHash: "daily-aggregation-parent",
-        dedupeSignature: "daily-aggregation-parent",
-        originalTitle: "AI 行业简报合集",
-        publishedAt: new Date("2026-04-24T04:00:00.000Z"),
-        createdAt: new Date("2026-04-24T04:00:00.000Z"),
-        status: "processed",
-        moderationStatus: "allowed",
-        summaryText: "父级聚合摘要不应直接进入日报候选",
-        qualityScore: 98,
-        isAggregation: true,
-        aggregationCheckedAt: new Date("2026-04-24T04:05:00.000Z"),
-        aggregationParseStatus: "parsed",
-      },
-    });
-
-    // Child items represent the parsed sub-events as full Item rows.
-    await prisma.item.createMany({
-      data: [
-        {
-          sourceId: source.id,
-          parentItemId: item.id,
-          originalUrl: "https://aggregation.example.com/roundup#event-launch-openai-发布-toolkit-2026-04-24",
-          canonicalUrl: "https://aggregation.example.com/roundup",
-          urlHash: "daily-aggregation-child-0",
-          dedupeSignature: "launch|openai|发布|toolkit|2026-04-24|source|2026-04-24T04:00:00.000Z",
-          originalTitle: "OpenAI 发布 Toolkit",
-          publishedAt: new Date("2026-04-24T04:00:00.000Z"),
-          createdAt: new Date("2026-04-24T04:00:00.000Z"),
-          status: "processed",
-          moderationStatus: "allowed",
-          summaryText: "OpenAI 发布 Toolkit",
-          summaryStatus: "succeeded",
-          analysisStatus: "succeeded",
-          eventType: "launch",
-          eventSubject: "OpenAI",
-          eventAction: "发布",
-          eventObject: "Toolkit",
-          eventDate: REPORT_DATE,
-          qualityScore: 91,
-          qualityRationale: "由聚合内容拆出",
-          isAggregation: false,
-        },
-        {
-          sourceId: source.id,
-          parentItemId: item.id,
-          originalUrl: "https://aggregation.example.com/roundup#event-update-anthropic-更新-console-2026-04-24",
-          canonicalUrl: "https://aggregation.example.com/roundup",
-          urlHash: "daily-aggregation-child-1",
-          dedupeSignature: "update|anthropic|更新|console|2026-04-24|source|2026-04-24T04:00:00.000Z",
-          originalTitle: "Anthropic 更新 Console",
-          publishedAt: new Date("2026-04-24T04:00:00.000Z"),
-          createdAt: new Date("2026-04-24T04:00:00.000Z"),
-          status: "processed",
-          moderationStatus: "allowed",
-          summaryText: "Anthropic 更新 Console",
-          summaryStatus: "succeeded",
-          analysisStatus: "succeeded",
-          eventType: "update",
-          eventSubject: "Anthropic",
-          eventAction: "更新",
-          eventObject: "Console",
-          eventDate: REPORT_DATE,
-          qualityScore: 89,
-          qualityRationale: "由聚合内容拆出",
-          isAggregation: false,
-        },
-      ],
-    });
-
-    const candidates = await listDailyReportCandidates(REPORT_DATE, 10);
-
-    expect(candidates.map((candidate) => candidate.title)).toEqual([
-      "OpenAI 发布 Toolkit",
-      "Anthropic 更新 Console",
-    ]);
-    expect(candidates.map((candidate) => candidate.sourceKey)).toEqual([
-      expect.stringMatching(/^item:/),
-      expect.stringMatching(/^item:/),
-    ]);
-    // Child item ids are different from the parent.
-    const childIds = candidates.map((candidate) => candidate.itemId);
-    expect(childIds[0]).not.toBe(item.id);
-    expect(childIds[1]).not.toBe(item.id);
-    expect(candidates[0]?.createdAt).toBe("2026-04-24T04:00:00.000Z");
-    expect(candidates.some((candidate) => candidate.title === "AI 行业简报合集")).toBe(false);
-
-    generateDailyReportMock.mockResolvedValue(buildDailyReportOutput());
-    const result = await generateDailyReport({ date: REPORT_DATE, force: true });
-    const savedSources = await prisma.dailyReportSource.findMany({
-      where: { dailyReportId: result.report?.id },
-      orderBy: { sourceNumber: "asc" },
-    });
-
-    expect(savedSources.map((source) => source.sourceNumber)).toEqual([1, 2]);
-    // After the split-to-items refactor, daily report sources point at the
-    // child item ids (one per parsed event) rather than the parent.
-    expect(savedSources.map((source) => source.itemId)).toEqual([
-      candidates[0]?.itemId,
-      candidates[1]?.itemId,
-    ]);
-    expect(savedSources.map((source) => source.itemId ?? null)).not.toContain(item.id);
-    expect(savedSources.map((source) => source.sourceKey)).toEqual([
-      candidates[0]?.sourceKey,
-      candidates[1]?.sourceKey,
-    ]);
-  });
-
-  it("recovers stable source numbers for an existing report before refinement", async () => {
-    await createReportCandidates();
-    generateDailyReportMock.mockResolvedValue(buildDailyReportOutput());
-    const result = await generateDailyReport({ date: REPORT_DATE, force: true });
-    const originalSources = await prisma.dailyReportSource.findMany({
-      where: { dailyReportId: result.report?.id },
-    });
-    await Promise.all(originalSources.map((source) =>
-      prisma.dailyReportSource.update({
-        where: { id: source.id },
-        data: {
-          sourceNumber: null,
-          sourceKey: source.itemId ? `parsed:${source.itemId}` : null,
-          sourceSummary: null,
-        },
-      }),
-    ));
-    streamDailyReportRefinementMock.mockReturnValue(createStreamFromText(buildRefinedDailyReportOutput()));
-
-    const events = [];
-    for await (const event of streamDailyReportRefinement({
-      date: REPORT_DATE,
-      instruction: "基于当前日报继续微调。",
-      mode: "generate",
-    })) {
-      events.push(event);
-    }
-
-    expect(events.some((event) => event.event === "candidate")).toBe(true);
-    expect(streamDailyReportRefinementMock).toHaveBeenCalledWith(expect.objectContaining({
-      sourceRegistry: expect.arrayContaining([
-        expect.objectContaining({ sourceNumber: 1, summary: "OpenAI 发布新模型摘要" }),
-        expect.objectContaining({ sourceNumber: 2, summary: "开发者工具更新摘要" }),
-      ]),
-    }));
-
-    const recoveredSources = await prisma.dailyReportSource.findMany({
-      where: { dailyReportId: result.report?.id },
-      orderBy: { sourceNumber: "asc" },
-    });
-    expect(recoveredSources.map((source) => source.sourceNumber)).toEqual([1, 2]);
-    expect(recoveredSources.map((source) => source.sourceKey)).toEqual(
-      originalSources.map((source) => `item:${source.itemId}`),
-    );
-    expect(recoveredSources[0].sourceSummary).toBe("OpenAI 发布新模型摘要");
-  });
-
-  it("returns invalid_ai_output when a refinement candidate cannot be validated", async () => {
-    await createReportCandidates();
-    generateDailyReportMock.mockResolvedValue(buildDailyReportOutput());
-    await generateDailyReport({ date: REPORT_DATE, force: true });
-    streamDailyReportRefinementMock.mockReturnValue(createStreamFromText(JSON.stringify({
-      openingSummary: "太短",
-      sections: {},
-      closingThought: "太短",
-    })));
-    repairDailyReportJsonMock.mockResolvedValue(null);
-
-    const events = [];
-    for await (const event of streamDailyReportRefinement({
-      date: REPORT_DATE,
-      instruction: "输出一个非法结构。",
-      mode: "generate",
-    })) {
-      events.push(event);
-    }
-
-    expect(events).toContainEqual(expect.objectContaining({
-      event: "error",
-      code: "invalid_ai_output",
-    }));
-    expect(events).toContainEqual({ event: "done", ok: false });
-  });
-
-  it("does not save a refinement candidate directly over a published report", async () => {
-    await createReportCandidates();
-    generateDailyReportMock.mockResolvedValue(buildDailyReportOutput());
-    const result = await generateDailyReport({ date: REPORT_DATE, force: true });
-    streamDailyReportRefinementMock.mockReturnValue(createStreamFromText(buildRefinedDailyReportOutput()));
-
-    const events = [];
-    for await (const event of streamDailyReportRefinement({
-      date: REPORT_DATE,
-      instruction: "压缩开头摘要。",
-      mode: "generate",
-    })) {
-      events.push(event);
-    }
-    const sessionEvent = events.find((event) => event.event === "session");
-    const candidate = events.find((event) => event.event === "candidate");
-    if (!sessionEvent || sessionEvent.event !== "session" || !candidate || candidate.event !== "candidate") {
-      throw new Error("missing refinement events");
-    }
-
-    await prisma.dailyReport.update({
-      where: { id: result.report?.id },
-      data: {
-        status: "published",
-        publishedAt: new Date("2026-04-25T00:00:00.000Z"),
-      },
-    });
-
-    await expect(saveDailyReportRefinementCandidate({
-      date: REPORT_DATE,
-      sessionId: sessionEvent.sessionId,
-      messageId: candidate.messageId,
-    })).rejects.toThrow(/先撤回为草稿/);
   });
 
   it("publishes the report immediately when daily report auto publish is enabled", async () => {

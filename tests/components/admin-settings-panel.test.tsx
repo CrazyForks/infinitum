@@ -666,26 +666,6 @@ describe("AdminSettingsPanel", () => {
     dialog = screen.getByRole("dialog", { name: "创建新提示词配置" });
     expect(within(dialog).getByText(/可使用占位符：\s+\{\{date\}\} \/ \{\{timezone\}\} \/ \{\{articlesJson\}\}/)).toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "取消" }));
-
-    await user.click(screen.getByRole("button", { name: "日报微调对话" }));
-    await user.click(screen.getAllByRole("button", { name: /创建配置/i })[0]);
-    dialog = screen.getByRole("dialog", { name: "创建新提示词配置" });
-    expect(
-      within(dialog).getByText(
-        /可使用占位符：\s+\{\{date\}\} \/ \{\{timezone\}\} \/ \{\{currentContentJson\}\} \/ \{\{sourceRegistryJson\}\} \/ \{\{messagesJson\}\} \/ \{\{instruction\}\}/,
-      ),
-    ).toBeInTheDocument();
-    await user.click(within(dialog).getByRole("button", { name: "取消" }));
-
-    await user.click(screen.getByRole("button", { name: "日报微调生成" }));
-    await user.click(screen.getAllByRole("button", { name: /创建配置/i })[0]);
-    dialog = screen.getByRole("dialog", { name: "创建新提示词配置" });
-    expect(
-      within(dialog).getByText(
-        /可使用占位符：\s+\{\{date\}\} \/ \{\{timezone\}\} \/ \{\{currentContentJson\}\} \/ \{\{sourceRegistryJson\}\} \/ \{\{messagesJson\}\} \/ \{\{instruction\}\}/,
-      ),
-    ).toBeInTheDocument();
-    await user.click(within(dialog).getByRole("button", { name: "取消" }));
   });
 
   it("keeps prompt advanced settings collapsed and reorders daily report blocks by drag", async () => {

@@ -86,7 +86,6 @@ describe("DailyReportDetail", () => {
     expect(screen.queryByText("日报不存在")).not.toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "草稿日报", level: 1 })).toBeInTheDocument();
     expect(screen.getByText("草稿")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "日报微调" })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith("/api/admin/session", { cache: "no-store" });
     expect(fetchMock).toHaveBeenCalledWith("/api/admin/daily-reports/2026-04-29", undefined);
   });

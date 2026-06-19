@@ -73,31 +73,6 @@ export const DEFAULT_CLUSTER_MATCH_PROMPT =
 
 export const DEFAULT_DAILY_REPORT_PROMPT = compileDailyReportTemplatePrompt(DEFAULT_DAILY_REPORT_TEMPLATE);
 
-export const DEFAULT_DAILY_REPORT_REFINEMENT_GENERATE_PROMPT = `你是中文 AI 日报编辑，负责在既有日报草稿基础上按管理员指令微调内容。严格只输出单个 JSON 对象，不要输出 Markdown、代码块或额外解释。
-
-固定输出格式：
-{"blocks":[{"type":"text","title":"摘要","body":"..."},{"type":"section","title":"热点事件","items":[{"title":"...","body":"...","notes":[{"label":"重点","text":"..."}],"sourceIds":[1,2]}]},{"type":"text","title":"趋势观察","body":"..."}]}
-
-编辑原则：
-1. 以 currentContent 为事实起点，默认保留管理员未要求修改的 blocks、items 和来源引用。
-2. 只基于 sourceRegistry 中的来源背景改写，不要输出来源之外的新事实。
-3. sourceIds 只能使用 sourceRegistry 中存在的 sourceNumber，不要编造来源编号。
-4. 如果 sourceRegistry 中包含当前日报原文未引用、但管理员已召回加入的来源，这些来源已经生效；当管理员要求纳入相关主题或编号时，可以直接使用，不要再要求重新召回。
-5. 可以根据指令调整 block 顺序、条目归属、摘要长短和表达结构，但必须保持 JSON 字段完整。
-6. 如果指令要求无法由来源支撑，保守改写并保留原事实，不要编造。
-7. 字段内容只写正文，不要带“摘要：”“趋势观察：”“建议：”“来源：”等字段名前缀；item 只使用 title、body、notes、sourceIds，notes 只使用 label、text。
-8. 除 **加粗** 和 *斜体* 外，不要在 JSON 字段中输出其他 Markdown 标记。`;
-
-export const DEFAULT_DAILY_REPORT_REFINEMENT_CHAT_PROMPT = `你是中文 AI 日报编辑，负责和管理员围绕既有日报草稿持续对话，帮助确认局部结构、表达和来源使用方案。
-
-对话原则：
-1. 以 currentContent 为当前日报现状，不要把对话起点当作空白日报。
-2. sourceRegistry 是当前 session 可用的来源背景；只能基于这些来源和当前日报讨论事实，不要编造来源之外的新事实。
-3. 本阶段只做对话、分析、澄清和编辑建议，不要输出完整日报 JSON，也不要假装已经保存或应用修改。
-4. 如果 sourceRegistry 中已经有管理员召回加入的来源，它已经是当前上下文；当管理员提到相关主题、标题或 sourceNumber 时，直接基于它讨论，不要重复提示召回。
-5. 如果管理员需要纳入未加入 sourceRegistry 的来源，才提示可以用关键词召回并加入来源上下文；不要自动引用未加入 sourceRegistry 的内容。
-6. 回答要短而具体，优先说明建议怎么改、会影响哪些栏目、还需要管理员确认什么。`;
-
 export const DEFAULT_ITEM_SUMMARY_USER_PROMPT_TEMPLATE = `标题：{{title}}
 来源：{{sourceName}}
 正文：{{inputText}}`;
@@ -121,20 +96,6 @@ export const DEFAULT_CLUSTER_MATCH_USER_PROMPT_TEMPLATE = `当前内容标题：
 export const DEFAULT_DAILY_REPORT_USER_PROMPT_TEMPLATE = `日期：{{date}}
 时区：{{timezone}}
 候选内容 JSON：{{articlesJson}}`;
-
-export const DEFAULT_DAILY_REPORT_REFINEMENT_GENERATE_USER_PROMPT_TEMPLATE = `日期：{{date}}
-时区：{{timezone}}
-当前日报 JSON：{{currentContentJson}}
-引用来源 registry JSON：{{sourceRegistryJson}}
-历史对话摘要或消息 JSON：{{messagesJson}}
-本轮管理员指令：{{instruction}}`;
-
-export const DEFAULT_DAILY_REPORT_REFINEMENT_CHAT_USER_PROMPT_TEMPLATE = `日期：{{date}}
-时区：{{timezone}}
-当前日报 JSON：{{currentContentJson}}
-当前 session 可用来源 registry JSON：{{sourceRegistryJson}}
-历史对话消息 JSON：{{messagesJson}}
-本轮管理员消息：{{instruction}}`;
 
 export const DEFAULT_CLUSTER_MERGE_PROMPT = `你是聚合合并助手。请基于给定的候选聚合 Pair，判断每个 Pair 中的两个聚合组是否描述同一具体事件，输出需要合并的 Pair。
 

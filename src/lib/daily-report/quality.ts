@@ -51,13 +51,6 @@ export type DayOverlapStat = {
   avgClusterOverlap: number;
 };
 
-export type RefinementDeltaStat = {
-  reportsWithSession: number;
-  reportsRefined: number;
-  refinedRate: number;
-  avgMessagesPerReport: number;
-};
-
 export type DailyReportQualityMetrics = {
   range: { from: string; to: string; days: number };
   reportCount: number;
@@ -65,7 +58,6 @@ export type DailyReportQualityMetrics = {
   sourceDiversity: SourceDiversityStat;
   missRate: MissRateStat;
   dayOverlap: DayOverlapStat;
-  refinementDelta: RefinementDeltaStat;
 };
 
 type ReportWithRelations = {
@@ -79,11 +71,6 @@ type ReportWithRelations = {
     itemId: string | null;
     clusterId: string | null;
     url: string;
-  }>;
-  refinementSessions: Array<{
-    baseContentJson: string;
-    currentDraftJson: string;
-    messages: Array<{ id: string }>;
   }>;
 };
 
@@ -283,27 +270,6 @@ function computeDayOverlap(reports: ReportWithRelations[]): DayOverlapStat {
   };
 }
 
-function computeRefinementDelta(reports: ReportWithRelations[]): RefinementDeltaStat {
-  let reportsWithSession = 0;
-  let reportsRefined = 0;
-  let totalMessages = 0;
-  for (const report of reports) {
-    const session = report.refinementSessions[0];
-    if (!session) continue;
-    reportsWithSession += 1;
-    totalMessages += session.messages.length;
-    if (session.baseContentJson !== session.currentDraftJson) {
-      reportsRefined += 1;
-    }
-  }
-  return {
-    reportsWithSession,
-    reportsRefined,
-    refinedRate: reportsWithSession > 0 ? Math.round((reportsRefined / reportsWithSession) * 1000) / 1000 : 0,
-    avgMessagesPerReport: reportsWithSession > 0 ? Math.round((totalMessages / reportsWithSession) * 100) / 100 : 0,
-  };
-}
-
 export async function getDailyReportQualityMetrics(input: { days: number; now?: Date }): Promise<DailyReportQualityMetrics> {
   const days = Math.max(1, Math.min(180, Math.floor(input.days)));
   const { from, to } = getDateRange(days, input.now);
@@ -323,15 +289,6 @@ export async function getDailyReportQualityMetrics(input: { days: number; now?: 
       sources: {
         select: { sourceName: true, itemId: true, clusterId: true, url: true },
       },
-      refinementSessions: {
-        orderBy: { updatedAt: "desc" },
-        take: 1,
-        select: {
-          baseContentJson: true,
-          currentDraftJson: true,
-          messages: { select: { id: true } },
-        },
-      },
     },
   });
 
@@ -344,6 +301,5 @@ export async function getDailyReportQualityMetrics(input: { days: number; now?: 
     sourceDiversity: computeSourceDiversity(typedReports),
     missRate: computeMissRate(typedReports),
     dayOverlap: computeDayOverlap(typedReports),
-    refinementDelta: computeRefinementDelta(typedReports),
   };
 }

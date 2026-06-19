@@ -60,25 +60,13 @@ describe("admin settings service", () => {
     expect(settings.modelApiConfigs[0]?.apiKeyMasked).toBe("");
     expect(settings.modelApiConfigs[0]?.ingestionItemConcurrency).toBe(3);
     expect(settings.taskSchedule.aggregationSplitMaxEvents).toBe(20);
-    expect(settings.promptConfigs).toHaveLength(9);
+    expect(settings.promptConfigs).toHaveLength(7);
     expect(settings.promptConfigs.find((config) => config.type === "daily_report")?.systemPrompt).toContain("AI 新闻日报");
     expect(settings.promptConfigs.find((config) => config.type === "daily_report")?.templateJson).toBe(
       DEFAULT_DAILY_REPORT_TEMPLATE_JSON,
     );
     expect(settings.promptConfigs.find((config) => config.type === "daily_report")?.systemPrompt).toContain(
       "优先综合参考 candidateScore、sourceCount、itemCount 和日期相关性",
-    );
-    expect(settings.promptConfigs.find((config) => config.type === "daily_report_refinement_chat")?.name).toBe(
-      "默认日报微调对话提示词",
-    );
-    expect(settings.promptConfigs.find((config) => config.type === "daily_report_refinement_chat")?.systemPrompt).toContain(
-      "持续对话",
-    );
-    expect(settings.promptConfigs.find((config) => config.type === "daily_report_refinement_generate")?.name).toBe(
-      "默认日报微调生成提示词",
-    );
-    expect(settings.promptConfigs.find((config) => config.type === "daily_report_refinement_generate")?.systemPrompt).toContain(
-      "既有日报草稿",
     );
     expect(settings.taskSchedule.key).toBe("ingestion_default");
     expect(settings.taskSchedule.enabled).toBe(false);
@@ -121,6 +109,32 @@ describe("admin settings service", () => {
       maxTokens: 80,
       topP: null,
     });
+  });
+
+  it("cleans removed daily report refinement prompt configs before reading settings", async () => {
+    await getIngestionRuntimeConfig();
+
+    await prisma.$executeRawUnsafe(
+      `
+      INSERT INTO "prompt_configs" (
+        "id", "name", "type", "prompt", "systemPrompt", "isEnabled", "isDefault", "updatedAt"
+      ) VALUES
+        ('removed-refine-chat', '旧日报微调对话提示词', 'daily_report_refinement_chat', '模板', '系统提示词', true, false, CURRENT_TIMESTAMP),
+        ('removed-refine-generate', '旧日报微调生成提示词', 'daily_report_refinement_generate', '模板', '系统提示词', true, false, CURRENT_TIMESTAMP)
+      `,
+    );
+
+    const settings = await getAdminSettings();
+    const staleRows = await prisma.$queryRawUnsafe<Array<{ count: bigint }>>(
+      `
+      SELECT COUNT(*) AS count
+      FROM "prompt_configs"
+      WHERE "type" IN ('daily_report_refinement_chat', 'daily_report_refinement_generate')
+      `,
+    );
+
+    expect(settings.promptConfigs.map((config) => config.type)).not.toContain("daily_report_refinement_chat");
+    expect(Number(staleRows[0]?.count ?? 0)).toBe(0);
   });
 
   it("does not overwrite a customized cluster summary prompt", async () => {
@@ -287,8 +301,6 @@ describe("admin settings service", () => {
     expect(runtimeConfig.selectedPromptConfigs?.itemAggregation.systemPrompt).toBe(DEFAULT_ITEM_AGGREGATION_ANALYSIS_PROMPT);
     expect(runtimeConfig.selectedPromptConfigs?.clusterSummary.maxTokens).toBe(300);
     expect(runtimeConfig.selectedPromptConfigs?.clusterMatch.maxTokens).toBe(80);
-    expect(runtimeConfig.selectedPromptConfigs?.dailyReportRefinementChat.systemPrompt).toContain("持续对话");
-    expect(runtimeConfig.selectedPromptConfigs?.dailyReportRefinementGenerate.systemPrompt).toContain("既有日报草稿");
   });
 
   it("prevents deleting the default model config", async () => {

@@ -72,9 +72,6 @@ async function createReportWithItems(opts: {
   usedItems: ReportItemRef[];
   snapshotUsedItemIds: string[];
   snapshotTotalCandidates: number;
-  refinementBase?: string;
-  refinementCurrent?: string;
-  refinementMessages?: number;
   status?: "draft" | "published";
 }) {
   const extraItems: ReportItemRef[] = [];
@@ -129,31 +126,12 @@ async function createReportWithItems(opts: {
           sourceQualityScore: 80,
         })),
       },
-      ...(opts.refinementBase && opts.refinementCurrent
-        ? {
-            refinementSessions: {
-              create: {
-                baseContentJson: opts.refinementBase,
-                currentDraftJson: opts.refinementCurrent,
-                sourceRegistryJson: "[]",
-                messages: {
-                  create: Array.from({ length: opts.refinementMessages ?? 2 }, (_, i) => ({
-                    role: i === 0 ? "user" : "assistant",
-                    content: `message ${i + 1}`,
-                  })),
-                },
-              },
-            },
-          }
-        : {}),
     },
   });
 }
 
 describe("daily report quality metrics", () => {
   beforeEach(async () => {
-    await prisma.dailyReportRefinementMessage.deleteMany();
-    await prisma.dailyReportRefinementSession.deleteMany();
     await prisma.dailyReportSource.deleteMany();
     await prisma.dailyReport.deleteMany();
     await prisma.item.deleteMany();
@@ -168,10 +146,9 @@ describe("daily report quality metrics", () => {
     expect(metrics.sourceDiversity.avgSourceCountPerReport).toBe(0);
     expect(metrics.missRate.reportsEvaluated).toBe(0);
     expect(metrics.dayOverlap.pairsComputed).toBe(0);
-    expect(metrics.refinementDelta.reportsWithSession).toBe(0);
   });
 
-  it("computes all 5 metrics over multiple reports", async () => {
+  it("computes all metrics over multiple reports", async () => {
     const sourceA = await prisma.source.create({
       data: { name: "Source A", rssUrl: "https://a.example/feed.xml", siteUrl: "https://a.example" },
     });
@@ -190,9 +167,6 @@ describe("daily report quality metrics", () => {
     const usedD2 = await createItem(sourceB.id, "u-d-2", "https://d.example/2");
     const usedE1 = await createItem(sourceB.id, "u-e-1", "https://e.example/1");
 
-    const baseContent = buildContent({ topCount: 3, changeCount: 2 });
-    const editedContent = buildContent({ topCount: 4, changeCount: 3 });
-
     await createReportWithItems({
       date: REPORT_DATE_A,
       sourceId: sourceA.id,
@@ -204,9 +178,6 @@ describe("daily report quality metrics", () => {
       ],
       snapshotUsedItemIds: [usedA1.id, usedA2.id],
       snapshotTotalCandidates: 10,
-      refinementBase: baseContent,
-      refinementCurrent: editedContent,
-      refinementMessages: 4,
     });
 
     await createReportWithItems({
@@ -263,11 +234,6 @@ describe("daily report quality metrics", () => {
     expect(metrics.dayOverlap.pairsComputed).toBe(2);
     expect(metrics.dayOverlap.avgSourceOverlap).toBeGreaterThan(0);
     expect(metrics.dayOverlap.avgSourceOverlap).toBeLessThan(1);
-
-    expect(metrics.refinementDelta.reportsWithSession).toBe(1);
-    expect(metrics.refinementDelta.reportsRefined).toBe(1);
-    expect(metrics.refinementDelta.refinedRate).toBe(1);
-    expect(metrics.refinementDelta.avgMessagesPerReport).toBe(4);
   });
 
   it("filters out failed reports", async () => {
@@ -297,8 +263,6 @@ describe("daily report quality metrics", () => {
 
 describe("URL fallback for miss-rate matching", () => {
   beforeEach(async () => {
-    await prisma.dailyReportRefinementMessage.deleteMany();
-    await prisma.dailyReportRefinementSession.deleteMany();
     await prisma.dailyReportSource.deleteMany();
     await prisma.dailyReport.deleteMany();
     await prisma.item.deleteMany();

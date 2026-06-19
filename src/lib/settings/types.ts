@@ -6,8 +6,6 @@ export const PROMPT_CONFIG_TYPES = [
   "cluster_match",
   "cluster_merge",
   "daily_report",
-  "daily_report_refinement_chat",
-  "daily_report_refinement_generate",
 ] as const;
 
 export type PromptConfigType = typeof PROMPT_CONFIG_TYPES[number];

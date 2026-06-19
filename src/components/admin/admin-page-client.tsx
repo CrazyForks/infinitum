@@ -86,8 +86,6 @@ function normalizePromptType(value: string | null): PromptConfigType {
     value === "cluster_summary" ||
     value === "cluster_match" ||
     value === "cluster_merge" ||
-    value === "daily_report_refinement_chat" ||
-    value === "daily_report_refinement_generate" ||
     value === "daily_report"
   ) {
     return value;

@@ -92,8 +92,6 @@ enum PromptConfigType {
   cluster_match
   cluster_merge
   daily_report
-  daily_report_refinement_chat
-  daily_report_refinement_generate
 }
 
 enum DailyReportStatus {
@@ -360,7 +358,6 @@ model DailyReport {
   updatedAt          DateTime                       @updatedAt
   taskRun            BackgroundTaskRun?             @relation(fields: [taskRunId], references: [id], onDelete: SetNull)
   sources            DailyReportSource[]
-  refinementSessions DailyReportRefinementSession[]
 
   @@unique([date, timezone])
   @@index([status, date])
@@ -399,40 +396,6 @@ model DailyReportSource {
   @@index([itemId])
   @@index([clusterId])
   @@map("daily_report_sources")
-}
-
-model DailyReportRefinementSession {
-  id                 String                         @id @default(cuid())
-  dailyReportId      String
-  status             String                         @default("active")
-  baseContentJson    String
-  currentDraftJson   String
-  sourceRegistryJson String
-  providerSessionId  String?
-  providerResponseId String?
-  modelName          String?
-  createdAt          DateTime                       @default(now())
-  updatedAt          DateTime                       @updatedAt
-  finishedAt         DateTime?
-  dailyReport        DailyReport                    @relation(fields: [dailyReportId], references: [id], onDelete: Cascade)
-  messages           DailyReportRefinementMessage[]
-
-  @@index([dailyReportId, updatedAt])
-  @@map("daily_report_refinement_sessions")
-}
-
-model DailyReportRefinementMessage {
-  id            String                       @id @default(cuid())
-  sessionId     String
-  role          String
-  content       String
-  candidateJson String?
-  errorMessage  String?
-  createdAt     DateTime                     @default(now())
-  session       DailyReportRefinementSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-
-  @@index([sessionId, createdAt])
-  @@map("daily_report_refinement_messages")
 }
 
 model SourceGroup {

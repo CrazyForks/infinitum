@@ -28,6 +28,10 @@ const sqliteRuntimePragmas = [
   "PRAGMA synchronous = NORMAL;",
   "PRAGMA foreign_keys = ON;",
 ].join("\n");
+const removedPromptConfigTypes = [
+  "daily_report_refinement_chat",
+  "daily_report_refinement_generate",
+];
 
 function resolvePrismaCliPath() {
   const cliFileName = process.platform === "win32" ? "prisma.cmd" : "prisma";
@@ -172,6 +176,20 @@ function applyAdditiveSchemaUpgrades() {
   }
 }
 
+function cleanupRemovedPromptConfigTypes() {
+  if (!ftsTableExists("prompt_configs")) {
+    return;
+  }
+
+  const quotedTypes = removedPromptConfigTypes
+    .map((type) => `'${type.replace(/'/g, "''")}'`)
+    .join(", ");
+
+  runSqlite([dbPath], {
+    input: `DELETE FROM "prompt_configs" WHERE "type" IN (${quotedTypes});\n`,
+  });
+}
+
 function sleep(ms) {
   if (ms <= 0) {
     return;
@@ -242,6 +260,7 @@ try {
     input: sql,
   });
   applyAdditiveSchemaUpgrades();
+  cleanupRemovedPromptConfigTypes();
   applyRuntimeSqliteObjects();
 
   if (testHoldMs > 0) {

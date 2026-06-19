@@ -111,6 +111,10 @@ describe("sqlite setup", () => {
         "id", "name", "type", "prompt", "systemPrompt", "isEnabled", "isDefault", "updatedAt"
       ) VALUES (
         'prompt-old', '旧日报提示词', 'daily_report', '模板', '系统提示词', true, true, CURRENT_TIMESTAMP
+      ), (
+        'prompt-removed-chat', '旧日报微调对话提示词', 'daily_report_refinement_chat', '模板', '系统提示词', true, false, CURRENT_TIMESTAMP
+      ), (
+        'prompt-removed-generate', '旧日报微调生成提示词', 'daily_report_refinement_generate', '模板', '系统提示词', true, false, CURRENT_TIMESTAMP
       );
       `,
     );
@@ -122,6 +126,7 @@ describe("sqlite setup", () => {
 
     expect(runSqlite(dbPath, `SELECT COUNT(*) FROM pragma_table_info('prompt_configs') WHERE "name" = 'templateJson'`)).toBe("1");
     expect(runSqlite(dbPath, `SELECT "name" FROM "prompt_configs" WHERE "id" = 'prompt-old'`)).toBe("旧日报提示词");
+    expect(runSqlite(dbPath, `SELECT COUNT(*) FROM "prompt_configs" WHERE "type" IN ('daily_report_refinement_chat', 'daily_report_refinement_generate')`)).toBe("0");
   });
 
 });

@@ -2,8 +2,6 @@ import {
   DEFAULT_CLUSTER_MATCH_USER_PROMPT_TEMPLATE,
   DEFAULT_CLUSTER_MERGE_USER_PROMPT_TEMPLATE,
   DEFAULT_CLUSTER_SUMMARY_USER_PROMPT_TEMPLATE,
-  DEFAULT_DAILY_REPORT_REFINEMENT_CHAT_USER_PROMPT_TEMPLATE,
-  DEFAULT_DAILY_REPORT_REFINEMENT_GENERATE_USER_PROMPT_TEMPLATE,
   DEFAULT_DAILY_REPORT_USER_PROMPT_TEMPLATE,
   DEFAULT_ITEM_AGGREGATION_USER_PROMPT_TEMPLATE,
   DEFAULT_ITEM_ANALYSIS_USER_PROMPT_TEMPLATE,
@@ -22,8 +20,6 @@ export const PROMPT_TYPE_OPTIONS: Array<{
   { value: "cluster_match", label: "归组判定" },
   { value: "cluster_merge", label: "聚合合并" },
   { value: "daily_report", label: "AI 日报" },
-  { value: "daily_report_refinement_chat", label: "日报微调对话" },
-  { value: "daily_report_refinement_generate", label: "日报微调生成" },
 ];
 
 export function getPromptTypeLabel(type: PromptConfigType): string {
@@ -46,10 +42,6 @@ export function getDefaultPromptConfigName(type: PromptConfigType): string {
       return "默认聚合合并提示词";
     case "daily_report":
       return "默认 AI 日报提示词";
-    case "daily_report_refinement_chat":
-      return "默认日报微调对话提示词";
-    case "daily_report_refinement_generate":
-      return "默认日报微调生成提示词";
   }
 }
 
@@ -69,10 +61,6 @@ export function getDefaultPromptTemplate(type: PromptConfigType): string {
       return DEFAULT_CLUSTER_MERGE_USER_PROMPT_TEMPLATE;
     case "daily_report":
       return DEFAULT_DAILY_REPORT_USER_PROMPT_TEMPLATE;
-    case "daily_report_refinement_chat":
-      return DEFAULT_DAILY_REPORT_REFINEMENT_CHAT_USER_PROMPT_TEMPLATE;
-    case "daily_report_refinement_generate":
-      return DEFAULT_DAILY_REPORT_REFINEMENT_GENERATE_USER_PROMPT_TEMPLATE;
   }
 }
 
@@ -119,18 +107,6 @@ export function getDefaultPromptSampling(type: PromptConfigType): {
         topP: null,
       };
     case "daily_report":
-      return {
-        temperature: 0.2,
-        maxTokens: 4096,
-        topP: null,
-      };
-    case "daily_report_refinement_chat":
-      return {
-        temperature: 0.2,
-        maxTokens: 1200,
-        topP: null,
-      };
-    case "daily_report_refinement_generate":
       return {
         temperature: 0.2,
         maxTokens: 4096,

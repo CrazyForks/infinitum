@@ -163,18 +163,6 @@ export function createTaskAiUsageTracker(
           syncEstimateFloor();
           return aiProvider.generateDailyReport(input);
         },
-        async *streamDailyReportRefinement(input) {
-          incrementActual("daily_report");
-          incrementEstimated("daily_report");
-          syncEstimateFloor();
-          yield* aiProvider.streamDailyReportRefinement(input);
-        },
-        async *streamDailyReportRefinementChat(input) {
-          incrementActual("daily_report");
-          incrementEstimated("daily_report");
-          syncEstimateFloor();
-          yield* aiProvider.streamDailyReportRefinementChat(input);
-        },
         async repairDailyReportJson(rawContent) {
           incrementActual("daily_report");
           syncEstimateFloor();

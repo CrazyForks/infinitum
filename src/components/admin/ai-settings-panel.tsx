@@ -114,22 +114,6 @@ const PROMPT_PLACEHOLDERS_BY_TYPE: Record<PromptConfigType, string[]> = {
   cluster_match: ["{{title}}", "{{inputText}}", "{{candidatesJson}}"],
   cluster_merge: ["{{clustersJson}}"],
   daily_report: ["{{date}}", "{{timezone}}", "{{articlesJson}}"],
-  daily_report_refinement_chat: [
-    "{{date}}",
-    "{{timezone}}",
-    "{{currentContentJson}}",
-    "{{sourceRegistryJson}}",
-    "{{messagesJson}}",
-    "{{instruction}}",
-  ],
-  daily_report_refinement_generate: [
-    "{{date}}",
-    "{{timezone}}",
-    "{{currentContentJson}}",
-    "{{sourceRegistryJson}}",
-    "{{messagesJson}}",
-    "{{instruction}}",
-  ],
 };
 
 function toNullableNumber(value: string) {

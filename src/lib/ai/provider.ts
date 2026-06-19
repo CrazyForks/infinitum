@@ -13,10 +13,6 @@ import {
   DEFAULT_CLUSTER_SUMMARY_PROMPT,
   DEFAULT_CLUSTER_SUMMARY_USER_PROMPT_TEMPLATE,
   DEFAULT_DAILY_REPORT_PROMPT,
-  DEFAULT_DAILY_REPORT_REFINEMENT_CHAT_PROMPT,
-  DEFAULT_DAILY_REPORT_REFINEMENT_CHAT_USER_PROMPT_TEMPLATE,
-  DEFAULT_DAILY_REPORT_REFINEMENT_GENERATE_PROMPT,
-  DEFAULT_DAILY_REPORT_REFINEMENT_GENERATE_USER_PROMPT_TEMPLATE,
   DEFAULT_DAILY_REPORT_USER_PROMPT_TEMPLATE,
   DEFAULT_ITEM_AGGREGATION_ANALYSIS_PROMPT,
   DEFAULT_ITEM_AGGREGATION_USER_PROMPT_TEMPLATE,
@@ -27,7 +23,6 @@ import {
 } from "@/config/prompts";
 import type { RuntimeConfig } from "@/config/runtime";
 import { shouldRegenerateChineseSummary } from "@/lib/ai/summary-language";
-import type { DailyReportContent, DailyReportSourceRegistryEntry } from "@/lib/daily-report/types";
 import { normalizeOptionalText } from "@/lib/utils/text";
 
 export type AiEventSignature = {
@@ -113,22 +108,6 @@ export type AiProvider = {
   generateDailyReport(
     input: { date: string; timezone: string; articles: unknown[] },
   ): Promise<string | null>;
-  streamDailyReportRefinement(input: {
-    date: string;
-    timezone: string;
-    currentContent: DailyReportContent;
-    sourceRegistry: DailyReportSourceRegistryEntry[];
-    instruction: string;
-    messages: Array<{ role: string; content: string }>;
-  }): AsyncIterable<string>;
-  streamDailyReportRefinementChat(input: {
-    date: string;
-    timezone: string;
-    currentContent: DailyReportContent;
-    sourceRegistry: DailyReportSourceRegistryEntry[];
-    instruction: string;
-    messages: Array<{ role: string; content: string }>;
-  }): AsyncIterable<string>;
   repairDailyReportJson(rawContent: string): Promise<string | null>;
 };
 
@@ -140,18 +119,10 @@ type CompletionResponse = {
   }>;
 };
 
-type CompletionStreamChunk = {
-  choices?: Array<{
-    delta?: {
-      content?: string | null;
-    };
-  }>;
-};
-
 type OpenAICompatibleClient = {
   chat: {
     completions: {
-      create: (payload: Record<string, unknown>) => Promise<CompletionResponse> | AsyncIterable<CompletionStreamChunk>;
+      create: (payload: Record<string, unknown>) => Promise<CompletionResponse>;
     };
   };
 };
@@ -173,8 +144,6 @@ type PromptOverrides = {
   clusterMatch?: PromptRuntimeConfig;
   clusterMerge?: PromptRuntimeConfig;
   dailyReport?: PromptRuntimeConfig;
-  dailyReportRefinementChat?: PromptRuntimeConfig;
-  dailyReportRefinementGenerate?: PromptRuntimeConfig;
 };
 
 export type AiProviderOptions = {
@@ -979,42 +948,6 @@ async function completeText(
   return response.choices?.[0]?.message?.content?.trim() || "";
 }
 
-async function* streamText(
-  client: OpenAICompatibleClient,
-  config: RuntimeConfig["modelApi"],
-  promptConfig: PromptRuntimeConfig,
-  userContent: string,
-  options?: {
-    responseFormat?: CompletionResponseFormat;
-  },
-): AsyncIterable<string> {
-  const response = await client.chat.completions.create({
-    model: config.model,
-    messages: [
-      {
-        role: "system",
-        content: promptConfig.systemPrompt,
-      },
-      {
-        role: "user",
-        content: userContent,
-      },
-    ],
-    max_tokens: promptConfig.maxTokens ?? undefined,
-    temperature: promptConfig.temperature ?? undefined,
-    top_p: promptConfig.topP ?? undefined,
-    response_format: options?.responseFormat,
-    stream: true,
-  }) as AsyncIterable<CompletionStreamChunk>;
-
-  for await (const chunk of response) {
-    const text = chunk.choices?.[0]?.delta?.content;
-    if (text) {
-      yield text;
-    }
-  }
-}
-
 export function createAiProvider(
   config: RuntimeConfig["modelApi"],
   promptOverrides?: PromptOverrides | null,
@@ -1065,16 +998,6 @@ export function createAiProvider(
     DEFAULT_DAILY_REPORT_PROMPT,
     DEFAULT_DAILY_REPORT_USER_PROMPT_TEMPLATE,
     promptOverrides?.dailyReport,
-  );
-  const dailyReportRefinementGenerateConfig = resolvePromptConfig(
-    DEFAULT_DAILY_REPORT_REFINEMENT_GENERATE_PROMPT,
-    DEFAULT_DAILY_REPORT_REFINEMENT_GENERATE_USER_PROMPT_TEMPLATE,
-    promptOverrides?.dailyReportRefinementGenerate,
-  );
-  const dailyReportRefinementChatConfig = resolvePromptConfig(
-    DEFAULT_DAILY_REPORT_REFINEMENT_CHAT_PROMPT,
-    DEFAULT_DAILY_REPORT_REFINEMENT_CHAT_USER_PROMPT_TEMPLATE,
-    promptOverrides?.dailyReportRefinementChat,
   );
 
   const getExecutionConfig = (promptConfig: PromptRuntimeConfig) => promptConfig.modelApi ?? config;
@@ -1341,53 +1264,6 @@ export function createAiProvider(
         {
           responseFormat: { type: "json_object" },
         },
-      );
-    },
-    async *streamDailyReportRefinement(input) {
-      const executionConfig = getExecutionConfig(dailyReportRefinementGenerateConfig);
-      const selectedClient = getClientForExecutionConfig(executionConfig);
-
-      if (!selectedClient) {
-        throw new Error("Model API is not configured.");
-      }
-
-      yield* streamText(
-        selectedClient,
-        executionConfig,
-        dailyReportRefinementGenerateConfig,
-        renderPromptTemplate(dailyReportRefinementGenerateConfig.promptTemplate, {
-          date: input.date,
-          timezone: input.timezone,
-          currentContentJson: JSON.stringify(input.currentContent),
-          sourceRegistryJson: JSON.stringify(input.sourceRegistry),
-          instruction: input.instruction,
-          messagesJson: JSON.stringify(input.messages),
-        }),
-        {
-          responseFormat: { type: "json_object" },
-        },
-      );
-    },
-    async *streamDailyReportRefinementChat(input) {
-      const executionConfig = getExecutionConfig(dailyReportRefinementChatConfig);
-      const selectedClient = getClientForExecutionConfig(executionConfig);
-
-      if (!selectedClient) {
-        throw new Error("Model API is not configured.");
-      }
-
-      yield* streamText(
-        selectedClient,
-        executionConfig,
-        dailyReportRefinementChatConfig,
-        renderPromptTemplate(dailyReportRefinementChatConfig.promptTemplate, {
-          date: input.date,
-          timezone: input.timezone,
-          currentContentJson: JSON.stringify(input.currentContent),
-          sourceRegistryJson: JSON.stringify(input.sourceRegistry),
-          instruction: input.instruction,
-          messagesJson: JSON.stringify(input.messages),
-        }),
       );
     },
     async repairDailyReportJson(rawContent) {

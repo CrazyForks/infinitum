@@ -97,20 +97,6 @@ export type DailyReportSourceRegistryEntry = {
   eventDate: string | null;
 };
 
-export type DailyReportRefineMode = "chat" | "generate";
-
-export type DailyReportRefineStreamEvent =
-  | { event: "session"; sessionId: string; reportDate: string; sourceRegistryVersion: string }
-  | { event: "message_delta"; text: string }
-  | { event: "message_done"; messageId: string }
-  | { event: "candidate"; messageId: string; content: DailyReportContent; renderedMarkdown: string }
-  | { event: "error"; code: string; message: string }
-  | { event: "done"; ok: boolean };
-
-export type DailyReportRefinementSourceSearchResult = Omit<DailyReportSourceRegistryEntry, "sourceNumber"> & {
-  candidateNumber: number;
-};
-
 export type DailyReportListItemDTO = {
   id: string;
   date: string;
