@@ -691,7 +691,7 @@ export async function processFeedItem({
             await assignItemToCluster(childId, {
               aiProvider,
               coordinator: clusterAssignmentCoordinator,
-              aggregationEnabled,
+              aggregationEnabled: true,
             });
             addElapsed(timings, "clusterAssignmentMs", childClusterAssignmentStartedAt);
           } catch (assignError) {

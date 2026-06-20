@@ -1120,7 +1120,7 @@ async function reparseAggregationCandidate(
 
     for (const childId of childItemIds) {
       try {
-        await assignItemToCluster(childId, { aiProvider: options.aiProvider });
+        await assignItemToCluster(childId, { aiProvider: options.aiProvider, aggregationEnabled: true });
       } catch (assignError) {
         console.error(`[Item Reparse] cluster assignment failed for ${childId}:`, assignError);
       }

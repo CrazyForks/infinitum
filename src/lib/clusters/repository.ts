@@ -1,3 +1,5 @@
+import type { Prisma } from "@prisma/client";
+
 import { prisma } from "@/lib/db";
 
 export type ClusterAssignmentCandidate = {
@@ -14,21 +16,34 @@ export type ClusterAssignmentCandidate = {
   itemCount: number;
 };
 
+function clusterableItemWhere(): Prisma.ItemWhereInput {
+  return {
+    status: "processed" as const,
+    moderationStatus: {
+      in: ["allowed", "restored"],
+    },
+    OR: [
+      {
+        source: {
+          aggregationEnabled: true,
+        },
+      },
+      {
+        parentItemId: {
+          not: null,
+        },
+      },
+    ],
+  };
+}
+
 export async function findActiveClusterByFingerprint(fingerprint: string, since: Date, until?: Date) {
   return prisma.contentCluster.findFirst({
     where: {
       fingerprint,
       status: "active",
       items: {
-        some: {
-          status: "processed",
-          moderationStatus: {
-            in: ["allowed", "restored"],
-          },
-          source: {
-            aggregationEnabled: true,
-          },
-        },
+        some: clusterableItemWhere(),
       },
       latestPublishedAt: {
         gte: since,
@@ -51,15 +66,7 @@ export async function findActiveClusterByTitle(title: string, since: Date, until
       title: normalizedTitle,
       status: "active",
       items: {
-        some: {
-          status: "processed",
-          moderationStatus: {
-            in: ["allowed", "restored"],
-          },
-          source: {
-            aggregationEnabled: true,
-          },
-        },
+        some: clusterableItemWhere(),
       },
       latestPublishedAt: {
         gte: since,
@@ -75,15 +82,7 @@ export async function findRecentActiveClusterCandidates(options: { since: Date; 
     where: {
       status: "active",
       items: {
-        some: {
-          status: "processed",
-          moderationStatus: {
-            in: ["allowed", "restored"],
-          },
-          source: {
-            aggregationEnabled: true,
-          },
-        },
+        some: clusterableItemWhere(),
       },
       latestPublishedAt: {
         gte: options.since,

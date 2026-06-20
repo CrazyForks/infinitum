@@ -2880,6 +2880,7 @@ describe("runIngestion", () => {
           siteUrl: "https://source-a.example.com",
           enabled: true,
           aiParsingEnabled: true,
+          aggregationEnabled: false,
           aggregationDetectionEnabled: true,
         },
         {
@@ -2888,6 +2889,7 @@ describe("runIngestion", () => {
           siteUrl: "https://source-b.example.com",
           enabled: true,
           aiParsingEnabled: true,
+          aggregationEnabled: false,
           aggregationDetectionEnabled: true,
         },
       ],
@@ -2924,6 +2926,15 @@ describe("runIngestion", () => {
     // Each parent produced 2 children sharing the same fingerprint namespace.
     expect(children.every((child) => Boolean(child.summaryText && child.summaryText.length > 0))).toBe(true);
     expect(children.every((child) => child.status === "processed")).toBe(true);
+    expect(new Set(children.map((child) => child.clusterId)).size).toBe(2);
+    const toolkitClusterIds = new Set(
+      children.filter((child) => child.originalTitle === "OpenAI 推出 Toolkit").map((child) => child.clusterId),
+    );
+    const consoleClusterIds = new Set(
+      children.filter((child) => child.originalTitle === "Anthropic 更新 Console").map((child) => child.clusterId),
+    );
+    expect(toolkitClusterIds.size).toBe(1);
+    expect(consoleClusterIds.size).toBe(1);
     expect(displayItemsAdded).toBe(4);
     expect(runSnapshot.itemsAdded).toBe(4);
     expect(taskTimeline.find((node) => node.key === "item_aggregation")?.metrics).toEqual(expect.arrayContaining([

@@ -104,6 +104,111 @@ describe("cluster assignment", () => {
     await expect(prisma.contentCluster.count()).resolves.toBe(2);
   });
 
+  it("allows aggregation split children from disabled sources to join clusters", async () => {
+    const source = await prisma.source.create({
+      data: {
+        name: "Split Only Feed",
+        rssUrl: "https://split-only.example.com/feed.xml",
+        siteUrl: "https://split-only.example.com",
+        enabled: true,
+        aiParsingEnabled: true,
+        aggregationEnabled: false,
+        aggregationDetectionEnabled: true,
+      },
+    });
+    const parent = await prisma.item.create({
+      data: {
+        sourceId: source.id,
+        originalUrl: "https://split-only.example.com/roundup",
+        canonicalUrl: "https://split-only.example.com/roundup",
+        urlHash: "split-only-roundup",
+        dedupeSignature: "split-only-roundup",
+        originalTitle: "Split only roundup",
+        translatedTitle: null,
+        author: null,
+        publishedAt: new Date("2026-04-20T08:00:00.000Z"),
+        rssExcerpt: null,
+        rssContent: "Acme 发布 Widget。Acme 发布 Widget。",
+        fullText: null,
+        summaryText: "聚合父项",
+        language: "zh",
+        status: "processed",
+        summaryStatus: "succeeded",
+        analysisStatus: "succeeded",
+        moderationStatus: "allowed",
+        qualityScore: 70,
+        qualityRationale: "aggregation parent",
+        isAggregation: true,
+      },
+    });
+    const eventSignature = {
+      eventType: "release" as const,
+      eventSubject: "Acme",
+      eventAction: "发布",
+      eventObject: "Widget",
+      eventDate: "2026-04-20",
+    };
+    const childBaseData = {
+      sourceId: source.id,
+      parentItemId: parent.id,
+      translatedTitle: null,
+      author: null,
+      publishedAt: new Date("2026-04-20T08:00:00.000Z"),
+      rssExcerpt: null,
+      rssContent: null,
+      fullText: null,
+      summaryText: "Acme 发布 Widget",
+      language: "zh",
+      status: "processed" as const,
+      summaryStatus: "succeeded" as const,
+      analysisStatus: "succeeded" as const,
+      moderationStatus: "allowed" as const,
+      qualityScore: 88,
+      qualityRationale: "由聚合内容拆出",
+      eventType: eventSignature.eventType,
+      eventSubject: eventSignature.eventSubject,
+      eventAction: eventSignature.eventAction,
+      eventObject: eventSignature.eventObject,
+      eventDate: eventSignature.eventDate,
+      isAggregation: false,
+    };
+    const firstChild = await prisma.item.create({
+      data: {
+        ...childBaseData,
+        originalUrl: "https://split-only.example.com/roundup#event-1",
+        canonicalUrl: "https://split-only.example.com/roundup",
+        urlHash: "split-only-child-1",
+        dedupeSignature: "split-only|child-1",
+        originalTitle: "Acme 发布 Widget",
+      },
+    });
+    const firstAssignment = await assignItemToCluster(firstChild.id, {
+      eventSignature,
+      aggregationEnabled: true,
+    });
+    const secondChild = await prisma.item.create({
+      data: {
+        ...childBaseData,
+        originalUrl: "https://split-only.example.com/roundup#event-2",
+        canonicalUrl: "https://split-only.example.com/roundup",
+        urlHash: "split-only-child-2",
+        dedupeSignature: "split-only|child-2",
+        originalTitle: "Acme 发布 Widget follow-up",
+      },
+    });
+
+    const secondAssignment = await assignItemToCluster(secondChild.id, {
+      eventSignature,
+      aggregationEnabled: true,
+    });
+
+    expect(firstAssignment.createdNewCluster).toBe(true);
+    expect(secondAssignment.matchSource).toBe("exact_match");
+    expect(secondAssignment.createdNewCluster).toBe(false);
+    expect(secondAssignment.clusterId).toBe(firstAssignment.clusterId);
+    await expect(prisma.contentCluster.count()).resolves.toBe(1);
+  });
+
   it("joins an active cluster with the same generated title even when fingerprints differ", async () => {
     const source = await prisma.source.create({
       data: {

@@ -949,9 +949,7 @@ export async function executeClusterMerge(
         some: {
           status: "processed",
           moderationStatus: { in: ["allowed", "restored"] },
-          source: {
-            aggregationEnabled: true,
-          },
+          OR: [{ source: { aggregationEnabled: true } }, { parentItemId: { not: null } }],
         },
       },
     },
