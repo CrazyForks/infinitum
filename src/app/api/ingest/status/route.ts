@@ -1,6 +1,10 @@
 import { adminErrorResponse } from "@/lib/admin/http";
 import { requireAdmin } from "@/lib/admin/session";
-import { getLatestFetchRun, toFetchRunSnapshot } from "@/lib/feed/repository";
+import {
+  countDisplayItemsCreatedDuringFetchRun,
+  getLatestFetchRun,
+  toFetchRunSnapshot,
+} from "@/lib/feed/repository";
 
 export async function GET() {
   try {
@@ -10,8 +14,9 @@ export async function GET() {
   }
 
   const latestRun = await getLatestFetchRun();
+  const itemsAdded = latestRun ? await countDisplayItemsCreatedDuringFetchRun(latestRun) : null;
 
   return Response.json({
-    run: latestRun ? toFetchRunSnapshot(latestRun) : null,
+    run: latestRun ? toFetchRunSnapshot(latestRun, { itemsAdded: itemsAdded ?? undefined }) : null,
   });
 }

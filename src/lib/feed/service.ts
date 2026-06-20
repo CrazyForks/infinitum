@@ -5,6 +5,7 @@ import {
   listFeedFilterOptions,
   listFeedItems,
   getLatestFetchRun,
+  countDisplayItemsCreatedDuringFetchRun,
   toFetchRunSnapshot,
 } from "@/lib/feed/repository";
 import { withFeedCache } from "@/lib/feed/cache";
@@ -84,11 +85,16 @@ export async function getCachedFeedFilterOptions() {
 }
 
 export async function getCachedLatestFetchRunSnapshot() {
-  const latestRun = await getLatestFetchRun();
+  const [latestRun, latestItemUpdate] = await Promise.all([getLatestFetchRun(), getLatestFeedItemUpdate()]);
+  const cacheVersion = `${serializeFetchRunCacheVersion(latestRun)}:${serializeFeedDataCacheVersion(latestItemUpdate)}`;
 
   return withFeedCache(
-    `feed:latest-run:${serializeFetchRunCacheVersion(latestRun)}`,
-    async () => latestRun ? toFetchRunSnapshot(latestRun) : null,
+    `feed:latest-run:${cacheVersion}`,
+    async () => latestRun
+      ? toFetchRunSnapshot(latestRun, {
+        itemsAdded: await countDisplayItemsCreatedDuringFetchRun(latestRun),
+      })
+      : null,
     FEED_STATUS_CACHE_TTL_MS,
   );
 }

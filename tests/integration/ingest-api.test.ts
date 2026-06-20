@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const getLatestFetchRun = vi.fn();
+const countDisplayItemsCreatedDuringFetchRun = vi.fn();
 const requireAdmin = vi.fn();
 const toFetchRunSnapshot = vi.fn((run) => ({
   id: run.id,
@@ -18,6 +19,7 @@ const toFetchRunSnapshot = vi.fn((run) => ({
 const startIngestionTask = vi.fn();
 
 vi.mock("@/lib/feed/repository", () => ({
+  countDisplayItemsCreatedDuringFetchRun,
   getLatestFetchRun,
   toFetchRunSnapshot,
 }));
@@ -87,6 +89,7 @@ describe("/api/ingest", () => {
 
   it("returns the latest run status including progress counters", async () => {
     requireAdmin.mockResolvedValue(undefined);
+    countDisplayItemsCreatedDuringFetchRun.mockResolvedValue(8);
     getLatestFetchRun.mockResolvedValue({
       id: "run-2",
       status: "running",
@@ -109,6 +112,8 @@ describe("/api/ingest", () => {
     expect(json.run.itemCount).toBe(10);
     expect(json.run.successCount).toBe(6);
     expect(json.run.failureCount).toBe(1);
+    expect(countDisplayItemsCreatedDuringFetchRun).toHaveBeenCalledOnce();
+    expect(toFetchRunSnapshot).toHaveBeenCalledWith(expect.objectContaining({ id: "run-2" }), { itemsAdded: 8 });
   });
 
   it("rejects ingest status requests when the requester is not an admin", async () => {

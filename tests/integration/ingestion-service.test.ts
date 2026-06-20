@@ -4,6 +4,7 @@ import type { AiProvider } from "@/lib/ai/provider";
 import { recomputeCluster } from "@/lib/clusters/service";
 import { findRecentActiveClusterCandidates } from "@/lib/clusters/repository";
 import { prisma } from "@/lib/db";
+import { countDisplayItemsCreatedDuringFetchRun, toFetchRunSnapshot } from "@/lib/feed/repository";
 import { runIngestion, runIngestionTask, startIngestionTask } from "@/lib/ingestion/service";
 import { buildDedupeKeys } from "@/lib/ingestion/dedupe";
 
@@ -2903,6 +2904,11 @@ describe("runIngestion", () => {
     const storedTaskRun = await prisma.backgroundTaskRun.findUniqueOrThrow({
       where: { id: taskRun.id },
     });
+    const storedFetchRun = await prisma.fetchRun.findFirstOrThrow({
+      where: { taskRunId: taskRun.id },
+    });
+    const displayItemsAdded = await countDisplayItemsCreatedDuringFetchRun(storedFetchRun);
+    const runSnapshot = toFetchRunSnapshot(storedFetchRun, { itemsAdded: displayItemsAdded });
     const taskTimeline = JSON.parse(
       storedTaskRun.taskTimelineJson ?? "[]",
     ) as Array<{ key: string; metrics: Array<{ label: string; value: number }> }>;
@@ -2918,6 +2924,8 @@ describe("runIngestion", () => {
     // Each parent produced 2 children sharing the same fingerprint namespace.
     expect(children.every((child) => Boolean(child.summaryText && child.summaryText.length > 0))).toBe(true);
     expect(children.every((child) => child.status === "processed")).toBe(true);
+    expect(displayItemsAdded).toBe(4);
+    expect(runSnapshot.itemsAdded).toBe(4);
     expect(taskTimeline.find((node) => node.key === "item_aggregation")?.metrics).toEqual(expect.arrayContaining([
       { label: "拆分成功", value: 2 },
       { label: "拆分失败", value: 0 },

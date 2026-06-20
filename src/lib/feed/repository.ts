@@ -331,6 +331,29 @@ export async function getLatestFetchRun() {
   });
 }
 
+export async function countDisplayItemsCreatedDuringFetchRun(run: FetchRun, now = new Date()) {
+  const createdThrough = run.finishedAt ?? now;
+
+  return prisma.item.count({
+    where: {
+      createdAt: {
+        gte: run.startedAt,
+        lte: createdThrough,
+      },
+      status: "processed",
+      moderationStatus: {
+        in: [...DISPLAYABLE_MODERATION_STATUSES],
+      },
+      isAggregation: false,
+      source: {
+        is: {
+          enabled: true,
+        },
+      },
+    },
+  });
+}
+
 export async function getLatestFeedItemUpdate() {
   return prisma.item.findFirst({
     select: {
@@ -376,7 +399,7 @@ export async function getLatestFeedSourceConfigUpdate() {
   };
 }
 
-export function toFetchRunSnapshot(run: FetchRun): FetchRunSnapshot {
+export function toFetchRunSnapshot(run: FetchRun, overrides?: { itemsAdded?: number }): FetchRunSnapshot {
   return {
     id: run.id,
     status: run.status,
@@ -387,7 +410,7 @@ export function toFetchRunSnapshot(run: FetchRun): FetchRunSnapshot {
     itemCount: run.itemCount,
     successCount: run.successCount,
     failureCount: run.failureCount,
-    itemsAdded: run.itemsAdded,
+    itemsAdded: overrides?.itemsAdded ?? run.itemsAdded,
     errorSummary: run.errorSummary,
   };
 }
