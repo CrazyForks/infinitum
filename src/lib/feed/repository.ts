@@ -881,15 +881,12 @@ function buildFeedEntryCandidatesCte(
 
     if (likeSearchTerm) {
       const likeEscape = "\\";
+      // FTS handles body/full-text search. Keep LIKE only on short display fields
+      // so short CJK terms below trigram length can still match titles.
       searchClauses.push(Prisma.sql`COALESCE(i."originalTitle", '') LIKE ${likeSearchTerm} ESCAPE ${likeEscape}`);
       searchClauses.push(Prisma.sql`COALESCE(i."translatedTitle", '') LIKE ${likeSearchTerm} ESCAPE ${likeEscape}`);
       searchClauses.push(Prisma.sql`COALESCE(i.author, '') LIKE ${likeSearchTerm} ESCAPE ${likeEscape}`);
-      searchClauses.push(Prisma.sql`COALESCE(i."rssExcerpt", '') LIKE ${likeSearchTerm} ESCAPE ${likeEscape}`);
-      searchClauses.push(Prisma.sql`COALESCE(i."rssContent", '') LIKE ${likeSearchTerm} ESCAPE ${likeEscape}`);
-      searchClauses.push(Prisma.sql`COALESCE(i."fullText", '') LIKE ${likeSearchTerm} ESCAPE ${likeEscape}`);
-      searchClauses.push(Prisma.sql`COALESCE(i."summaryText", '') LIKE ${likeSearchTerm} ESCAPE ${likeEscape}`);
       searchClauses.push(Prisma.sql`COALESCE(c.title, '') LIKE ${likeSearchTerm} ESCAPE ${likeEscape}`);
-      searchClauses.push(Prisma.sql`COALESCE(c.summary, '') LIKE ${likeSearchTerm} ESCAPE ${likeEscape}`);
     }
 
     nonTimeWhereClauses.push(Prisma.sql`(${Prisma.join(searchClauses, " OR ")})`);
@@ -1316,23 +1313,39 @@ async function listPopularFeedTags(
   const entryCandidatesCte = buildFeedEntryCandidatesCte(effectiveFilters, searchTerm, {
     includeClusterScoreStats: false,
   });
+  const tagEntryType = Prisma.sql`
+    CASE
+      WHEN fi."clusterId" IS NOT NULL AND COALESCE(cmc."matchedItemCount", 1) > 1 THEN 'cluster'
+      ELSE 'single'
+    END
+  `;
+  const tagEntryId = Prisma.sql`
+    CASE
+      WHEN fi."clusterId" IS NOT NULL AND COALESCE(cmc."matchedItemCount", 1) > 1 THEN fi."clusterId"
+      ELSE fi."itemId"
+    END
+  `;
+  const tagEntryGroupId = Prisma.sql`
+    CASE
+      WHEN fi."clusterId" IS NOT NULL AND COALESCE(cmc."matchedItemCount", 1) > 1 THEN cdg."groupId"
+      ELSE fi."sourceGroupId"
+    END
+  `;
   const rows = await prisma.$queryRaw<FeedTagCountRow[]>(Prisma.sql`
     ${entryCandidatesCte},
     entry_tag_matches AS (
       SELECT DISTINCT
-        ec.type AS "entryType",
-        ec.id AS "entryId",
+        ${tagEntryType} AS "entryType",
+        ${tagEntryId} AS "entryId",
         t.id AS "tagId",
         t.name AS name,
         t.normalized AS normalized
-      FROM entry_candidates ec
-      INNER JOIN filtered_items fi
-        ON (
-          (ec.type = 'cluster' AND fi."clusterId" = ec.id)
-          OR (ec.type = 'single' AND fi."itemId" = ec.id)
-        )
+      FROM filtered_items fi
+      LEFT JOIN cluster_match_counts cmc ON cmc.id = fi."clusterId"
+      ${filters.groupId ? Prisma.sql`LEFT JOIN cluster_dominant_groups cdg ON cdg."clusterId" = fi."clusterId"` : Prisma.empty}
       INNER JOIN "item_tags" it ON it."itemId" = fi."itemId"
       INNER JOIN "tags" t ON t.id = it."tagId"
+      ${filters.groupId ? Prisma.sql`WHERE ${tagEntryGroupId} = ${filters.groupId}` : Prisma.empty}
     )
     SELECT
       etm.name AS name,
