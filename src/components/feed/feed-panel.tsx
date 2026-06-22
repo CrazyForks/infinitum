@@ -618,8 +618,8 @@ export function FeedPanel({
   const syncUrlWithQuery = useCallback((query: FeedQueryState, page?: number, size?: number) => {
     const search = buildFeedSearch(query, { page, size });
     const newUrl = `${window.location.pathname}?${search}`;
-    router.replace(newUrl, { scroll: false });
-  }, [router]);
+    window.history.replaceState(null, "", newUrl);
+  }, []);
 
   const loadFeed = useCallback((
     query: FeedQueryState,
@@ -627,6 +627,7 @@ export function FeedPanel({
     size = pageSize,
     options?: {
       scrollToTop?: boolean;
+      includePopularTags?: boolean;
     },
   ) => {
     const normalizedQuery = normalizeImplicitCreatedRange(query);
@@ -644,10 +645,16 @@ export function FeedPanel({
     setAppliedQuery(normalizedQuery);
     syncUrlWithQuery(normalizedQuery, page, size);
     startTransition(async () => {
-      const payload = await requestFeed(normalizedQuery, { page, size });
+      const payload = await requestFeed(normalizedQuery, {
+        page,
+        size,
+        includePopularTags: options?.includePopularTags,
+      });
       replaceFeedData(payload.items, payload.pagination);
       setGroups(payload.groups ?? availableGroups);
-      setPopularTags(payload.popularTags ?? []);
+      if (payload.popularTags) {
+        setPopularTags(payload.popularTags);
+      }
       setGroupTotalCount(payload.groupTotalCount ?? payload.pagination.total);
       setRefreshFeedback(null);
 
@@ -775,10 +782,16 @@ export function FeedPanel({
 
   const reloadCurrentFeed = () => {
     startTransition(async () => {
-      const payload = await requestFeed(latestQueryRef.current, { page: currentPage, size: pageSize });
+      const payload = await requestFeed(latestQueryRef.current, {
+        page: currentPage,
+        size: pageSize,
+        includePopularTags: currentPage === 1,
+      });
       replaceFeedData(payload.items, payload.pagination);
       setGroups(payload.groups ?? availableGroups);
-      setPopularTags(payload.popularTags ?? []);
+      if (payload.popularTags) {
+        setPopularTags(payload.popularTags);
+      }
       setGroupTotalCount(payload.groupTotalCount ?? payload.pagination.total);
     });
   };
@@ -1499,7 +1512,9 @@ export function FeedPanel({
         setItems(feedPayload.items);
         setPagination(feedPayload.pagination);
         setGroups(feedPayload.groups ?? availableGroups);
-        setPopularTags(feedPayload.popularTags ?? []);
+        if (feedPayload.popularTags) {
+          setPopularTags(feedPayload.popularTags);
+        }
         setGroupTotalCount(feedPayload.groupTotalCount ?? feedPayload.pagination.total);
         resetExpandedClusterState();
         setRefreshFeedback({
@@ -1526,7 +1541,7 @@ export function FeedPanel({
     if (!FEED_PAGE_SIZE_OPTIONS.includes(nextSize as (typeof FEED_PAGE_SIZE_OPTIONS)[number])) {
       return;
     }
-    loadFeed(latestQueryRef.current, 1, nextSize, { scrollToTop: true });
+    loadFeed(latestQueryRef.current, 1, nextSize, { scrollToTop: true, includePopularTags: false });
   };
 
   const handleJumpToPage = () => {
@@ -1542,7 +1557,7 @@ export function FeedPanel({
       return;
     }
 
-    loadFeed(latestQueryRef.current, normalizedPage, pageSize, { scrollToTop: true });
+    loadFeed(latestQueryRef.current, normalizedPage, pageSize, { scrollToTop: true, includePopularTags: false });
   };
 
   const resumeReadingProgress = () => {
@@ -1567,7 +1582,7 @@ export function FeedPanel({
       }
     }
 
-    loadFeed(latestQueryRef.current, restoredPage, readingProgress.size);
+    loadFeed(latestQueryRef.current, restoredPage, readingProgress.size, { includePopularTags: false });
   };
 
   const neutralBadgeClassName =
@@ -1603,7 +1618,6 @@ export function FeedPanel({
       header={{
         activeNav: "home",
         isAdmin,
-        resolveAdminClient: hydrateAdminClient,
       }}
       footerPath="/"
       contentClassName="gap-5 sm:gap-6"
@@ -2296,7 +2310,11 @@ export function FeedPanel({
             totalPages={totalPages}
             pageSize={pageSize}
             pageSizeOptions={FEED_PAGE_SIZE_OPTIONS}
-            onPageChange={(nextPage) => loadFeed(latestQueryRef.current, nextPage, pageSize, { scrollToTop: true })}
+            onPageChange={(nextPage) =>
+              loadFeed(latestQueryRef.current, nextPage, pageSize, {
+                scrollToTop: true,
+                includePopularTags: false,
+              })}
             onPageSizeChange={handlePageSizeChange}
             disabled={isPending}
             nextLabel={isPending ? "加载中..." : "下一页"}

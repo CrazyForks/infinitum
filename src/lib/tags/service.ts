@@ -1,4 +1,6 @@
 import { prisma } from "@/lib/db";
+import { refreshClusterFeedStatsSafely } from "@/lib/clusters/feed-stats";
+import { invalidateFeedCache } from "@/lib/feed/cache";
 import { normalizeItemTags } from "@/lib/tags/normalization";
 
 type PrismaTransaction = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
@@ -38,4 +40,12 @@ export async function replaceItemTagsInTransaction(
 
 export async function replaceItemTags(itemId: string, tagsInput: unknown) {
   await prisma.$transaction((tx) => replaceItemTagsInTransaction(tx, itemId, tagsInput));
+  const item = await prisma.item.findUnique({
+    where: { id: itemId },
+    select: { clusterId: true },
+  });
+  if (item?.clusterId) {
+    await refreshClusterFeedStatsSafely([item.clusterId], "replace item tags");
+  }
+  invalidateFeedCache();
 }

@@ -80,6 +80,7 @@ export async function requestFeed(
   pagination?: {
     page?: number;
     size?: number;
+    includePopularTags?: boolean;
   },
 ) {
   const requestedPage = pagination?.page ?? 1;

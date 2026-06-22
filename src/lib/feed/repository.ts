@@ -31,6 +31,7 @@ import type {
 } from "@/lib/feed/types";
 
 const DISPLAYABLE_MODERATION_STATUSES = ["allowed", "restored"] as const;
+const isClusterEntityFilteringEnabled = () => process.env.FEED_CLUSTER_ENTITY_FILTERING_ENABLED !== "false";
 const aggregationParentSelect = {
   id: true,
   originalTitle: true,
@@ -63,8 +64,8 @@ type FeedEntryRow = {
   id: string;
   entryType: "single" | "cluster";
   clusterId?: string | null;
-  title: string;
-  summary: string | null;
+  title?: string;
+  summary?: string | null;
   latestPublishedAt: Date | string;
   createdAt: Date | string;
   score: number | bigint;
@@ -74,6 +75,13 @@ type FeedEntryRow = {
   upvotes?: number | bigint;
   downvotes?: number | bigint;
   recommendScore?: number | bigint;
+};
+
+type FeedClusterMetadataRow = {
+  id: string;
+  title: string;
+  summary: string;
+  dominantGroup?: SourceGroup | null;
 };
 
 type CountRow = {
@@ -853,9 +861,11 @@ function buildFeedEntryCandidatesCte(
   searchTerm: string | null = null,
   options: {
     includeClusterScoreStats?: boolean;
+    includeDisplayFields?: boolean;
   } = {},
 ) {
   const includeClusterScoreStats = options.includeClusterScoreStats ?? true;
+  const includeDisplayFields = options.includeDisplayFields ?? true;
   const nonTimeWhereClauses: Prisma.Sql[] = [
     Prisma.sql`i.status = ${"processed"}`,
     Prisma.sql`i."moderationStatus" IN (${Prisma.join([...DISPLAYABLE_MODERATION_STATUSES])})`,
@@ -1007,11 +1017,14 @@ function buildFeedEntryCandidatesCte(
         i."publishedAt" AS "publishedAt",
         i."createdAt" AS "createdAt",
         i."qualityScore" AS "qualityScore",
+        s."groupId" AS "sourceGroupId",
+        ${includeDisplayFields
+          ? Prisma.sql`
         i."originalTitle" AS "originalTitle",
         i."translatedTitle" AS "translatedTitle",
-        s."groupId" AS "sourceGroupId",
         c.title AS "clusterTitle",
-        c.summary AS "clusterSummary"
+        c.summary AS "clusterSummary"`
+          : Prisma.sql`NULL AS "originalTitle", NULL AS "translatedTitle", NULL AS "clusterTitle", NULL AS "clusterSummary"`}
       FROM "items" i
       INNER JOIN "sources" s ON s.id = i."sourceId"
       LEFT JOIN "content_clusters" c ON c.id = i."clusterId"
@@ -1076,8 +1089,11 @@ function buildFeedEntryCandidatesCte(
     cluster_groups AS (
       SELECT
         fi."clusterId" AS id,
+        ${includeDisplayFields
+          ? Prisma.sql`
         MIN(fi."clusterTitle") AS title,
-        MIN(fi."clusterSummary") AS summary,
+        MIN(fi."clusterSummary") AS summary,`
+          : Prisma.empty}
         MAX(fi."publishedAt") AS "latestPublishedAt",
         MAX(fi."createdAt") AS "createdAt",
         MAX(COALESCE(csg.score, 0)) AS score,
@@ -1102,8 +1118,11 @@ function buildFeedEntryCandidatesCte(
         fi."itemId" AS id,
         'single' AS type,
         fi."clusterId" AS "clusterId",
+        ${includeDisplayFields
+          ? Prisma.sql`
         COALESCE(NULLIF(TRIM(fi."translatedTitle"), ''), fi."originalTitle") AS title,
-        NULL AS summary,
+        NULL AS summary,`
+          : Prisma.empty}
         fi."publishedAt" AS "latestPublishedAt",
         fi."createdAt" AS "createdAt",
         fi."qualityScore" AS score,
@@ -1130,8 +1149,11 @@ function buildFeedEntryCandidatesCte(
         cg.id AS id,
         'cluster' AS type,
         cg.id AS "clusterId",
+        ${includeDisplayFields
+          ? Prisma.sql`
         cg.title AS title,
-        cg.summary AS summary,
+        cg.summary AS summary,`
+          : Prisma.empty}
         cg."latestPublishedAt" AS "latestPublishedAt",
         cg."createdAt" AS "createdAt",
         cg.score AS score,
@@ -1146,10 +1168,10 @@ function buildFeedEntryCandidatesCte(
       WHERE cg."matchedItemCount" > 1
     ),
     all_entry_candidates AS (
-      SELECT id, type, NULL AS "clusterId", title, summary, "latestPublishedAt", "createdAt", score, "sourceCount", "itemCount", "totalItemCount", "entryGroupId", upvotes, downvotes, "recommendScore"
+      SELECT id, type, NULL AS "clusterId", ${includeDisplayFields ? Prisma.sql`title, summary,` : Prisma.empty} "latestPublishedAt", "createdAt", score, "sourceCount", "itemCount", "totalItemCount", "entryGroupId", upvotes, downvotes, "recommendScore"
       FROM cluster_entries
       UNION ALL
-      SELECT id, type, "clusterId", title, summary, "latestPublishedAt", "createdAt", score, "sourceCount", "itemCount", CAST(1 AS INTEGER) AS "totalItemCount", "entryGroupId", upvotes, downvotes, "recommendScore"
+      SELECT id, type, "clusterId", ${includeDisplayFields ? Prisma.sql`title, summary,` : Prisma.empty} "latestPublishedAt", "createdAt", score, "sourceCount", "itemCount", CAST(1 AS INTEGER) AS "totalItemCount", "entryGroupId", upvotes, downvotes, "recommendScore"
       FROM single_entries
     ),
     entry_candidates AS (
@@ -1158,6 +1180,414 @@ function buildFeedEntryCandidatesCte(
       ${filters.groupId ? Prisma.sql`WHERE "entryGroupId" = ${filters.groupId}` : Prisma.empty}
     )
   `;
+}
+
+function buildFeedEntryCountCandidatesCte(
+  filters: FeedFilters & {
+    rangeStart: Date | null;
+    rangeEnd: Date | null;
+    publishedRangeStart: Date | null;
+    publishedRangeEnd: Date | null;
+  },
+  searchTerm: string | null = null,
+) {
+  const nonTimeWhereClauses: Prisma.Sql[] = [
+    Prisma.sql`i.status = ${"processed"}`,
+    Prisma.sql`i."moderationStatus" IN (${Prisma.join([...DISPLAYABLE_MODERATION_STATUSES])})`,
+    Prisma.sql`s.enabled = ${true}`,
+    Prisma.sql`(i."clusterId" IS NULL OR c.status = ${"active"})`,
+    Prisma.sql`i."isAggregation" = ${false}`,
+  ];
+
+  if (filters.sourceId) {
+    nonTimeWhereClauses.push(Prisma.sql`s.id = ${filters.sourceId}`);
+  }
+
+  const likeSearchTerm = sanitizeLikeQuery(filters.title);
+
+  if (searchTerm || likeSearchTerm) {
+    const searchClauses: Prisma.Sql[] = [];
+
+    if (searchTerm) {
+      searchClauses.push(Prisma.sql`i.rowid IN (SELECT rowid FROM items_fts WHERE items_fts MATCH ${searchTerm})`);
+    }
+
+    if (likeSearchTerm) {
+      const likeEscape = "\\";
+      searchClauses.push(Prisma.sql`COALESCE(i."originalTitle", '') LIKE ${likeSearchTerm} ESCAPE ${likeEscape}`);
+      searchClauses.push(Prisma.sql`COALESCE(i."translatedTitle", '') LIKE ${likeSearchTerm} ESCAPE ${likeEscape}`);
+      searchClauses.push(Prisma.sql`COALESCE(i.author, '') LIKE ${likeSearchTerm} ESCAPE ${likeEscape}`);
+      searchClauses.push(Prisma.sql`COALESCE(c.title, '') LIKE ${likeSearchTerm} ESCAPE ${likeEscape}`);
+    }
+
+    nonTimeWhereClauses.push(Prisma.sql`(${Prisma.join(searchClauses, " OR ")})`);
+  }
+
+  const timeWhereClauses: Prisma.Sql[] = [];
+
+  if (filters.rangeStart) {
+    timeWhereClauses.push(Prisma.sql`mi."createdAt" >= ${filters.rangeStart.getTime()}`);
+  }
+
+  if (filters.rangeEnd) {
+    timeWhereClauses.push(Prisma.sql`mi."createdAt" <= ${filters.rangeEnd.getTime()}`);
+  }
+
+  if (filters.publishedRangeStart) {
+    timeWhereClauses.push(Prisma.sql`mi."publishedAt" >= ${filters.publishedRangeStart.getTime()}`);
+  }
+
+  if (filters.publishedRangeEnd) {
+    timeWhereClauses.push(Prisma.sql`mi."publishedAt" <= ${filters.publishedRangeEnd.getTime()}`);
+  }
+
+  const baseFilteredItemsWhereClause =
+    timeWhereClauses.length > 0
+      ? Prisma.sql`WHERE ${Prisma.join(timeWhereClauses, " AND ")}`
+      : Prisma.empty;
+  const filteredItemsCte = filters.tag
+    ? Prisma.sql`
+    tag_matched_clusters AS (
+      SELECT DISTINCT bfi."clusterId" AS id
+      FROM base_filtered_items bfi
+      INNER JOIN "item_tags" it ON it."itemId" = bfi."itemId"
+      INNER JOIN "tags" t ON t.id = it."tagId"
+      WHERE t.normalized = ${filters.tag}
+        AND bfi."clusterId" IS NOT NULL
+    ),
+    filtered_items AS (
+      SELECT bfi.*
+      FROM base_filtered_items bfi
+      WHERE EXISTS (
+          SELECT 1
+          FROM "item_tags" it
+          INNER JOIN "tags" t ON t.id = it."tagId"
+          WHERE it."itemId" = bfi."itemId"
+            AND t.normalized = ${filters.tag}
+        )
+        OR bfi."clusterId" IN (SELECT id FROM tag_matched_clusters)
+    )`
+    : Prisma.sql`
+    filtered_items AS (
+      SELECT *
+      FROM base_filtered_items
+    )`;
+
+  return Prisma.sql`
+    WITH matched_items AS (
+      SELECT
+        i.id AS "itemId",
+        i."clusterId" AS "clusterId",
+        i."publishedAt" AS "publishedAt",
+        i."createdAt" AS "createdAt",
+        i."originalTitle" AS "originalTitle",
+        i."translatedTitle" AS "translatedTitle",
+        i.author AS author,
+        s."groupId" AS "sourceGroupId",
+        c.title AS "clusterTitle"
+      FROM "items" i
+      INNER JOIN "sources" s ON s.id = i."sourceId"
+      LEFT JOIN "content_clusters" c ON c.id = i."clusterId"
+      WHERE ${Prisma.join(nonTimeWhereClauses, " AND ")}
+    ),
+    base_filtered_items AS (
+      SELECT
+        mi."itemId",
+        mi."clusterId",
+        mi."publishedAt",
+        mi."createdAt",
+        mi."sourceGroupId"
+      FROM matched_items mi
+      ${baseFilteredItemsWhereClause}
+    ),
+    ${filteredItemsCte},
+    relevant_clusters AS (
+      SELECT DISTINCT fi."clusterId" AS id
+      FROM filtered_items fi
+      WHERE fi."clusterId" IS NOT NULL
+    ),
+    cluster_match_counts AS (
+      SELECT
+        mi."clusterId" AS id,
+        COUNT(*) AS "matchedItemCount"
+      FROM matched_items mi
+      INNER JOIN relevant_clusters rc ON rc.id = mi."clusterId"
+      GROUP BY mi."clusterId"
+    ),
+    cluster_match_group_counts AS (
+      SELECT
+        mi."clusterId",
+        mi."sourceGroupId" AS "groupId",
+        COUNT(*) AS count,
+        MIN(mi."createdAt") AS "firstCreatedAt"
+      FROM matched_items mi
+      INNER JOIN relevant_clusters rc ON rc.id = mi."clusterId"
+      WHERE mi."sourceGroupId" IS NOT NULL
+      GROUP BY mi."clusterId", mi."sourceGroupId"
+    ),
+    cluster_dominant_groups AS (
+      SELECT "clusterId", "groupId"
+      FROM (
+        SELECT
+          cmgc."clusterId",
+          cmgc."groupId",
+          ROW_NUMBER() OVER (
+            PARTITION BY cmgc."clusterId"
+            ORDER BY cmgc.count DESC, cmgc."firstCreatedAt" ASC, cmgc."groupId" ASC
+          ) AS rn
+        FROM cluster_match_group_counts cmgc
+      )
+      WHERE rn = 1
+    ),
+    cluster_count_entries AS (
+      SELECT
+        fi."clusterId" AS id,
+        MIN(cdg."groupId") AS "entryGroupId"
+      FROM filtered_items fi
+      INNER JOIN cluster_match_counts cmc ON cmc.id = fi."clusterId"
+      LEFT JOIN cluster_dominant_groups cdg ON cdg."clusterId" = fi."clusterId"
+      WHERE fi."clusterId" IS NOT NULL
+        AND cmc."matchedItemCount" > 1
+      GROUP BY fi."clusterId"
+    ),
+    single_count_entries AS (
+      SELECT
+        fi."itemId" AS id,
+        fi."sourceGroupId" AS "entryGroupId"
+      FROM filtered_items fi
+      LEFT JOIN cluster_match_counts cmc ON cmc.id = fi."clusterId"
+      WHERE fi."clusterId" IS NULL OR COALESCE(cmc."matchedItemCount", 1) <= 1
+    ),
+    entry_count_candidates AS (
+      SELECT id, "entryGroupId"
+      FROM cluster_count_entries
+      UNION ALL
+      SELECT id, "entryGroupId"
+      FROM single_count_entries
+    )
+  `;
+}
+
+function buildEntityFeedEntryCandidatesCte(
+  filters: FeedFilters & {
+    rangeStart: Date | null;
+    rangeEnd: Date | null;
+    publishedRangeStart: Date | null;
+    publishedRangeEnd: Date | null;
+  },
+  searchTerm: string | null = null,
+  options: {
+    includeDisplayFields?: boolean;
+  } = {},
+) {
+  const includeDisplayFields = options.includeDisplayFields ?? true;
+  const likeSearchTerm = sanitizeLikeQuery(filters.title);
+  const likeEscape = "\\";
+  const clusterWhereClauses: Prisma.Sql[] = [
+    Prisma.sql`cc.status = ${"active"}`,
+    Prisma.sql`cc."displayItemCount" > 1`,
+    Prisma.sql`cc."latestCreatedAt" IS NOT NULL`,
+  ];
+  const singleWhereClauses: Prisma.Sql[] = [
+    Prisma.sql`i.status = ${"processed"}`,
+    Prisma.sql`i."moderationStatus" IN (${Prisma.join([...DISPLAYABLE_MODERATION_STATUSES])})`,
+    Prisma.sql`s.enabled = ${true}`,
+    Prisma.sql`(i."clusterId" IS NULL OR c.status = ${"active"})`,
+    Prisma.sql`(i."clusterId" IS NULL OR COALESCE(c."displayItemCount", 0) <= 1)`,
+    Prisma.sql`i."isAggregation" = ${false}`,
+  ];
+
+  if (filters.sourceId) {
+    clusterWhereClauses.push(Prisma.sql`0 = 1`);
+    singleWhereClauses.push(Prisma.sql`s.id = ${filters.sourceId}`);
+  }
+
+  if (filters.groupId) {
+    clusterWhereClauses.push(Prisma.sql`cc."dominantGroupId" = ${filters.groupId}`);
+    singleWhereClauses.push(Prisma.sql`s."groupId" = ${filters.groupId}`);
+  }
+
+  if (searchTerm || likeSearchTerm) {
+    const singleSearchClauses: Prisma.Sql[] = [];
+    const clusterSearchClauses: Prisma.Sql[] = [];
+
+    if (searchTerm) {
+      singleSearchClauses.push(Prisma.sql`i.rowid IN (SELECT rowid FROM items_fts WHERE items_fts MATCH ${searchTerm})`);
+    }
+
+    if (likeSearchTerm) {
+      singleSearchClauses.push(Prisma.sql`COALESCE(i."originalTitle", '') LIKE ${likeSearchTerm} ESCAPE ${likeEscape}`);
+      singleSearchClauses.push(Prisma.sql`COALESCE(i."translatedTitle", '') LIKE ${likeSearchTerm} ESCAPE ${likeEscape}`);
+      singleSearchClauses.push(Prisma.sql`COALESCE(i.author, '') LIKE ${likeSearchTerm} ESCAPE ${likeEscape}`);
+      clusterSearchClauses.push(Prisma.sql`COALESCE(cc."feedSearchText", '') LIKE ${likeSearchTerm} ESCAPE ${likeEscape}`);
+      clusterSearchClauses.push(Prisma.sql`COALESCE(cc.title, '') LIKE ${likeSearchTerm} ESCAPE ${likeEscape}`);
+      clusterSearchClauses.push(Prisma.sql`COALESCE(cc.summary, '') LIKE ${likeSearchTerm} ESCAPE ${likeEscape}`);
+    }
+
+    if (singleSearchClauses.length > 0) {
+      singleWhereClauses.push(Prisma.sql`(${Prisma.join(singleSearchClauses, " OR ")})`);
+    }
+
+    if (clusterSearchClauses.length > 0) {
+      clusterWhereClauses.push(Prisma.sql`(${Prisma.join(clusterSearchClauses, " OR ")})`);
+    }
+  }
+
+  if (filters.rangeStart) {
+    clusterWhereClauses.push(Prisma.sql`cc."latestCreatedAt" >= ${filters.rangeStart.getTime()}`);
+    singleWhereClauses.push(Prisma.sql`i."createdAt" >= ${filters.rangeStart.getTime()}`);
+  }
+
+  if (filters.rangeEnd) {
+    clusterWhereClauses.push(Prisma.sql`cc."latestCreatedAt" <= ${filters.rangeEnd.getTime()}`);
+    singleWhereClauses.push(Prisma.sql`i."createdAt" <= ${filters.rangeEnd.getTime()}`);
+  }
+
+  if (filters.publishedRangeStart) {
+    clusterWhereClauses.push(Prisma.sql`cc."latestPublishedAt" >= ${filters.publishedRangeStart.getTime()}`);
+    singleWhereClauses.push(Prisma.sql`i."publishedAt" >= ${filters.publishedRangeStart.getTime()}`);
+  }
+
+  if (filters.publishedRangeEnd) {
+    clusterWhereClauses.push(Prisma.sql`cc."latestPublishedAt" <= ${filters.publishedRangeEnd.getTime()}`);
+    singleWhereClauses.push(Prisma.sql`i."publishedAt" <= ${filters.publishedRangeEnd.getTime()}`);
+  }
+
+  if (filters.tag) {
+    clusterWhereClauses.push(Prisma.sql`
+      EXISTS (
+        SELECT 1
+        FROM json_each(cc."feedTagsJson") tag
+        WHERE CASE
+          WHEN json_valid(tag.value) THEN json_extract(tag.value, '$.normalized')
+          ELSE tag.value
+        END = ${filters.tag}
+      )
+    `);
+    singleWhereClauses.push(Prisma.sql`
+      EXISTS (
+        SELECT 1
+        FROM "item_tags" it
+        INNER JOIN "tags" t ON t.id = it."tagId"
+        WHERE it."itemId" = i.id
+          AND t.normalized = ${filters.tag}
+      )
+    `);
+  }
+
+  const singleUpvotes = Prisma.sql`COALESCE(c.upvotes, 0)`;
+  const singleDownvotes = Prisma.sql`COALESCE(c.downvotes, 0)`;
+
+  return Prisma.sql`
+    WITH cluster_entries AS (
+      SELECT
+        cc.id AS id,
+        'cluster' AS type,
+        cc.id AS "clusterId",
+        ${includeDisplayFields ? Prisma.sql`cc.title AS title, cc.summary AS summary,` : Prisma.empty}
+        cc."latestPublishedAt" AS "latestPublishedAt",
+        cc."latestCreatedAt" AS "createdAt",
+        cc."displayAverageScore" AS score,
+        cc."displaySourceCount" AS "sourceCount",
+        cc."displayItemCount" AS "itemCount",
+        cc."displayItemCount" AS "totalItemCount",
+        cc."dominantGroupId" AS "entryGroupId",
+        cc.upvotes AS upvotes,
+        cc.downvotes AS downvotes,
+        cc."displayRecommendScore" AS "recommendScore"
+      FROM "content_clusters" cc
+      WHERE ${Prisma.join(clusterWhereClauses, " AND ")}
+    ),
+    single_entries AS (
+      SELECT
+        i.id AS id,
+        'single' AS type,
+        i."clusterId" AS "clusterId",
+        ${includeDisplayFields ? Prisma.sql`COALESCE(NULLIF(TRIM(i."translatedTitle"), ''), i."originalTitle") AS title, NULL AS summary,` : Prisma.empty}
+        i."publishedAt" AS "latestPublishedAt",
+        i."createdAt" AS "createdAt",
+        i."qualityScore" AS score,
+        1 AS "sourceCount",
+        1 AS "itemCount",
+        s."groupId" AS "entryGroupId",
+        ${singleUpvotes} AS upvotes,
+        ${singleDownvotes} AS downvotes,
+        ${buildRecommendScoreSql({
+          aiScore: Prisma.sql`i."qualityScore"`,
+          upvotes: singleUpvotes,
+          downvotes: singleDownvotes,
+          sourceCount: Prisma.sql`1`,
+          itemCount: Prisma.sql`1`,
+        })} AS "recommendScore"
+      FROM "items" i
+      INNER JOIN "sources" s ON s.id = i."sourceId"
+      LEFT JOIN "content_clusters" c ON c.id = i."clusterId"
+      WHERE ${Prisma.join(singleWhereClauses, " AND ")}
+    ),
+    entry_candidates AS (
+      SELECT id, type, NULL AS "clusterId", ${includeDisplayFields ? Prisma.sql`title, summary,` : Prisma.empty} "latestPublishedAt", "createdAt", score, "sourceCount", "itemCount", "totalItemCount", "entryGroupId", upvotes, downvotes, "recommendScore"
+      FROM cluster_entries
+      UNION ALL
+      SELECT id, type, "clusterId", ${includeDisplayFields ? Prisma.sql`title, summary,` : Prisma.empty} "latestPublishedAt", "createdAt", score, "sourceCount", "itemCount", CAST(1 AS INTEGER) AS "totalItemCount", "entryGroupId", upvotes, downvotes, "recommendScore"
+      FROM single_entries
+    )
+  `;
+}
+
+function buildEntityFeedEntryCountCandidatesCte(
+  filters: FeedFilters & {
+    rangeStart: Date | null;
+    rangeEnd: Date | null;
+    publishedRangeStart: Date | null;
+    publishedRangeEnd: Date | null;
+  },
+  searchTerm: string | null = null,
+) {
+  return Prisma.sql`
+    ${buildEntityFeedEntryCandidatesCte(filters, searchTerm, { includeDisplayFields: false })},
+    entry_count_candidates AS (
+      SELECT id, "entryGroupId"
+      FROM entry_candidates
+    )
+  `;
+}
+
+function buildActiveFeedEntryCandidatesCte(
+  filters: FeedFilters & {
+    rangeStart: Date | null;
+    rangeEnd: Date | null;
+    publishedRangeStart: Date | null;
+    publishedRangeEnd: Date | null;
+  },
+  searchTerm: string | null,
+  options: {
+    includeDisplayFields?: boolean;
+  } = {},
+) {
+  if (!isClusterEntityFilteringEnabled()) {
+    return buildFeedEntryCandidatesCte(filters, searchTerm, {
+      includeClusterScoreStats: true,
+      includeDisplayFields: options.includeDisplayFields,
+    });
+  }
+
+  return buildEntityFeedEntryCandidatesCte(filters, searchTerm, options);
+}
+
+function buildActiveFeedEntryCountCandidatesCte(
+  filters: FeedFilters & {
+    rangeStart: Date | null;
+    rangeEnd: Date | null;
+    publishedRangeStart: Date | null;
+    publishedRangeEnd: Date | null;
+  },
+  searchTerm: string | null,
+) {
+  if (!isClusterEntityFilteringEnabled()) {
+    return buildFeedEntryCountCandidatesCte(filters, searchTerm);
+  }
+
+  return buildEntityFeedEntryCountCandidatesCte(filters, searchTerm);
 }
 
 function buildFeedEntryOrderBy(sort: FeedFilters["sort"]) {
@@ -1236,29 +1666,20 @@ async function listFeedGroupCounts(
     groupId: null,
   };
   const searchTerm = sanitizeFts5Query(filters.title);
-  const entryCandidatesCte = buildFeedEntryCandidatesCte(effectiveFilters, searchTerm, {
-    includeClusterScoreStats: false,
-  });
+  const entryCandidatesCte = buildActiveFeedEntryCountCandidatesCte(effectiveFilters, searchTerm);
   const groupRows = await prisma.$queryRaw<(FeedGroupCountRow & { total: bigint })[]>(Prisma.sql`
     ${entryCandidatesCte},
-    annotated_entry_candidates AS (
-      SELECT
-        ec.*,
-        COUNT(*) OVER() AS total
-      FROM entry_candidates ec
-    ),
     grouped_entries AS (
       SELECT
-        aec."entryGroupId" AS id,
-        COUNT(*) AS count,
-        MAX(aec.total) AS total
-      FROM annotated_entry_candidates aec
-      WHERE aec."entryGroupId" IS NOT NULL
-      GROUP BY aec."entryGroupId"
+        ecc."entryGroupId" AS id,
+        COUNT(*) AS count
+      FROM entry_count_candidates ecc
+      WHERE ecc."entryGroupId" IS NOT NULL
+      GROUP BY ecc."entryGroupId"
     ),
     total_entries AS (
-      SELECT COALESCE(MAX(total), 0) AS total
-      FROM annotated_entry_candidates
+      SELECT COUNT(*) AS total
+      FROM entry_count_candidates
     )
     SELECT
       ge.id AS id,
@@ -1280,7 +1701,7 @@ async function listFeedGroupCounts(
             await prisma.$queryRaw<CountRow[]>(Prisma.sql`
               ${entryCandidatesCte}
               SELECT COUNT(*) AS total
-              FROM entry_candidates
+              FROM entry_count_candidates
             `)
           )[0]?.total ?? BigInt(0),
         );
@@ -1310,49 +1731,52 @@ async function listPopularFeedTags(
     tag: null,
   };
   const searchTerm = sanitizeFts5Query(filters.title);
-  const entryCandidatesCte = buildFeedEntryCandidatesCte(effectiveFilters, searchTerm, {
-    includeClusterScoreStats: false,
+  const entryCandidatesCte = buildActiveFeedEntryCandidatesCte(effectiveFilters, searchTerm, {
+    includeDisplayFields: false,
   });
-  const tagEntryType = Prisma.sql`
-    CASE
-      WHEN fi."clusterId" IS NOT NULL AND COALESCE(cmc."matchedItemCount", 1) > 1 THEN 'cluster'
-      ELSE 'single'
-    END
-  `;
-  const tagEntryId = Prisma.sql`
-    CASE
-      WHEN fi."clusterId" IS NOT NULL AND COALESCE(cmc."matchedItemCount", 1) > 1 THEN fi."clusterId"
-      ELSE fi."itemId"
-    END
-  `;
-  const tagEntryGroupId = Prisma.sql`
-    CASE
-      WHEN fi."clusterId" IS NOT NULL AND COALESCE(cmc."matchedItemCount", 1) > 1 THEN cdg."groupId"
-      ELSE fi."sourceGroupId"
-    END
-  `;
   const rows = await prisma.$queryRaw<FeedTagCountRow[]>(Prisma.sql`
     ${entryCandidatesCte},
     entry_tag_matches AS (
       SELECT DISTINCT
-        ${tagEntryType} AS "entryType",
-        ${tagEntryId} AS "entryId",
-        t.id AS "tagId",
+        'single' AS "entryType",
+        ec.id AS "entryId",
         t.name AS name,
         t.normalized AS normalized
-      FROM filtered_items fi
-      LEFT JOIN cluster_match_counts cmc ON cmc.id = fi."clusterId"
-      ${filters.groupId ? Prisma.sql`LEFT JOIN cluster_dominant_groups cdg ON cdg."clusterId" = fi."clusterId"` : Prisma.empty}
-      INNER JOIN "item_tags" it ON it."itemId" = fi."itemId"
+      FROM entry_candidates ec
+      INNER JOIN "item_tags" it ON it."itemId" = ec.id
       INNER JOIN "tags" t ON t.id = it."tagId"
-      ${filters.groupId ? Prisma.sql`WHERE ${tagEntryGroupId} = ${filters.groupId}` : Prisma.empty}
+      WHERE ec.type = 'single'
+
+      UNION ALL
+
+      SELECT DISTINCT
+        'cluster' AS "entryType",
+        ec.id AS "entryId",
+        CASE
+          WHEN json_valid(tag.value) THEN COALESCE(json_extract(tag.value, '$.name'), json_extract(tag.value, '$.normalized'))
+          ELSE tag.value
+        END AS name,
+        CASE
+          WHEN json_valid(tag.value) THEN json_extract(tag.value, '$.normalized')
+          ELSE tag.value
+        END AS normalized
+      FROM entry_candidates ec
+      INNER JOIN "content_clusters" cc ON cc.id = ec.id
+      INNER JOIN json_each(cc."feedTagsJson") tag
+      WHERE ec.type = 'cluster'
+        AND CASE
+          WHEN json_valid(tag.value) THEN json_extract(tag.value, '$.normalized')
+          ELSE tag.value
+        END IS NOT NULL
     )
     SELECT
       etm.name AS name,
       etm.normalized AS normalized,
       COUNT(*) AS count
     FROM entry_tag_matches etm
-    GROUP BY etm."tagId", etm.name, etm.normalized
+    WHERE etm.normalized IS NOT NULL
+      AND etm.normalized != ''
+    GROUP BY etm.name, etm.normalized
     ORDER BY count DESC, etm.name ASC
     LIMIT ${limit}
   `);
@@ -1374,11 +1798,14 @@ export async function listFeedItems(
   pagination: {
     page: number;
     size: number;
+    includePopularTags?: boolean;
   },
   visitorId?: string | undefined,
 ) {
   const searchTerm = sanitizeFts5Query(filters.title);
-  const entryCandidatesCte = buildFeedEntryCandidatesCte(filters, searchTerm);
+  const entryCandidatesCte = buildActiveFeedEntryCandidatesCte(filters, searchTerm, {
+    includeDisplayFields: false,
+  });
   const requestedPage = Math.max(1, pagination.page);
   let page = requestedPage;
   let offset = (requestedPage - 1) * pagination.size;
@@ -1390,8 +1817,6 @@ export async function listFeedItems(
         id,
         type AS "entryType",
         "clusterId",
-        title,
-        summary,
         "latestPublishedAt",
         "createdAt",
         "recommendScore" AS score,
@@ -1407,10 +1832,11 @@ export async function listFeedItems(
       OFFSET ${pageOffset}
     `);
 
+  const shouldLoadPopularTags = pagination.includePopularTags !== false;
   const [initialPageRows, groupCounts, popularTags] = await Promise.all([
     queryPageRows(offset),
     listFeedGroupCounts(filters),
-    listPopularFeedTags(filters),
+    shouldLoadPopularTags ? listPopularFeedTags(filters) : Promise.resolve(undefined),
   ]);
   let pageRows = initialPageRows;
   const total = resolvePaginationTotalFromGroupCounts(groupCounts, filters.groupId);
@@ -1424,7 +1850,7 @@ export async function listFeedItems(
 
   const singleIds = pageRows.filter((row) => row.entryType === "single").map((row) => row.id);
   const clusterIds = pageRows.filter((row) => row.entryType === "cluster").map((row) => row.id);
-  const [singleItems, clusterItems] = await Promise.all([
+  const [singleItems, clusterItems, clusterMetadataRows] = await Promise.all([
     singleIds.length > 0
       ? prisma.item.findMany({
           where: {
@@ -1443,7 +1869,19 @@ export async function listFeedItems(
       : Promise.resolve([]),
     clusterIds.length > 0
       ? prisma.item.findMany({
-          where: buildItemWhere({ ...filters, groupId: null }, clusterIds),
+          where: {
+            clusterId: { in: clusterIds },
+            status: "processed",
+            moderationStatus: {
+              in: [...DISPLAYABLE_MODERATION_STATUSES],
+            },
+            isAggregation: false,
+            source: {
+              is: {
+                enabled: true,
+              },
+            },
+          },
           include: {
             source: {
               include: {
@@ -1454,8 +1892,26 @@ export async function listFeedItems(
           orderBy: [{ publishedAt: "desc" }, { createdAt: "desc" }],
         })
       : Promise.resolve([]),
+    clusterIds.length > 0
+      ? prisma.contentCluster.findMany({
+          where: {
+            id: {
+              in: clusterIds,
+            },
+          },
+          select: {
+            id: true,
+            title: true,
+            summary: true,
+            dominantGroup: true,
+          },
+        })
+      : Promise.resolve([]),
   ]);
   const singleItemMap = new Map(singleItems.map((item) => [item.id, mapItemToFeedItem(item)]));
+  const clusterMetadataMap = new Map(
+    (clusterMetadataRows as FeedClusterMetadataRow[]).map((cluster) => [cluster.id, cluster]),
+  );
   const clusterItemMap = new Map<string, ItemWithSource[]>();
   const selectedGroup = filters.groupId
     ? toGroupBadge(groupCounts.groups.find((group) => group.id === filters.groupId))
@@ -1511,14 +1967,15 @@ export async function listFeedItems(
     const clusterItemsForEntry = clusterItemMap.get(row.id) ?? [];
     const previewItems = clusterItemsForEntry.slice(0, 3).map(mapItemToClusterPreview);
     const totalCount = toNumber(row.totalItemCount ?? row.itemCount);
+    const metadata = clusterMetadataMap.get(row.id);
 
     return [
       {
         id: row.id,
         type: "cluster",
-        title: row.title,
-        summary: normalizeDisplaySummary(row.summary),
-        group: selectDominantGroupBadge(clusterItemsForEntry, selectedGroup),
+        title: metadata?.title ?? row.id,
+        summary: normalizeDisplaySummary(metadata?.summary ?? null),
+        group: selectedGroup ?? toGroupBadge(metadata?.dominantGroup ?? null) ?? selectDominantGroupBadge(clusterItemsForEntry, null),
         publishedAt: toIsoString(row.latestPublishedAt),
         createdAt: toIsoString(row.createdAt),
         latestPublishedAt: toIsoString(row.latestPublishedAt),

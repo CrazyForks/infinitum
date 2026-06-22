@@ -420,10 +420,13 @@ export async function restoreFilteredItem(itemId: string, options?: Regeneration
     include: { source: true },
   });
 
-  await assignItemToCluster(restored.id, {
+  const assignment = await assignItemToCluster(restored.id, {
     eventSignature: null,
     aiProvider: options?.aiProvider,
   });
+  if (assignment.clusterId) {
+    await recomputeCluster(assignment.clusterId, options?.aiProvider);
+  }
   invalidateFeedCache();
 
   return prisma.item.findUniqueOrThrow({

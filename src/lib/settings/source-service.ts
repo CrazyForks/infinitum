@@ -1,4 +1,6 @@
 import { prisma } from "@/lib/db";
+import { refreshClusterFeedStatsSafely } from "@/lib/clusters/feed-stats";
+import { invalidateFeedCache } from "@/lib/feed/cache";
 import { generateUniqueGroupColor } from "@/lib/groups/badge";
 import { createRssParser } from "@/lib/ingestion/parser";
 import {
@@ -12,6 +14,23 @@ import {
 } from "@/lib/settings/core";
 import type { OpmlImportSummary, ResolvedSourceMetadata } from "@/lib/settings/types";
 import { normalizeKeyword, normalizeText, normalizeUrl } from "@/lib/utils/text";
+
+async function collectClusterIdsForSources(sourceIds: string[]) {
+  if (sourceIds.length === 0) {
+    return [];
+  }
+
+  const rows = await prisma.item.findMany({
+    where: {
+      sourceId: { in: [...new Set(sourceIds)] },
+      clusterId: { not: null },
+    },
+    select: { clusterId: true },
+    distinct: ["clusterId"],
+  });
+
+  return rows.map((row) => row.clusterId).filter((clusterId): clusterId is string => Boolean(clusterId));
+}
 
 export async function resolveSourceMetadata(
   rssUrl: string,
@@ -58,6 +77,7 @@ export async function importSourcesFromOpml(
   const usedColors = new Set(existingGroups.map((g) => g.color).filter(Boolean));
   let createdCount = 0;
   let updatedCount = 0;
+  const changedSourceIds = new Set<string>();
   const failures: OpmlImportSummary["failures"] = [];
 
   for (const source of parsedSources) {
@@ -91,7 +111,7 @@ export async function importSourcesFromOpml(
       const name = source.name || metadata.name;
       const siteUrl = source.siteUrl || metadata.siteUrl;
 
-      await prisma.source.upsert({
+      const storedSource = await prisma.source.upsert({
         where: { rssUrl: source.rssUrl },
         update: {
           name,
@@ -116,6 +136,7 @@ export async function importSourcesFromOpml(
 
       if (existingSource) {
         updatedCount += 1;
+        changedSourceIds.add(storedSource.id);
       } else {
         createdCount += 1;
       }
@@ -126,6 +147,10 @@ export async function importSourcesFromOpml(
       });
     }
   }
+
+  const affectedClusterIds = await collectClusterIdsForSources([...changedSourceIds]);
+  await refreshClusterFeedStatsSafely(affectedClusterIds, "import sources from OPML");
+  invalidateFeedCache();
 
   return {
     totalCount: parsedSources.length,
@@ -159,13 +184,15 @@ export async function createSourceGroup(name: string) {
       .filter(Boolean),
   );
 
-  return prisma.sourceGroup.create({
+  const group = await prisma.sourceGroup.create({
     data: {
       name: name.trim(),
       color: generateUniqueGroupColor(existingColors),
       sortOrder: nextSortOrder,
     },
   });
+  invalidateFeedCache();
+  return group;
 }
 
 async function getNextSourceGroupSortOrder() {
@@ -178,12 +205,14 @@ async function getNextSourceGroupSortOrder() {
 }
 
 export async function renameSourceGroup(id: string, name: string) {
-  return prisma.sourceGroup.update({
+  const group = await prisma.sourceGroup.update({
     where: { id },
     data: {
       name: name.trim(),
     },
   });
+  invalidateFeedCache();
+  return group;
 }
 
 export async function deleteSourceGroup(id: string) {
@@ -198,6 +227,7 @@ export async function deleteSourceGroup(id: string) {
   await prisma.sourceGroup.delete({
     where: { id },
   });
+  invalidateFeedCache();
 }
 
 export async function reorderSourceGroups(groupIds: string[]) {
@@ -219,6 +249,7 @@ export async function reorderSourceGroups(groupIds: string[]) {
       }),
     ),
   );
+  invalidateFeedCache();
 
   return prisma.sourceGroup.findMany({
     orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
@@ -234,7 +265,7 @@ export async function createSource(input: SourceInput) {
     throw new Error("该 RSS 地址已存在。");
   }
 
-  return prisma.source.create({
+  const source = await prisma.source.create({
     data: {
       name: input.name,
       rssUrl: input.rssUrl,
@@ -246,6 +277,8 @@ export async function createSource(input: SourceInput) {
       groupId: input.groupId ?? null,
     },
   });
+  invalidateFeedCache();
+  return source;
 }
 
 export async function updateSource(id: string, input: SourceInput) {
@@ -257,7 +290,8 @@ export async function updateSource(id: string, input: SourceInput) {
     throw new Error("该 RSS 地址已被其他源使用。");
   }
 
-  return prisma.source.update({
+  const affectedClusterIds = await collectClusterIdsForSources([id]);
+  const source = await prisma.source.update({
     where: { id },
     data: {
       name: input.name,
@@ -270,10 +304,16 @@ export async function updateSource(id: string, input: SourceInput) {
       groupId: input.groupId ?? null,
     },
   });
+  await refreshClusterFeedStatsSafely(affectedClusterIds, "update source");
+  invalidateFeedCache();
+  return source;
 }
 
 export async function deleteSource(id: string) {
+  const affectedClusterIds = await collectClusterIdsForSources([id]);
   await prisma.source.delete({
     where: { id },
   });
+  await refreshClusterFeedStatsSafely(affectedClusterIds, "delete source");
+  invalidateFeedCache();
 }

@@ -15,13 +15,14 @@ type ResolvedFeedRequest = {
   pagination: {
     page: number;
     size: number;
+    includePopularTags: boolean;
   };
 };
 
 const ADVANCED_FILTER_KEYS = ["sourceId", "title", "tag", "publishedStart", "publishedEnd"] as const;
 const CREATED_TIME_FILTER_KEYS = ["range", "start", "end"] as const;
 
-function getSearchParamValue(searchParams: SearchParamSource, key: keyof FeedFilters | "page" | "size") {
+function getSearchParamValue(searchParams: SearchParamSource, key: keyof FeedFilters | "page" | "size" | "includeTags") {
   if (searchParams instanceof URLSearchParams) {
     return searchParams.get(key) ?? undefined;
   }
@@ -82,6 +83,7 @@ export function resolveFeedRequest(searchParams: SearchParamSource, now = new Da
     pagination: {
       page: parsePage(getSearchParamValue(searchParams, "page")),
       size: parsePageSize(getSearchParamValue(searchParams, "size")),
+      includePopularTags: getSearchParamValue(searchParams, "includeTags") !== "false",
     },
   };
 }

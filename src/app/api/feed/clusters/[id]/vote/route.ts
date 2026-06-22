@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/db";
+import { refreshClusterFeedStatsSafely } from "@/lib/clusters/feed-stats";
 import { invalidateFeedCache } from "@/lib/feed/cache";
 
 async function getVisitorIdCookie(): Promise<string | undefined> {
@@ -141,6 +142,7 @@ export async function POST(
     });
 
     // 投票成功后清除 feed 缓存，确保访客能看到最新的投票数据
+    await refreshClusterFeedStatsSafely([clusterId], "cluster vote");
     invalidateFeedCache();
 
     return Response.json(result);

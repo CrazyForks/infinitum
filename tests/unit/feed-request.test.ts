@@ -30,4 +30,11 @@ describe("feed request parsing", () => {
     expect(resolveFeedRequest({ tag: " openai " }, now).filters.tag).toBe("openai");
     expect(resolveFeedRequest({ tag: " " }, now).filters.tag).toBeNull();
   });
+
+  it("allows callers to skip popular tag calculation", () => {
+    const now = new Date("2026-04-10T16:45:00.000Z");
+
+    expect(resolveFeedRequest({ includeTags: "false" }, now).pagination.includePopularTags).toBe(false);
+    expect(resolveFeedRequest({}, now).pagination.includePopularTags).toBe(true);
+  });
 });

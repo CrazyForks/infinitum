@@ -44,6 +44,7 @@ import {
   updateClusterStatus,
   updateClusterSummary,
 } from "@/lib/clusters/repository";
+import { refreshClusterFeedStatsSafely } from "@/lib/clusters/feed-stats";
 import { normalizeEventSignatureForStorage } from "@/lib/clusters/normalization";
 import { prisma } from "@/lib/db";
 import { invalidateFeedCache } from "@/lib/feed/cache";
@@ -424,6 +425,7 @@ export async function recomputeCluster(
     cluster.summaryInputHash === summaryInputHash;
 
   if (shouldSkipUpdate) {
+    await refreshClusterFeedStatsSafely([clusterId], "recompute unchanged cluster");
     return {
       clusterId,
       deleted: false,
@@ -446,6 +448,7 @@ export async function recomputeCluster(
     eventObject: eventSignature?.eventObject ?? null,
     eventDate: eventSignature?.eventDate ?? null,
   });
+  await refreshClusterFeedStatsSafely([clusterId], "recompute cluster");
 
   return {
     clusterId,
@@ -472,7 +475,7 @@ async function refreshClusterStats(clusterId: string) {
   const score = Math.max(...cluster.items.map((item) => item.qualityScore));
   const latestPublishedAt = cluster.items[0]!.publishedAt;
 
-  return prisma.contentCluster.update({
+  const updated = await prisma.contentCluster.update({
     where: { id: clusterId },
     data: {
       score,
@@ -485,6 +488,8 @@ async function refreshClusterStats(clusterId: string) {
       eventDate: eventSignature?.eventDate ?? null,
     },
   });
+  await refreshClusterFeedStatsSafely([clusterId], "refresh cluster stats");
+  return updated;
 }
 
 export async function detachItemFromCluster(itemId: string, aiProvider?: AiProvider) {
@@ -516,6 +521,10 @@ export async function detachItemFromCluster(itemId: string, aiProvider?: AiProvi
   if (detachedAssignment.clusterId) {
     await recomputeCluster(detachedAssignment.clusterId, aiProvider);
   }
+  await refreshClusterFeedStatsSafely(
+    [previousClusterId, detachedAssignment.clusterId].filter((id): id is string => Boolean(id)),
+    "detach item from cluster",
+  );
 
   invalidateFeedCache();
 
@@ -576,6 +585,7 @@ export async function splitClusterIntoSingletons(
   }
 
   await recomputeCluster(clusterId, aiProvider);
+  await refreshClusterFeedStatsSafely([clusterId, ...singletonClusterIds], "split cluster into singletons");
   invalidateFeedCache();
 
   return {
@@ -639,6 +649,10 @@ export async function moveItemToCluster(itemId: string, clusterId: string, aiPro
   if (previousClusterId) {
     await recomputeCluster(previousClusterId, aiProvider);
   }
+  await refreshClusterFeedStatsSafely(
+    [clusterId, previousClusterId].filter((id): id is string => Boolean(id)),
+    "move item to cluster",
+  );
 
   invalidateFeedCache();
 
@@ -743,6 +757,7 @@ export async function mergeSelectedItemsToLargestCluster(
   for (const clusterId of affectedClusterIds) {
     await recomputeCluster(clusterId, aiProvider);
   }
+  await refreshClusterFeedStatsSafely(affectedClusterIds, "merge selected items to largest cluster");
 
   invalidateFeedCache();
 
@@ -757,6 +772,7 @@ export async function mergeSelectedItemsToLargestCluster(
 
 export async function setClusterVisibility(clusterId: string, visible: boolean) {
   const cluster = await updateClusterStatus(clusterId, visible ? "active" : "hidden");
+  await refreshClusterFeedStatsSafely([clusterId], "set cluster visibility");
   invalidateFeedCache();
   return cluster;
 }
@@ -874,6 +890,7 @@ async function mergeClustersInternal(
 
   // Refresh target cluster stats
   await refreshClusterStats(targetClusterId);
+  await refreshClusterFeedStatsSafely([targetClusterId, ...sourceClusterIds], "merge clusters internal");
 
   return { itemsMoved: moveResult.count };
 }

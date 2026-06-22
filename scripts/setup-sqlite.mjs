@@ -66,6 +66,9 @@ function loadSchemaSql() {
 
 function makeSqliteSchemaIdempotent(sql) {
   return sql
+    .replace(/^CREATE INDEX "content_clusters_status_latestCreatedAt_idx".*;\n?/gm, "")
+    .replace(/^CREATE INDEX "content_clusters_status_displayRecommendScore_idx".*;\n?/gm, "")
+    .replace(/^CREATE INDEX "content_clusters_dominantGroupId_status_latestCreatedAt_idx".*;\n?/gm, "")
     .replace(/^CREATE TABLE /gm, "CREATE TABLE IF NOT EXISTS ")
     .replace(/^CREATE UNIQUE INDEX /gm, "CREATE UNIQUE INDEX IF NOT EXISTS ")
     .replace(/^CREATE INDEX /gm, "CREATE INDEX IF NOT EXISTS ");
@@ -168,6 +171,151 @@ function tableColumnExists(tableName, columnName) {
   return Number(result) > 0;
 }
 
+function addColumnIfMissing(tableName, columnName, definition) {
+  if (!ftsTableExists(tableName) || tableColumnExists(tableName, columnName)) {
+    return;
+  }
+
+  runSqlite([dbPath], {
+    input: `ALTER TABLE "${tableName}" ADD COLUMN "${columnName}" ${definition};\n`,
+  });
+}
+
+function applyClusterFeedStatsBackfill() {
+  if (!ftsTableExists("content_clusters") || !ftsTableExists("items") || !ftsTableExists("sources")) {
+    return;
+  }
+
+  runSqlite([dbPath], {
+    input: `
+      DROP TABLE IF EXISTS "_cluster_feed_stats_backfill";
+      CREATE TEMP TABLE "_cluster_feed_stats_backfill" AS
+      SELECT
+        i."clusterId" AS "clusterId",
+        COUNT(*) AS "displayItemCount",
+        COUNT(DISTINCT i."sourceId") AS "displaySourceCount",
+        CAST(ROUND(AVG(i."qualityScore")) AS INTEGER) AS "displayAverageScore",
+        MAX(i."createdAt") AS "latestCreatedAt",
+        MAX(i."publishedAt") AS "latestPublishedAt"
+      FROM "items" i
+      INNER JOIN "sources" s ON s.id = i."sourceId"
+      WHERE i."clusterId" IS NOT NULL
+        AND i.status = 'processed'
+        AND i."moderationStatus" IN ('allowed', 'restored')
+        AND i."isAggregation" = false
+        AND s.enabled = true
+      GROUP BY i."clusterId";
+
+      DROP TABLE IF EXISTS "_cluster_feed_group_backfill";
+      CREATE TEMP TABLE "_cluster_feed_group_backfill" AS
+      SELECT "clusterId", "groupId"
+      FROM (
+        SELECT
+          i."clusterId" AS "clusterId",
+          s."groupId" AS "groupId",
+          COUNT(*) AS count,
+          MIN(i."createdAt") AS "firstCreatedAt",
+          ROW_NUMBER() OVER (
+            PARTITION BY i."clusterId"
+            ORDER BY COUNT(*) DESC, MIN(i."createdAt") ASC, s."groupId" ASC
+          ) AS rn
+        FROM "items" i
+        INNER JOIN "sources" s ON s.id = i."sourceId"
+        WHERE i."clusterId" IS NOT NULL
+          AND i.status = 'processed'
+          AND i."moderationStatus" IN ('allowed', 'restored')
+          AND i."isAggregation" = false
+          AND s.enabled = true
+          AND s."groupId" IS NOT NULL
+        GROUP BY i."clusterId", s."groupId"
+      )
+      WHERE rn = 1;
+
+      DROP TABLE IF EXISTS "_cluster_feed_tag_backfill";
+      CREATE TEMP TABLE "_cluster_feed_tag_backfill" AS
+      SELECT
+        i."clusterId" AS "clusterId",
+        t.normalized AS normalized,
+        MIN(t.name) AS name
+      FROM "items" i
+      INNER JOIN "sources" s ON s.id = i."sourceId"
+      INNER JOIN "item_tags" it ON it."itemId" = i.id
+      INNER JOIN "tags" t ON t.id = it."tagId"
+      WHERE i."clusterId" IS NOT NULL
+        AND i.status = 'processed'
+        AND i."moderationStatus" IN ('allowed', 'restored')
+        AND i."isAggregation" = false
+        AND s.enabled = true
+      GROUP BY i."clusterId", t.normalized;
+
+      DROP TABLE IF EXISTS "_cluster_feed_tag_json_backfill";
+      CREATE TEMP TABLE "_cluster_feed_tag_json_backfill" AS
+      SELECT
+        "clusterId",
+        json_group_array(json_object('name', name, 'normalized', normalized)) AS "feedTagsJson",
+        GROUP_CONCAT(name, ' ') AS "tagSearchText"
+      FROM (
+        SELECT "clusterId", name, normalized
+        FROM "_cluster_feed_tag_backfill"
+        ORDER BY name ASC, normalized ASC
+      )
+      GROUP BY "clusterId";
+
+      UPDATE "content_clusters"
+      SET
+        "displayItemCount" = COALESCE((SELECT "displayItemCount" FROM "_cluster_feed_stats_backfill" stats WHERE stats."clusterId" = "content_clusters".id), 0),
+        "displaySourceCount" = COALESCE((SELECT "displaySourceCount" FROM "_cluster_feed_stats_backfill" stats WHERE stats."clusterId" = "content_clusters".id), 0),
+        "displayAverageScore" = COALESCE((SELECT "displayAverageScore" FROM "_cluster_feed_stats_backfill" stats WHERE stats."clusterId" = "content_clusters".id), 0),
+        "displayRecommendScore" = (
+          WITH stats AS (
+            SELECT
+              COALESCE((SELECT "displayAverageScore" FROM "_cluster_feed_stats_backfill" stats WHERE stats."clusterId" = "content_clusters".id), 0) AS aiScore,
+              COALESCE((SELECT "displaySourceCount" FROM "_cluster_feed_stats_backfill" stats WHERE stats."clusterId" = "content_clusters".id), 0) AS sourceCount,
+              COALESCE((SELECT "displayItemCount" FROM "_cluster_feed_stats_backfill" stats WHERE stats."clusterId" = "content_clusters".id), 0) AS itemCount,
+              COALESCE("content_clusters".upvotes, 0) AS upvotes,
+              COALESCE("content_clusters".downvotes, 0) AS downvotes
+          ),
+          score_parts AS (
+            SELECT
+              CAST(ROUND(
+                (50 + ((aiScore - 50) * 0.82)) +
+                CASE
+                  WHEN (upvotes + downvotes) >= 8 THEN CASE WHEN (upvotes - downvotes) > 8 THEN 8 WHEN (upvotes - downvotes) < -8 THEN -8 ELSE (upvotes - downvotes) END
+                  WHEN (upvotes + downvotes) >= 4 THEN CASE WHEN ROUND((upvotes - downvotes) * 0.75) > 8 THEN 8 WHEN ROUND((upvotes - downvotes) * 0.75) < -8 THEN -8 ELSE ROUND((upvotes - downvotes) * 0.75) END
+                  WHEN (upvotes + downvotes) >= 2 THEN CASE WHEN ROUND((upvotes - downvotes) * 0.5) > 8 THEN 8 WHEN ROUND((upvotes - downvotes) * 0.5) < -8 THEN -8 ELSE ROUND((upvotes - downvotes) * 0.5) END
+                  WHEN (upvotes + downvotes) >= 1 THEN CASE WHEN ROUND((upvotes - downvotes) * 0.25) > 8 THEN 8 WHEN ROUND((upvotes - downvotes) * 0.25) < -8 THEN -8 ELSE ROUND((upvotes - downvotes) * 0.25) END
+                  ELSE 0
+                END +
+                CASE
+                  WHEN (
+                    CASE WHEN ((sourceCount - 1) * 3) > 8 THEN 8 WHEN ((sourceCount - 1) * 3) < 0 THEN 0 ELSE ((sourceCount - 1) * 3) END +
+                    CASE WHEN itemCount >= 16 THEN 4 WHEN itemCount >= 8 THEN 3 WHEN itemCount >= 4 THEN 2 WHEN itemCount >= 2 THEN 1 ELSE 0 END
+                  ) > 10 THEN 10
+                  ELSE (
+                    CASE WHEN ((sourceCount - 1) * 3) > 8 THEN 8 WHEN ((sourceCount - 1) * 3) < 0 THEN 0 ELSE ((sourceCount - 1) * 3) END +
+                    CASE WHEN itemCount >= 16 THEN 4 WHEN itemCount >= 8 THEN 3 WHEN itemCount >= 4 THEN 2 WHEN itemCount >= 2 THEN 1 ELSE 0 END
+                  )
+                END
+              ) AS INTEGER) AS score
+            FROM stats
+          )
+          SELECT CASE WHEN score > 100 THEN 100 WHEN score < 0 THEN 0 ELSE score END FROM score_parts
+        ),
+        "latestCreatedAt" = (SELECT "latestCreatedAt" FROM "_cluster_feed_stats_backfill" stats WHERE stats."clusterId" = "content_clusters".id),
+        "latestPublishedAt" = COALESCE((SELECT "latestPublishedAt" FROM "_cluster_feed_stats_backfill" stats WHERE stats."clusterId" = "content_clusters".id), "latestPublishedAt"),
+        "dominantGroupId" = (SELECT "groupId" FROM "_cluster_feed_group_backfill" groups WHERE groups."clusterId" = "content_clusters".id),
+        "feedTagsJson" = COALESCE((SELECT "feedTagsJson" FROM "_cluster_feed_tag_json_backfill" tags WHERE tags."clusterId" = "content_clusters".id), '[]'),
+        "feedSearchText" = TRIM(COALESCE(title, '') || ' ' || COALESCE(summary, '') || ' ' || COALESCE((SELECT "tagSearchText" FROM "_cluster_feed_tag_json_backfill" tags WHERE tags."clusterId" = "content_clusters".id), '')),
+        "feedStatsUpdatedAt" = CURRENT_TIMESTAMP;
+
+      DROP TABLE IF EXISTS "_cluster_feed_stats_backfill";
+      DROP TABLE IF EXISTS "_cluster_feed_group_backfill";
+      DROP TABLE IF EXISTS "_cluster_feed_tag_backfill";
+      DROP TABLE IF EXISTS "_cluster_feed_tag_json_backfill";
+    `,
+  });
+}
+
 function applyAdditiveSchemaUpgrades() {
   if (ftsTableExists("prompt_configs") && !tableColumnExists("prompt_configs", "templateJson")) {
     runSqlite([dbPath], {
@@ -208,6 +356,27 @@ function applyAdditiveSchemaUpgrades() {
       `,
     });
   }
+
+  addColumnIfMissing("content_clusters", "displayItemCount", "INTEGER NOT NULL DEFAULT 0");
+  addColumnIfMissing("content_clusters", "displaySourceCount", "INTEGER NOT NULL DEFAULT 0");
+  addColumnIfMissing("content_clusters", "displayAverageScore", "INTEGER NOT NULL DEFAULT 0");
+  addColumnIfMissing("content_clusters", "displayRecommendScore", "INTEGER NOT NULL DEFAULT 0");
+  addColumnIfMissing("content_clusters", "latestCreatedAt", "DATETIME");
+  addColumnIfMissing("content_clusters", "dominantGroupId", "TEXT");
+  addColumnIfMissing("content_clusters", "feedSearchText", "TEXT");
+  addColumnIfMissing("content_clusters", "feedTagsJson", "TEXT NOT NULL DEFAULT '[]'");
+  addColumnIfMissing("content_clusters", "feedStatsUpdatedAt", "DATETIME");
+
+  runSqlite([dbPath], {
+    input: `
+      CREATE INDEX IF NOT EXISTS "content_clusters_status_latestCreatedAt_idx" ON "content_clusters"("status", "latestCreatedAt");
+      CREATE INDEX IF NOT EXISTS "content_clusters_status_displayRecommendScore_idx" ON "content_clusters"("status", "displayRecommendScore");
+      CREATE INDEX IF NOT EXISTS "content_clusters_dominantGroupId_status_latestCreatedAt_idx" ON "content_clusters"("dominantGroupId", "status", "latestCreatedAt");
+      CREATE INDEX IF NOT EXISTS "items_sourceId_status_moderationStatus_isAggregation_createdAt_idx" ON "items"("sourceId", "status", "moderationStatus", "isAggregation", "createdAt");
+    `,
+  });
+
+  applyClusterFeedStatsBackfill();
 }
 
 function cleanupRemovedPromptConfigTypes() {

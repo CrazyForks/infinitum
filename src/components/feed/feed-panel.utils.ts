@@ -146,6 +146,7 @@ export function buildFeedSearch(
   pagination?: {
     page?: number;
     size?: number;
+    includePopularTags?: boolean;
   },
 ): string {
   const search = new URLSearchParams();
@@ -201,6 +202,10 @@ export function buildFeedSearch(
 
   if (size !== DEFAULT_FEED_PAGE_SIZE) {
     search.set("size", String(size));
+  }
+
+  if (pagination?.includePopularTags === false) {
+    search.set("includeTags", "false");
   }
 
   return search.toString();

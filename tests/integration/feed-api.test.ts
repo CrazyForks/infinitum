@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { prisma } from "@/lib/db";
+import { refreshAllClusterFeedStats, refreshClusterFeedStats } from "@/lib/clusters/feed-stats";
 import { resolveFeedFilters } from "@/lib/feed/range";
 import { listFeedItems } from "@/lib/feed/repository";
 import { replaceItemTags } from "@/lib/tags/service";
@@ -202,6 +203,7 @@ describe("/api/feed", () => {
         },
       ],
     });
+    await refreshAllClusterFeedStats();
   });
 
   it("returns a mixed feed with clusters and single items for the selected range", async () => {
@@ -303,6 +305,23 @@ describe("/api/feed", () => {
       id: "item-b1",
       title: "故事 B",
     });
+
+    vi.useRealTimers();
+  });
+
+  it("skips popular tags when the feed request opts out", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-10T12:00:00.000Z"));
+    await replaceItemTags("item-a1", ["OpenAI", "AI Agent"]);
+
+    const { GET } = await import("@/app/api/feed/route");
+    const response = await GET(
+      new Request("http://localhost/api/feed?range=7d&includeTags=false"),
+    );
+    const json = await response.json();
+
+    expect(json.items.length).toBeGreaterThan(0);
+    expect(json).not.toHaveProperty("popularTags");
 
     vi.useRealTimers();
   });
@@ -439,6 +458,7 @@ describe("/api/feed", () => {
           },
         ],
       });
+      await refreshClusterFeedStats(["cluster-temporal"]);
 
       const { GET } = await import("@/app/api/feed/route");
       const response = await GET(new Request("http://localhost/api/feed?range=today&title=Temporal"));
@@ -451,9 +471,9 @@ describe("/api/feed", () => {
         title: "Temporal Cluster",
         itemCount: 2,
         score: 64,
-        hasMoreItems: true,
+        hasMoreItems: false,
       });
-      expect(json.items[0].itemsPreview).toHaveLength(1);
+      expect(json.items[0].itemsPreview).toHaveLength(2);
       expect(json.items[0].itemsPreview[0]).toMatchObject({
         id: "item-temporal-today",
       });
@@ -555,6 +575,7 @@ describe("/api/feed", () => {
           },
         ],
       });
+      await refreshClusterFeedStats(["cluster-disabled-source"]);
 
       const filters = resolveFeedFilters(
         {
@@ -830,6 +851,7 @@ describe("/api/feed", () => {
           },
         ],
       });
+      await refreshClusterFeedStats(["cluster-dominant-group", "cluster-a", "cluster-b", "cluster-c"]);
 
       const { GET } = await import("@/app/api/feed/route");
       const [defaultResponse, aiResponse, researchResponse] = await Promise.all([
@@ -970,12 +992,13 @@ describe("/api/feed", () => {
           },
         ],
       });
+      await refreshClusterFeedStats(["cluster-cross-group-count", "cluster-a", "cluster-b", "cluster-c"]);
 
       const { GET } = await import("@/app/api/feed/route");
       const [defaultResponse, aiResponse, researchResponse] = await Promise.all([
-        GET(new Request("http://localhost/api/feed?range=today&title=Cross%20Count")),
-        GET(new Request(`http://localhost/api/feed?range=today&title=Cross%20Count&groupId=${aiGroup.id}`)),
-        GET(new Request(`http://localhost/api/feed?range=today&title=Cross%20Count&groupId=${researchGroup.id}`)),
+        GET(new Request("http://localhost/api/feed?range=today&title=Cross%20Group%20Count")),
+        GET(new Request(`http://localhost/api/feed?range=today&title=Cross%20Group%20Count&groupId=${aiGroup.id}`)),
+        GET(new Request(`http://localhost/api/feed?range=today&title=Cross%20Group%20Count&groupId=${researchGroup.id}`)),
       ]);
       const defaultJson = await defaultResponse.json();
       const aiJson = await aiResponse.json();
@@ -1127,6 +1150,7 @@ describe("/api/feed", () => {
           createdAt: new Date(`2026-04-07T09:1${index}:00.000Z`),
         })),
       });
+      await refreshClusterFeedStats(["cluster-boosted"]);
 
       const { GET } = await import("@/app/api/feed/route");
       const response = await GET(new Request("http://localhost/api/feed?range=7d&sort=score_desc"));
@@ -1149,21 +1173,22 @@ describe("/api/feed", () => {
     }
   });
 
-  it("filters the feed by full-text search on item content", async () => {
+  it("filters clusters by entity search text instead of child item titles", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-10T12:00:00.000Z"));
 
     try {
       const { GET } = await import("@/app/api/feed/route");
-      // "Story" appears in originalTitle of items a1, a2, b1, c1
-      const response = await GET(new Request("http://localhost/api/feed?range=7d&title=Story"));
+      const childOnlyResponse = await GET(new Request("http://localhost/api/feed?range=7d&title=Story"));
+      const response = await GET(new Request("http://localhost/api/feed?range=7d&title=OpenAI"));
 
+      const childOnlyJson = await childOnlyResponse.json();
       const json = await response.json();
 
       expect(json.items.length).toBeGreaterThan(0);
-      // Should include cluster-a (2 items with "Story A" / "Story A 2" in originalTitle)
       expect(json.items.some((item: { type: string }) => item.type === "cluster")).toBe(true);
-      expect(json.title).toBe("Story");
+      expect(childOnlyJson.items.some((item: { id: string }) => item.id === "cluster-a")).toBe(false);
+      expect(json.title).toBe("OpenAI");
     } finally {
       vi.useRealTimers();
     }
@@ -1594,7 +1619,7 @@ describe("/api/feed", () => {
     });
   });
 
-  it("downgrades a filtered cluster into a single entry when only one source item matches", async () => {
+  it("does not match multi-item clusters by sourceId child membership", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-10T12:00:00.000Z"));
 
@@ -1667,6 +1692,7 @@ describe("/api/feed", () => {
           },
         ],
       });
+      await refreshClusterFeedStats(["cluster-mixed"]);
 
       const { GET } = await import("@/app/api/feed/route");
       const response = await GET(
@@ -1676,14 +1702,7 @@ describe("/api/feed", () => {
       const json = await response.json();
       const downgradedEntry = json.items.find((entry: { id: string }) => entry.id === "item-mixed-source-a");
 
-      expect(downgradedEntry).toMatchObject({
-        type: "single",
-        id: "item-mixed-source-a",
-        title: "混合来源 A",
-        sourceName: "API Feed",
-        itemCount: 1,
-        sourceCount: 1,
-      });
+      expect(downgradedEntry).toBeUndefined();
       expect(json.items.find((entry: { id: string }) => entry.id === "cluster-mixed")).toBeUndefined();
     } finally {
       vi.useRealTimers();

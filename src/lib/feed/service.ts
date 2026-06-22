@@ -10,13 +10,23 @@ import {
 } from "@/lib/feed/repository";
 import { withFeedCache } from "@/lib/feed/cache";
 
-type FeedFiltersInput = Parameters<typeof listFeedItems>[0];
+type FeedFiltersInput = Parameters<typeof listFeedItems>[0] & { isCustomRange?: boolean };
 type FeedPaginationInput = Parameters<typeof listFeedItems>[1];
+
+const ROLLING_RANGE_CACHE_KEYS = new Set(["3d", "7d", "1m", "1y"]);
+
+function serializeCreatedRangeStart(filters: FeedFiltersInput & { isCustomRange?: boolean }) {
+  if (!filters.isCustomRange && ROLLING_RANGE_CACHE_KEYS.has(filters.range)) {
+    return `range:${filters.range}`;
+  }
+
+  return filters.rangeStart?.toISOString() ?? null;
+}
 
 function serializeFeedFilters(filters: FeedFiltersInput) {
   return JSON.stringify({
     ...filters,
-    rangeStart: filters.rangeStart?.toISOString() ?? null,
+    rangeStart: serializeCreatedRangeStart(filters),
     rangeEnd: filters.rangeEnd?.toISOString() ?? null,
     publishedRangeStart: filters.publishedRangeStart?.toISOString() ?? null,
     publishedRangeEnd: filters.publishedRangeEnd?.toISOString() ?? null,
@@ -24,7 +34,7 @@ function serializeFeedFilters(filters: FeedFiltersInput) {
 }
 
 function serializeFeedPagination(pagination: FeedPaginationInput) {
-  return `${pagination.page}:${pagination.size}`;
+  return `${pagination.page}:${pagination.size}:${pagination.includePopularTags === false ? "without-tags" : "with-tags"}`;
 }
 
 function serializeFetchRunCacheVersion(run: Awaited<ReturnType<typeof getLatestFetchRun>>) {
