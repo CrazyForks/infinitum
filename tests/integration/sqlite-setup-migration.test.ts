@@ -142,4 +142,56 @@ describe("sqlite setup", () => {
     expect(runSqlite(dbPath, `SELECT COUNT(*) FROM "prompt_configs" WHERE "type" IN ('daily_report_refinement_chat', 'daily_report_refinement_generate')`)).toBe("0");
   });
 
+  it("does not rerun cluster feed stats backfill after clusters have been initialized", () => {
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), "infinitum-sqlite-cluster-backfill-"));
+    const dbPath = path.join(tempDir, "cluster-backfill.db");
+
+    tempDirs.push(tempDir);
+
+    execFileSync("node", ["scripts/setup-sqlite.mjs", dbPath], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+    });
+
+    runSqlite(
+      dbPath,
+      `
+      PRAGMA trusted_schema = ON;
+
+      INSERT INTO "sources" (
+        "id", "name", "rssUrl", "siteUrl", "enabled", "aiParsingEnabled", "aggregationEnabled", "aggregationDetectionEnabled", "updatedAt"
+      ) VALUES (
+        'source-backfilled', 'Backfilled Source', 'https://backfilled.example.com/feed.xml', 'https://backfilled.example.com',
+        true, true, true, false, CURRENT_TIMESTAMP
+      );
+
+      INSERT INTO "content_clusters" (
+        "id", "kind", "title", "summary", "score", "itemCount", "latestPublishedAt", "status", "fingerprint",
+        "displayItemCount", "displaySourceCount", "displayAverageScore", "displayRecommendScore", "latestCreatedAt",
+        "feedSearchText", "feedTagsJson", "feedStatsUpdatedAt", "updatedAt"
+      ) VALUES (
+        'cluster-backfilled', 'topic', 'Backfilled Cluster', 'Backfilled summary', 50, 1, '2026-04-10T10:00:00.000Z', 'active', 'cluster-backfilled',
+        7, 3, 88, 91, '2026-04-10T10:05:00.000Z', 'precomputed text', '[]', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+      );
+
+      INSERT INTO "items" (
+        "id", "sourceId", "clusterId", "originalUrl", "canonicalUrl", "urlHash", "dedupeSignature", "originalTitle",
+        "publishedAt", "status", "moderationStatus", "qualityScore", "qualityRationale", "language", "createdAt", "updatedAt"
+      ) VALUES (
+        'item-backfilled', 'source-backfilled', 'cluster-backfilled', 'https://backfilled.example.com/item',
+        'https://backfilled.example.com/item', 'item-backfilled', 'item-backfilled', 'Backfilled Item',
+        '2026-04-10T10:00:00.000Z', 'processed', 'allowed', 50, 'ok', 'en', '2026-04-10T10:05:00.000Z', CURRENT_TIMESTAMP
+      );
+      `,
+    );
+
+    execFileSync("node", ["scripts/setup-sqlite.mjs", dbPath], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+    });
+
+    expect(runSqlite(dbPath, `SELECT "displayItemCount" FROM "content_clusters" WHERE id = 'cluster-backfilled'`)).toBe("7");
+    expect(runSqlite(dbPath, `SELECT "displayRecommendScore" FROM "content_clusters" WHERE id = 'cluster-backfilled'`)).toBe("91");
+  });
+
 });

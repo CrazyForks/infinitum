@@ -14,7 +14,7 @@ const root = process.cwd();
 const dbPath = path.resolve(root, dbPathArg);
 const dbDir = path.dirname(dbPath);
 const lockPath = `${dbPath}.setup.lock`;
-const lockTimeoutMs = Number.parseInt(process.env.SQLITE_SETUP_LOCK_TIMEOUT_MS || "30000", 10);
+const lockTimeoutMs = Number.parseInt(process.env.SQLITE_SETUP_LOCK_TIMEOUT_MS || "300000", 10);
 const staleLockMs = Number.parseInt(process.env.SQLITE_SETUP_STALE_LOCK_MS || "120000", 10);
 const testHoldMs = Number.parseInt(process.env.SQLITE_SETUP_LOCK_HOLD_MS || "0", 10);
 const sqliteBusyTimeoutMs = Number.parseInt(process.env.SQLITE_BUSY_TIMEOUT_MS || "10000", 10);
@@ -173,12 +173,36 @@ function tableColumnExists(tableName, columnName) {
 
 function addColumnIfMissing(tableName, columnName, definition) {
   if (!ftsTableExists(tableName) || tableColumnExists(tableName, columnName)) {
-    return;
+    return false;
   }
 
   runSqlite([dbPath], {
     input: `ALTER TABLE "${tableName}" ADD COLUMN "${columnName}" ${definition};\n`,
   });
+  return true;
+}
+
+function querySqliteNumber(sql) {
+  const result = execFileSync("sqlite3", [dbPath, sql], {
+    encoding: "utf8",
+  }).trim();
+
+  return Number(result || "0");
+}
+
+function hasPendingClusterFeedStatsBackfill() {
+  if (
+    !ftsTableExists("content_clusters") ||
+    !tableColumnExists("content_clusters", "feedStatsUpdatedAt")
+  ) {
+    return false;
+  }
+
+  return querySqliteNumber(`
+    SELECT COUNT(*)
+    FROM "content_clusters"
+    WHERE "feedStatsUpdatedAt" IS NULL
+  `) > 0;
 }
 
 function applyClusterFeedStatsBackfill() {
@@ -188,6 +212,13 @@ function applyClusterFeedStatsBackfill() {
 
   runSqlite([dbPath], {
     input: `
+      DROP TABLE IF EXISTS "_cluster_feed_backfill_targets";
+      CREATE TEMP TABLE "_cluster_feed_backfill_targets" AS
+      SELECT id
+      FROM "content_clusters"
+      WHERE "feedStatsUpdatedAt" IS NULL;
+      CREATE INDEX "_cluster_feed_backfill_targets_id_idx" ON "_cluster_feed_backfill_targets"(id);
+
       DROP TABLE IF EXISTS "_cluster_feed_stats_backfill";
       CREATE TEMP TABLE "_cluster_feed_stats_backfill" AS
       SELECT
@@ -198,6 +229,7 @@ function applyClusterFeedStatsBackfill() {
         MAX(i."createdAt") AS "latestCreatedAt",
         MAX(i."publishedAt") AS "latestPublishedAt"
       FROM "items" i
+      INNER JOIN "_cluster_feed_backfill_targets" target ON target.id = i."clusterId"
       INNER JOIN "sources" s ON s.id = i."sourceId"
       WHERE i."clusterId" IS NOT NULL
         AND i.status = 'processed'
@@ -205,6 +237,7 @@ function applyClusterFeedStatsBackfill() {
         AND i."isAggregation" = false
         AND s.enabled = true
       GROUP BY i."clusterId";
+      CREATE INDEX "_cluster_feed_stats_backfill_clusterId_idx" ON "_cluster_feed_stats_backfill"("clusterId");
 
       DROP TABLE IF EXISTS "_cluster_feed_group_backfill";
       CREATE TEMP TABLE "_cluster_feed_group_backfill" AS
@@ -220,6 +253,7 @@ function applyClusterFeedStatsBackfill() {
             ORDER BY COUNT(*) DESC, MIN(i."createdAt") ASC, s."groupId" ASC
           ) AS rn
         FROM "items" i
+        INNER JOIN "_cluster_feed_backfill_targets" target ON target.id = i."clusterId"
         INNER JOIN "sources" s ON s.id = i."sourceId"
         WHERE i."clusterId" IS NOT NULL
           AND i.status = 'processed'
@@ -230,6 +264,7 @@ function applyClusterFeedStatsBackfill() {
         GROUP BY i."clusterId", s."groupId"
       )
       WHERE rn = 1;
+      CREATE INDEX "_cluster_feed_group_backfill_clusterId_idx" ON "_cluster_feed_group_backfill"("clusterId");
 
       DROP TABLE IF EXISTS "_cluster_feed_tag_backfill";
       CREATE TEMP TABLE "_cluster_feed_tag_backfill" AS
@@ -238,6 +273,7 @@ function applyClusterFeedStatsBackfill() {
         t.normalized AS normalized,
         MIN(t.name) AS name
       FROM "items" i
+      INNER JOIN "_cluster_feed_backfill_targets" target ON target.id = i."clusterId"
       INNER JOIN "sources" s ON s.id = i."sourceId"
       INNER JOIN "item_tags" it ON it."itemId" = i.id
       INNER JOIN "tags" t ON t.id = it."tagId"
@@ -260,6 +296,7 @@ function applyClusterFeedStatsBackfill() {
         ORDER BY name ASC, normalized ASC
       )
       GROUP BY "clusterId";
+      CREATE INDEX "_cluster_feed_tag_json_backfill_clusterId_idx" ON "_cluster_feed_tag_json_backfill"("clusterId");
 
       UPDATE "content_clusters"
       SET
@@ -306,8 +343,10 @@ function applyClusterFeedStatsBackfill() {
         "dominantGroupId" = (SELECT "groupId" FROM "_cluster_feed_group_backfill" groups WHERE groups."clusterId" = "content_clusters".id),
         "feedTagsJson" = COALESCE((SELECT "feedTagsJson" FROM "_cluster_feed_tag_json_backfill" tags WHERE tags."clusterId" = "content_clusters".id), '[]'),
         "feedSearchText" = TRIM(COALESCE(title, '') || ' ' || COALESCE(summary, '') || ' ' || COALESCE((SELECT "tagSearchText" FROM "_cluster_feed_tag_json_backfill" tags WHERE tags."clusterId" = "content_clusters".id), '')),
-        "feedStatsUpdatedAt" = CURRENT_TIMESTAMP;
+        "feedStatsUpdatedAt" = CURRENT_TIMESTAMP
+      WHERE "feedStatsUpdatedAt" IS NULL;
 
+      DROP TABLE IF EXISTS "_cluster_feed_backfill_targets";
       DROP TABLE IF EXISTS "_cluster_feed_stats_backfill";
       DROP TABLE IF EXISTS "_cluster_feed_group_backfill";
       DROP TABLE IF EXISTS "_cluster_feed_tag_backfill";
@@ -357,15 +396,17 @@ function applyAdditiveSchemaUpgrades() {
     });
   }
 
-  addColumnIfMissing("content_clusters", "displayItemCount", "INTEGER NOT NULL DEFAULT 0");
-  addColumnIfMissing("content_clusters", "displaySourceCount", "INTEGER NOT NULL DEFAULT 0");
-  addColumnIfMissing("content_clusters", "displayAverageScore", "INTEGER NOT NULL DEFAULT 0");
-  addColumnIfMissing("content_clusters", "displayRecommendScore", "INTEGER NOT NULL DEFAULT 0");
-  addColumnIfMissing("content_clusters", "latestCreatedAt", "DATETIME");
-  addColumnIfMissing("content_clusters", "dominantGroupId", "TEXT");
-  addColumnIfMissing("content_clusters", "feedSearchText", "TEXT");
-  addColumnIfMissing("content_clusters", "feedTagsJson", "TEXT NOT NULL DEFAULT '[]'");
-  addColumnIfMissing("content_clusters", "feedStatsUpdatedAt", "DATETIME");
+  const clusterFeedStatsColumnsAdded = [
+    addColumnIfMissing("content_clusters", "displayItemCount", "INTEGER NOT NULL DEFAULT 0"),
+    addColumnIfMissing("content_clusters", "displaySourceCount", "INTEGER NOT NULL DEFAULT 0"),
+    addColumnIfMissing("content_clusters", "displayAverageScore", "INTEGER NOT NULL DEFAULT 0"),
+    addColumnIfMissing("content_clusters", "displayRecommendScore", "INTEGER NOT NULL DEFAULT 0"),
+    addColumnIfMissing("content_clusters", "latestCreatedAt", "DATETIME"),
+    addColumnIfMissing("content_clusters", "dominantGroupId", "TEXT"),
+    addColumnIfMissing("content_clusters", "feedSearchText", "TEXT"),
+    addColumnIfMissing("content_clusters", "feedTagsJson", "TEXT NOT NULL DEFAULT '[]'"),
+    addColumnIfMissing("content_clusters", "feedStatsUpdatedAt", "DATETIME"),
+  ].some(Boolean);
 
   runSqlite([dbPath], {
     input: `
@@ -376,7 +417,9 @@ function applyAdditiveSchemaUpgrades() {
     `,
   });
 
-  applyClusterFeedStatsBackfill();
+  if (clusterFeedStatsColumnsAdded || hasPendingClusterFeedStatsBackfill()) {
+    applyClusterFeedStatsBackfill();
+  }
 }
 
 function cleanupRemovedPromptConfigTypes() {
