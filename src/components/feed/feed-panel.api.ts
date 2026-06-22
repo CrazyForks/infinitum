@@ -6,6 +6,7 @@ import type {
   FeedPagination,
   FeedRange,
   FeedSort,
+  FeedTagOption,
   FetchRunSnapshot,
 } from "@/lib/feed/types";
 import { DEFAULT_FEED_PAGE_SIZE } from "@/lib/feed/types";
@@ -15,6 +16,7 @@ import { buildFeedSearch } from "@/components/feed/feed-panel.utils";
 type FeedPayload = {
   items: FeedEntryDTO[];
   groups?: FeedGroupOption[];
+  popularTags?: FeedTagOption[];
   groupTotalCount?: number;
   nextCursor?: string | null;
   pagination?: FeedPagination;
@@ -27,6 +29,7 @@ type FeedPayload = {
   groupId: string | null;
   sourceId: string | null;
   title: string | null;
+  tag: string | null;
 };
 
 type TaskRunResponse = {

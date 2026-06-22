@@ -18,6 +18,7 @@ import {
   buildAggregationParsingInput,
   buildItemSummaryInput,
 } from "@/lib/ingestion/model-input";
+import { replaceItemTags } from "@/lib/tags/service";
 import type {
   ParsedFeedItem,
   ProcessedItemRecord,
@@ -119,6 +120,14 @@ function normalizeUrl(url: string): string {
 function appendIssue(issues: string[], error: unknown, fallbackMessage: string) {
   console.error(`[Item Processor] ${fallbackMessage}:`, error);
   issues.push(error instanceof Error ? error.message : fallbackMessage);
+}
+
+async function replaceItemTagsSafely(itemId: string, tags: unknown, issues: string[]) {
+  try {
+    await replaceItemTags(itemId, tags);
+  } catch (error) {
+    appendIssue(issues, error, "Unknown item tag persistence error");
+  }
 }
 
 function createItemProcessingTimings() {
@@ -393,6 +402,7 @@ export async function processFeedItem({
   let qualityScore = existing?.qualityScore ?? 50;
   let qualityRationale = existing?.qualityRationale ?? "AI analysis unavailable";
   let eventSignature: AiEventSignature | null = readStoredEventSignature(existing);
+  let itemTags: string[] = [];
   let fullTextFetched = false;
   let summaryCompleted = false;
   let summaryFailed = false;
@@ -478,6 +488,7 @@ export async function processFeedItem({
       },
     );
     addElapsed(timings, "dbWriteMs", dbWriteStartedAt);
+    await replaceItemTagsSafely(stored.id, [], issues);
 
     return {
       id: stored.id,
@@ -756,6 +767,7 @@ export async function processFeedItem({
         qualityScore = enrichment.qualityScore;
         qualityRationale = enrichment.qualityRationale;
         eventSignature = enrichment.eventSignature;
+        itemTags = enrichment.tags;
         analysisCompleted = true;
         analysisStatus = "succeeded";
       } catch (enrichError) {
@@ -767,6 +779,7 @@ export async function processFeedItem({
         qualityScore = 50;
         qualityRationale = "AI analysis unavailable";
         eventSignature = null;
+        itemTags = [];
         analysisStatus = "failed";
         analysisFailed = true;
       }
@@ -792,6 +805,7 @@ export async function processFeedItem({
         qualityScore = enrichment.qualityScore;
         qualityRationale = enrichment.qualityRationale;
         eventSignature = enrichment.eventSignature;
+        itemTags = enrichment.tags;
         analysisCompleted = true;
         analysisStatus = "succeeded";
       } catch (error) {
@@ -803,6 +817,7 @@ export async function processFeedItem({
         qualityScore = 50;
         qualityRationale = "AI analysis unavailable";
         eventSignature = null;
+        itemTags = [];
         analysisStatus = "failed";
         analysisFailed = true;
       }
@@ -823,6 +838,7 @@ export async function processFeedItem({
     qualityScore = 50;
     qualityRationale = "AI parsing disabled for this source";
     eventSignature = null;
+    itemTags = [];
     status = "processed";
   }
 
@@ -872,6 +888,14 @@ export async function processFeedItem({
     },
   );
   addElapsed(timings, "dbWriteMs", dbWriteStartedAt);
+
+  if (!isAggregation) {
+    await replaceItemTagsSafely(
+      stored.id,
+      status === "processed" && analysisStatus === "succeeded" ? itemTags : [],
+      issues,
+    );
+  }
 
   let affectedClusterId: string | null = null;
   let clusterAssignmentMetrics: NonNullable<ProcessedItemRecord["metrics"]>["clusterAssignment"] | undefined;

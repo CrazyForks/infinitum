@@ -2028,7 +2028,7 @@ describe("FeedPanel", () => {
       />,
     );
 
-    await user.click(screen.getByLabelText(/全选/));
+    await user.click(screen.getByLabelText(/批量选择/));
     await user.click(screen.getByRole("button", { name: "批量合并" }));
 
     const dialog = await screen.findByRole("dialog", { name: "确认批量合并" });

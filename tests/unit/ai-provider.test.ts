@@ -159,6 +159,7 @@ describe("ai provider", () => {
               eventAction: "发布",
               eventObject: "agent toolkit",
               eventDate: "2026-04-10",
+              tags: ["OpenAI", "AI Agent", "新闻", "OpenAI"],
             }),
           },
         },
@@ -201,6 +202,7 @@ describe("ai provider", () => {
         eventObject: "agent toolkit",
         eventDate: "2026-04-10",
       },
+      tags: ["OpenAI", "AI Agent"],
     });
     expect(create).toHaveBeenCalledTimes(1);
   });
@@ -257,6 +259,7 @@ describe("ai provider", () => {
     expect(systemPrompt).toContain("qualityRationale");
     expect(systemPrompt).toContain("eventType");
     expect(systemPrompt).toContain("eventSubject");
+    expect(systemPrompt).toContain("tags");
     expect(systemPrompt).toContain("只基于输入标题、来源和摘要判断");
     expect(systemPrompt).toContain('"moderationStatus":"allowed|filtered"');
     expect(systemPrompt).not.toContain("restored");
@@ -328,6 +331,7 @@ describe("ai provider", () => {
       eventObject: null,
       eventDate: null,
     });
+    expect(enriched.tags).toEqual([]);
   });
 
   it("keeps item summary fallback text untruncated when no api key is configured", async () => {
@@ -565,6 +569,7 @@ describe("ai provider", () => {
         eventObject: null,
         eventDate: null,
       },
+      tags: [],
     });
     expect(create).toHaveBeenCalledTimes(1);
   });
@@ -868,6 +873,7 @@ describe("ai provider", () => {
                   title: "OpenAI 推出 Agent SDK",
                   oneLiner: "OpenAI 发布 Agent SDK。",
                   qualityScore: 88,
+                  tags: ["OpenAI", "Agent SDK", "新闻", "openai"],
                 },
               ],
             }),
@@ -906,6 +912,7 @@ describe("ai provider", () => {
 
     expect(parsed.events).toHaveLength(1);
     expect(parsed.events[0]?.title).toBe("OpenAI 推出 Agent SDK");
+    expect(parsed.events[0]?.tags).toEqual(["OpenAI", "Agent SDK"]);
     expect(create).toHaveBeenCalledTimes(1);
     expect(create.mock.calls[0]?.[0]?.messages?.[0]?.content).toBe("聚合拆分专用系统提示词");
     expect(create.mock.calls[0]?.[0]?.messages?.[1]?.content).toBe(

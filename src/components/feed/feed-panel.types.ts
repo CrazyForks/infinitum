@@ -8,6 +8,7 @@ import type {
   FeedRange,
   FeedSort,
   FeedSourceOption,
+  FeedTagOption,
   FetchRunSnapshot,
 } from "@/lib/feed/types";
 
@@ -28,9 +29,11 @@ export type FeedPanelProps = {
   initialGroupId?: string | null;
   initialSourceId?: string | null;
   initialTitle?: string | null;
+  initialTag?: string | null;
   availableGroups?: FeedGroupOption[];
   initialGroupTotalCount?: number;
   availableSources?: FeedSourceOption[];
+  popularTags?: FeedTagOption[];
 };
 
 export type FeedQueryState = {
@@ -43,6 +46,7 @@ export type FeedQueryState = {
   groupId: string | null;
   sourceId: string | null;
   title: string | null;
+  tag: string | null;
   createdRangeExplicit?: boolean;
 };
 

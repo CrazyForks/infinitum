@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import {
   DEFAULT_DAILY_REPORT_PROMPT,
+  DEFAULT_ITEM_ANALYSIS_PROMPT,
   DEFAULT_ITEM_AGGREGATION_ANALYSIS_PROMPT,
 } from "@/config/prompts";
 import { prisma } from "@/lib/db";
@@ -86,6 +87,9 @@ describe("admin settings service", () => {
     expect(settings.promptConfigs.find((config) => config.type === "item_analysis")?.systemPrompt).toContain(
       "固定输出格式",
     );
+    expect(settings.promptConfigs.find((config) => config.type === "item_analysis")?.systemPrompt).toContain(
+      '"tags"',
+    );
     expect(settings.promptConfigs.find((config) => config.type === "item_analysis")).toMatchObject({
       temperature: 0.2,
       maxTokens: 1000,
@@ -101,6 +105,9 @@ describe("admin settings service", () => {
       isEnabled: true,
       isDefault: true,
     });
+    expect(settings.promptConfigs.find((config) => config.type === "item_aggregation")?.systemPrompt).toContain(
+      '"tags"',
+    );
     expect(settings.promptConfigs.find((config) => config.type === "cluster_summary")).toMatchObject({
       temperature: 0.2,
       maxTokens: 450,
@@ -577,6 +584,94 @@ describe("admin settings service", () => {
     expect(config?.systemPrompt).toContain("固定输出格式：");
     expect(config?.systemPrompt).toContain('"blocks"');
     expect(config?.maxTokens).toBe(40960);
+  });
+
+  it("upgrades legacy default daily_report templateJson when it does not contain blocks", async () => {
+    await getIngestionRuntimeConfig();
+    const legacyTemplateJson = JSON.stringify({
+      opening: {
+        label: "摘要",
+        instruction: "旧版摘要要求",
+      },
+      sections: [
+        {
+          title: "今日大事",
+          description: "旧版栏目要求",
+        },
+      ],
+      closing: {
+        label: "今日观察",
+        instruction: "旧版收尾要求",
+      },
+      globalRules: ["旧版规则"],
+    });
+
+    await prisma.promptConfig.updateMany({
+      where: { type: "daily_report", isDefault: true },
+      data: {
+        systemPrompt: "旧版日报系统提示词",
+        templateJson: legacyTemplateJson,
+        maxTokens: 40960,
+      },
+    });
+
+    await ensureRuntimeConfigSeeded();
+
+    const config = await prisma.promptConfig.findFirst({
+      where: { type: "daily_report", isDefault: true },
+    });
+    expect(config?.templateJson).toBe(DEFAULT_DAILY_REPORT_TEMPLATE_JSON);
+    expect(config?.systemPrompt).toContain("固定输出格式：");
+    expect(config?.systemPrompt).toContain('"blocks"');
+    expect(config?.maxTokens).toBe(40960);
+  });
+
+  it("upgrades legacy default item_analysis prompt to include tags", async () => {
+    await getIngestionRuntimeConfig();
+    const legacyPrompt = `你是新闻内容分析助手。
+
+固定输出格式：
+{"translatedTitle":"...","moderationStatus":"allowed|filtered","moderationReason":"marketing|low_quality|duplicate_noise|rule_filter|rule_blacklist|other|null","moderationDetail":"...","qualityScore":0,"qualityRationale":"...","eventType":"release|launch|update|funding|acquisition|partnership|policy|research|security|other|null","eventSubject":"...","eventAction":"...","eventObject":"...","eventDate":"YYYY-MM-DD|null"}`;
+    await prisma.promptConfig.updateMany({
+      where: { type: "item_analysis", isDefault: true },
+      data: {
+        systemPrompt: legacyPrompt,
+        maxTokens: 2048,
+      },
+    });
+
+    await ensureRuntimeConfigSeeded();
+
+    const config = await prisma.promptConfig.findFirst({
+      where: { type: "item_analysis", isDefault: true },
+    });
+    expect(config?.systemPrompt).toBe(DEFAULT_ITEM_ANALYSIS_PROMPT);
+    expect(config?.systemPrompt).toContain('"tags"');
+    expect(config?.maxTokens).toBe(2048);
+  });
+
+  it("upgrades legacy default item_aggregation prompt to include event tags", async () => {
+    await getIngestionRuntimeConfig();
+    const legacyPrompt = `你是聚合内容拆条助手。
+
+固定输出格式：
+{"mainEvent":{"eventType":"...","eventSubject":"...","eventAction":"...","eventObject":"...","eventDate":"YYYY-MM-DD|null"}|null,"events":[{"eventType":"...","eventSubject":"...","eventAction":"...","eventObject":"...","eventDate":"YYYY-MM-DD|null","title":"...","oneLiner":"...","qualityScore":0,"sourceUrl":"https://...|null"}]}`;
+    await prisma.promptConfig.updateMany({
+      where: { type: "item_aggregation", isDefault: true },
+      data: {
+        systemPrompt: legacyPrompt,
+        maxTokens: 2048,
+      },
+    });
+
+    await ensureRuntimeConfigSeeded();
+
+    const config = await prisma.promptConfig.findFirst({
+      where: { type: "item_aggregation", isDefault: true },
+    });
+    expect(config?.systemPrompt).toBe(DEFAULT_ITEM_AGGREGATION_ANALYSIS_PROMPT);
+    expect(config?.systemPrompt).toContain('"tags"');
+    expect(config?.maxTokens).toBe(2048);
   });
 
   it("preserves null daily_report systemPrompts when reseeding", async () => {

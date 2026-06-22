@@ -84,6 +84,7 @@ import type {
   FeedPagination,
   FeedRange,
   FeedSort,
+  FeedTagOption,
   FetchRunSnapshot,
 } from "@/lib/feed/types";
 import { FEED_PAGE_SIZE_OPTIONS } from "@/lib/feed/types";
@@ -194,6 +195,57 @@ function GroupBadge({ group }: { group: FeedGroupBadge | null | undefined }) {
   );
 }
 
+const TAG_TONES = [
+  { bg: "#ecfeff", border: "#06b6d4", text: "#0e7490", active: "#0891b2" },
+  { bg: "#f0fdf4", border: "#22c55e", text: "#15803d", active: "#16a34a" },
+  { bg: "#fff7ed", border: "#f97316", text: "#c2410c", active: "#ea580c" },
+  { bg: "#f5f3ff", border: "#8b5cf6", text: "#6d28d9", active: "#7c3aed" },
+  { bg: "#fef2f2", border: "#ef4444", text: "#b91c1c", active: "#dc2626" },
+  { bg: "#eff6ff", border: "#3b82f6", text: "#1d4ed8", active: "#2563eb" },
+  { bg: "#f0fdfa", border: "#14b8a6", text: "#0f766e", active: "#0d9488" },
+  { bg: "#fdf4ff", border: "#d946ef", text: "#a21caf", active: "#c026d3" },
+  { bg: "#fff1f2", border: "#fb7185", text: "#be123c", active: "#e11d48" },
+  { bg: "#f7fee7", border: "#84cc16", text: "#4d7c0f", active: "#65a30d" },
+  { bg: "#f8fafc", border: "#64748b", text: "#334155", active: "#475569" },
+  { bg: "#eef2ff", border: "#6366f1", text: "#4338ca", active: "#4f46e5" },
+  { bg: "#fffbeb", border: "#f59e0b", text: "#b45309", active: "#d97706" },
+  { bg: "#faf5ff", border: "#a855f7", text: "#7e22ce", active: "#9333ea" },
+  { bg: "#f0f9ff", border: "#0ea5e9", text: "#0369a1", active: "#0284c7" },
+  { bg: "#fefce8", border: "#eab308", text: "#a16207", active: "#ca8a04" },
+  { bg: "#f1f5f9", border: "#475569", text: "#1e293b", active: "#334155" },
+  { bg: "#ecfdf5", border: "#10b981", text: "#047857", active: "#059669" },
+  { bg: "#fdf2f8", border: "#ec4899", text: "#be185d", active: "#db2777" },
+  { bg: "#f4f4f5", border: "#71717a", text: "#3f3f46", active: "#52525b" },
+];
+const POPULAR_TAG_DISPLAY_LIMIT = 12;
+
+function getTagToneKey(value: string) {
+  let hash = 2166136261;
+  for (const char of value) {
+    hash ^= char.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return Math.abs(hash) % TAG_TONES.length;
+}
+
+function getTagButtonStyle(option: FeedTagOption, index: number, isActive: boolean): CSSProperties {
+  const tone = TAG_TONES[(getTagToneKey(option.normalized) + index * 7) % TAG_TONES.length] ?? TAG_TONES[0];
+
+  if (isActive) {
+    return {
+      backgroundColor: tone.active,
+      borderColor: tone.active,
+      color: "#ffffff",
+    };
+  }
+
+  return {
+    backgroundColor: tone.bg,
+    borderColor: `${tone.border}66`,
+    color: tone.text,
+  };
+}
+
 const READING_PROGRESS_STORAGE_KEY = "infinitum.feed.readingProgress.v1";
 
 type ReadingProgress = {
@@ -216,11 +268,12 @@ function buildReadingProgressFilterKey(query: FeedQueryState) {
     groupId: query.groupId ?? "",
     sourceId: query.sourceId ?? "",
     title: query.title ?? "",
+    tag: query.tag ?? "",
   });
 }
 
 function hasAdvancedQueryFilter(query: FeedQueryState) {
-  return Boolean(query.sourceId || query.title || query.publishedStartDate || query.publishedEndDate);
+  return Boolean(query.sourceId || query.title || query.tag || query.publishedStartDate || query.publishedEndDate);
 }
 
 function normalizeImplicitCreatedRange(query: FeedQueryState): FeedQueryState {
@@ -392,9 +445,11 @@ export function FeedPanel({
   initialGroupId = null,
   initialSourceId = null,
   initialTitle = null,
+  initialTag = null,
   availableGroups = [],
   initialGroupTotalCount,
   availableSources = [],
+  popularTags: initialPopularTags = [],
 }: FeedPanelProps) {
   const router = useRouter();
   const isAdmin = useClientAdminSession(initialIsAdmin, hydrateAdminClient);
@@ -413,8 +468,10 @@ export function FeedPanel({
   const [sourceId, setSourceId] = useState<string | null>(normalizeOptionalId(initialSourceId));
   const [titleInput, setTitleInput] = useState<string>(normalizeSearchText(initialTitle) ?? "");
   const [titleFilter, setTitleFilter] = useState<string | null>(normalizeSearchText(initialTitle));
+  const [tag, setTag] = useState<string | null>(normalizeOptionalId(initialTag));
   const [status, setStatus] = useState<FetchRunSnapshot | null>(initialStatus);
   const [groups, setGroups] = useState<FeedGroupOption[]>(availableGroups);
+  const [popularTags, setPopularTags] = useState<FeedTagOption[]>(initialPopularTags);
   const [groupTotalCount, setGroupTotalCount] = useState<number>(
     initialGroupTotalCount ?? fallbackInitialPagination.total,
   );
@@ -456,6 +513,7 @@ export function FeedPanel({
     groupId: normalizeOptionalId(initialGroupId),
     sourceId: normalizeOptionalId(initialSourceId),
     title: normalizeSearchText(initialTitle),
+    tag: normalizeOptionalId(initialTag),
     createdRangeExplicit: initialCreatedRangeExplicit,
   };
   const [appliedQuery, setAppliedQuery] = useState<FeedQueryState>(initialQuery);
@@ -480,6 +538,7 @@ export function FeedPanel({
       groupId: appliedQuery.groupId,
       sourceId: appliedQuery.sourceId,
       title: appliedQuery.title,
+      tag: appliedQuery.tag,
     }),
     [appliedQuery],
   );
@@ -512,8 +571,15 @@ export function FeedPanel({
       filters.push(`信息源：${availableSources.find((source) => source.id === sourceId)?.name ?? sourceId}`);
     }
 
+    if (tag) {
+      filters.push(`标签：${popularTags.find((option) => option.normalized === tag)?.name ?? tag}`);
+    }
+
     return filters;
-  }, [availableGroups, availableSources, groupId, sourceId, summary.publishedRangeLabel, summary.rangeLabel, summary.sortLabel, titleFilter]);
+  }, [availableGroups, availableSources, groupId, popularTags, sourceId, summary.publishedRangeLabel, summary.rangeLabel, summary.sortLabel, tag, titleFilter]);
+  const visiblePopularTags = useMemo(() => {
+    return popularTags.slice(0, POPULAR_TAG_DISPLAY_LIMIT);
+  }, [popularTags]);
   const visibleClusterOptions = useMemo(() => {
     return clusterOptions.filter((cluster) => {
       if (cluster.status !== "active") {
@@ -577,6 +643,7 @@ export function FeedPanel({
       const payload = await requestFeed(normalizedQuery, { page, size });
       replaceFeedData(payload.items, payload.pagination);
       setGroups(payload.groups ?? availableGroups);
+      setPopularTags(payload.popularTags ?? []);
       setGroupTotalCount(payload.groupTotalCount ?? payload.pagination.total);
       setRefreshFeedback(null);
 
@@ -597,6 +664,7 @@ export function FeedPanel({
     groupId,
     sourceId,
     title: titleFilter,
+    tag,
     createdRangeExplicit,
     ...overrides,
   });
@@ -660,6 +728,14 @@ export function FeedPanel({
     setSourceId(null);
     setTitleInput("");
     setTitleFilter(null);
+    setTag(null);
+  };
+
+  const toggleTag = (nextTag: string) => {
+    const normalizedTag = normalizeOptionalId(nextTag);
+    const selectedTag = normalizedTag && normalizedTag !== tag ? normalizedTag : null;
+    setTag(selectedTag);
+    loadFeed(buildQuery({ tag: selectedTag }), 1, pageSize, { scrollToTop: true });
   };
 
   const refresh = () => {
@@ -698,6 +774,7 @@ export function FeedPanel({
       const payload = await requestFeed(latestQueryRef.current, { page: currentPage, size: pageSize });
       replaceFeedData(payload.items, payload.pagination);
       setGroups(payload.groups ?? availableGroups);
+      setPopularTags(payload.popularTags ?? []);
       setGroupTotalCount(payload.groupTotalCount ?? payload.pagination.total);
     });
   };
@@ -1418,6 +1495,7 @@ export function FeedPanel({
         setItems(feedPayload.items);
         setPagination(feedPayload.pagination);
         setGroups(feedPayload.groups ?? availableGroups);
+        setPopularTags(feedPayload.popularTags ?? []);
         setGroupTotalCount(feedPayload.groupTotalCount ?? feedPayload.pagination.total);
         resetExpandedClusterState();
         setRefreshFeedback({
@@ -1543,7 +1621,45 @@ export function FeedPanel({
         />
       }
     >
-      <section className="w-full grid gap-4">
+      <section className="grid w-full min-w-0 gap-4">
+        {visiblePopularTags.length > 0 ? (
+          <section
+            role="region"
+            aria-label="热门标签"
+            className="w-full min-w-0"
+          >
+            <div className="w-full min-w-0">
+              <div className="flex w-full min-w-0 flex-wrap items-center gap-1.5 lg:justify-between">
+                {visiblePopularTags.map((option, index) => {
+                  const isActive = option.normalized === tag;
+
+                  return (
+                    <button
+                      key={option.normalized}
+                      type="button"
+                      onClick={() => toggleTag(option.normalized)}
+                      disabled={isPending}
+                      aria-pressed={isActive}
+                      aria-label={`筛选标签：${option.name}，${option.count} 条`}
+                      title={`${option.name} ${option.count}`}
+                      style={getTagButtonStyle(option, index, isActive)}
+                      className={cx(
+                        "inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-sm border px-2 text-xs font-semibold transition",
+                        "hover:-translate-y-0.5 hover:shadow-[var(--shadow-sm)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(59,130,246,0.28)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)]",
+                        "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none",
+                        isActive ? "shadow-[var(--shadow-sm)]" : "",
+                      )}
+                    >
+                      <span>{option.name}</span>
+                      <span className="shrink-0 text-[11px] font-bold opacity-75">{option.count}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </section>
+        ) : null}
+
         <section
           role="region"
           aria-label="信息流筛选"
@@ -1791,7 +1907,7 @@ export function FeedPanel({
                 className="h-4 w-4 rounded border-[color:var(--line)] text-[var(--accent)] focus:ring-[var(--accent)]"
               />
               <label htmlFor="select-all-items" className="text-sm text-[var(--text-2)] cursor-pointer">
-                全选 ({selectedItems.size}/{allSelectableItemIds.length})
+                批量选择 ({selectedItems.size}/{allSelectableItemIds.length})
               </label>
             </div>
           )}

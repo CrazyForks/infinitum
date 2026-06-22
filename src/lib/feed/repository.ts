@@ -18,6 +18,7 @@ import type {
   AggregationSplitParentDTO,
   ClusterDTO,
   FeedGroupOption,
+  FeedTagOption,
   FeedClusterPreviewItemDTO,
   FeedEntryDTO,
   FeedFilters,
@@ -110,6 +111,12 @@ type FeedGroupCountRow = {
   id: string;
   name: string;
   sortOrder: number | bigint;
+  count: bigint;
+};
+
+type FeedTagCountRow = {
+  name: string;
+  normalized: string;
   count: bigint;
 };
 
@@ -639,6 +646,17 @@ function buildItemWhere(
             ...(filters.sourceId ? { id: filters.sourceId } : {}),
           },
         },
+        ...(filters.tag
+          ? {
+              tags: {
+                some: {
+                  tag: {
+                    normalized: filters.tag,
+                  },
+                },
+              },
+            }
+          : {}),
       },
       {
         OR: [{ clusterId: null }, { cluster: { is: { status: "active" } } }],
@@ -894,10 +912,37 @@ function buildFeedEntryCandidatesCte(
     timeWhereClauses.push(Prisma.sql`mi."publishedAt" <= ${filters.publishedRangeEnd.getTime()}`);
   }
 
-  const filteredItemsWhereClause =
+  const baseFilteredItemsWhereClause =
     timeWhereClauses.length > 0
       ? Prisma.sql`WHERE ${Prisma.join(timeWhereClauses, " AND ")}`
       : Prisma.empty;
+  const filteredItemsCte = filters.tag
+    ? Prisma.sql`
+    tag_matched_clusters AS (
+      SELECT DISTINCT bfi."clusterId" AS id
+      FROM base_filtered_items bfi
+      INNER JOIN "item_tags" it ON it."itemId" = bfi."itemId"
+      INNER JOIN "tags" t ON t.id = it."tagId"
+      WHERE t.normalized = ${filters.tag}
+        AND bfi."clusterId" IS NOT NULL
+    ),
+    filtered_items AS (
+      SELECT bfi.*
+      FROM base_filtered_items bfi
+      WHERE EXISTS (
+          SELECT 1
+          FROM "item_tags" it
+          INNER JOIN "tags" t ON t.id = it."tagId"
+          WHERE it."itemId" = bfi."itemId"
+            AND t.normalized = ${filters.tag}
+        )
+        OR bfi."clusterId" IN (SELECT id FROM tag_matched_clusters)
+    )`
+    : Prisma.sql`
+    filtered_items AS (
+      SELECT *
+      FROM base_filtered_items
+    )`;
 
   const clusterAiScore = Prisma.sql`CAST(ROUND(AVG(csi."qualityScore")) AS INTEGER)`;
   const clusterItemCount = Prisma.sql`COUNT(*)`;
@@ -925,7 +970,7 @@ function buildFeedEntryCandidatesCte(
       LEFT JOIN "content_clusters" c ON c.id = i."clusterId"
       WHERE ${Prisma.join(nonTimeWhereClauses, " AND ")}
     ),
-    filtered_items AS (
+    base_filtered_items AS (
       SELECT
         mi."itemId",
         mi."clusterId",
@@ -939,8 +984,9 @@ function buildFeedEntryCandidatesCte(
         mi."clusterTitle",
         mi."clusterSummary"
       FROM matched_items mi
-      ${filteredItemsWhereClause}
+      ${baseFilteredItemsWhereClause}
     ),
+    ${filteredItemsCte},
     relevant_clusters AS (
       SELECT DISTINCT mi."clusterId" AS id
       FROM matched_items mi
@@ -1218,6 +1264,56 @@ async function listFeedGroupCounts(
   };
 }
 
+async function listPopularFeedTags(
+  filters: FeedFilters & {
+    rangeStart: Date | null;
+    rangeEnd: Date | null;
+    publishedRangeStart: Date | null;
+    publishedRangeEnd: Date | null;
+  },
+  limit = 20,
+): Promise<FeedTagOption[]> {
+  const effectiveFilters = {
+    ...filters,
+    tag: null,
+  };
+  const searchTerm = sanitizeFts5Query(filters.title);
+  const entryCandidatesCte = buildFeedEntryCandidatesCte(effectiveFilters, searchTerm);
+  const rows = await prisma.$queryRaw<FeedTagCountRow[]>(Prisma.sql`
+    ${entryCandidatesCte},
+    entry_tag_matches AS (
+      SELECT DISTINCT
+        ec.type AS "entryType",
+        ec.id AS "entryId",
+        t.id AS "tagId",
+        t.name AS name,
+        t.normalized AS normalized
+      FROM entry_candidates ec
+      INNER JOIN filtered_items fi
+        ON (
+          (ec.type = 'cluster' AND fi."clusterId" = ec.id)
+          OR (ec.type = 'single' AND fi."itemId" = ec.id)
+        )
+      INNER JOIN "item_tags" it ON it."itemId" = fi."itemId"
+      INNER JOIN "tags" t ON t.id = it."tagId"
+    )
+    SELECT
+      etm.name AS name,
+      etm.normalized AS normalized,
+      COUNT(*) AS count
+    FROM entry_tag_matches etm
+    GROUP BY etm."tagId", etm.name, etm.normalized
+    ORDER BY count DESC, etm.name ASC
+    LIMIT ${limit}
+  `);
+
+  return rows.map((row) => ({
+    name: row.name,
+    normalized: row.normalized,
+    count: toNumber(row.count),
+  }));
+}
+
 export async function listFeedItems(
   filters: FeedFilters & {
     rangeStart: Date | null;
@@ -1289,7 +1385,7 @@ export async function listFeedItems(
 
   const singleIds = pageRows.filter((row) => row.entryType === "single").map((row) => row.id);
   const clusterIds = pageRows.filter((row) => row.entryType === "cluster").map((row) => row.id);
-  const [singleItems, clusterItems, groupCounts] = await Promise.all([
+  const [singleItems, clusterItems, groupCounts, popularTags] = await Promise.all([
     singleIds.length > 0
       ? prisma.item.findMany({
           where: {
@@ -1320,6 +1416,7 @@ export async function listFeedItems(
         })
       : Promise.resolve([]),
     listFeedGroupCounts(filters),
+    listPopularFeedTags(filters),
   ]);
   const singleItemMap = new Map(singleItems.map((item) => [item.id, mapItemToFeedItem(item)]));
   const clusterItemMap = new Map<string, ItemWithSource[]>();
@@ -1411,6 +1508,7 @@ export async function listFeedItems(
     items,
     groups: groupCounts.groups,
     groupTotalCount: groupCounts.totalCount,
+    popularTags,
     pagination: normalizedPagination,
     nextCursor,
   };

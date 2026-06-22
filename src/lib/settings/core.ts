@@ -21,6 +21,10 @@ import { normalizeKeyword, normalizeText, normalizeUrl } from "@/lib/utils/text"
 
 export const DEFAULT_MODEL_CONFIG_NAME = "默认模型配置";
 const LEGACY_DAILY_REPORT_PROMPT_MARKER = '"openingSummary":"...","sections":{"今日大事"';
+const LEGACY_ITEM_ANALYSIS_PROMPT_MARKER =
+  '"eventDate":"YYYY-MM-DD|null"}';
+const LEGACY_ITEM_AGGREGATION_PROMPT_MARKER =
+  '"sourceUrl":"https://...|null"}';
 
 export type SourceInput = SourceConfig & {
   groupId?: string | null;
@@ -464,6 +468,24 @@ async function deleteRemovedPromptConfigTypes() {
   );
 }
 
+function isLegacyDailyReportTemplateJson(templateJson: string) {
+  try {
+    const parsed = JSON.parse(templateJson) as unknown;
+
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return false;
+    }
+
+    const candidate = parsed as Record<string, unknown>;
+    return (
+      !Array.isArray(candidate.blocks) &&
+      ("opening" in candidate || "sections" in candidate || "closing" in candidate)
+    );
+  } catch {
+    return false;
+  }
+}
+
 function resolveSystemPromptByType(type: PromptConfigType, fileConfig: RuntimeConfig): string {
   switch (type) {
     case PromptConfigType.item_summary:
@@ -494,6 +516,8 @@ async function ensureModelAndPromptConfigsSeeded() {
     prisma.blacklistKeyword.count(),
   ]);
 
+  await upgradeLegacyItemAnalysisPrompt(fileConfig);
+  await upgradeLegacyItemAggregationPrompt(fileConfig);
   await upgradeLegacyDailyReportPrompt(fileConfig);
 
   if (
@@ -604,6 +628,40 @@ async function ensureModelAndPromptConfigsSeeded() {
 }
 
 async function upgradeLegacyDailyReportPrompt(fileConfig: RuntimeConfig) {
+  const defaultDailyReportPrompts = await prisma.promptConfig.findMany({
+    where: {
+      type: PromptConfigType.daily_report,
+      isDefault: true,
+    },
+    select: {
+      id: true,
+      systemPrompt: true,
+      templateJson: true,
+    },
+  });
+
+  for (const config of defaultDailyReportPrompts) {
+    let shouldUpgradeTemplate = false;
+
+    if (config.templateJson) {
+      try {
+        parseDailyReportTemplateJson(config.templateJson);
+      } catch {
+        shouldUpgradeTemplate = isLegacyDailyReportTemplateJson(config.templateJson);
+      }
+    }
+
+    if (shouldUpgradeTemplate) {
+      await prisma.promptConfig.update({
+        where: { id: config.id },
+        data: {
+          systemPrompt: resolveSystemPromptByType(PromptConfigType.daily_report, fileConfig),
+          templateJson: DEFAULT_DAILY_REPORT_TEMPLATE_JSON,
+        },
+      });
+    }
+  }
+
   await prisma.promptConfig.updateMany({
     where: {
       type: PromptConfigType.daily_report,
@@ -616,6 +674,46 @@ async function upgradeLegacyDailyReportPrompt(fileConfig: RuntimeConfig) {
     data: {
       systemPrompt: resolveSystemPromptByType(PromptConfigType.daily_report, fileConfig),
       templateJson: DEFAULT_DAILY_REPORT_TEMPLATE_JSON,
+    },
+  });
+}
+
+async function upgradeLegacyItemAnalysisPrompt(fileConfig: RuntimeConfig) {
+  await prisma.promptConfig.updateMany({
+    where: {
+      type: PromptConfigType.item_analysis,
+      isDefault: true,
+      systemPrompt: {
+        contains: LEGACY_ITEM_ANALYSIS_PROMPT_MARKER,
+      },
+      NOT: {
+        systemPrompt: {
+          contains: '"tags"',
+        },
+      },
+    },
+    data: {
+      systemPrompt: resolveSystemPromptByType(PromptConfigType.item_analysis, fileConfig),
+    },
+  });
+}
+
+async function upgradeLegacyItemAggregationPrompt(fileConfig: RuntimeConfig) {
+  await prisma.promptConfig.updateMany({
+    where: {
+      type: PromptConfigType.item_aggregation,
+      isDefault: true,
+      systemPrompt: {
+        contains: LEGACY_ITEM_AGGREGATION_PROMPT_MARKER,
+      },
+      NOT: {
+        systemPrompt: {
+          contains: '"tags"',
+        },
+      },
+    },
+    data: {
+      systemPrompt: resolveSystemPromptByType(PromptConfigType.item_aggregation, fileConfig),
     },
   });
 }

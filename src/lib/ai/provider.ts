@@ -23,6 +23,7 @@ import {
 } from "@/config/prompts";
 import type { RuntimeConfig } from "@/config/runtime";
 import { shouldRegenerateChineseSummary } from "@/lib/ai/summary-language";
+import { normalizeItemTags } from "@/lib/tags/normalization";
 import { normalizeOptionalText } from "@/lib/utils/text";
 
 export type AiEventSignature = {
@@ -52,6 +53,7 @@ export type AiEnrichment = {
   qualityScore: number;
   qualityRationale: string;
   eventSignature: AiEventSignature;
+  tags: string[];
 };
 
 export type ItemSummaryResult = {
@@ -72,6 +74,7 @@ export type ParsedEvent = ParsedEventSignature & {
   oneLiner: string;
   qualityScore: number;
   sourceUrl: string | null;
+  tags: string[];
 };
 
 export type ParsedAggregation = {
@@ -311,6 +314,7 @@ function getFallbackEnrichment(
       eventObject: null,
       eventDate: null,
     },
+    tags: [],
   };
 }
 
@@ -460,6 +464,7 @@ function normalizeParsedEvent(raw: Partial<ParsedEvent>): ParsedEvent | null {
       oneLiner,
       qualityScore: normalizeScore(raw.qualityScore, 50),
       sourceUrl: normalizeSourceUrl(raw.sourceUrl ?? null),
+      tags: normalizeItemTags(raw.tags).map((tag) => tag.name),
     };
   }
 
@@ -473,6 +478,7 @@ function normalizeParsedEvent(raw: Partial<ParsedEvent>): ParsedEvent | null {
     oneLiner,
     qualityScore: normalizeScore(raw.qualityScore, 50),
     sourceUrl: normalizeSourceUrl(raw.sourceUrl ?? null),
+    tags: normalizeItemTags(raw.tags).map((tag) => tag.name),
   };
 }
 
@@ -509,6 +515,7 @@ function parseJsonLikeEnrichment(
         eventObject?: string | null;
         eventDate?: string | null;
       } | null;
+      tags?: unknown;
     };
 
     return {
@@ -552,6 +559,7 @@ function parseJsonLikeEnrichment(
       qualityScore: fallback.qualityScore,
       qualityRationale: fallback.qualityRationale,
       eventSignature: fallback.eventSignature,
+      tags: fallback.tags,
     },
   };
 }
@@ -668,6 +676,7 @@ function buildEnrichmentFromParsed(
       eventObject?: string | null;
       eventDate?: string | null;
     } | null;
+    tags?: unknown;
   },
   fallback: AiEnrichment,
   translateTitle: boolean,
@@ -680,6 +689,7 @@ function buildEnrichmentFromParsed(
     qualityScore: normalizeScore(parsed.qualityScore, fallback.qualityScore),
     qualityRationale: parsed.qualityRationale?.trim() || fallback.qualityRationale,
     eventSignature: buildEventSignatureFromParsed(parsed, fallback.eventSignature),
+    tags: normalizeItemTags(parsed.tags).map((tag) => tag.name),
   };
 }
 

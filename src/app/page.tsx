@@ -55,7 +55,8 @@ function hasNonDefaultFeedFilter(filters: FeedFilters, page: number) {
       filters.publishedEnd ||
       filters.groupId ||
       filters.sourceId ||
-      filters.title,
+      filters.title ||
+      filters.tag,
   );
 }
 
@@ -74,6 +75,10 @@ function buildFeedMetadataText(filters: FeedFilters) {
 
   if (filters.title) {
     descriptionParts.push(`当前筛选关键词为“${filters.title}”。`);
+  }
+
+  if (filters.tag) {
+    descriptionParts.push(`当前筛选标签为“${filters.tag}”。`);
   }
 
   if (filters.groupId || filters.sourceId) {
@@ -202,9 +207,11 @@ export default async function Home({ searchParams }: PageProps) {
         initialGroupId={filters.groupId}
         initialSourceId={filters.sourceId}
         initialTitle={filters.title}
+        initialTag={filters.tag}
         availableGroups={feed.groups}
         initialGroupTotalCount={feed.groupTotalCount}
         availableSources={feedFilterOptions.sources}
+        popularTags={feed.popularTags}
       />
     </main>
   );

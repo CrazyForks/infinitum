@@ -13,6 +13,7 @@ export type FeedFilters = {
   groupId: string | null;
   sourceId: string | null;
   title: string | null;
+  tag: string | null;
 };
 
 export const DEFAULT_FEED_PAGE_SIZE = 50;
@@ -189,6 +190,12 @@ export type FeedSourceOption = {
   id: string;
   name: string;
   groupId: string | null;
+};
+
+export type FeedTagOption = {
+  name: string;
+  normalized: string;
+  count: number;
 };
 
 export type SourceConfig = {

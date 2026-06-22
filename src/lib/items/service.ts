@@ -19,6 +19,7 @@ import { shouldTranslateTitle, stripHtmlTags } from "@/lib/feed/presentation";
 import { buildAggregationParsingInput } from "@/lib/ingestion/model-input";
 import { normalizeStoredEventType } from "@/lib/clusters/normalization";
 import { getIngestionRuntimeConfig } from "@/lib/settings/service";
+import { replaceItemTags } from "@/lib/tags/service";
 import { createTaskAiUsageTracker } from "@/lib/tasks/ai-usage";
 import {
   enqueueTaskRun,
@@ -100,6 +101,14 @@ function getItemSourceText(item: Item): string {
 
 function normalizeSummary(summary: string | null | undefined): string | null {
   return stripHtmlTags(summary) || null;
+}
+
+async function replaceItemTagsSafely(itemId: string, tags: unknown) {
+  try {
+    await replaceItemTags(itemId, tags);
+  } catch (error) {
+    console.error("[Items] Failed to persist item tags:", error);
+  }
 }
 
 async function resolveItemSummaryResult(
@@ -666,6 +675,7 @@ async function reanalyzeItem(itemId: string, options?: RegenerationOptions) {
         errorMessage: null,
       },
     });
+    await replaceItemTagsSafely(item.id, []);
 
     const reparseResult = await reparseAggregationCandidate(candidate, {
       aiProvider,
@@ -738,6 +748,10 @@ async function reanalyzeItem(itemId: string, options?: RegenerationOptions) {
     },
     include: { source: true },
   });
+  await replaceItemTagsSafely(
+    updated.id,
+    nextStatus === "processed" ? analysis.tags : [],
+  );
 
   if (aggregationDetectionEnabled) {
     for (const clusterId of await collectAggregationChildClusterIds(item.id)) {
@@ -1115,6 +1129,7 @@ async function reparseAggregationCandidate(
         oneLiner: event.oneLiner,
         qualityScore: event.qualityScore,
         sourceUrl: event.sourceUrl,
+        tags: event.tags,
       })),
     });
 

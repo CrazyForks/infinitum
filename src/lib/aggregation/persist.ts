@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/db";
+import { replaceItemTagsInTransaction } from "@/lib/tags/service";
 
 export type AggregationChildEventInput = {
   title?: string | null;
@@ -14,6 +15,7 @@ export type AggregationChildEventInput = {
   eventObject: string | null;
   eventDate: string | null;
   sourceUrl: string | null;
+  tags?: unknown;
   fingerprint?: string | null;
 };
 
@@ -339,6 +341,7 @@ export async function persistAggregationChildItems({
       }
       linkedDedupeSignatures.add(dedupeSignature);
       const child = await upsertItemInTx(tx, childInput);
+      await replaceItemTagsInTransaction(tx, child.id, event.tags);
       const fingerprint = event.fingerprint ?? buildSemanticEventFingerprint(event);
       await tx.aggregationSplitLink.upsert({
         where: {

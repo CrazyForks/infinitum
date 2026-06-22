@@ -10,7 +10,9 @@ import { getAggregationSplitParent } from "@/lib/feed/repository";
 describe("aggregation child persistence", () => {
   beforeEach(async () => {
     await prisma.aggregationSplitLink.deleteMany();
+    await prisma.itemTag.deleteMany();
     await prisma.item.deleteMany();
+    await prisma.tag.deleteMany();
     await prisma.contentCluster.deleteMany();
     await prisma.source.deleteMany();
   });
@@ -113,6 +115,75 @@ describe("aggregation child persistence", () => {
         where: { parentItemId: secondParent.id },
       }),
     ).toBe(1);
+  });
+
+  it("persists normalized tags for aggregation child items", async () => {
+    const source = await prisma.source.create({
+      data: {
+        name: "Tagged Roundup",
+        rssUrl: "https://tagged-roundup.example.com/feed.xml",
+        siteUrl: "https://tagged-roundup.example.com",
+        enabled: true,
+        aiParsingEnabled: true,
+        aggregationDetectionEnabled: true,
+      },
+    });
+    const parent = await prisma.item.create({
+      data: {
+        sourceId: source.id,
+        originalUrl: "https://tagged-roundup.example.com/2026-04-10",
+        canonicalUrl: "https://tagged-roundup.example.com/2026-04-10",
+        urlHash: "tagged-roundup-parent",
+        dedupeSignature: "tagged-roundup-parent",
+        originalTitle: "2026-04-10 Tagged Daily",
+        publishedAt: new Date("2026-04-10T08:00:00.000Z"),
+        status: "processed",
+        moderationStatus: "allowed",
+        summaryText: "Tagged daily roundup",
+        isAggregation: true,
+        aggregationParseStatus: "parsed",
+        aggregationCheckedAt: new Date("2026-04-10T09:00:00.000Z"),
+      },
+    });
+
+    const result = await persistAggregationChildItems({
+      sourceId: source.id,
+      parent,
+      publishedAt: parent.publishedAt,
+      events: [
+        {
+          eventType: "launch",
+          eventSubject: "OpenAI",
+          eventAction: "发布",
+          eventObject: "Agent SDK",
+          eventDate: "2026-04-10",
+          title: "OpenAI 推出 Agent SDK",
+          oneLiner: "OpenAI 发布 Agent SDK。",
+          qualityScore: 92,
+          sourceUrl: null,
+          tags: ["OpenAI", "Agent SDK", "新闻", "openai", "AI Agent", "开发者工具", "额外标签"],
+        },
+      ],
+    });
+
+    const child = await prisma.item.findUniqueOrThrow({
+      where: { id: result.childItemIds[0] },
+      include: {
+        tags: {
+          include: { tag: true },
+        },
+      },
+    });
+
+    const tagNames = child.tags.map((entry) => entry.tag.name);
+    expect(tagNames).toHaveLength(5);
+    expect(tagNames).toEqual(expect.arrayContaining([
+      "OpenAI",
+      "Agent SDK",
+      "AI Agent",
+      "开发者工具",
+      "额外标签",
+    ]));
   });
 
   it("allows one parent to link events with the same semantic fingerprint when source urls differ", async () => {

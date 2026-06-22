@@ -175,6 +175,7 @@ model Item {
   aggregationSplitParents  AggregationSplitLink[]     @relation("AggregationSplitChild")
   aggregationSplitChildren AggregationSplitLink[]     @relation("AggregationSplitParent")
   dailyReportSources       DailyReportSource[]
+  tags                     ItemTag[]
 
   @@index([sourceId, publishedAt])
   @@index([status, publishedAt])
@@ -413,6 +414,32 @@ model DailyReportSource {
   @@index([itemId])
   @@index([clusterId])
   @@map("daily_report_sources")
+}
+
+model Tag {
+  id         String    @id @default(cuid())
+  name       String
+  normalized String    @unique
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  items      ItemTag[]
+
+  @@index([name])
+  @@map("tags")
+}
+
+model ItemTag {
+  id        String   @id @default(cuid())
+  itemId    String
+  tagId     String
+  createdAt DateTime @default(now())
+  item      Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  tag       Tag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([itemId, tagId])
+  @@index([tagId])
+  @@index([itemId])
+  @@map("item_tags")
 }
 
 model SourceGroup {

@@ -47,6 +47,7 @@ function buildAiProviderMock(
       qualityScore: 80,
       qualityRationale: "高质量",
       eventSignature: buildEventSignature(),
+      tags: [],
     }),
     summarizeCluster: vi.fn().mockResolvedValue("默认聚合摘要"),
     matchClusterCandidate: vi.fn().mockResolvedValue(null),
@@ -57,6 +58,7 @@ function buildAiProviderMock(
 describe("runIngestion", () => {
   beforeEach(async () => {
     await prisma.item.deleteMany();
+    await prisma.tag.deleteMany();
     await prisma.fetchRun.deleteMany();
     await prisma.backgroundTaskRun.deleteMany();
     await prisma.promptConfig.deleteMany();
@@ -222,6 +224,83 @@ describe("runIngestion", () => {
       { label: "摘要完成", value: 1 },
       { label: "摘要失败", value: 0 },
       { label: "已删除", value: 0 },
+    ]);
+  });
+
+  it("persists normalized AI tags for processed items", async () => {
+    const parser = {
+      parseURL: vi.fn().mockResolvedValue({
+        items: [
+          {
+            title: "OpenAI ships Codex cloud agent",
+            link: "https://example.com/posts/openai-codex",
+            isoDate: "2026-04-10T09:00:00.000Z",
+            contentSnippet: "OpenAI 发布 Codex 云端智能体。",
+          },
+        ],
+      }),
+    };
+    const aiProvider = buildAiProviderMock({
+      summarizeItem: vi.fn().mockResolvedValue({summary: "OpenAI 发布 Codex 云端智能体，面向开发者自动处理编程任务。", isAggregation: false}),
+      enrichContent: vi.fn().mockResolvedValue({
+        translatedTitle: "OpenAI 发布 Codex 云端智能体",
+        moderationStatus: "allowed",
+        moderationReason: null,
+        moderationDetail: "产品发布信息明确",
+        qualityScore: 90,
+        qualityRationale: "具备明确主体和产品对象",
+        eventSignature: buildEventSignature({
+          eventType: "launch",
+          eventSubject: "OpenAI",
+          eventAction: "发布",
+          eventObject: "Codex 云端智能体",
+        }),
+        tags: ["OpenAI", "Codex", "新闻", "openai", "AI 编程", "开发者工具", "额外标签"],
+      }),
+    });
+
+    await runIngestion({
+      parser,
+      articleFetcher: vi.fn(),
+      aiProvider,
+      sourceConfigs: [
+        {
+          name: "Tagged Feed",
+          rssUrl: "https://example.com/tagged-feed.xml",
+          siteUrl: "https://example.com",
+          enabled: true,
+          aiParsingEnabled: true,
+        },
+      ],
+      blacklist: [],
+      now: new Date("2026-04-10T10:30:00.000Z"),
+    });
+
+    const storedItem = await prisma.item.findFirstOrThrow({
+      include: {
+        tags: {
+          include: {
+            tag: true,
+          },
+          orderBy: { createdAt: "asc" },
+        },
+      },
+    });
+
+    expect(storedItem.status).toBe("processed");
+    expect(storedItem.tags.map((entry) => entry.tag.name)).toEqual([
+      "OpenAI",
+      "Codex",
+      "AI 编程",
+      "开发者工具",
+      "额外标签",
+    ]);
+    expect(storedItem.tags.map((entry) => entry.tag.normalized)).toEqual([
+      "openai",
+      "codex",
+      "ai 编程",
+      "开发者工具",
+      "额外标签",
     ]);
   });
 

@@ -20,6 +20,7 @@ export async function GET(request: Request) {
       groupId: filters.groupId,
       sourceId: filters.sourceId,
       title: filters.title,
+      tag: filters.tag,
     },
     {
       headers: {

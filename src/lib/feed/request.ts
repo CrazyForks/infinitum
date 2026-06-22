@@ -18,7 +18,7 @@ type ResolvedFeedRequest = {
   };
 };
 
-const ADVANCED_FILTER_KEYS = ["sourceId", "title", "publishedStart", "publishedEnd"] as const;
+const ADVANCED_FILTER_KEYS = ["sourceId", "title", "tag", "publishedStart", "publishedEnd"] as const;
 const CREATED_TIME_FILTER_KEYS = ["range", "start", "end"] as const;
 
 function getSearchParamValue(searchParams: SearchParamSource, key: keyof FeedFilters | "page" | "size") {
@@ -61,6 +61,7 @@ export function resolveFeedRequest(searchParams: SearchParamSource, now = new Da
   const groupIdParam = getSearchParamValue(searchParams, "groupId");
   const sourceIdParam = getSearchParamValue(searchParams, "sourceId");
   const titleParam = getSearchParamValue(searchParams, "title");
+  const tagParam = getSearchParamValue(searchParams, "tag");
   const defaultRange = resolveDefaultRange(searchParams);
   return {
     filters: resolveFeedFilters(
@@ -74,6 +75,7 @@ export function resolveFeedRequest(searchParams: SearchParamSource, now = new Da
         groupId: normalizeFeedFilterId(groupIdParam),
         sourceId: normalizeFeedFilterId(sourceIdParam),
         title: titleParam?.trim() ? titleParam.trim() : null,
+        tag: normalizeFeedFilterId(tagParam),
       },
       now,
     ),

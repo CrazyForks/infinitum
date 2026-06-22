@@ -3,10 +3,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { prisma } from "@/lib/db";
 import { resolveFeedFilters } from "@/lib/feed/range";
 import { listFeedItems } from "@/lib/feed/repository";
+import { replaceItemTags } from "@/lib/tags/service";
 
 describe("/api/feed", () => {
   beforeEach(async () => {
     await prisma.item.deleteMany();
+    await prisma.tag.deleteMany();
     await prisma.contentCluster.deleteMany();
     await prisma.fetchRun.deleteMany();
     await prisma.source.deleteMany();
@@ -251,6 +253,56 @@ describe("/api/feed", () => {
       totalPages: 1,
     });
     expect(json.sort).toBe("time_desc");
+
+    vi.useRealTimers();
+  });
+
+  it("filters feed entries by tag and returns popular tags", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-10T12:00:00.000Z"));
+    await replaceItemTags("item-a1", ["OpenAI", "AI Agent"]);
+    await replaceItemTags("item-a2", ["OpenAI"]);
+    await replaceItemTags("item-b1", ["Robotics"]);
+
+    const { GET } = await import("@/app/api/feed/route");
+    const response = await GET(
+      new Request("http://localhost/api/feed?range=7d&tag=openai"),
+    );
+    const json = await response.json();
+
+    expect(json.tag).toBe("openai");
+    expect(json.items).toHaveLength(1);
+    expect(json.items[0]).toMatchObject({
+      type: "cluster",
+      id: "cluster-a",
+      title: "OpenAI Agent 发布",
+    });
+    expect(json.popularTags).toEqual([
+      { name: "AI Agent", normalized: "ai agent", count: 1 },
+      { name: "OpenAI", normalized: "openai", count: 1 },
+      { name: "Robotics", normalized: "robotics", count: 1 },
+    ]);
+
+    vi.useRealTimers();
+  });
+
+  it("filters single feed items by tag", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-10T12:00:00.000Z"));
+    await replaceItemTags("item-b1", ["Robotics"]);
+
+    const { GET } = await import("@/app/api/feed/route");
+    const response = await GET(
+      new Request("http://localhost/api/feed?range=7d&tag=robotics"),
+    );
+    const json = await response.json();
+
+    expect(json.items).toHaveLength(1);
+    expect(json.items[0]).toMatchObject({
+      type: "single",
+      id: "item-b1",
+      title: "故事 B",
+    });
 
     vi.useRealTimers();
   });

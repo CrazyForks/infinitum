@@ -140,6 +140,7 @@ export function buildFeedSearch(
     groupId,
     sourceId,
     title,
+    tag,
     createdRangeExplicit = true,
   }: FeedQueryState,
   pagination?: {
@@ -151,9 +152,10 @@ export function buildFeedSearch(
   const normalizedGroupId = normalizeOptionalId(groupId);
   const normalizedSourceId = normalizeOptionalId(sourceId);
   const normalizedTitle = normalizeSearchText(title);
+  const normalizedTag = normalizeOptionalId(tag);
   const page = pagination?.page ?? 1;
   const size = pagination?.size ?? DEFAULT_FEED_PAGE_SIZE;
-  const hasAdvancedFilter = Boolean(normalizedSourceId || normalizedTitle || publishedStartDate || publishedEndDate);
+  const hasAdvancedFilter = Boolean(normalizedSourceId || normalizedTitle || normalizedTag || publishedStartDate || publishedEndDate);
   const hasCreatedDateRange = Boolean(startDate || endDate);
 
   if (createdRangeExplicit || hasCreatedDateRange || (!hasAdvancedFilter && range !== "all")) {
@@ -188,6 +190,10 @@ export function buildFeedSearch(
 
   if (normalizedTitle) {
     search.set("title", normalizedTitle);
+  }
+
+  if (normalizedTag) {
+    search.set("tag", normalizedTag);
   }
 
   if (page > 1) {

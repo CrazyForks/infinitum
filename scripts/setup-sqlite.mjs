@@ -174,6 +174,40 @@ function applyAdditiveSchemaUpgrades() {
       input: `ALTER TABLE "prompt_configs" ADD COLUMN "templateJson" TEXT;\n`,
     });
   }
+
+  if (!ftsTableExists("tags")) {
+    runSqlite([dbPath], {
+      input: `
+        CREATE TABLE IF NOT EXISTS "tags" (
+          "id" TEXT NOT NULL PRIMARY KEY,
+          "name" TEXT NOT NULL,
+          "normalized" TEXT NOT NULL,
+          "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          "updatedAt" DATETIME NOT NULL
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS "tags_normalized_key" ON "tags"("normalized");
+        CREATE INDEX IF NOT EXISTS "tags_name_idx" ON "tags"("name");
+      `,
+    });
+  }
+
+  if (!ftsTableExists("item_tags")) {
+    runSqlite([dbPath], {
+      input: `
+        CREATE TABLE IF NOT EXISTS "item_tags" (
+          "id" TEXT NOT NULL PRIMARY KEY,
+          "itemId" TEXT NOT NULL,
+          "tagId" TEXT NOT NULL,
+          "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          CONSTRAINT "item_tags_itemId_fkey" FOREIGN KEY ("itemId") REFERENCES "items" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+          CONSTRAINT "item_tags_tagId_fkey" FOREIGN KEY ("tagId") REFERENCES "tags" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS "item_tags_tagId_idx" ON "item_tags"("tagId");
+        CREATE INDEX IF NOT EXISTS "item_tags_itemId_idx" ON "item_tags"("itemId");
+        CREATE UNIQUE INDEX IF NOT EXISTS "item_tags_itemId_tagId_key" ON "item_tags"("itemId", "tagId");
+      `,
+    });
+  }
 }
 
 function cleanupRemovedPromptConfigTypes() {
