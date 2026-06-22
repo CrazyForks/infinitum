@@ -74,7 +74,6 @@ type FeedEntryRow = {
   upvotes?: number | bigint;
   downvotes?: number | bigint;
   recommendScore?: number | bigint;
-  totalEntries?: number | bigint;
 };
 
 type CountRow = {
@@ -852,7 +851,11 @@ function buildFeedEntryCandidatesCte(
     publishedRangeEnd: Date | null;
   },
   searchTerm: string | null = null,
+  options: {
+    includeClusterScoreStats?: boolean;
+  } = {},
 ) {
+  const includeClusterScoreStats = options.includeClusterScoreStats ?? true;
   const nonTimeWhereClauses: Prisma.Sql[] = [
     Prisma.sql`i.status = ${"processed"}`,
     Prisma.sql`i."moderationStatus" IN (${Prisma.join([...DISPLAYABLE_MODERATION_STATUSES])})`,
@@ -951,6 +954,53 @@ function buildFeedEntryCandidatesCte(
   const clusterDownvotes = Prisma.sql`COALESCE(MIN(cc.downvotes), 0)`;
   const singleUpvotes = Prisma.sql`COALESCE(csg.upvotes, 0)`;
   const singleDownvotes = Prisma.sql`COALESCE(csg.downvotes, 0)`;
+  const clusterScoreStatsCtes = includeClusterScoreStats
+    ? Prisma.sql`
+    cluster_score_items AS (
+      SELECT
+        i."clusterId" AS "clusterId",
+        i."sourceId" AS "sourceId",
+        i."qualityScore" AS "qualityScore"
+      FROM "items" i
+      INNER JOIN relevant_clusters rc ON rc.id = i."clusterId"
+      INNER JOIN "sources" s ON s.id = i."sourceId"
+      WHERE i.status = ${"processed"}
+        AND i."moderationStatus" IN (${Prisma.join([...DISPLAYABLE_MODERATION_STATUSES])})
+        AND s.enabled = ${true}
+    ),
+    cluster_score_groups AS (
+      SELECT
+        csi."clusterId" AS id,
+        ${clusterAiScore} AS score,
+        ${clusterItemCount} AS "totalItemCount",
+        ${clusterSourceCount} AS "sourceCount",
+        ${clusterUpvotes} AS upvotes,
+        ${clusterDownvotes} AS downvotes,
+        -- 综合推荐评分 = AI锚点分 + 有限反馈微调 + 来源/条目聚合加权
+        ${buildRecommendScoreSql({
+          aiScore: clusterAiScore,
+          upvotes: clusterUpvotes,
+          downvotes: clusterDownvotes,
+          sourceCount: clusterSourceCount,
+          itemCount: clusterItemCount,
+        })} AS "recommendScore"
+      FROM cluster_score_items csi
+      INNER JOIN "content_clusters" cc ON cc.id = csi."clusterId"
+      GROUP BY csi."clusterId"
+    )`
+    : Prisma.sql`
+    cluster_score_groups AS (
+      SELECT
+        CAST(NULL AS TEXT) AS id,
+        CAST(0 AS INTEGER) AS score,
+        CAST(0 AS INTEGER) AS "totalItemCount",
+        CAST(0 AS INTEGER) AS "sourceCount",
+        CAST(0 AS INTEGER) AS upvotes,
+        CAST(0 AS INTEGER) AS downvotes,
+        CAST(0 AS INTEGER) AS "recommendScore"
+      WHERE 0
+    )`;
+
   return Prisma.sql`
     WITH matched_items AS (
       SELECT
@@ -988,42 +1038,11 @@ function buildFeedEntryCandidatesCte(
     ),
     ${filteredItemsCte},
     relevant_clusters AS (
-      SELECT DISTINCT mi."clusterId" AS id
-      FROM matched_items mi
-      WHERE mi."clusterId" IS NOT NULL
+      SELECT DISTINCT fi."clusterId" AS id
+      FROM filtered_items fi
+      WHERE fi."clusterId" IS NOT NULL
     ),
-    cluster_score_items AS (
-      SELECT
-        i."clusterId" AS "clusterId",
-        i."sourceId" AS "sourceId",
-        i."qualityScore" AS "qualityScore"
-      FROM "items" i
-      INNER JOIN relevant_clusters rc ON rc.id = i."clusterId"
-      INNER JOIN "sources" s ON s.id = i."sourceId"
-      WHERE i.status = ${"processed"}
-        AND i."moderationStatus" IN (${Prisma.join([...DISPLAYABLE_MODERATION_STATUSES])})
-        AND s.enabled = ${true}
-    ),
-    cluster_score_groups AS (
-      SELECT
-        csi."clusterId" AS id,
-        ${clusterAiScore} AS score,
-        ${clusterItemCount} AS "totalItemCount",
-        ${clusterSourceCount} AS "sourceCount",
-        ${clusterUpvotes} AS upvotes,
-        ${clusterDownvotes} AS downvotes,
-        -- 综合推荐评分 = AI锚点分 + 有限反馈微调 + 来源/条目聚合加权
-        ${buildRecommendScoreSql({
-          aiScore: clusterAiScore,
-          upvotes: clusterUpvotes,
-          downvotes: clusterDownvotes,
-          sourceCount: clusterSourceCount,
-          itemCount: clusterItemCount,
-        })} AS "recommendScore"
-      FROM cluster_score_items csi
-      INNER JOIN "content_clusters" cc ON cc.id = csi."clusterId"
-      GROUP BY csi."clusterId"
-    ),
+    ${clusterScoreStatsCtes},
     cluster_match_group_counts AS (
       SELECT
         mi."clusterId",
@@ -1031,8 +1050,8 @@ function buildFeedEntryCandidatesCte(
         COUNT(*) AS count,
         MIN(mi."createdAt") AS "firstCreatedAt"
       FROM matched_items mi
-      WHERE mi."clusterId" IS NOT NULL
-        AND mi."sourceGroupId" IS NOT NULL
+      INNER JOIN relevant_clusters rc ON rc.id = mi."clusterId"
+      WHERE mi."sourceGroupId" IS NOT NULL
       GROUP BY mi."clusterId", mi."sourceGroupId"
     ),
     cluster_dominant_groups AS (
@@ -1054,7 +1073,7 @@ function buildFeedEntryCandidatesCte(
         mi."clusterId" AS id,
         COUNT(*) AS "matchedItemCount"
       FROM matched_items mi
-      WHERE mi."clusterId" IS NOT NULL
+      INNER JOIN relevant_clusters rc ON rc.id = mi."clusterId"
       GROUP BY mi."clusterId"
     ),
     cluster_groups AS (
@@ -1153,6 +1172,20 @@ function buildFeedEntryOrderBy(sort: FeedFilters["sort"]) {
   return Prisma.sql`ORDER BY "createdAt" DESC, "recommendScore" DESC, "itemCount" DESC, id DESC`;
 }
 
+function resolvePaginationTotalFromGroupCounts(
+  groupCounts: {
+    groups: FeedGroupOption[];
+    totalCount: number;
+  },
+  groupId: string | null,
+) {
+  if (!groupId) {
+    return groupCounts.totalCount;
+  }
+
+  return groupCounts.groups.find((group) => group.id === groupId)?.count ?? 0;
+}
+
 export async function listFeedFilterOptions(): Promise<{
   groups: FeedGroupOption[];
   sources: FeedSourceOption[];
@@ -1206,7 +1239,9 @@ async function listFeedGroupCounts(
     groupId: null,
   };
   const searchTerm = sanitizeFts5Query(filters.title);
-  const entryCandidatesCte = buildFeedEntryCandidatesCte(effectiveFilters, searchTerm);
+  const entryCandidatesCte = buildFeedEntryCandidatesCte(effectiveFilters, searchTerm, {
+    includeClusterScoreStats: false,
+  });
   const groupRows = await prisma.$queryRaw<(FeedGroupCountRow & { total: bigint })[]>(Prisma.sql`
     ${entryCandidatesCte},
     annotated_entry_candidates AS (
@@ -1278,7 +1313,9 @@ async function listPopularFeedTags(
     tag: null,
   };
   const searchTerm = sanitizeFts5Query(filters.title);
-  const entryCandidatesCte = buildFeedEntryCandidatesCte(effectiveFilters, searchTerm);
+  const entryCandidatesCte = buildFeedEntryCandidatesCte(effectiveFilters, searchTerm, {
+    includeClusterScoreStats: false,
+  });
   const rows = await prisma.$queryRaw<FeedTagCountRow[]>(Prisma.sql`
     ${entryCandidatesCte},
     entry_tag_matches AS (
@@ -1330,8 +1367,6 @@ export async function listFeedItems(
   const searchTerm = sanitizeFts5Query(filters.title);
   const entryCandidatesCte = buildFeedEntryCandidatesCte(filters, searchTerm);
   const requestedPage = Math.max(1, pagination.page);
-  let total = 0;
-  let totalPages = 1;
   let page = requestedPage;
   let offset = (requestedPage - 1) * pagination.size;
 
@@ -1352,40 +1387,31 @@ export async function listFeedItems(
         "totalItemCount",
         upvotes,
         downvotes,
-        "recommendScore",
-        COUNT(*) OVER() AS "totalEntries"
+        "recommendScore"
       FROM entry_candidates
       ${buildFeedEntryOrderBy(filters.sort)}
       LIMIT ${pagination.size}
       OFFSET ${pageOffset}
     `);
 
-  let pageRows = await queryPageRows(offset);
+  const [initialPageRows, groupCounts, popularTags] = await Promise.all([
+    queryPageRows(offset),
+    listFeedGroupCounts(filters),
+    listPopularFeedTags(filters),
+  ]);
+  let pageRows = initialPageRows;
+  const total = resolvePaginationTotalFromGroupCounts(groupCounts, filters.groupId);
+  const totalPages = Math.max(1, Math.ceil(total / pagination.size));
+  page = Math.min(requestedPage, totalPages);
 
-  if (pageRows.length > 0) {
-    total = toNumber(pageRows[0].totalEntries ?? 0);
-    totalPages = Math.max(1, Math.ceil(total / pagination.size));
-    page = Math.min(requestedPage, totalPages);
-  } else if (requestedPage > 1) {
-    const countRows = await prisma.$queryRaw<CountRow[]>(Prisma.sql`
-      ${entryCandidatesCte}
-      SELECT COUNT(*) AS total
-      FROM entry_candidates
-    `);
-    total = toNumber(countRows[0]?.total ?? BigInt(0));
-    totalPages = Math.max(1, Math.ceil(total / pagination.size));
-    page = Math.min(requestedPage, totalPages);
-
-    if (total > 0 && page !== requestedPage) {
-      offset = (page - 1) * pagination.size;
-      pageRows = await queryPageRows(offset);
-      total = toNumber(pageRows[0]?.totalEntries ?? total);
-    }
+  if (pageRows.length === 0 && total > 0 && page !== requestedPage) {
+    offset = (page - 1) * pagination.size;
+    pageRows = await queryPageRows(offset);
   }
 
   const singleIds = pageRows.filter((row) => row.entryType === "single").map((row) => row.id);
   const clusterIds = pageRows.filter((row) => row.entryType === "cluster").map((row) => row.id);
-  const [singleItems, clusterItems, groupCounts, popularTags] = await Promise.all([
+  const [singleItems, clusterItems] = await Promise.all([
     singleIds.length > 0
       ? prisma.item.findMany({
           where: {
@@ -1415,8 +1441,6 @@ export async function listFeedItems(
           orderBy: [{ publishedAt: "desc" }, { createdAt: "desc" }],
         })
       : Promise.resolve([]),
-    listFeedGroupCounts(filters),
-    listPopularFeedTags(filters),
   ]);
   const singleItemMap = new Map(singleItems.map((item) => [item.id, mapItemToFeedItem(item)]));
   const clusterItemMap = new Map<string, ItemWithSource[]>();

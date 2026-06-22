@@ -155,10 +155,9 @@ export function buildFeedSearch(
   const normalizedTag = normalizeOptionalId(tag);
   const page = pagination?.page ?? 1;
   const size = pagination?.size ?? DEFAULT_FEED_PAGE_SIZE;
-  const hasAdvancedFilter = Boolean(normalizedSourceId || normalizedTitle || normalizedTag || publishedStartDate || publishedEndDate);
   const hasCreatedDateRange = Boolean(startDate || endDate);
 
-  if (createdRangeExplicit || hasCreatedDateRange || (!hasAdvancedFilter && range !== "all")) {
+  if (createdRangeExplicit || hasCreatedDateRange || range !== "all") {
     search.set("range", range);
   }
 

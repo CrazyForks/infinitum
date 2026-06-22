@@ -615,14 +615,14 @@ describe("FeedPanel", () => {
     expect(screen.getByText("排序：按评分倒序")).toBeInTheDocument();
   });
 
-  it("omits the implicit today range when applying advanced filters", async () => {
+  it("keeps the implicit today range when applying advanced filters", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () =>
       new Response(
         JSON.stringify({
           items: initialEntries,
           nextCursor: null,
-          range: "all" satisfies FeedRange,
+          range: "today" satisfies FeedRange,
           sort: "time_desc" satisfies FeedSort,
           start: null,
           end: null,
@@ -655,9 +655,51 @@ describe("FeedPanel", () => {
     await user.click(screen.getByRole("button", { name: "查询" }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("/api/feed?sort=time_desc&sourceId=source-ai");
+      expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=today&sort=time_desc&sourceId=source-ai");
     });
-    expect(getSelectRoot("创建时间")).toHaveTextContent("不限");
+    expect(getSelectRoot("创建时间")).toHaveTextContent("当天");
+  });
+
+  it("keeps the current created time range when toggling a popular tag", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () =>
+      new Response(
+        JSON.stringify({
+          items: initialEntries,
+          nextCursor: null,
+          range: "today" satisfies FeedRange,
+          sort: "time_desc" satisfies FeedSort,
+          start: null,
+          end: null,
+          tag: "ios",
+          popularTags: [{ name: "iOS", normalized: "ios", count: 5 }],
+        }),
+      ),
+    );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <FeedPanel
+        initialItems={initialEntries}
+        initialRange="today"
+        initialCreatedRangeExplicit={false}
+        initialSort="time_desc"
+        initialStartDate={null}
+        initialEndDate={null}
+        initialNextCursor={null}
+        initialStatus={null}
+        isAdmin={false}
+        popularTags={[{ name: "iOS", normalized: "ios", count: 5 }]}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "筛选标签：iOS，5 条" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=today&sort=time_desc&tag=ios");
+    });
+    expect(getSelectRoot("创建时间")).toHaveTextContent("当天");
   });
 
   it("keeps the created time range when the user changes it before applying advanced filters", async () => {

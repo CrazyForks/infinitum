@@ -22,6 +22,7 @@ import {
   updateFetchRunProgress,
 } from "@/lib/feed/repository";
 import { invalidateFeedCache } from "@/lib/feed/cache";
+import { scheduleDefaultFeedCacheWarm } from "@/lib/feed/warmup";
 import { createConfiguredArticleFetcher, fetchArticleContent } from "@/lib/ingestion/article";
 import {
   deriveSourceConcurrency,
@@ -68,6 +69,11 @@ type ResolvedRunOptions = RunIngestionOptions & {
 };
 
 // 摄入进度刷新间隔常量已移至 @/config/constants
+
+function invalidateAndWarmFeedCache(reason: string) {
+  invalidateFeedCache();
+  scheduleDefaultFeedCacheWarm({ reason });
+}
 
 type RuntimePromptConfigs = NonNullable<RuntimeConfig["selectedPromptConfigs"]>;
 type RuntimePromptConfig =
@@ -872,7 +878,7 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
 async function runExistingFetchRun(run: FetchRun, options: ResolvedRunOptions) {
   try {
     const completedRun = await executeIngestion(run, options);
-    invalidateFeedCache();
+    invalidateAndWarmFeedCache("ingestion:completed");
     return completedRun;
   } catch (error) {
     if (error instanceof TaskRunCancellationError) {
@@ -901,7 +907,7 @@ async function runExistingFetchRun(run: FetchRun, options: ResolvedRunOptions) {
         taskTimeline: error.snapshot.taskTimeline,
       });
 
-      invalidateFeedCache();
+      invalidateAndWarmFeedCache("ingestion:cancelled");
       return cancelledRun;
     }
 
@@ -929,7 +935,7 @@ async function runExistingFetchRun(run: FetchRun, options: ResolvedRunOptions) {
       taskTimeline: [],
     });
 
-    invalidateFeedCache();
+    invalidateAndWarmFeedCache("ingestion:failed");
     return failedRun;
   }
 }

@@ -83,6 +83,8 @@ cp docker-compose.yml.example docker-compose.yml
 - `ADMIN_SESSION_SECRET`
 - `SITE_URL`：生产环境建议设置为实际访问域名，例如 `https://your-domain.example`，用于 RSS XML 中的站点与订阅链接
 
+worker 任务完成后会默认通过 `http://app:3000` 主动预热首页和 feed 接口缓存。如果调整了 Compose 服务名或端口，可用 `FEED_CACHE_WARM_URL` 覆盖；如果配置了代理，建议在 `NO_PROXY` 中包含 `app`。
+
 如通过 HTTP 在可信内网访问，可将 `ADMIN_SESSION_COOKIE_SECURE` 改为 `"false"`。
 
 ### 2. 启动服务
@@ -132,6 +134,8 @@ DATABASE_URL="file:./prisma/dev.db"
 ADMIN_PASSWORD="change-me"
 ADMIN_SESSION_SECRET="replace-with-a-long-random-secret"
 # SITE_URL="https://your-domain.example"
+# Optional cache warm origin override. Docker compose defaults to http://app:3000.
+# FEED_CACHE_WARM_URL="http://localhost:3000"
 ```
 
 ### 3. 初始化数据库

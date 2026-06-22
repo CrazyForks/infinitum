@@ -281,7 +281,11 @@ function normalizeImplicitCreatedRange(query: FeedQueryState): FeedQueryState {
     return query;
   }
 
-  const nextRange = hasAdvancedQueryFilter(query) ? "all" : "today";
+  if (hasAdvancedQueryFilter(query)) {
+    return query;
+  }
+
+  const nextRange = "today";
 
   return query.range === nextRange ? query : { ...query, range: nextRange };
 }
