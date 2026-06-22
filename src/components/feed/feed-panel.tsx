@@ -1594,7 +1594,6 @@ export function FeedPanel({
       onOpen={setFullSummaryDialog}
     />
   );
-
   return (
     <PageShell
       header={{
@@ -1663,10 +1662,10 @@ export function FeedPanel({
         <section
           role="region"
           aria-label="信息流筛选"
-          className="panel-raised w-full rounded-sm border border-[color:var(--line)] p-4 sm:p-6"
+          className="panel-raised w-full rounded-sm border border-[color:var(--line)] px-4 py-3 sm:px-6 sm:py-4"
         >
-          <div className="flex flex-col gap-4">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div className="flex min-w-0 flex-wrap items-center gap-2 lg:flex-1 lg:flex-nowrap">
                 <button
                   aria-expanded={advancedFiltersOpen}
@@ -1708,7 +1707,7 @@ export function FeedPanel({
                 ) : null}
               </div>
 
-              <div className="flex items-center gap-3 lg:flex-nowrap lg:justify-end lg:pl-4">
+              <div className="flex items-center gap-2 lg:flex-nowrap lg:justify-end lg:pl-4">
                 <FilterSelectInline
                   label="创建时间："
                   ariaLabel="创建时间"
@@ -1736,7 +1735,7 @@ export function FeedPanel({
             </div>
 
             <div className="lg:hidden">
-              <div className="rounded-sm border border-[color:var(--line)] bg-[var(--surface)] px-3 py-3 shadow-[var(--shadow-sm)]">
+              <div className="rounded-sm border border-[color:var(--line)] bg-[var(--surface)] px-3 py-2.5 shadow-[var(--shadow-sm)]">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <span className="text-sm font-medium text-[var(--foreground)]">分组筛选</span>
                   <FilterSelectInline
@@ -1758,9 +1757,9 @@ export function FeedPanel({
             </div>
 
             {advancedFiltersOpen ? (
-              <div className="border-t border-[color:var(--line)] pt-4">
-                <div className="grid gap-4">
-                  <div className="grid gap-4 sm:grid-cols-2">
+              <div className="border-t border-[color:var(--line)] pt-3">
+                <div className="grid gap-3">
+                  <div className="grid gap-3 sm:grid-cols-2">
                     <FilterInput
                       id="feed-title-filter"
                       label="全文搜索"
@@ -1789,7 +1788,7 @@ export function FeedPanel({
                     />
                   </div>
 
-                  <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="grid gap-3 sm:grid-cols-2">
                     <FormField label="创建时间" htmlFor="feed-created-date-range">
                       <DateRangePicker
                         id="feed-created-date-range"
@@ -1830,7 +1829,7 @@ export function FeedPanel({
                 </button>
               }
               details={null}
-              className="pt-5"
+              className="pt-3"
             />
 
             {/* 批量操作工具栏 */}
@@ -2254,32 +2253,32 @@ export function FeedPanel({
                           ) : null}
                         </div>
                       </div>
-                    <div className={cardMetaRowClassName}>
-                      <GroupBadge group={entry.group} />
-                      <span className={neutralBadgeClassName}>{formatScore(entry.score)}</span>
-                      <span className={metaTextClassName}>{formatMetaLabel("来源", entry.sourceName)}</span>
-                      {isAdmin && entry.aggregationParent ? (
-                        <a
-                          className={`${metaTextClassName} underline decoration-transparent underline-offset-4 hover:decoration-[var(--accent)]`}
-                          href={entry.aggregationParent.originalUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          title={`拆条来源：${entry.aggregationParent.title}`}
-                        >
-                          {formatMetaLabel("拆条来源", entry.aggregationParent.title)}
-                        </a>
-                      ) : null}
-                      {getVisibleAuthorLabel(entry.author) ? (
-                        <span className={`${metaTextClassName} min-w-0 truncate`}>
-                          {formatMetaLabel("作者", getVisibleAuthorLabel(entry.author) ?? "")}
-                        </span>
-                      ) : null}
-                      <span className={metaTextClassName}>{formatMetaLabel("发表", formatDate(entry.publishedAt))}</span>
+                      <div className={cardMetaRowClassName}>
+                        <GroupBadge group={entry.group} />
+                        <span className={neutralBadgeClassName}>{formatScore(entry.score)}</span>
+                        <span className={metaTextClassName}>{formatMetaLabel("来源", entry.sourceName)}</span>
+                        {isAdmin && entry.aggregationParent ? (
+                          <a
+                            className={`${metaTextClassName} underline decoration-transparent underline-offset-4 hover:decoration-[var(--accent)]`}
+                            href={entry.aggregationParent.originalUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            title={`拆条来源：${entry.aggregationParent.title}`}
+                          >
+                            {formatMetaLabel("拆条来源", entry.aggregationParent.title)}
+                          </a>
+                        ) : null}
+                        {getVisibleAuthorLabel(entry.author) ? (
+                          <span className={`${metaTextClassName} min-w-0 truncate`}>
+                            {formatMetaLabel("作者", getVisibleAuthorLabel(entry.author) ?? "")}
+                          </span>
+                        ) : null}
+                        <span className={metaTextClassName}>{formatMetaLabel("发表", formatDate(entry.publishedAt))}</span>
+                      </div>
+                      {renderSummary(entry.title, entry.summary)}
                     </div>
-                    {renderSummary(entry.title, entry.summary)}
                   </div>
-                </div>
-              </article>
+                </article>
               ),
             )
           )}
