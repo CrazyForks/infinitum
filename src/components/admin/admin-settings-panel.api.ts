@@ -44,6 +44,44 @@ type GroupReorderPayload = {
   groups?: AdminSettingsSnapshot["groups"];
 };
 
+export type AdminTagAlias = {
+  id: string;
+  aliasName: string;
+  aliasNormalized: string;
+  createdBy: string;
+  createdAt: string;
+};
+
+export type AdminTag = {
+  id: string;
+  name: string;
+  normalized: string;
+  itemCount: number;
+  aliasCount: number;
+  aliases: AdminTagAlias[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AdminTagListPayload = {
+  error?: string;
+  tags: AdminTag[];
+  totalCount: number;
+  page: number;
+  pageSize: number;
+};
+
+type TagAliasPayload = {
+  error?: string;
+  alias?: AdminTagAlias;
+};
+
+type TagMergePayload = {
+  error?: string;
+  mergedCount: number;
+  affectedClusterCount: number;
+};
+
 async function requestAdminSettingsJson<T extends { error?: string }>(
   url: string,
   method: string,
@@ -55,7 +93,7 @@ async function requestAdminSettingsJson<T extends { error?: string }>(
     headers: {
       "content-type": "application/json",
     },
-    body: JSON.stringify(body ?? {}),
+    body: body === undefined ? undefined : JSON.stringify(body),
   });
   const payload = (await response.json()) as T;
 
@@ -204,4 +242,69 @@ export async function reorderSourceGroups(groupIds: string[]) {
   }
 
   return payload.groups;
+}
+
+export async function listAdminTags(input: {
+  search?: string;
+  page?: number;
+  pageSize?: number;
+}) {
+  const search = new URLSearchParams();
+  if (input.search?.trim()) {
+    search.set("search", input.search.trim());
+  }
+  if (input.page) {
+    search.set("page", String(input.page));
+  }
+  if (input.pageSize) {
+    search.set("pageSize", String(input.pageSize));
+  }
+  const queryString = search.toString();
+  const payload = await requestAdminSettingsJson<AdminTagListPayload>(
+    `/api/admin/settings/tags${queryString ? `?${queryString}` : ""}`,
+    "GET",
+    undefined,
+    "标签列表加载失败。",
+  );
+
+  return payload;
+}
+
+export async function addAdminTagAlias(input: {
+  tagId: string;
+  aliasName: string;
+}) {
+  const payload = await requestAdminSettingsJson<TagAliasPayload>(
+    "/api/admin/settings/tags/aliases",
+    "POST",
+    input,
+    "别名添加失败。",
+  );
+
+  if (!payload.alias) {
+    throw new Error("别名添加失败。");
+  }
+
+  return payload.alias;
+}
+
+export async function deleteAdminTagAlias(aliasId: string) {
+  await requestAdminSettingsJson<{ error?: string }>(
+    `/api/admin/settings/tags/aliases/${encodeURIComponent(aliasId)}`,
+    "DELETE",
+    {},
+    "别名删除失败。",
+  );
+}
+
+export async function mergeAdminTags(input: {
+  targetTagId: string;
+  sourceTagIds: string[];
+}) {
+  return requestAdminSettingsJson<TagMergePayload>(
+    "/api/admin/settings/tags/merge",
+    "POST",
+    input,
+    "标签合并失败。",
+  );
 }

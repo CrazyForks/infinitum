@@ -208,6 +208,16 @@ describe("AdminPageClient", () => {
     expect(screen.getByText("内容审核:clusters:none:none")).toBeInTheDocument();
   });
 
+  it("restores tag management as a monitoring content sub tab", async () => {
+    searchParamsState.value = "tab=monitoring&section=content&view=tags";
+
+    renderAdminPageClient();
+
+    await waitFor(() => {
+      expect(screen.getByText("设置面板:tags")).toBeInTheDocument();
+    });
+  });
+
   it("passes content pagination from the url into the content review panel", () => {
     searchParamsState.value = "tab=monitoring&section=content&view=clusters&contentPage=3&contentPageSize=20";
 
@@ -311,12 +321,14 @@ describe("AdminPageClient", () => {
     expect(screen.getByText("内容审核:filtered:none:none")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "过滤内容" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "聚合管理" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "标签管理" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "内容审核" }));
 
     expect(screen.queryByRole("button", { name: "过滤内容" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "聚合管理" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "聚合拆分" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "标签管理" })).not.toBeInTheDocument();
   });
 
   it("collapses monitoring content review when switching to task monitoring", async () => {
@@ -334,6 +346,7 @@ describe("AdminPageClient", () => {
     expect(screen.queryByRole("button", { name: "过滤内容" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "聚合管理" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "聚合拆分" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "标签管理" })).not.toBeInTheDocument();
   });
 
   it("updates the url when selecting a monitoring sub tab", async () => {
@@ -348,6 +361,24 @@ describe("AdminPageClient", () => {
       null,
       "",
       "/admin?tab=monitoring&section=content&view=clusters",
+    );
+  });
+
+  it("updates the url when selecting tag management", async () => {
+    const user = userEvent.setup();
+    searchParamsState.value = "tab=monitoring&section=content";
+
+    renderAdminPageClient();
+
+    await user.click(screen.getByRole("button", { name: "标签管理" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("设置面板:tags")).toBeInTheDocument();
+    });
+    expect(replaceStateSpy).toHaveBeenLastCalledWith(
+      null,
+      "",
+      "/admin?tab=monitoring&section=content&view=tags",
     );
   });
 

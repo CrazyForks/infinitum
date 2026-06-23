@@ -387,6 +387,26 @@ function applyAdditiveSchemaUpgrades() {
     });
   }
 
+  if (!ftsTableExists("tag_aliases")) {
+    runSqlite([dbPath], {
+      input: `
+        CREATE TABLE IF NOT EXISTS "tag_aliases" (
+          "id" TEXT NOT NULL PRIMARY KEY,
+          "tagId" TEXT NOT NULL,
+          "aliasName" TEXT NOT NULL,
+          "aliasNormalized" TEXT NOT NULL,
+          "createdBy" TEXT NOT NULL DEFAULT 'admin',
+          "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          "updatedAt" DATETIME NOT NULL,
+          CONSTRAINT "tag_aliases_tagId_fkey" FOREIGN KEY ("tagId") REFERENCES "tags" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS "tag_aliases_aliasNormalized_key" ON "tag_aliases"("aliasNormalized");
+        CREATE INDEX IF NOT EXISTS "tag_aliases_tagId_idx" ON "tag_aliases"("tagId");
+        CREATE INDEX IF NOT EXISTS "tag_aliases_aliasName_idx" ON "tag_aliases"("aliasName");
+      `,
+    });
+  }
+
   const clusterFeedStatsColumnsAdded = [
     addColumnIfMissing("content_clusters", "displayItemCount", "INTEGER NOT NULL DEFAULT 0"),
     addColumnIfMissing("content_clusters", "displaySourceCount", "INTEGER NOT NULL DEFAULT 0"),

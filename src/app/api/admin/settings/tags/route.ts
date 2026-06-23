@@ -1,0 +1,27 @@
+import { z } from "zod";
+
+import { adminErrorResponse } from "@/lib/admin/http";
+import { requireAdmin } from "@/lib/admin/session";
+import { listAdminTags } from "@/lib/tags/service";
+
+const tagListQuerySchema = z.object({
+  search: z.string().nullable().optional(),
+  page: z.coerce.number().int().positive().optional(),
+  pageSize: z.coerce.number().int().positive().optional(),
+});
+
+export async function GET(request: Request) {
+  try {
+    await requireAdmin();
+    const searchParams = new URL(request.url).searchParams;
+    const query = tagListQuerySchema.parse({
+      search: searchParams.get("search"),
+      page: searchParams.get("page") ?? undefined,
+      pageSize: searchParams.get("pageSize") ?? undefined,
+    });
+
+    return Response.json(await listAdminTags(query));
+  } catch (error) {
+    return adminErrorResponse(error);
+  }
+}

@@ -31,7 +31,7 @@ import type { AdminSettingsSnapshot, PromptConfigType } from "@/lib/settings/typ
 
 type PrimaryTab = "monitoring" | "settings";
 type MonitorSubSection = "dashboard" | "content" | "tasks";
-type ContentSubSection = "filtered" | "clusters" | "splits";
+type ContentSubSection = "filtered" | "clusters" | "splits" | "tags";
 type SettingsSection = "groups" | "sources" | "ai" | "content" | "tasks";
 type AISubSection = "model-api" | "prompt";
 type ContentSettingsSubSection = "blacklist" | "content-extraction";
@@ -64,7 +64,7 @@ function normalizeMonitorSubSection(value: string | null): MonitorSubSection {
 }
 
 function normalizeContentSubSection(value: string | null): ContentSubSection {
-  if (value === "clusters" || value === "splits") {
+  if (value === "clusters" || value === "splits" || value === "tags") {
     return value;
   }
 
@@ -382,6 +382,25 @@ export function AdminPageClient() {
 
     // Monitoring - Content Review
     if (primaryTab === "monitoring" && monitoringSubSection === "content") {
+      if (contentSubSection === "tags") {
+        if (!settings) {
+          return (
+            <div className="space-y-6 animate-pulse">
+              <div className="h-8 w-48 rounded bg-[var(--bg-muted)]" />
+              <div className="h-[240px] rounded-sm bg-[var(--bg-muted)]" />
+            </div>
+          );
+        }
+
+        return (
+          <AdminSettingsPanel
+            initialSettings={settings}
+            activeSection="tags"
+            embedMode
+          />
+        );
+      }
+
       return (
         <ContentReviewPanel
           embedMode
@@ -593,6 +612,29 @@ export function AdminPageClient() {
                             <span className="inline-flex items-center gap-2">
                               <IconFilter className="h-4 w-4" />
                               <span>过滤内容</span>
+                            </span>
+                          </SelectableButton>
+                          <SelectableButton
+                            onClick={() => {
+                              setCollapsedSections((prev) => ({
+                                ...prev,
+                                monitoringContent: false,
+                              }));
+                              navigateAdmin({
+                                primaryTab: "monitoring",
+                                monitoringSubSection: "content",
+                                contentSubSection: "tags",
+                              });
+                            }}
+                            active={
+                              monitoringSubSection === "content" &&
+                              contentSubSection === "tags"
+                            }
+                            variant="submenu"
+                          >
+                            <span className="inline-flex items-center gap-2">
+                              <IconTag className="h-4 w-4" />
+                              <span>标签管理</span>
                             </span>
                           </SelectableButton>
                           <SelectableButton

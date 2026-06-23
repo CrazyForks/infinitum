@@ -29,6 +29,7 @@ import {
   submitAdminSettingsAction,
 } from "@/components/admin/admin-settings-panel.api";
 import { AiSettingsPanel } from "@/components/admin/ai-settings-panel";
+import { TagSettingsPanel } from "@/components/admin/tag-settings-panel";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageShell } from "@/components/ui/page-shell";
@@ -77,6 +78,7 @@ type AdminSettingsPanelProps = {
 type AdminSettingsSection =
   | "ai-model-api"
   | "ai-prompt"
+  | "tags"
   | "blacklist"
   | "groups"
   | "sources"
@@ -96,6 +98,7 @@ const settingsNavItems: Array<{
 }> = [
   { key: "ai-model-api", label: "模型API" },
   { key: "ai-prompt", label: "提示词" },
+  { key: "tags", label: "标签管理" },
   { key: "blacklist", label: "黑名单" },
   { key: "groups", label: "分组" },
   { key: "sources", label: "信息源" },
@@ -1088,6 +1091,10 @@ export function AdminSettingsPanel({
 
         {activeSection === "ai-prompt" ? (
           <AiSettingsPanel initialSettings={initialSettings} mode="prompt" initialPromptType={initialPromptType} />
+        ) : null}
+
+        {activeSection === "tags" ? (
+          <TagSettingsPanel />
         ) : null}
 
         {activeSection === "blacklist" ? (
