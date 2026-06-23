@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
+import { refreshClusterFeedStats } from "@/lib/clusters/feed-stats";
 import { prisma } from "@/lib/db";
 import { getIngestionMetrics } from "@/lib/ingestion/metrics-service";
 
@@ -102,6 +103,7 @@ describe("ingestion metrics service", () => {
         },
       ],
     });
+    await refreshClusterFeedStats(["metrics-cluster"]);
 
     const metrics = await getIngestionMetrics(1);
     const countByRange = new Map(metrics.qualityScoreDistribution.map((bucket) => [bucket.range, bucket.count]));

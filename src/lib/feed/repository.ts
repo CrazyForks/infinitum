@@ -779,6 +779,21 @@ function mapClusterToAdminDto(
   } satisfies ClusterDTO;
 }
 
+function getPrecomputedClusterScoreStats(cluster: ClusterWithPreviewItems): ClusterScoreStats | null {
+  if (!cluster.feedStatsUpdatedAt) {
+    return null;
+  }
+
+  return {
+    aiScore: cluster.displayAverageScore,
+    itemCount: cluster.displayItemCount,
+    sourceCount: cluster.displaySourceCount,
+    upvotes: cluster.upvotes,
+    downvotes: cluster.downvotes,
+    recommendScore: cluster.displayRecommendScore,
+  };
+}
+
 async function getClusterScoreStatsByCluster(clusterIds: string[]) {
   if (clusterIds.length === 0) {
     return new Map<string, ClusterScoreStats>();
@@ -2301,7 +2316,7 @@ export async function listAdminClusters(
     ]);
     const ids = idRows.map((row) => row.id);
     const order = new Map(ids.map((id, index) => [id, index]));
-    const [clusters, latestItemUpdatedAtByCluster, scoreStatsByCluster] = await Promise.all([
+    const [clusters, latestItemUpdatedAtByCluster] = await Promise.all([
       ids.length > 0
         ? prisma.contentCluster.findMany({
             where: { id: { in: ids } },
@@ -2327,15 +2342,21 @@ export async function listAdminClusters(
                 take: 5,
               },
             },
-          })
+        })
         : [],
       getLatestItemUpdatedAtByCluster(ids),
-      getClusterScoreStatsByCluster(ids),
     ]);
+    const liveScoreStatsByCluster = await getClusterScoreStatsByCluster(
+      clusters.filter((cluster) => !cluster.feedStatsUpdatedAt).map((cluster) => cluster.id),
+    );
     const mappedClusters = clusters
       .sort((left, right) => (order.get(left.id) ?? 0) - (order.get(right.id) ?? 0))
       .map((cluster) =>
-        mapClusterToAdminDto(cluster, latestItemUpdatedAtByCluster.get(cluster.id), scoreStatsByCluster.get(cluster.id)),
+        mapClusterToAdminDto(
+          cluster,
+          latestItemUpdatedAtByCluster.get(cluster.id),
+          getPrecomputedClusterScoreStats(cluster) ?? liveScoreStatsByCluster.get(cluster.id),
+        ),
       );
 
     return {
@@ -2371,7 +2392,7 @@ export async function listAdminClusters(
   ]);
   const ids = idRows.map((row) => row.id);
   const order = new Map(ids.map((id, index) => [id, index]));
-  const [clusters, latestItemUpdatedAtByCluster, scoreStatsByCluster] = await Promise.all([
+  const [clusters, latestItemUpdatedAtByCluster] = await Promise.all([
     ids.length > 0
       ? prisma.contentCluster.findMany({
           where: { id: { in: ids } },
@@ -2397,16 +2418,22 @@ export async function listAdminClusters(
               take: 5,
             },
           },
-        })
+      })
       : [],
     getLatestItemUpdatedAtByCluster(ids),
-    getClusterScoreStatsByCluster(ids),
   ]);
+  const liveScoreStatsByCluster = await getClusterScoreStatsByCluster(
+    clusters.filter((cluster) => !cluster.feedStatsUpdatedAt).map((cluster) => cluster.id),
+  );
 
   const mappedClusters = clusters
     .sort((left, right) => (order.get(left.id) ?? 0) - (order.get(right.id) ?? 0))
     .map((cluster) =>
-      mapClusterToAdminDto(cluster, latestItemUpdatedAtByCluster.get(cluster.id), scoreStatsByCluster.get(cluster.id)),
+      mapClusterToAdminDto(
+        cluster,
+        latestItemUpdatedAtByCluster.get(cluster.id),
+        getPrecomputedClusterScoreStats(cluster) ?? liveScoreStatsByCluster.get(cluster.id),
+      ),
     );
   return {
     clusters: mappedClusters,
