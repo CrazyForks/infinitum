@@ -16,10 +16,11 @@ import {
   TRENDING_LIMIT,
   TRENDING_LOOKBACK_HOURS,
   TRENDING_MIN_RECOMMEND_SCORE,
+  TRENDING_TAG_HEAT_CANDIDATE_LIMIT,
   TRENDING_VELOCITY_BASELINE_HOURS,
   TRENDING_VELOCITY_RECENT_HOURS,
-  buildMultiSourceBoostSql,
   buildRecencyWeightSql,
+  buildTagHeatBoostSql,
   buildVelocityBoostSql,
 } from "@/lib/feed/trending";
 import { toGroupBadge, type GroupBadge } from "@/lib/groups/badge";
@@ -2455,7 +2456,7 @@ export async function getAdminCluster(clusterId: string) {
 //   * 标题策略一致（cluster 形态用 `ContentCluster.title`，
 //     single 形态用 `translatedTitle`/`originalTitle` 退化）
 // - 区别仅在于：trending 强制 24h 窗口 + 在外层计算 trendingScore 并按其取 Top N。
-//   排序键 = recommendScore * recency(scoredCreatedAt, now) + multiSourceBoost(sourceCount) + velocityBoost(group).
+//   排序键 = recommendScore * recency(scoredCreatedAt, now) + velocityBoost(group) + tagHeatBoost(tags).
 // - 排序输入（recommendScore / sourceCount）来自 entry_candidates，
 //   cluster 的 scoredCreatedAt 额外取其下可展示子条目的最早 createdAt，避免持续报道用最新条目反复刷新热度。
 //   feed 列表仍保留 latestCreatedAt 作为展示/时间排序口径。
@@ -2555,7 +2556,6 @@ export async function listTrendingEntries(
     createdAt: Prisma.sql`ec."scoredCreatedAt"`,
     now: nowSql,
   });
-  const multiSource = buildMultiSourceBoostSql(Prisma.sql`ec."sourceCount"`);
 
   // velocity 维度：按 entryGroupId（cluster.dominantGroupId / item.source.groupId）
   // 聚合 6h / 24h 内 entry_candidates 行数。derived table 内计算 ratio → boost，
@@ -2584,17 +2584,13 @@ export async function listTrendingEntries(
     )
   `;
 
-  const trendingScore = Prisma.sql`
+  const baseTrendingScore = Prisma.sql`
     (ec."recommendScore" * ${recency})
-    + ${multiSource}
     + COALESCE(vb."velocityBoost", 0)
   `;
 
-  const rows = await prisma.$queryRaw<TrendingRow[]>(Prisma.sql`
-    ${entryCandidatesCte},
-    ${scoredEntryCandidatesCte},
-    ${velocityByGroupCte},
-    with_trending AS (
+  const baseTrendingCandidatesCte = Prisma.sql`
+    base_trending_candidates AS (
       SELECT
         ec.id,
         ec.type,
@@ -2603,13 +2599,111 @@ export async function listTrendingEntries(
         ec."createdAt",
         ec."scoredCreatedAt",
         ec."recommendScore",
-        ${trendingScore} AS "trendingScore",
         ec."itemCount",
-        ec."sourceCount"
+        ec."sourceCount",
+        ${baseTrendingScore} AS "baseTrendingScore"
       FROM scored_entry_candidates ec
       LEFT JOIN velocity_boost vb ON vb."groupId" = ec."entryGroupId"
       WHERE ec."recommendScore" >= ${TRENDING_MIN_RECOMMEND_SCORE}
         AND ec."scoredCreatedAt" >= ${baselineStartSql}
+      ORDER BY "baseTrendingScore" DESC, ec."recommendScore" DESC, ec."scoredCreatedAt" DESC, ec.id DESC
+      LIMIT ${TRENDING_TAG_HEAT_CANDIDATE_LIMIT}
+    )
+  `;
+
+  // tag heat 维度：只在基础热度粗排 Top 200 entry 内展开标签并统计关联 entry 数。
+  // - single 形态读 item_tags；
+  // - cluster 形态读预聚合的 feedTagsJson；
+  // - 标签热度按本轮候选标签分布动态排名，避免固定阈值在大流量下失去区分度；
+  // - 多标签取最高标签热度，避免泛标签累加刷分；
+  // - 先粗排截断，避免在请求链路展开全部 24h 候选标签。
+  const tagHeatCte = Prisma.sql`
+    single_candidate_tags AS (
+      SELECT
+        btc.id AS "entryId",
+        t.normalized AS normalized
+      FROM base_trending_candidates btc
+      INNER JOIN "item_tags" it ON it."itemId" = btc.id
+      INNER JOIN "tags" t ON t.id = it."tagId"
+      WHERE btc.type = ${"single"}
+    ),
+    cluster_candidate_tags AS (
+      SELECT "entryId", normalized
+      FROM (
+        SELECT
+          btc.id AS "entryId",
+          CASE
+            WHEN json_valid(tag.value) THEN json_extract(tag.value, '$.normalized')
+            ELSE tag.value
+          END AS normalized
+        FROM base_trending_candidates btc
+        INNER JOIN "content_clusters" cc ON cc.id = btc.id
+        INNER JOIN json_each(cc."feedTagsJson") tag
+        WHERE btc.type = ${"cluster"}
+      )
+      WHERE normalized IS NOT NULL
+        AND TRIM(normalized) <> ''
+    ),
+    candidate_tags AS (
+      SELECT "entryId", normalized FROM single_candidate_tags
+      UNION ALL
+      SELECT "entryId", normalized FROM cluster_candidate_tags
+    ),
+    tag_entry_counts AS (
+      SELECT
+        normalized,
+        COUNT(DISTINCT "entryId") - 1 AS "tagRelatedCount"
+      FROM candidate_tags
+      GROUP BY normalized
+    ),
+    ranked_tag_heat AS (
+      SELECT
+        normalized,
+        "tagRelatedCount",
+        ROW_NUMBER() OVER (ORDER BY "tagRelatedCount" DESC, normalized ASC) AS "heatRank",
+        COUNT(*) OVER () AS "tagCount"
+      FROM tag_entry_counts
+    ),
+    entry_tag_heat AS (
+      SELECT
+        ct."entryId",
+        MAX(${buildTagHeatBoostSql({
+          tagRelatedCount: Prisma.sql`rth."tagRelatedCount"`,
+          heatRank: Prisma.sql`rth."heatRank"`,
+          tagCount: Prisma.sql`rth."tagCount"`,
+        })}) AS "tagHeatBoost",
+        MAX(rth."tagRelatedCount") AS "tagRelatedCount"
+      FROM candidate_tags ct
+      INNER JOIN ranked_tag_heat rth ON rth.normalized = ct.normalized
+      GROUP BY ct."entryId"
+    )
+  `;
+
+  const trendingScore = Prisma.sql`
+    btc."baseTrendingScore"
+    + COALESCE(eth."tagHeatBoost", 0)
+  `;
+
+  const rows = await prisma.$queryRaw<TrendingRow[]>(Prisma.sql`
+    ${entryCandidatesCte},
+    ${scoredEntryCandidatesCte},
+    ${velocityByGroupCte},
+    ${baseTrendingCandidatesCte},
+    ${tagHeatCte},
+    with_trending AS (
+      SELECT
+        btc.id,
+        btc.type,
+        btc."clusterId",
+        btc.title,
+        btc."createdAt",
+        btc."scoredCreatedAt",
+        btc."recommendScore",
+        ${trendingScore} AS "trendingScore",
+        btc."itemCount",
+        btc."sourceCount"
+      FROM base_trending_candidates btc
+      LEFT JOIN entry_tag_heat eth ON eth."entryId" = btc.id
     )
     SELECT
       id,

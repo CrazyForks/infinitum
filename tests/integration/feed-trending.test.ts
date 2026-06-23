@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { prisma } from "@/lib/db";
 import { listFeedItems, listTrendingEntries } from "@/lib/feed/repository";
 import { resolveFeedFilters } from "@/lib/feed/range";
+import { TRENDING_TAG_HEAT_CANDIDATE_LIMIT } from "@/lib/feed/trending";
 
 const NOW = new Date("2026-06-22T12:00:00.000Z");
 
@@ -382,12 +383,11 @@ describe("listTrendingEntries", () => {
     const entries = await listTrendingEntries(NOW, 10);
     const ids = entries.map((e) => e.id);
 
-    // 多源聚合 cluster 形态应进榜（multiSourceBoost 给它额外加分）
+    // 多源聚合 cluster 形态应进榜（recommendScore 已包含有限多源/多条目加权）
     const cluster = entries.find((e) => e.id === "cluster-fresh-multi")!;
     expect(cluster).toBeDefined();
     expect(cluster.type).toBe("cluster");
     expect(cluster.sourceCount).toBeGreaterThanOrEqual(2);
-    // multiSourceBoost 应让 cluster 拿到 +2 加成
     expect(cluster.recommendScore).toBeLessThanOrEqual(100);
 
     // 1h 内暖身期单条应在榜
@@ -645,6 +645,304 @@ describe("listTrendingEntries", () => {
     // fast 候选 1h 暖身期 recency=1.0, sourceCount=1, velocity=+30 → 100
     // 辅助 baseline/recent 条目用于参与速度统计。
     expect(fast!.trendingScore - slow!.trendingScore).toBe(20);
+  });
+
+  it("adds capped tag heat from related candidate entries without requiring historical scans", async () => {
+    const sourceTag = await prisma.source.create({
+      data: {
+        name: "Source Tag",
+        rssUrl: "https://tag.example.com/feed",
+        siteUrl: "https://tag.example.com",
+        enabled: true,
+        aiParsingEnabled: true,
+      },
+    });
+    const tag = await prisma.tag.create({
+      data: {
+        id: "tag-hot-topic",
+        name: "Hot Topic",
+        normalized: "hot-topic",
+      },
+    });
+    await prisma.contentCluster.createMany({
+      data: [
+        {
+          id: "cluster-tag-target",
+          kind: "topic",
+          title: "Tag cluster target",
+          summary: "Tag cluster summary",
+          score: 60,
+          itemCount: 2,
+          latestPublishedAt: hoursAgo(1),
+          status: "active",
+          fingerprint: "cluster-tag-target",
+          displayItemCount: 2,
+          displaySourceCount: 1,
+          displayAverageScore: 60,
+          displayRecommendScore: 58,
+          earliestCreatedAt: hoursAgo(1),
+          latestCreatedAt: hoursAgo(1),
+          feedTagsJson: JSON.stringify([{ name: "Hot Topic", normalized: "hot-topic" }]),
+        },
+        {
+          id: "cluster-tag-plain",
+          kind: "topic",
+          title: "Tag cluster plain",
+          summary: "Tag cluster plain summary",
+          score: 60,
+          itemCount: 2,
+          latestPublishedAt: hoursAgo(1),
+          status: "active",
+          fingerprint: "cluster-tag-plain",
+          displayItemCount: 2,
+          displaySourceCount: 1,
+          displayAverageScore: 60,
+          displayRecommendScore: 58,
+          earliestCreatedAt: hoursAgo(1),
+          latestCreatedAt: hoursAgo(1),
+        },
+      ],
+    });
+
+    await prisma.item.createMany({
+      data: [
+        {
+          id: "item-tag-target",
+          sourceId: sourceTag.id,
+          originalUrl: "https://tag.example.com/target",
+          canonicalUrl: "https://tag.example.com/target",
+          urlHash: "hash-tag-target",
+          dedupeSignature: "tag-target",
+          originalTitle: "Tag target",
+          publishedAt: hoursAgo(1),
+          status: "processed",
+          analysisStatus: "succeeded",
+          moderationStatus: "allowed",
+          qualityScore: 60,
+          qualityRationale: "tag",
+          language: "zh",
+          createdAt: hoursAgo(1),
+        },
+        ...[1, 2, 3].map((index) => ({
+          id: `item-tag-related-${index}`,
+          sourceId: sourceTag.id,
+          originalUrl: `https://tag.example.com/related-${index}`,
+          canonicalUrl: `https://tag.example.com/related-${index}`,
+          urlHash: `hash-tag-related-${index}`,
+          dedupeSignature: `tag-related-${index}`,
+          originalTitle: `Tag related ${index}`,
+          publishedAt: hoursAgo(1),
+          status: "processed" as const,
+          analysisStatus: "succeeded" as const,
+          moderationStatus: "allowed" as const,
+          qualityScore: 60,
+          qualityRationale: "tag",
+          language: "zh",
+          createdAt: hoursAgo(1),
+        })),
+        {
+          id: "item-tag-plain",
+          sourceId: sourceTag.id,
+          originalUrl: "https://tag.example.com/plain",
+          canonicalUrl: "https://tag.example.com/plain",
+          urlHash: "hash-tag-plain",
+          dedupeSignature: "tag-plain",
+          originalTitle: "Tag plain",
+          publishedAt: hoursAgo(1),
+          status: "processed",
+          analysisStatus: "succeeded",
+          moderationStatus: "allowed",
+          qualityScore: 60,
+          qualityRationale: "plain",
+          language: "zh",
+          createdAt: hoursAgo(1),
+        },
+      ],
+    });
+    await prisma.itemTag.createMany({
+      data: ["item-tag-target", "item-tag-related-1", "item-tag-related-2", "item-tag-related-3"].map((itemId) => ({
+        itemId,
+        tagId: tag.id,
+      })),
+    });
+
+    const entries = await listTrendingEntries(NOW, 50);
+    const target = entries.find((e) => e.id === "item-tag-target");
+    const plain = entries.find((e) => e.id === "item-tag-plain");
+    const targetCluster = entries.find((e) => e.id === "cluster-tag-target");
+    const plainCluster = entries.find((e) => e.id === "cluster-tag-plain");
+
+    expect(target).toBeDefined();
+    expect(plain).toBeDefined();
+    expect(targetCluster).toBeDefined();
+    expect(plainCluster).toBeDefined();
+    // 至少 4 个候选 entry 共享同一标签，排除自身后 tagRelatedCount >= 3 → tagHeatBoost +3。
+    expect(target!.trendingScore - plain!.trendingScore).toBe(3);
+    expect(targetCluster!.trendingScore - plainCluster!.trendingScore).toBe(3);
+  });
+
+  it("uses relative tag heat ranking when many candidate tags exceed the absolute threshold", async () => {
+    const sourceRankedTag = await prisma.source.create({
+      data: {
+        name: "Source Ranked Tag",
+        rssUrl: "https://ranked-tag.example.com/feed",
+        siteUrl: "https://ranked-tag.example.com",
+        enabled: true,
+        aiParsingEnabled: true,
+      },
+    });
+    await prisma.tag.createMany({
+      data: Array.from({ length: 10 }, (_, index) => ({
+        id: `tag-ranked-${index}`,
+        name: `Ranked Tag ${index}`,
+        normalized: `ranked-tag-${index}`,
+      })),
+    });
+    const targetA = "item-ranked-tag-a-target";
+    const targetB = "item-ranked-tag-b-target";
+    const plain = "item-ranked-tag-plain";
+    const itemRows = [
+      targetA,
+      targetB,
+      plain,
+      ...Array.from({ length: 14 }, (_, index) => `item-ranked-tag-a-${index}`),
+      ...Array.from({ length: 12 }, (_, index) => `item-ranked-tag-b-${index}`),
+      ...Array.from({ length: 3 }, (_, index) => `item-ranked-tag-low-${index}`),
+      ...Array.from({ length: 8 }, (_, index) => `item-ranked-tag-filler-${index}`),
+    ].map((id) => ({
+      id,
+      sourceId: sourceRankedTag.id,
+      originalUrl: `https://ranked-tag.example.com/${id}`,
+      canonicalUrl: `https://ranked-tag.example.com/${id}`,
+      urlHash: `hash-${id}`,
+      dedupeSignature: id,
+      originalTitle: id,
+      publishedAt: hoursAgo(1),
+      status: "processed" as const,
+      analysisStatus: "succeeded" as const,
+      moderationStatus: "allowed" as const,
+      qualityScore: 60,
+      qualityRationale: "ranked tag",
+      language: "zh",
+      createdAt: hoursAgo(1),
+    }));
+
+    await prisma.item.createMany({ data: itemRows });
+
+    const tagAssignments = [
+      targetA,
+      ...Array.from({ length: 14 }, (_, index) => `item-ranked-tag-a-${index}`),
+    ].map((itemId) => ({
+      itemId,
+      tagId: "tag-ranked-0",
+    }));
+    tagAssignments.push(
+      ...[
+        targetB,
+        ...Array.from({ length: 12 }, (_, index) => `item-ranked-tag-b-${index}`),
+      ].map((itemId) => ({
+        itemId,
+        tagId: "tag-ranked-1",
+      })),
+    );
+    tagAssignments.push(
+      ...Array.from({ length: 3 }, (_, index) => ({
+        itemId: `item-ranked-tag-low-${index}`,
+        tagId: "tag-ranked-2",
+      })),
+    );
+    for (let tagIndex = 3; tagIndex < 10; tagIndex += 1) {
+      tagAssignments.push({
+        itemId: `item-ranked-tag-filler-${tagIndex - 3}`,
+        tagId: `tag-ranked-${tagIndex}`,
+      });
+    }
+    await prisma.itemTag.createMany({ data: tagAssignments });
+
+    const entries = await listTrendingEntries(NOW, 100);
+    const rankedA = entries.find((entry) => entry.id === targetA);
+    const rankedB = entries.find((entry) => entry.id === targetB);
+    const plainEntry = entries.find((entry) => entry.id === plain);
+
+    expect(rankedA).toBeDefined();
+    expect(rankedB).toBeDefined();
+    expect(plainEntry).toBeDefined();
+    // 10 个候选标签中，ranked-tag-0 排名第一且关联数 >= 12 → +10。
+    expect(rankedA!.trendingScore - plainEntry!.trendingScore).toBe(10);
+    // ranked-tag-1 也超过 12，但排名第二；动态分布下只能拿第二档 +6。
+    expect(rankedB!.trendingScore - plainEntry!.trendingScore).toBe(6);
+  });
+
+  it("limits tag heat expansion to the top 200 base trending candidates", async () => {
+    const sourceCappedTag = await prisma.source.create({
+      data: {
+        name: "Source Capped Tag",
+        rssUrl: "https://capped-tag.example.com/feed",
+        siteUrl: "https://capped-tag.example.com",
+        enabled: true,
+        aiParsingEnabled: true,
+      },
+    });
+    const cappedTag = await prisma.tag.create({
+      data: {
+        id: "tag-capped-heat",
+        name: "Capped Heat",
+        normalized: "capped-heat",
+      },
+    });
+    const highBaseItems = Array.from({ length: TRENDING_TAG_HEAT_CANDIDATE_LIMIT }, (_, index) => {
+      const id = `item-capped-high-${String(index).padStart(3, "0")}`;
+      return {
+        id,
+        sourceId: sourceCappedTag.id,
+        originalUrl: `https://capped-tag.example.com/${id}`,
+        canonicalUrl: `https://capped-tag.example.com/${id}`,
+        urlHash: `hash-${id}`,
+        dedupeSignature: id,
+        originalTitle: id,
+        publishedAt: hoursAgo(1),
+        status: "processed" as const,
+        analysisStatus: "succeeded" as const,
+        moderationStatus: "allowed" as const,
+        qualityScore: 90,
+        qualityRationale: "high base candidate",
+        language: "zh",
+        createdAt: hoursAgo(1),
+      };
+    });
+    const hotLowItems = [
+      "item-capped-low-target",
+      ...Array.from({ length: 12 }, (_, index) => `item-capped-low-related-${index}`),
+    ].map((id) => ({
+      id,
+      sourceId: sourceCappedTag.id,
+      originalUrl: `https://capped-tag.example.com/${id}`,
+      canonicalUrl: `https://capped-tag.example.com/${id}`,
+      urlHash: `hash-${id}`,
+      dedupeSignature: id,
+      originalTitle: id,
+      publishedAt: hoursAgo(1),
+      status: "processed" as const,
+      analysisStatus: "succeeded" as const,
+      moderationStatus: "allowed" as const,
+      qualityScore: 55,
+      qualityRationale: "low base hot tag candidate",
+      language: "zh",
+      createdAt: hoursAgo(1),
+    }));
+
+    await prisma.item.createMany({ data: [...highBaseItems, ...hotLowItems] });
+    await prisma.itemTag.createMany({
+      data: hotLowItems.map((item) => ({
+        itemId: item.id,
+        tagId: cappedTag.id,
+      })),
+    });
+
+    const entries = await listTrendingEntries(NOW, TRENDING_TAG_HEAT_CANDIDATE_LIMIT + 50);
+
+    expect(entries).toHaveLength(TRENDING_TAG_HEAT_CANDIDATE_LIMIT);
+    expect(entries.some((entry) => entry.id === "item-capped-low-target")).toBe(false);
   });
 
   it("supports precise feed filtering from trending entry ids", async () => {

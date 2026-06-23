@@ -6,9 +6,10 @@ import {
   TRENDING_LIMIT,
   TRENDING_MIN_QUALITY_SCORE,
   TRENDING_MIN_RECOMMEND_SCORE,
+  TRENDING_TAG_HEAT_CANDIDATE_LIMIT,
   TRENDING_WARMUP_HOURS,
-  buildMultiSourceBoostSql,
   buildRecencyWeightSql,
+  buildTagHeatBoostSql,
   buildTrendingScoreSql,
   buildVelocityBoostSql,
 } from "@/lib/feed/trending";
@@ -41,6 +42,7 @@ describe("feed trending score SQL", () => {
     expect(TRENDING_HALF_LIFE_HOURS).toBe(12);
     expect(TRENDING_WARMUP_HOURS).toBe(6);
     expect(TRENDING_LIMIT).toBe(10);
+    expect(TRENDING_TAG_HEAT_CANDIDATE_LIMIT).toBe(200);
     expect(TRENDING_MIN_QUALITY_SCORE).toBe(30);
     expect(TRENDING_MIN_RECOMMEND_SCORE).toBe(50);
   });
@@ -61,13 +63,21 @@ describe("feed trending score SQL", () => {
     expect(rendered).not.toContain("POWER(");
   });
 
-  it("emits multi-source boost thresholds at 3 and 5 sources", () => {
-    const sql = buildMultiSourceBoostSql(Prisma.sql`sourceCount`);
+  it("emits tag heat boost thresholds capped at 10", () => {
+    const sql = buildTagHeatBoostSql({
+      tagRelatedCount: Prisma.sql`tagRelatedCount`,
+      heatRank: Prisma.sql`heatRank`,
+      tagCount: Prisma.sql`tagCount`,
+    });
     const rendered = renderSql(sql);
-    expect(rendered).toContain(">= 5");
+    expect(rendered).toContain(">= 12");
+    expect(rendered).toContain(">= 6");
     expect(rendered).toContain(">= 3");
-    expect(rendered).toContain("THEN 5");
-    expect(rendered).toContain("THEN 2");
+    expect(rendered).toContain("heatRank");
+    expect(rendered).toContain("tagCount");
+    expect(rendered).toContain("THEN 10");
+    expect(rendered).toContain("THEN 6");
+    expect(rendered).toContain("THEN 3");
   });
 
   it("emits velocity boost with three tiers capped at 30", () => {
@@ -83,7 +93,7 @@ describe("feed trending score SQL", () => {
     expect(rendered).toContain("CAST(recent AS REAL)");
   });
 
-  it("composes trending score from recommend, recency, multi-source, and velocity", () => {
+  it("composes trending score from recommend, recency, velocity, and tag heat", () => {
     const sql = buildTrendingScoreSql({
       aiScore: Prisma.sql`ai`,
       sourceCount: Prisma.sql`src`,
@@ -92,10 +102,13 @@ describe("feed trending score SQL", () => {
       now: Prisma.sql`now`,
       recentSum: Prisma.sql`recent`,
       baselineSum: Prisma.sql`baseline`,
+      tagRelatedCount: Prisma.sql`tagRelatedCount`,
+      tagHeatRank: Prisma.sql`heatRank`,
+      tagCount: Prisma.sql`tagCount`,
     });
     const rendered = renderSql(sql);
     expect(rendered).toContain("1.0");
-    expect(rendered).toContain("THEN 5");
     expect(rendered).toContain("THEN 30");
+    expect(rendered).toContain("THEN 10");
   });
 });

@@ -9,17 +9,19 @@ import { buildRecommendScoreSql } from "@/lib/feed/recommend-score";
  * 完整算法（一次 SQL 计算）：
  *   trendingScore =
  *     recommendScore * recencyWeight       // 0~100 基础分乘以时间衰减
- *   + multiSourceBoost(sourceCount)        // 多源报道加权
  *   + velocityBoost(recent, baseline)      // 升温速度加权
+ *   + tagHeatBoost(tagRelatedCount)        // 同主题标签关注度加权
  *
  * - recencyWeight：6h 暖身期不衰减，之后按 12h 半衰期指数衰减
  *   SQLite 默认不提供 EXP/POWER，因此用 5 段硬编码实现指数衰减的视觉近似：
  *   0-6h: 1.0, 6-12h: 0.75, 12-18h: 0.5, 18-24h: 0.3
  *   候选时间窗为 24h，24h 之外不进入候选，所以不需要更长的尾部。
- * - multiSourceBoost：3 源 +2，5 源 +5
- * - velocityBoost：最近 6h 条目数 / 6h~24h 条目数（同一 sourceId 范围），最多 +30
+ * - velocityBoost：最近 6h 条目数 / 6h~24h 条目数（同一来源组范围），最多 +30
  *   改用条数比而非分数累计，避免与 recommendScore 重复计入 recency 衰减。
- * - 候选时间窗：24h 内创建
+ * - tagHeatBoost：当前 entry 的标签在实时候选集内的相对热度，最多 +10
+ *   用 entry 数而非 item 数，并结合本轮候选标签分布排名，避免固定阈值在大流量下失去区分度。
+ *   性能上先按基础热度粗排 Top 200，再在这批候选内展开标签。
+ * - 候选时间窗：24h 内评分时间
  * - 同 cluster 24h 去重：避免 AI 重生后改 translatedTitle 反复上榜
  */
 export const TRENDING_HALF_LIFE_HOURS = 12;
@@ -30,6 +32,7 @@ export const TRENDING_VELOCITY_BASELINE_HOURS = 24;
 export const TRENDING_MIN_QUALITY_SCORE = 30;
 export const TRENDING_MIN_RECOMMEND_SCORE = 50;
 export const TRENDING_LIMIT = 10;
+export const TRENDING_TAG_HEAT_CANDIDATE_LIMIT = 200;
 
 /**
  * 时间衰减（5 段硬编码，避免依赖 SQLite math 扩展）
@@ -49,13 +52,6 @@ export function buildRecencyWeightSql(input: {
 }
 
 /**
- * 多源报道加权：sourceCount >= 5 → +5，>= 3 → +2，否则 0
- */
-export function buildMultiSourceBoostSql(sourceCount: Prisma.Sql): Prisma.Sql {
-  return Prisma.sql`CASE WHEN ${sourceCount} >= 5 THEN 5 WHEN ${sourceCount} >= 3 THEN 2 ELSE 0 END`;
-}
-
-/**
  * 升温速度：最近 6h 条目数 / 6h~24h 条目数，最多 +30
  *
  * 当 baseline = 0 时返回 0；ratio 用 0.33/0.66/1 三档阶梯。
@@ -69,7 +65,27 @@ export function buildVelocityBoostSql(input: {
 }
 
 /**
- * 组装 trendingScore：recencyWeight * recommendScore + multiSourceBoost + velocityBoost
+ * 标签热度：同标签关联其他 entry 数 + 当前候选标签热度排名，最多 +10
+ */
+export function buildTagHeatBoostSql(input: {
+  tagRelatedCount: Prisma.Sql;
+  heatRank: Prisma.Sql;
+  tagCount: Prisma.Sql;
+}): Prisma.Sql {
+  const topTenPercent = Prisma.sql`((${input.heatRank} - 1) * 10) < ${input.tagCount}`;
+  const topQuarter = Prisma.sql`((${input.heatRank} - 1) * 4) < ${input.tagCount}`;
+  const topHalf = Prisma.sql`((${input.heatRank} - 1) * 2) < ${input.tagCount}`;
+
+  return Prisma.sql`CASE
+    WHEN ${input.tagRelatedCount} >= 12 AND ${topTenPercent} THEN 10
+    WHEN ${input.tagRelatedCount} >= 6 AND ${topQuarter} THEN 6
+    WHEN ${input.tagRelatedCount} >= 3 AND ${topHalf} THEN 3
+    ELSE 0
+  END`;
+}
+
+/**
+ * 组装 trendingScore：recencyWeight * recommendScore + velocityBoost + tagHeatBoost
  */
 export function buildTrendingScoreSql(input: {
   aiScore: Prisma.Sql;
@@ -79,6 +95,9 @@ export function buildTrendingScoreSql(input: {
   now: Prisma.Sql;
   recentSum: Prisma.Sql;
   baselineSum: Prisma.Sql;
+  tagRelatedCount: Prisma.Sql;
+  tagHeatRank: Prisma.Sql;
+  tagCount: Prisma.Sql;
 }): Prisma.Sql {
   const recommend = buildRecommendScoreSql({
     aiScore: input.aiScore,
@@ -86,11 +105,15 @@ export function buildTrendingScoreSql(input: {
     itemCount: input.itemCount,
   });
   const recency = buildRecencyWeightSql({ createdAt: input.createdAt, now: input.now });
-  const multiSource = buildMultiSourceBoostSql(input.sourceCount);
   const velocity = buildVelocityBoostSql({
     recentSum: input.recentSum,
     baselineSum: input.baselineSum,
   });
+  const tagHeat = buildTagHeatBoostSql({
+    tagRelatedCount: input.tagRelatedCount,
+    heatRank: input.tagHeatRank,
+    tagCount: input.tagCount,
+  });
 
-  return Prisma.sql`(${recommend}) * ${recency} + ${multiSource} + ${velocity}`;
+  return Prisma.sql`(${recommend}) * ${recency} + ${velocity} + ${tagHeat}`;
 }
