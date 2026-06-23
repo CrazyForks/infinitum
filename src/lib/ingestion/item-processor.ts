@@ -1,6 +1,6 @@
 import type { Item } from "@prisma/client";
 
-import { AGGREGATION_PARSE_STATUS } from "@/lib/aggregation/status";
+import { AGGREGATION_PARSE_STATUS, RETRIABLE_AGGREGATION_PARSE_STATUSES } from "@/lib/aggregation/status";
 import { persistAggregationChildItems } from "@/lib/aggregation/persist";
 import type { AiEventSignature } from "@/lib/ai/provider";
 import type { ClusterAssignmentCoordinator } from "@/lib/clusters/helpers";
@@ -225,13 +225,38 @@ function hasAnalysisInputsChanged(
   );
 }
 
+function hasRetriableAggregationParse(existing?: {
+  aggregationParseStatus?: string | null;
+  isAggregation?: boolean | null;
+} | null) {
+  if (!existing) {
+    return false;
+  }
+
+  // Items whose aggregation parse failed or was detected-but-not-parsed in a
+  // previous run must be re-processed so the next run can retry parseAggregation.
+  // Without this guard, the "reused existing" early return would silently skip
+  // them and the failure would never recover.
+  if (existing.aggregationParseStatus && (RETRIABLE_AGGREGATION_PARSE_STATUSES as readonly string[]).includes(existing.aggregationParseStatus)) {
+    return true;
+  }
+
+  return false;
+}
+
 function isCompletedExistingItem(existing?: {
   status?: string | null;
   summaryStatus?: string | null;
   summaryText?: string | null;
   analysisStatus?: string | null;
+  aggregationParseStatus?: string | null;
+  isAggregation?: boolean | null;
 } | null) {
   if (!existing) {
+    return false;
+  }
+
+  if (hasRetriableAggregationParse(existing)) {
     return false;
   }
 
@@ -411,7 +436,15 @@ export async function processFeedItem({
   let aggregationParsed = false;
   let aggregationParseFailed = false;
   let aggregationEventCount = 0;
-  let isAggregation = existing?.isAggregation ?? false;
+  // If a previous run detected this item as aggregation but the parse then
+  // failed (or never finished), the DB isAggregation flag was reset to false on
+  // the failure path. Recover the original detection so parseAggregation is
+  // re-attempted instead of silently degraded again on this run. Only honor
+  // the recovery when this source still has aggregation detection enabled,
+  // otherwise an admin who turned the flag off would still see retries fire.
+  let isAggregation =
+    (existing?.isAggregation ?? false) ||
+    (aggregationDetectionEnabled && hasRetriableAggregationParse(existing));
   let aggregationCheckedAt: Date | null = existing?.aggregationCheckedAt ?? null;
   let aggregationParseStatus: string | null = existing?.aggregationParseStatus ?? null;
   let storedItemId = existing?.id ?? null;

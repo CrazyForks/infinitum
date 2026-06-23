@@ -3090,4 +3090,122 @@ describe("runIngestion", () => {
     expect(item.analysisStatus).toBe("succeeded");
     expect(await prisma.item.count({ where: { parentItemId: item.id } })).toBe(0);
   });
+
+  it("retries aggregation parsing on a later ingestion when a previous run failed", async () => {
+    // First parser run returns the roundup, parseAggregation fails.
+    // Second parser run returns the same roundup, parseAggregation now succeeds.
+    // The follow-up ingestion must NOT be dedupe-filtered by urlHash; it must
+    // re-enter the aggregation branch and persist child items.
+    const buildRoundupItem = (contentBody: string) => ({
+      title: "Weekly AI roundup",
+      link: "https://agg.example.com/roundup-retry",
+      isoDate: "2026-04-10T09:00:00.000Z",
+      content: contentBody,
+    });
+    // First run sees a shorter excerpt; the second run fetches the same URL with
+    // updated content so the feedContentHash differs (avoiding the
+    // unchanged-source short-circuit) and the item is routed to the processor.
+    const parser = {
+      parseURL: vi
+        .fn()
+        .mockResolvedValueOnce({ items: [buildRoundupItem("Roundup body.")] })
+        .mockResolvedValueOnce({ items: [buildRoundupItem("Roundup body with multiple events to split.")] }),
+    };
+    const parseAggregationSuccess = vi.fn().mockResolvedValue({
+      mainEvent: {
+        eventType: "release",
+        eventSubject: "OpenAI",
+        eventAction: "汇总发布",
+        eventObject: "Toolkit",
+        eventDate: "2026-04-10",
+      },
+      events: [
+        {
+          eventType: "release",
+          eventSubject: "OpenAI",
+          eventAction: "发布",
+          eventObject: "Toolkit",
+          eventDate: "2026-04-10",
+          oneLiner: "OpenAI 推出 Toolkit",
+          qualityScore: 80,
+          fingerprint: "toolkit-2026-04-10",
+        },
+        {
+          eventType: "update",
+          eventSubject: "Anthropic",
+          eventAction: "更新",
+          eventObject: "Claude",
+          eventDate: "2026-04-10",
+          oneLiner: "Anthropic 更新 Claude",
+          qualityScore: 75,
+          fingerprint: "claude-2026-04-10",
+        },
+      ],
+    });
+    const parseAggregationFailure = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("transient model error"));
+
+    const sourceConfigs = [
+      {
+        name: "Aggregation Retry Feed",
+        rssUrl: "https://agg.example.com/feed.xml",
+        siteUrl: "https://agg.example.com",
+        enabled: true,
+        aiParsingEnabled: true,
+        aggregationDetectionEnabled: true,
+      },
+    ];
+
+    // First run: parseAggregation fails, item should be left in failed state.
+    await runIngestion({
+      trigger: "manual",
+      parser,
+      articleFetcher: vi.fn(),
+      aiProvider: buildAiProviderMock({
+        summarizeItem: vi.fn().mockResolvedValue({ summary: "这是一篇聚合简报。", isAggregation: true }),
+        parseAggregation: parseAggregationFailure,
+      }),
+      sourceConfigs,
+      blacklist: [],
+      now: new Date("2026-04-10T10:00:00.000Z"),
+    });
+
+    const firstRunParent = await prisma.item.findFirstOrThrow({
+      where: { originalUrl: "https://agg.example.com/roundup-retry" },
+    });
+    expect(firstRunParent.isAggregation).toBe(false);
+    expect(firstRunParent.aggregationParseStatus).toBe("failed");
+    expect(await prisma.item.count({ where: { parentItemId: firstRunParent.id } })).toBe(0);
+
+    // Second run on the same feed: parseAggregation now succeeds, and the item
+    // must not be silently dropped by the urlHash dedupe gate.
+    await runIngestion({
+      trigger: "manual",
+      parser,
+      articleFetcher: vi.fn(),
+      aiProvider: buildAiProviderMock({
+        summarizeItem: vi.fn().mockResolvedValue({ summary: "这是一篇聚合简报。", isAggregation: true }),
+        parseAggregation: parseAggregationSuccess,
+      }),
+      sourceConfigs,
+      blacklist: [],
+      now: new Date("2026-04-10T10:00:01.000Z"),
+    });
+
+    const secondRunParent = await prisma.item.findFirstOrThrow({
+      where: { originalUrl: "https://agg.example.com/roundup-retry" },
+    });
+    expect(secondRunParent.aggregationParseStatus).toBe("parsed");
+    expect(secondRunParent.isAggregation).toBe(true);
+    expect(parseAggregationSuccess).toHaveBeenCalledTimes(1);
+    const children = await prisma.item.findMany({
+      where: { parentItemId: secondRunParent.id },
+    });
+    expect(children).toHaveLength(2);
+    expect(children.map((child) => child.originalTitle).sort()).toEqual([
+      "Anthropic 更新 Claude",
+      "OpenAI 推出 Toolkit",
+    ]);
+  });
 });
