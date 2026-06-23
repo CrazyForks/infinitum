@@ -308,7 +308,7 @@ function applyClusterFeedStatsBackfill() {
             SELECT
               COALESCE((SELECT "displayAverageScore" FROM "_cluster_feed_stats_backfill" stats WHERE stats."clusterId" = "content_clusters".id), 0) AS aiScore,
               COALESCE((SELECT "displaySourceCount" FROM "_cluster_feed_stats_backfill" stats WHERE stats."clusterId" = "content_clusters".id), 0) AS sourceCount,
-              COALESCE((SELECT "displayItemCount" FROM "_cluster_feed_stats_backfill" stats WHERE stats."clusterId" = "content_clusters".id), 0) AS itemCount,
+              COALESCE((SELECT "displayItemCount" FROM "_cluster_feed_stats_backfill" stats WHERE stats."clusterId" = "content_clusters".id), 0) AS itemCount
           ),
           score_parts AS (
             SELECT
