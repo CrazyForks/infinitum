@@ -14,7 +14,6 @@ import { getAdminCluster } from "@/lib/feed/repository";
 
 describe("cluster assignment", () => {
   beforeEach(async () => {
-    await prisma.visitorClusterVote.deleteMany();
     await prisma.backgroundTaskRun.deleteMany();
     await prisma.item.deleteMany();
     await prisma.contentCluster.deleteMany();

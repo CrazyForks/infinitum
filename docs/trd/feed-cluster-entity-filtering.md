@@ -113,7 +113,7 @@ model ContentCluster {
 - `displayItemCount`: cluster 下可公开展示 item 数，条件为 `processed + allowed/restored + source enabled + isAggregation=false`。
 - `displaySourceCount`: 可公开展示 item 的 distinct source 数。
 - `displayAverageScore`: 可公开展示 item 的平均质量分。
-- `displayRecommendScore`: 复用现有 `calculateRecommendScore` 逻辑，基于 `displayAverageScore/upvotes/downvotes/displaySourceCount/displayItemCount`。
+- `displayRecommendScore`: 复用现有 `calculateRecommendScore` 逻辑，基于 `displayAverageScore/displaySourceCount/displayItemCount`。
 - `latestCreatedAt`: 可公开展示 item 的最大 `createdAt`，用于 feed 创建时间窗口。
 - `latestPublishedAt`: 现有字段继续用于 published range / RSS / 展示，可在刷新 stats 时同步修正。
 - `dominantGroupId`: 可公开展示 item 中按数量最多、最早 createdAt、groupId 排序得到的主 group。

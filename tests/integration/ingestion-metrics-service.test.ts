@@ -6,7 +6,6 @@ import { getIngestionMetrics } from "@/lib/ingestion/metrics-service";
 
 describe("ingestion metrics service", () => {
   beforeEach(async () => {
-    await prisma.visitorClusterVote.deleteMany();
     await prisma.item.deleteMany();
     await prisma.contentCluster.deleteMany();
     await prisma.source.deleteMany();

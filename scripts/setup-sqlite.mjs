@@ -309,20 +309,11 @@ function applyClusterFeedStatsBackfill() {
               COALESCE((SELECT "displayAverageScore" FROM "_cluster_feed_stats_backfill" stats WHERE stats."clusterId" = "content_clusters".id), 0) AS aiScore,
               COALESCE((SELECT "displaySourceCount" FROM "_cluster_feed_stats_backfill" stats WHERE stats."clusterId" = "content_clusters".id), 0) AS sourceCount,
               COALESCE((SELECT "displayItemCount" FROM "_cluster_feed_stats_backfill" stats WHERE stats."clusterId" = "content_clusters".id), 0) AS itemCount,
-              COALESCE("content_clusters".upvotes, 0) AS upvotes,
-              COALESCE("content_clusters".downvotes, 0) AS downvotes
           ),
           score_parts AS (
             SELECT
               CAST(ROUND(
                 (50 + ((aiScore - 50) * 0.82)) +
-                CASE
-                  WHEN (upvotes + downvotes) >= 8 THEN CASE WHEN (upvotes - downvotes) > 8 THEN 8 WHEN (upvotes - downvotes) < -8 THEN -8 ELSE (upvotes - downvotes) END
-                  WHEN (upvotes + downvotes) >= 4 THEN CASE WHEN ROUND((upvotes - downvotes) * 0.75) > 8 THEN 8 WHEN ROUND((upvotes - downvotes) * 0.75) < -8 THEN -8 ELSE ROUND((upvotes - downvotes) * 0.75) END
-                  WHEN (upvotes + downvotes) >= 2 THEN CASE WHEN ROUND((upvotes - downvotes) * 0.5) > 8 THEN 8 WHEN ROUND((upvotes - downvotes) * 0.5) < -8 THEN -8 ELSE ROUND((upvotes - downvotes) * 0.5) END
-                  WHEN (upvotes + downvotes) >= 1 THEN CASE WHEN ROUND((upvotes - downvotes) * 0.25) > 8 THEN 8 WHEN ROUND((upvotes - downvotes) * 0.25) < -8 THEN -8 ELSE ROUND((upvotes - downvotes) * 0.25) END
-                  ELSE 0
-                END +
                 CASE
                   WHEN (
                     CASE WHEN ((sourceCount - 1) * 3) > 8 THEN 8 WHEN ((sourceCount - 1) * 3) < 0 THEN 0 ELSE ((sourceCount - 1) * 3) END +

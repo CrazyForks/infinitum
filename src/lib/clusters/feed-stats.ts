@@ -142,8 +142,6 @@ async function refreshCluster(cluster: RefreshableCluster) {
   const displayAverageScore = Math.round(items.reduce((sum, item) => sum + item.qualityScore, 0) / displayItemCount);
   const displayRecommendScore = calculateRecommendScore(
     displayAverageScore,
-    cluster.upvotes,
-    cluster.downvotes,
     displaySourceCount,
     displayItemCount,
   );

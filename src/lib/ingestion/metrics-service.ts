@@ -326,8 +326,6 @@ async function getDailySourceHealthStats(days: number): Promise<DailySourceHealt
 async function getQualityScoreDistribution(): Promise<QualityScoreBucket[]> {
   const singleRecommendScore = buildRecommendScoreSql({
     aiScore: Prisma.sql`i."qualityScore"`,
-    upvotes: Prisma.sql`COALESCE(cg.upvotes, 0)`,
-    downvotes: Prisma.sql`COALESCE(cg.downvotes, 0)`,
     sourceCount: Prisma.sql`1`,
     itemCount: Prisma.sql`1`,
   });

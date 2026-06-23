@@ -64,9 +64,6 @@ const initialEntries: FeedEntryDTO[] = [
     score: 90,
     sourceCount: 2,
     itemCount: 2,
-    upvotes: 5,
-    downvotes: 1,
-    userVote: null,
     itemsPreview: [
       {
         id: "item-preview-1",
@@ -90,7 +87,6 @@ const initialEntries: FeedEntryDTO[] = [
   {
     id: "item-1",
     type: "single",
-    clusterId: "item-1",
     title: "中文标题",
     originalUrl: "https://example.com/posts/1",
     publishedAt: "2026-04-09T09:00:00.000Z",
@@ -107,9 +103,6 @@ const initialEntries: FeedEntryDTO[] = [
     score: 72,
     sourceCount: 1,
     itemCount: 1,
-    upvotes: 0,
-    downvotes: 0,
-    userVote: null,
     canRegenerateTranslation: true,
   },
 ];

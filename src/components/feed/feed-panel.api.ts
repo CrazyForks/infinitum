@@ -191,20 +191,6 @@ export async function regenerateClusterSummary(clusterId: string) {
   });
 }
 
-export async function voteCluster(clusterId: string, voteType: "upvote" | "downvote") {
-  return requestJsonWithMeta<{
-    upvotes: number;
-    downvotes: number;
-    userVote: "upvote" | "downvote" | null;
-  }>(`/api/feed/clusters/${clusterId}/vote`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({ voteType }),
-  });
-}
-
 export async function requestIngestionStatus() {
   return requestJson<{ run?: FetchRunSnapshot | null }>("/api/ingest/status");
 }

@@ -27,7 +27,6 @@ import {
   requestIngestionStatus,
   requestReanalysis,
   requestRegeneration,
-  voteCluster,
 } from "@/components/feed/feed-panel.api";
 import { GroupFilterSidebar } from "@/components/feed/feed-panel-sidebar";
 import type {
@@ -69,7 +68,7 @@ import { FilterSelect } from "@/components/ui/filter-select";
 import { FilterSelectInline } from "@/components/ui/filter-select-inline";
 import { FilterSummary } from "@/components/ui/filter-summary";
 import { FormField } from "@/components/ui/form-field";
-import { IconFilter, IconPlus, IconTrash, IconThumbsUp, IconThumbsDown } from "@/components/ui/icons";
+import { IconFilter, IconPlus, IconTrash } from "@/components/ui/icons";
 import { ModalShell } from "@/components/ui/modal-shell";
 import { PaginationControls } from "@/components/ui/pagination-controls";
 import { SelectField } from "@/components/ui/select-field";
@@ -1115,35 +1114,6 @@ export function FeedPanel({
       }
     });
   };
-  const handleVote = async (clusterId: string, voteType: "upvote" | "downvote") => {
-    startTransition(async () => {
-      try {
-        const result = await voteCluster(clusterId, voteType);
-
-        if (!result.ok) {
-          setRefreshFeedback({ tone: "error", message: "投票失败，请稍后重试。" });
-          return;
-        }
-
-        // 更新本地状态（支持聚合和单条，通过 id 或 clusterId 匹配）
-        setItems((currentItems) =>
-          currentItems.map((item) =>
-            item.id === clusterId || ('clusterId' in item && item.clusterId === clusterId)
-              ? {
-                  ...item,
-                  upvotes: result.data.upvotes,
-                  downvotes: result.data.downvotes,
-                  userVote: result.data.userVote,
-                }
-              : item,
-          ),
-        );
-      } catch {
-        setRefreshFeedback({ tone: "error", message: "投票失败，请稍后重试。" });
-      }
-    });
-  };
-
   const allSelectableItemIds = useMemo(() => getAllSelectableItemIds(items), [items]);
 
   const handleToggleSelect = (itemId: string) => {
@@ -1990,37 +1960,6 @@ export function FeedPanel({
                               <RefreshIcon />
                             </button>
                           ) : null}
-                          {/* 投票按钮 */}
-                          <button
-                            type="button"
-                            onClick={() => handleVote(entry.id, "upvote")}
-                            disabled={isPending}
-                            className={cx(
-                              "inline-flex items-center gap-1 rounded-sm px-2 py-1 text-xs transition",
-                              entry.userVote === "upvote"
-                                ? "bg-green-100 text-green-700"
-                                : "bg-transparent text-[var(--text-2)] hover:bg-[var(--bg-muted)]"
-                            )}
-                            title="推荐"
-                          >
-                            <IconThumbsUp filled={entry.userVote === "upvote"} size={14} />
-                            <span>{entry.upvotes}</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleVote(entry.id, "downvote")}
-                            disabled={isPending}
-                            className={cx(
-                              "inline-flex items-center gap-1 rounded-sm px-2 py-1 text-xs transition",
-                              entry.userVote === "downvote"
-                                ? "bg-red-100 text-red-700"
-                                : "bg-transparent text-[var(--text-2)] hover:bg-[var(--bg-muted)]"
-                            )}
-                            title="不推荐"
-                          >
-                            <IconThumbsDown filled={entry.userVote === "downvote"} size={14} />
-                            <span>{entry.downvotes}</span>
-                          </button>
                         </div>
                       </div>
                       <div className={cardMetaRowClassName}>
@@ -2194,37 +2133,6 @@ export function FeedPanel({
                           </a>
                         </h2>
                         <div className="flex shrink-0 items-center gap-0.5">
-                          {/* 投票按钮 */}
-                          <button
-                            type="button"
-                            onClick={() => handleVote('clusterId' in entry && entry.clusterId ? entry.clusterId : entry.id, "upvote")}
-                            disabled={isPending}
-                            className={cx(
-                              "inline-flex items-center gap-1 rounded-sm px-2 py-1 text-xs transition",
-                              entry.userVote === "upvote"
-                                ? "bg-green-100 text-green-700"
-                                : "bg-transparent text-[var(--text-2)] hover:bg-[var(--bg-muted)]"
-                            )}
-                            title="推荐"
-                          >
-                            <IconThumbsUp filled={entry.userVote === "upvote"} size={14} />
-                            <span>{entry.upvotes}</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleVote('clusterId' in entry && entry.clusterId ? entry.clusterId : entry.id, "downvote")}
-                            disabled={isPending}
-                            className={cx(
-                              "inline-flex items-center gap-1 rounded-sm px-2 py-1 text-xs transition",
-                              entry.userVote === "downvote"
-                                ? "bg-red-100 text-red-700"
-                                : "bg-transparent text-[var(--text-2)] hover:bg-[var(--bg-muted)]"
-                            )}
-                            title="不推荐"
-                          >
-                            <IconThumbsDown filled={entry.userVote === "downvote"} size={14} />
-                            <span>{entry.downvotes}</span>
-                          </button>
                           {isAdmin ? (
                             <>
                               <button

@@ -228,8 +228,6 @@ model ContentCluster {
   eventAction           String?
   eventObject           String?
   eventDate             String?
-  upvotes               Int                  @default(0)
-  downvotes             Int                  @default(0)
   displayItemCount      Int                  @default(0)
   displaySourceCount    Int                  @default(0)
   displayAverageScore   Int                  @default(0)
@@ -242,7 +240,6 @@ model ContentCluster {
   createdAt             DateTime             @default(now())
   updatedAt             DateTime             @updatedAt
   items                 Item[]
-  visitorVotes          VisitorClusterVote[]
   dailyReportSources    DailyReportSource[]
   dominantGroup         SourceGroup?         @relation(fields: [dominantGroupId], references: [id], onDelete: SetNull)
 
@@ -250,27 +247,7 @@ model ContentCluster {
   @@index([status, latestCreatedAt])
   @@index([status, displayRecommendScore])
   @@index([dominantGroupId, status, latestCreatedAt])
-  @@index([upvotes, downvotes])
   @@map("content_clusters")
-}
-
-model VisitorClusterVote {
-  id        String         @id @default(cuid())
-  clusterId String
-  visitorId String
-  voteType  VoteType
-  createdAt DateTime       @default(now())
-  updatedAt DateTime       @updatedAt
-  cluster   ContentCluster @relation(fields: [clusterId], references: [id], onDelete: Cascade)
-
-  @@unique([clusterId, visitorId])
-  @@index([visitorId])
-  @@map("visitor_cluster_votes")
-}
-
-enum VoteType {
-  upvote
-  downvote
 }
 
 model FetchRun {

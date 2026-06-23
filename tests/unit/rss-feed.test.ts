@@ -36,9 +36,6 @@ describe("rss feed renderer", () => {
           score: 90,
           sourceCount: 2,
           itemCount: 2,
-          upvotes: 0,
-          downvotes: 0,
-          userVote: null,
           hasMoreItems: false,
           itemsPreview: [
             {
@@ -66,7 +63,6 @@ describe("rss feed renderer", () => {
         {
           id: "item-1",
           type: "single",
-          clusterId: "cluster-1",
           title: "OpenAI 发布新工具",
           originalUrl: "https://example.com/1",
           publishedAt: "2026-04-25T10:00:00.000Z",
@@ -78,9 +74,6 @@ describe("rss feed renderer", () => {
           score: 80,
           sourceCount: 1,
           itemCount: 1,
-          upvotes: 0,
-          downvotes: 0,
-          userVote: null,
         },
       ],
       "https://example.com",

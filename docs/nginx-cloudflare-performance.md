@@ -8,7 +8,7 @@
 
 - 匿名读流量优先命中 Cloudflare，其次命中 Nginx origin shield，最后才进入应用。
 - 只缓存明确公开、匿名、GET/HEAD 的响应。
-- admin、session、login、vote、写接口和任何会 `Set-Cookie` 的路径必须绕过共享缓存。
+- admin、session、login、写接口和任何会 `Set-Cookie` 的路径必须绕过共享缓存。
 - 由应用层决定数据新鲜度，Cloudflare/Nginx 尽量尊重源站 `Cache-Control` / `s-maxage`。
 - 对缓存挡不住的 POST/写路径加低成本限流，避免异常突发直接打穿应用和数据库。
 
@@ -270,7 +270,7 @@ map $http_cf_connecting_ip $app_limit_key {
 }
 
 limit_req_zone $app_limit_key zone=app_login:10m rate=1r/s;
-limit_req_zone $app_limit_key zone=app_vote:10m rate=10r/s;
+limit_req_zone $app_limit_key zone=app_clusters:10m rate=10r/s;
 limit_req_zone $app_limit_key zone=app_analytics:10m rate=20r/s;
 ```
 
@@ -298,7 +298,7 @@ location = /api/track-page-view {
 }
 
 location ^~ /api/feed/clusters/ {
-    limit_req zone=app_vote burst=30 nodelay;
+    limit_req zone=app_clusters burst=30 nodelay;
     limit_req_status 429;
 
     proxy_pass http://127.0.0.1:3001;
@@ -343,7 +343,7 @@ done
 期望结果：
 
 - 公开可缓存路径：`cf-cache-status: MISS` 后变 `HIT`。
-- admin/session/vote 路径：`cf-cache-status: DYNAMIC`，`X-Proxy-Cache: BYPASS`。
+- admin/session/写接口路径：`cf-cache-status: DYNAMIC`，`X-Proxy-Cache: BYPASS`。
 - 会 `Set-Cookie` 的路径不能被缓存。
 
 每次 reload 前必须：
@@ -385,7 +385,7 @@ Infinitum 当前配置：
 | `/api/daily/*/export.md` | cache eligible | 300s microcache | 已发布日报 markdown 导出 |
 | `/_next/static/*` | cache eligible | 30d Nginx cache | immutable 构建资源 |
 | `/admin*`、`/login*`、`/api/admin*` | bypass | bypass | 私有/admin |
-| `/api/feed/clusters/*` | bypass | bypass + rate limit | 投票/详情路径可能设置 `visitorId` |
+| `/api/feed/clusters/*` | bypass | bypass + rate limit | 详情路径（写 cookie 限流保护） |
 | `/api/track-page-view` | bypass | bypass + rate limit | 写路径 |
 
 Infinitum 当前限流：
@@ -393,5 +393,5 @@ Infinitum 当前限流：
 | Path | Zone | Rate | Burst |
 | --- | --- | --- | --- |
 | `/api/admin/login` | `infinitum_login` | `1r/s` | `5` |
-| `/api/feed/clusters/*` | `infinitum_vote` | `10r/s` | `30` |
+| `/api/feed/clusters/*` | `infinitum_clusters` | `10r/s` | `30` |
 | `/api/track-page-view` | `infinitum_analytics` | `20r/s` | `60` |

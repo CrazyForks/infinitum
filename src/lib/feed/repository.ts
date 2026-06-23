@@ -72,8 +72,6 @@ type FeedEntryRow = {
   sourceCount: number | bigint;
   itemCount: number | bigint;
   totalItemCount?: number | bigint;
-  upvotes?: number | bigint;
-  downvotes?: number | bigint;
   recommendScore?: number | bigint;
 };
 
@@ -131,8 +129,6 @@ type ClusterScoreStats = {
   aiScore: number;
   itemCount: number;
   sourceCount: number;
-  upvotes: number;
-  downvotes: number;
   recommendScore: number;
 };
 
@@ -141,8 +137,6 @@ type ClusterScoreStatsRow = {
   aiScore: number | bigint;
   itemCount: number | bigint;
   sourceCount: number | bigint;
-  upvotes: number | bigint;
-  downvotes: number | bigint;
   recommendScore: number | bigint;
 };
 
@@ -458,7 +452,6 @@ function mapItemToFeedItem(item: ItemWithSource): FeedItemDTO {
   return {
     id: item.id,
     type: "single",
-    clusterId: item.clusterId ?? item.id, // 用于投票的聚类ID
     title: getDisplayTitle(item.originalTitle, item.translatedTitle),
     originalUrl: item.originalUrl,
     publishedAt: item.publishedAt.toISOString(),
@@ -471,9 +464,6 @@ function mapItemToFeedItem(item: ItemWithSource): FeedItemDTO {
     score: item.qualityScore,
     sourceCount: 1,
     itemCount: 1,
-    upvotes: 0,
-    downvotes: 0,
-    userVote: null,
     canRegenerateTranslation: shouldTranslateTitle(item.originalTitle),
     ...(item.parent
       ? {
@@ -761,10 +751,8 @@ function mapClusterToAdminDto(
     (cluster.items.length > 0
       ? Math.round(cluster.items.reduce((sum, item) => sum + item.qualityScore, 0) / cluster.items.length)
       : cluster.score);
-  const upvotes = scoreStats?.upvotes ?? cluster.upvotes;
-  const downvotes = scoreStats?.downvotes ?? cluster.downvotes;
   const recommendScore =
-    scoreStats?.recommendScore ?? calculateRecommendScore(aiScore, upvotes, downvotes, sourceCount, itemCount);
+    scoreStats?.recommendScore ?? calculateRecommendScore(aiScore, sourceCount, itemCount);
 
   return {
     id: cluster.id,
@@ -788,8 +776,6 @@ function getPrecomputedClusterScoreStats(cluster: ClusterWithPreviewItems): Clus
     aiScore: cluster.displayAverageScore,
     itemCount: cluster.displayItemCount,
     sourceCount: cluster.displaySourceCount,
-    upvotes: cluster.upvotes,
-    downvotes: cluster.downvotes,
     recommendScore: cluster.displayRecommendScore,
   };
 }
@@ -802,20 +788,14 @@ async function getClusterScoreStatsByCluster(clusterIds: string[]) {
   const clusterAiScore = Prisma.sql`CAST(ROUND(AVG(i."qualityScore")) AS INTEGER)`;
   const clusterItemCount = Prisma.sql`COUNT(*)`;
   const clusterSourceCount = Prisma.sql`COUNT(DISTINCT i."sourceId")`;
-  const clusterUpvotes = Prisma.sql`COALESCE(MIN(cc.upvotes), 0)`;
-  const clusterDownvotes = Prisma.sql`COALESCE(MIN(cc.downvotes), 0)`;
   const rows = await prisma.$queryRaw<ClusterScoreStatsRow[]>(Prisma.sql`
     SELECT
       i."clusterId" AS "clusterId",
       ${clusterAiScore} AS "aiScore",
       ${clusterItemCount} AS "itemCount",
       ${clusterSourceCount} AS "sourceCount",
-      ${clusterUpvotes} AS upvotes,
-      ${clusterDownvotes} AS downvotes,
       ${buildRecommendScoreSql({
         aiScore: clusterAiScore,
-        upvotes: clusterUpvotes,
-        downvotes: clusterDownvotes,
         sourceCount: clusterSourceCount,
         itemCount: clusterItemCount,
       })} AS "recommendScore"
@@ -834,8 +814,6 @@ async function getClusterScoreStatsByCluster(clusterIds: string[]) {
         aiScore: toNumber(row.aiScore),
         itemCount: toNumber(row.itemCount),
         sourceCount: toNumber(row.sourceCount),
-        upvotes: toNumber(row.upvotes),
-        downvotes: toNumber(row.downvotes),
         recommendScore: toNumber(row.recommendScore),
       },
     ]),
@@ -972,10 +950,6 @@ function buildFeedEntryCandidatesCte(
   const clusterAiScore = Prisma.sql`CAST(ROUND(AVG(csi."qualityScore")) AS INTEGER)`;
   const clusterItemCount = Prisma.sql`COUNT(*)`;
   const clusterSourceCount = Prisma.sql`COUNT(DISTINCT csi."sourceId")`;
-  const clusterUpvotes = Prisma.sql`COALESCE(MIN(cc.upvotes), 0)`;
-  const clusterDownvotes = Prisma.sql`COALESCE(MIN(cc.downvotes), 0)`;
-  const singleUpvotes = Prisma.sql`COALESCE(csg.upvotes, 0)`;
-  const singleDownvotes = Prisma.sql`COALESCE(csg.downvotes, 0)`;
   const clusterScoreStatsCtes = includeClusterScoreStats
     ? Prisma.sql`
     cluster_score_items AS (
@@ -996,13 +970,9 @@ function buildFeedEntryCandidatesCte(
         ${clusterAiScore} AS score,
         ${clusterItemCount} AS "totalItemCount",
         ${clusterSourceCount} AS "sourceCount",
-        ${clusterUpvotes} AS upvotes,
-        ${clusterDownvotes} AS downvotes,
-        -- 综合推荐评分 = AI锚点分 + 有限反馈微调 + 来源/条目聚合加权
+        -- 综合推荐评分 = AI锚点分 + 来源/条目聚合加权
         ${buildRecommendScoreSql({
           aiScore: clusterAiScore,
-          upvotes: clusterUpvotes,
-          downvotes: clusterDownvotes,
           sourceCount: clusterSourceCount,
           itemCount: clusterItemCount,
         })} AS "recommendScore"
@@ -1017,8 +987,6 @@ function buildFeedEntryCandidatesCte(
         CAST(0 AS INTEGER) AS score,
         CAST(0 AS INTEGER) AS "totalItemCount",
         CAST(0 AS INTEGER) AS "sourceCount",
-        CAST(0 AS INTEGER) AS upvotes,
-        CAST(0 AS INTEGER) AS downvotes,
         CAST(0 AS INTEGER) AS "recommendScore"
       WHERE 0
     )`;
@@ -1117,8 +1085,6 @@ function buildFeedEntryCandidatesCte(
         MAX(COALESCE(csg."sourceCount", 0)) AS "sourceCount",
         MAX(COALESCE(csg."totalItemCount", 0)) AS "totalItemCount",
         MIN(cdg."groupId") AS "entryGroupId",
-        MAX(COALESCE(csg.upvotes, 0)) AS upvotes,
-        MAX(COALESCE(csg.downvotes, 0)) AS downvotes,
         MAX(COALESCE(csg."recommendScore", 0)) AS "recommendScore"
       FROM filtered_items fi
       INNER JOIN "content_clusters" cc ON cc.id = fi."clusterId"
@@ -1144,13 +1110,9 @@ function buildFeedEntryCandidatesCte(
         1 AS "sourceCount",
         1 AS "itemCount",
         fi."sourceGroupId" AS "entryGroupId",
-        COALESCE(csg.upvotes, 0) AS upvotes,
-        COALESCE(csg.downvotes, 0) AS downvotes,
-        -- 综合推荐评分 = AI锚点分 + 有限反馈微调，单条来源/条目加权为 0
+        -- 综合推荐评分 = AI锚点分 + 来源/条目聚合加权，单条来源/条目加权为 0
         ${buildRecommendScoreSql({
           aiScore: Prisma.sql`fi."qualityScore"`,
-          upvotes: singleUpvotes,
-          downvotes: singleDownvotes,
           sourceCount: Prisma.sql`1`,
           itemCount: Prisma.sql`1`,
         })} AS "recommendScore"
@@ -1176,17 +1138,15 @@ function buildFeedEntryCandidatesCte(
         cg."itemCount" AS "itemCount",
         cg."totalItemCount" AS "totalItemCount",
         cg."entryGroupId" AS "entryGroupId",
-        cg.upvotes AS upvotes,
-        cg.downvotes AS downvotes,
         cg."recommendScore" AS "recommendScore"
       FROM cluster_groups cg
       WHERE cg."matchedItemCount" > 1
     ),
     all_entry_candidates AS (
-      SELECT id, type, NULL AS "clusterId", ${includeDisplayFields ? Prisma.sql`title, summary,` : Prisma.empty} "latestPublishedAt", "createdAt", score, "sourceCount", "itemCount", "totalItemCount", "entryGroupId", upvotes, downvotes, "recommendScore"
+      SELECT id, type, NULL AS "clusterId", ${includeDisplayFields ? Prisma.sql`title, summary,` : Prisma.empty} "latestPublishedAt", "createdAt", score, "sourceCount", "itemCount", "totalItemCount", "entryGroupId", "recommendScore"
       FROM cluster_entries
       UNION ALL
-      SELECT id, type, "clusterId", ${includeDisplayFields ? Prisma.sql`title, summary,` : Prisma.empty} "latestPublishedAt", "createdAt", score, "sourceCount", "itemCount", CAST(1 AS INTEGER) AS "totalItemCount", "entryGroupId", upvotes, downvotes, "recommendScore"
+      SELECT id, type, "clusterId", ${includeDisplayFields ? Prisma.sql`title, summary,` : Prisma.empty} "latestPublishedAt", "createdAt", score, "sourceCount", "itemCount", CAST(1 AS INTEGER) AS "totalItemCount", "entryGroupId", "recommendScore"
       FROM single_entries
     ),
     entry_candidates AS (
@@ -1490,9 +1450,6 @@ function buildEntityFeedEntryCandidatesCte(
     `);
   }
 
-  const singleUpvotes = Prisma.sql`COALESCE(c.upvotes, 0)`;
-  const singleDownvotes = Prisma.sql`COALESCE(c.downvotes, 0)`;
-
   return Prisma.sql`
     WITH cluster_entries AS (
       SELECT
@@ -1507,8 +1464,6 @@ function buildEntityFeedEntryCandidatesCte(
         cc."displayItemCount" AS "itemCount",
         cc."displayItemCount" AS "totalItemCount",
         cc."dominantGroupId" AS "entryGroupId",
-        cc.upvotes AS upvotes,
-        cc.downvotes AS downvotes,
         cc."displayRecommendScore" AS "recommendScore"
       FROM "content_clusters" cc
       WHERE ${Prisma.join(clusterWhereClauses, " AND ")}
@@ -1525,12 +1480,8 @@ function buildEntityFeedEntryCandidatesCte(
         1 AS "sourceCount",
         1 AS "itemCount",
         s."groupId" AS "entryGroupId",
-        ${singleUpvotes} AS upvotes,
-        ${singleDownvotes} AS downvotes,
         ${buildRecommendScoreSql({
           aiScore: Prisma.sql`i."qualityScore"`,
-          upvotes: singleUpvotes,
-          downvotes: singleDownvotes,
           sourceCount: Prisma.sql`1`,
           itemCount: Prisma.sql`1`,
         })} AS "recommendScore"
@@ -1540,10 +1491,10 @@ function buildEntityFeedEntryCandidatesCte(
       WHERE ${Prisma.join(singleWhereClauses, " AND ")}
     ),
     entry_candidates AS (
-      SELECT id, type, NULL AS "clusterId", ${includeDisplayFields ? Prisma.sql`title, summary,` : Prisma.empty} "latestPublishedAt", "createdAt", score, "sourceCount", "itemCount", "totalItemCount", "entryGroupId", upvotes, downvotes, "recommendScore"
+      SELECT id, type, NULL AS "clusterId", ${includeDisplayFields ? Prisma.sql`title, summary,` : Prisma.empty} "latestPublishedAt", "createdAt", score, "sourceCount", "itemCount", "totalItemCount", "entryGroupId", "recommendScore"
       FROM cluster_entries
       UNION ALL
-      SELECT id, type, "clusterId", ${includeDisplayFields ? Prisma.sql`title, summary,` : Prisma.empty} "latestPublishedAt", "createdAt", score, "sourceCount", "itemCount", CAST(1 AS INTEGER) AS "totalItemCount", "entryGroupId", upvotes, downvotes, "recommendScore"
+      SELECT id, type, "clusterId", ${includeDisplayFields ? Prisma.sql`title, summary,` : Prisma.empty} "latestPublishedAt", "createdAt", score, "sourceCount", "itemCount", CAST(1 AS INTEGER) AS "totalItemCount", "entryGroupId", "recommendScore"
       FROM single_entries
     )
   `;
@@ -1815,7 +1766,6 @@ export async function listFeedItems(
     size: number;
     includePopularTags?: boolean;
   },
-  visitorId?: string | undefined,
 ) {
   const searchTerm = sanitizeFts5Query(filters.title);
   const entryCandidatesCte = buildActiveFeedEntryCandidatesCte(filters, searchTerm, {
@@ -1838,8 +1788,6 @@ export async function listFeedItems(
         "sourceCount",
         "itemCount",
         "totalItemCount",
-        upvotes,
-        downvotes,
         "recommendScore"
       FROM entry_candidates
       ${buildFeedEntryOrderBy(filters.sort)}
@@ -1942,40 +1890,15 @@ export async function listFeedItems(
     clusterItemMap.set(item.clusterId, current);
   }
 
-  // 获取访客对聚类的投票状态（包括聚合和单条）
-  const votedClusterIds = pageRows
-    .map((row) => row.entryType === "cluster" ? row.id : row.clusterId)
-    .filter((id): id is string => id != null);
-
-  const userVotes = new Map<string, "upvote" | "downvote">();
-  if (visitorId && votedClusterIds.length > 0) {
-    const votes = await prisma.visitorClusterVote.findMany({
-      where: {
-        clusterId: { in: votedClusterIds },
-        visitorId,
-      },
-    });
-    for (const vote of votes) {
-      userVotes.set(vote.clusterId, vote.voteType as "upvote" | "downvote");
-    }
-  }
-
   const items = pageRows.flatMap<FeedEntryDTO>((row) => {
     if (row.entryType === "single") {
       const item = singleItemMap.get(row.id);
       if (!item) {
         return [];
       }
-      // 为单条卡片注入 clusterId（用于投票）和正确的投票数
-      // 使用综合推荐评分（AI锚点分 + 访客反馈）
-      const clusterId = row.clusterId ?? item.id;
       return [{
         ...item,
-        clusterId,
         score: toNumber(row.recommendScore ?? row.score),
-        upvotes: toNumber(row.upvotes ?? 0),
-        downvotes: toNumber(row.downvotes ?? 0),
-        userVote: userVotes.get(clusterId) ?? null,
       }];
     }
 
@@ -1997,9 +1920,6 @@ export async function listFeedItems(
         score: toNumber(row.recommendScore ?? row.score),
         sourceCount: toNumber(row.sourceCount),
         itemCount: totalCount,
-        upvotes: toNumber(row.upvotes ?? 0),
-        downvotes: toNumber(row.downvotes ?? 0),
-        userVote: userVotes.get(row.id) ?? null,
         itemsPreview: previewItems,
         hasMoreItems: totalCount > previewItems.length,
       },
