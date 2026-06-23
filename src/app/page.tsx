@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 
 import { FeedPanel } from "@/components/feed/feed-panel";
 import {
@@ -10,6 +11,7 @@ import {
 import { resolveFeedRequest } from "@/lib/feed/request";
 import type { FeedEntryDTO, FeedFilters, FeedRange } from "@/lib/feed/types";
 import {
+  buildBreadcrumbListJsonLd,
   buildWebSiteJsonLd,
   getSiteOrigin,
   PUBLIC_ROBOTS,
@@ -24,6 +26,7 @@ export const revalidate = 30;
 type PageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
+
 
 const RANGE_LABELS: Record<FeedRange, string> = {
   today: "今日",
@@ -107,6 +110,7 @@ function buildFeedPageJsonLd(items: FeedEntryDTO[], pageUrl: string, title: stri
     "@context": "https://schema.org",
     "@graph": [
       buildWebSiteJsonLd(),
+      buildBreadcrumbListJsonLd([{ name: SITE_NAME, path: "/" }]),
       {
         "@type": "CollectionPage",
         name: title,
@@ -175,6 +179,7 @@ export async function generateMetadata({ searchParams }: PageProps): Promise<Met
 }
 
 export default async function Home({ searchParams }: PageProps) {
+  const requestHeaders = await headers();
   const resolvedSearchParams = (await searchParams) ?? {};
   const { filters, pagination } = resolveFeedRequest(resolvedSearchParams);
   const initialCreatedRangeExplicit = hasExplicitHomeCreatedTimeFilter(resolvedSearchParams);
@@ -185,7 +190,7 @@ export default async function Home({ searchParams }: PageProps) {
     getCachedTrendingEntries(),
   ]);
   const { title, description } = buildFeedMetadataText(filters);
-  const pageUrl = getSiteOrigin();
+  const pageUrl = getSiteOrigin(requestHeaders);
   const jsonLd = buildFeedPageJsonLd(feed.items, pageUrl, title, description);
 
   return (

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 
-import { resolveSiteOrigin } from "@/lib/http/public-origin";
+import { resolveOriginFromHeaders } from "@/lib/http/public-origin";
 
 export const SITE_NAME = "Infinitum";
 export const SITE_DEFAULT_TITLE = "Infinitum 资讯聚合";
@@ -36,16 +36,16 @@ export const PRIVATE_ROBOTS: Metadata["robots"] = {
   },
 };
 
-export function getSiteOrigin() {
-  return resolveSiteOrigin();
+export function getSiteOrigin(headers?: Headers) {
+  return resolveOriginFromHeaders(headers ?? null);
 }
 
-export function getSiteUrl(path = "/") {
-  return new URL(path, getSiteOrigin()).toString();
+export function getSiteUrl(path = "/", headers?: Headers) {
+  return new URL(path, getSiteOrigin(headers)).toString();
 }
 
-export function getMetadataBase() {
-  return new URL(getSiteOrigin());
+export function getMetadataBase(headers?: Headers) {
+  return new URL(getSiteOrigin(headers));
 }
 
 export function stripInlineMarkdown(value: string) {
@@ -90,3 +90,51 @@ export function buildWebSiteJsonLd() {
     },
   };
 }
+
+
+export const ORGANIZATION_LOGO_URL = "/brand-mark.svg";
+export const ORGANIZATION_SAME_AS: string[] = [];
+
+export function buildOrganizationJsonLd() {
+  const origin = getSiteOrigin();
+
+  return {
+    "@context": "https://schema.org",
+    "@type": "Organization",
+    "@id": `${origin}#organization`,
+    name: SITE_NAME,
+    url: origin,
+    logo: {
+      "@type": "ImageObject",
+      url: `${origin}${ORGANIZATION_LOGO_URL}`,
+    },
+    sameAs: ORGANIZATION_SAME_AS,
+  };
+}
+
+export function buildBreadcrumbListJsonLd(
+  items: { name: string; path: string }[],
+) {
+  const origin = getSiteOrigin();
+
+  return {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: items.map((item, index) => ({
+      "@type": "ListItem",
+      position: index + 1,
+      name: item.name,
+      item: item.path.startsWith("http")
+        ? item.path
+        : `${origin}${item.path.startsWith("/") ? "" : "/"}${item.path}`,
+    })),
+  };
+}
+
+export const LLMS_SUMMARY =
+  `${SITE_NAME} 是一个由 AI 驱动的资讯聚合平台，汇集、翻译、聚类并整理来自多个来源的技术资讯，每日生成 AI 日报。` +
+  " 主要入口：首页资讯流、AI 日报、RSS 订阅。";
+
+export const LLMS_FULL_ENTRY_LIMIT = 30;
+export const LLMS_FULL_HEADING = `# ${SITE_NAME} - AI 资讯聚合平台`;
+

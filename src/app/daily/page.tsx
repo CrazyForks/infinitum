@@ -1,10 +1,13 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 
 import { DailyReportList } from "@/components/daily/daily-report-list";
 import { BackToTopButton } from "@/components/ui/back-to-top-button";
 import { listDailyReportArchiveWeeks, listDailyReports } from "@/lib/daily-report/repository";
 import { PageShell } from "@/components/ui/page-shell";
 import {
+  buildBreadcrumbListJsonLd,
+  buildWebSiteJsonLd,
   getSiteOrigin,
   PUBLIC_ROBOTS,
   serializeJsonLd,
@@ -21,56 +24,71 @@ type DailyPageProps = {
 const DAILY_TITLE = "AI 日报";
 const DAILY_DESCRIPTION = "按日期归档的 Infinitum AI 日报，汇总每日值得关注的技术资讯、变更、安全风险、开源工具和数据洞察。";
 
-export const metadata: Metadata = {
-  title: DAILY_TITLE,
-  description: DAILY_DESCRIPTION,
-  robots: PUBLIC_ROBOTS,
-  alternates: {
-    canonical: "/daily",
-    types: {
-      "application/rss+xml": [{ title: "Infinitum AI 日报 RSS", url: "/api/daily/rss" }],
-    },
-  },
-  openGraph: {
-    type: "website",
-    locale: "zh_CN",
-    siteName: SITE_NAME,
-    title: DAILY_TITLE,
-    description: DAILY_DESCRIPTION,
-    url: "/daily",
-  },
-  twitter: {
-    card: "summary",
-    title: DAILY_TITLE,
-    description: DAILY_DESCRIPTION,
-  },
-};
-
-function buildDailyListJsonLd(reports: Awaited<ReturnType<typeof listDailyReports>>["reports"]) {
-  const origin = getSiteOrigin();
-
+export async function generateMetadata(): Promise<Metadata> {
+  // Touch headers() to opt this page into request-scoped rendering so
+  // that the metadata (canonical / og:url) participates in the same
+  // origin resolution as the page body below.
+  await headers();
   return {
-    "@context": "https://schema.org",
-    "@type": "CollectionPage",
-    name: "Infinitum AI 日报",
-    url: `${origin}/daily`,
-    inLanguage: "zh-CN",
+    title: DAILY_TITLE,
     description: DAILY_DESCRIPTION,
-    mainEntity: {
-      "@type": "ItemList",
-      itemListElement: reports.slice(0, 30).map((report, index) => ({
-        "@type": "ListItem",
-        position: index + 1,
-        url: `${origin}/daily/${report.date}`,
-        name: report.title,
-        description: toSeoDescription(report.openingSummary, DAILY_DESCRIPTION),
-        datePublished: report.publishedAt ?? report.generatedAt,
-      })),
+    robots: PUBLIC_ROBOTS,
+    alternates: {
+      canonical: "/daily",
+      types: {
+        "application/rss+xml": [{ title: "Infinitum AI 日报 RSS", url: "/api/daily/rss" }],
+      },
+    },
+    openGraph: {
+      type: "website",
+      locale: "zh_CN",
+      siteName: SITE_NAME,
+      title: DAILY_TITLE,
+      description: DAILY_DESCRIPTION,
+      url: "/daily",
+    },
+    twitter: {
+      card: "summary",
+      title: DAILY_TITLE,
+      description: DAILY_DESCRIPTION,
     },
   };
 }
 
+function buildDailyListJsonLd(reports: Awaited<ReturnType<typeof listDailyReports>>["reports"], origin: string) {
+
+  return {
+    "@context": "https://schema.org",
+    "@graph": [
+      buildWebSiteJsonLd(),
+      buildBreadcrumbListJsonLd([
+        { name: SITE_NAME, path: "/" },
+        { name: DAILY_TITLE, path: "/daily" },
+      ]),
+      {
+        "@type": "CollectionPage",
+        name: "Infinitum AI 日报",
+        url: `${origin}/daily`,
+        inLanguage: "zh-CN",
+        description: DAILY_DESCRIPTION,
+        mainEntity: {
+          "@type": "ItemList",
+          itemListElement: reports.slice(0, 30).map((report, index) => ({
+            "@type": "ListItem",
+            position: index + 1,
+            url: `${origin}/daily/${report.date}`,
+            name: report.title,
+            description: toSeoDescription(report.openingSummary, DAILY_DESCRIPTION),
+            datePublished: report.publishedAt ?? report.generatedAt,
+          })),
+        },
+      },
+    ],
+  };
+}
+
 export default async function DailyPage({ searchParams }: DailyPageProps) {
+  const requestHeaders = await headers();
   const resolvedSearchParams = (await searchParams) ?? {};
   const selectedWeek = typeof resolvedSearchParams.week === "string" ? resolvedSearchParams.week : null;
   const rawStatus = typeof resolvedSearchParams.status === "string" ? resolvedSearchParams.status : "all";
@@ -93,7 +111,8 @@ export default async function DailyPage({ searchParams }: DailyPageProps) {
       status: selectedStatus,
     }),
   ]);
-  const jsonLd = buildDailyListJsonLd(reports);
+  const origin = getSiteOrigin(requestHeaders);
+  const jsonLd = buildDailyListJsonLd(reports, origin);
 
   return (
     <PageShell

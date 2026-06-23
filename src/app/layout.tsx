@@ -4,9 +4,11 @@ import localFont from "next/font/local";
 
 import { ToastProvider } from "@/components/ui/toast";
 import {
+  buildOrganizationJsonLd,
   getMetadataBase,
   PUBLIC_ROBOTS,
   SEO_KEYWORDS,
+  serializeJsonLd,
   SITE_DEFAULT_DESCRIPTION,
   SITE_DEFAULT_TITLE,
   SITE_NAME,
@@ -38,9 +40,6 @@ export const metadata: Metadata = {
   robots: PUBLIC_ROBOTS,
   alternates: {
     canonical: "/",
-    languages: {
-      "zh-CN": "/",
-    },
     types: {
       "application/rss+xml": [
         { title: "Infinitum 资讯聚合 RSS", url: "/api/feed/rss" },
@@ -55,11 +54,20 @@ export const metadata: Metadata = {
     title: SITE_DEFAULT_TITLE,
     description: SITE_DEFAULT_DESCRIPTION,
     url: "/",
+    images: [
+      {
+        url: "/opengraph-image",
+        width: 1200,
+        height: 630,
+        alt: SITE_DEFAULT_TITLE,
+      },
+    ],
   },
   twitter: {
-    card: "summary",
+    card: "summary_large_image",
     title: SITE_DEFAULT_TITLE,
     description: SITE_DEFAULT_DESCRIPTION,
+    images: ["/opengraph-image"],
   },
   category: "technology",
 };
@@ -75,6 +83,10 @@ export default function RootLayout({
         <AntdRegistry>
           <ToastProvider>{children}</ToastProvider>
         </AntdRegistry>
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: serializeJsonLd(buildOrganizationJsonLd()) }}
+        />
       </body>
     </html>
   );

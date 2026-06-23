@@ -3,11 +3,19 @@ import type { MetadataRoute } from "next";
 import { getSiteOrigin, getSiteUrl } from "@/lib/seo/metadata";
 
 export default function robots(): MetadataRoute.Robots {
+  const origin = getSiteOrigin();
   return {
     rules: [
       {
         userAgent: "*",
-        allow: ["/", "/daily", "/api/feed/rss", "/api/daily/rss"],
+        allow: [
+          "/",
+          "/daily",
+          "/llms.txt",
+          "/llms-full.txt",
+          "/api/feed/rss",
+          "/api/daily/rss",
+        ],
         disallow: [
           "/admin",
           "/admin/",
@@ -17,7 +25,7 @@ export default function robots(): MetadataRoute.Robots {
         ],
       },
     ],
-    sitemap: getSiteUrl("/sitemap.xml"),
-    host: getSiteOrigin(),
+    sitemap: [getSiteUrl("/sitemap.xml"), getSiteUrl("/sitemap-news.xml")],
+    host: origin,
   };
 }
