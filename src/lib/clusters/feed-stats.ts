@@ -127,6 +127,7 @@ async function refreshCluster(cluster: RefreshableCluster) {
         displaySourceCount: 0,
         displayAverageScore: 0,
         displayRecommendScore: 0,
+        earliestCreatedAt: null,
         latestCreatedAt: null,
         dominantGroupId: null,
         feedSearchText: buildFeedSearchText({ title: cluster.title, summary: cluster.summary, tags: [] }),
@@ -145,6 +146,9 @@ async function refreshCluster(cluster: RefreshableCluster) {
     displaySourceCount,
     displayItemCount,
   );
+  const earliestCreatedAt = items.reduce((earliest, item) =>
+    item.createdAt.getTime() < earliest.getTime() ? item.createdAt : earliest,
+  items[0]!.createdAt);
   const latestCreatedAt = items.reduce((latest, item) =>
     item.createdAt.getTime() > latest.getTime() ? item.createdAt : latest,
   items[0]!.createdAt);
@@ -160,6 +164,7 @@ async function refreshCluster(cluster: RefreshableCluster) {
       displaySourceCount,
       displayAverageScore,
       displayRecommendScore,
+      earliestCreatedAt,
       latestCreatedAt,
       latestPublishedAt,
       dominantGroupId: selectDominantGroupId(items),

@@ -84,6 +84,7 @@ describe("sqlite setup", () => {
     expect(runSqlite(dbPath, `SELECT COUNT(*) FROM pragma_table_info('content_clusters') WHERE "name" = 'displaySourceCount'`)).toBe("1");
     expect(runSqlite(dbPath, `SELECT COUNT(*) FROM pragma_table_info('content_clusters') WHERE "name" = 'displayAverageScore'`)).toBe("1");
     expect(runSqlite(dbPath, `SELECT COUNT(*) FROM pragma_table_info('content_clusters') WHERE "name" = 'displayRecommendScore'`)).toBe("1");
+    expect(runSqlite(dbPath, `SELECT COUNT(*) FROM pragma_table_info('content_clusters') WHERE "name" = 'earliestCreatedAt'`)).toBe("1");
     expect(runSqlite(dbPath, `SELECT COUNT(*) FROM pragma_table_info('content_clusters') WHERE "name" = 'latestCreatedAt'`)).toBe("1");
     expect(runSqlite(dbPath, `SELECT COUNT(*) FROM pragma_table_info('content_clusters') WHERE "name" = 'dominantGroupId'`)).toBe("1");
     expect(runSqlite(dbPath, `SELECT COUNT(*) FROM pragma_table_info('content_clusters') WHERE "name" = 'feedSearchText'`)).toBe("1");
@@ -92,6 +93,7 @@ describe("sqlite setup", () => {
     expect(runSqlite(dbPath, `SELECT COUNT(*) FROM "sqlite_master" WHERE "type" = 'index' AND "name" = 'sources_enabled_healthStatus_idx'`)).toBe("1");
     expect(runSqlite(dbPath, `SELECT COUNT(*) FROM "sqlite_master" WHERE "type" = 'index' AND "name" = 'items_status_moderationStatus_updatedAt_idx'`)).toBe("1");
     expect(runSqlite(dbPath, `SELECT COUNT(*) FROM "sqlite_master" WHERE "type" = 'index' AND "name" = 'content_clusters_status_latestCreatedAt_idx'`)).toBe("1");
+    expect(runSqlite(dbPath, `SELECT COUNT(*) FROM "sqlite_master" WHERE "type" = 'index' AND "name" = 'content_clusters_status_earliestCreatedAt_idx'`)).toBe("1");
     expect(runSqlite(dbPath, `SELECT COUNT(*) FROM "sqlite_master" WHERE "type" = 'index' AND "name" = 'content_clusters_status_displayRecommendScore_idx'`)).toBe("1");
     expect(runSqlite(dbPath, `SELECT COUNT(*) FROM "sqlite_master" WHERE "type" = 'index' AND "name" = 'content_clusters_dominantGroupId_status_latestCreatedAt_idx'`)).toBe("1");
     expect(runSqlite(dbPath, `SELECT COUNT(*) FROM "sqlite_master" WHERE "type" = 'index' AND "name" = 'tag_aliases_aliasNormalized_key'`)).toBe("1");
@@ -144,7 +146,7 @@ describe("sqlite setup", () => {
     expect(runSqlite(dbPath, `SELECT COUNT(*) FROM "prompt_configs" WHERE "type" IN ('daily_report_refinement_chat', 'daily_report_refinement_generate')`)).toBe("0");
   });
 
-  it("does not rerun cluster feed stats backfill after clusters have been initialized", () => {
+  it("does not rerun cluster feed stats backfill or earliestCreatedAt backfill after clusters have been initialized", () => {
     const tempDir = mkdtempSync(path.join(os.tmpdir(), "infinitum-sqlite-cluster-backfill-"));
     const dbPath = path.join(tempDir, "cluster-backfill.db");
 
@@ -169,11 +171,11 @@ describe("sqlite setup", () => {
 
       INSERT INTO "content_clusters" (
         "id", "kind", "title", "summary", "score", "itemCount", "latestPublishedAt", "status", "fingerprint",
-        "displayItemCount", "displaySourceCount", "displayAverageScore", "displayRecommendScore", "latestCreatedAt",
+        "displayItemCount", "displaySourceCount", "displayAverageScore", "displayRecommendScore", "earliestCreatedAt", "latestCreatedAt",
         "feedSearchText", "feedTagsJson", "feedStatsUpdatedAt", "updatedAt"
       ) VALUES (
         'cluster-backfilled', 'topic', 'Backfilled Cluster', 'Backfilled summary', 50, 1, '2026-04-10T10:00:00.000Z', 'active', 'cluster-backfilled',
-        7, 3, 88, 91, '2026-04-10T10:05:00.000Z', 'precomputed text', '[]', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+        7, 3, 88, 91, NULL, '2026-04-10T10:05:00.000Z', 'precomputed text', '[]', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
       );
 
       INSERT INTO "items" (
@@ -194,6 +196,7 @@ describe("sqlite setup", () => {
 
     expect(runSqlite(dbPath, `SELECT "displayItemCount" FROM "content_clusters" WHERE id = 'cluster-backfilled'`)).toBe("7");
     expect(runSqlite(dbPath, `SELECT "displayRecommendScore" FROM "content_clusters" WHERE id = 'cluster-backfilled'`)).toBe("91");
-  });
+    expect(runSqlite(dbPath, `SELECT COALESCE("earliestCreatedAt", '') FROM "content_clusters" WHERE id = 'cluster-backfilled'`)).toBe("");
+  }, 20_000);
 
 });

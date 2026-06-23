@@ -67,6 +67,7 @@ function loadSchemaSql() {
 function makeSqliteSchemaIdempotent(sql) {
   return sql
     .replace(/^CREATE INDEX "content_clusters_status_latestCreatedAt_idx".*;\n?/gm, "")
+    .replace(/^CREATE INDEX "content_clusters_status_earliestCreatedAt_idx".*;\n?/gm, "")
     .replace(/^CREATE INDEX "content_clusters_status_displayRecommendScore_idx".*;\n?/gm, "")
     .replace(/^CREATE INDEX "content_clusters_dominantGroupId_status_latestCreatedAt_idx".*;\n?/gm, "")
     .replace(/^CREATE TABLE /gm, "CREATE TABLE IF NOT EXISTS ")
@@ -226,6 +227,7 @@ function applyClusterFeedStatsBackfill() {
         COUNT(*) AS "displayItemCount",
         COUNT(DISTINCT i."sourceId") AS "displaySourceCount",
         CAST(ROUND(AVG(i."qualityScore")) AS INTEGER) AS "displayAverageScore",
+        MIN(i."createdAt") AS "earliestCreatedAt",
         MAX(i."createdAt") AS "latestCreatedAt",
         MAX(i."publishedAt") AS "latestPublishedAt"
       FROM "items" i
@@ -300,10 +302,20 @@ function applyClusterFeedStatsBackfill() {
 
       UPDATE "content_clusters"
       SET
-        "displayItemCount" = COALESCE((SELECT "displayItemCount" FROM "_cluster_feed_stats_backfill" stats WHERE stats."clusterId" = "content_clusters".id), 0),
-        "displaySourceCount" = COALESCE((SELECT "displaySourceCount" FROM "_cluster_feed_stats_backfill" stats WHERE stats."clusterId" = "content_clusters".id), 0),
-        "displayAverageScore" = COALESCE((SELECT "displayAverageScore" FROM "_cluster_feed_stats_backfill" stats WHERE stats."clusterId" = "content_clusters".id), 0),
-        "displayRecommendScore" = (
+        "displayItemCount" = CASE
+          WHEN "feedStatsUpdatedAt" IS NULL THEN COALESCE((SELECT "displayItemCount" FROM "_cluster_feed_stats_backfill" stats WHERE stats."clusterId" = "content_clusters".id), 0)
+          ELSE "displayItemCount"
+        END,
+        "displaySourceCount" = CASE
+          WHEN "feedStatsUpdatedAt" IS NULL THEN COALESCE((SELECT "displaySourceCount" FROM "_cluster_feed_stats_backfill" stats WHERE stats."clusterId" = "content_clusters".id), 0)
+          ELSE "displaySourceCount"
+        END,
+        "displayAverageScore" = CASE
+          WHEN "feedStatsUpdatedAt" IS NULL THEN COALESCE((SELECT "displayAverageScore" FROM "_cluster_feed_stats_backfill" stats WHERE stats."clusterId" = "content_clusters".id), 0)
+          ELSE "displayAverageScore"
+        END,
+        "displayRecommendScore" = CASE
+          WHEN "feedStatsUpdatedAt" IS NULL THEN (
           WITH stats AS (
             SELECT
               COALESCE((SELECT "displayAverageScore" FROM "_cluster_feed_stats_backfill" stats WHERE stats."clusterId" = "content_clusters".id), 0) AS aiScore,
@@ -328,13 +340,34 @@ function applyClusterFeedStatsBackfill() {
             FROM stats
           )
           SELECT CASE WHEN score > 100 THEN 100 WHEN score < 0 THEN 0 ELSE score END FROM score_parts
-        ),
-        "latestCreatedAt" = (SELECT "latestCreatedAt" FROM "_cluster_feed_stats_backfill" stats WHERE stats."clusterId" = "content_clusters".id),
-        "latestPublishedAt" = COALESCE((SELECT "latestPublishedAt" FROM "_cluster_feed_stats_backfill" stats WHERE stats."clusterId" = "content_clusters".id), "latestPublishedAt"),
-        "dominantGroupId" = (SELECT "groupId" FROM "_cluster_feed_group_backfill" groups WHERE groups."clusterId" = "content_clusters".id),
-        "feedTagsJson" = COALESCE((SELECT "feedTagsJson" FROM "_cluster_feed_tag_json_backfill" tags WHERE tags."clusterId" = "content_clusters".id), '[]'),
-        "feedSearchText" = TRIM(COALESCE(title, '') || ' ' || COALESCE(summary, '') || ' ' || COALESCE((SELECT "tagSearchText" FROM "_cluster_feed_tag_json_backfill" tags WHERE tags."clusterId" = "content_clusters".id), '')),
-        "feedStatsUpdatedAt" = CURRENT_TIMESTAMP
+          )
+          ELSE "displayRecommendScore"
+        END,
+        "earliestCreatedAt" = (SELECT "earliestCreatedAt" FROM "_cluster_feed_stats_backfill" stats WHERE stats."clusterId" = "content_clusters".id),
+        "latestCreatedAt" = CASE
+          WHEN "feedStatsUpdatedAt" IS NULL THEN (SELECT "latestCreatedAt" FROM "_cluster_feed_stats_backfill" stats WHERE stats."clusterId" = "content_clusters".id)
+          ELSE "latestCreatedAt"
+        END,
+        "latestPublishedAt" = CASE
+          WHEN "feedStatsUpdatedAt" IS NULL THEN COALESCE((SELECT "latestPublishedAt" FROM "_cluster_feed_stats_backfill" stats WHERE stats."clusterId" = "content_clusters".id), "latestPublishedAt")
+          ELSE "latestPublishedAt"
+        END,
+        "dominantGroupId" = CASE
+          WHEN "feedStatsUpdatedAt" IS NULL THEN (SELECT "groupId" FROM "_cluster_feed_group_backfill" groups WHERE groups."clusterId" = "content_clusters".id)
+          ELSE "dominantGroupId"
+        END,
+        "feedTagsJson" = CASE
+          WHEN "feedStatsUpdatedAt" IS NULL THEN COALESCE((SELECT "feedTagsJson" FROM "_cluster_feed_tag_json_backfill" tags WHERE tags."clusterId" = "content_clusters".id), '[]')
+          ELSE "feedTagsJson"
+        END,
+        "feedSearchText" = CASE
+          WHEN "feedStatsUpdatedAt" IS NULL THEN TRIM(COALESCE(title, '') || ' ' || COALESCE(summary, '') || ' ' || COALESCE((SELECT "tagSearchText" FROM "_cluster_feed_tag_json_backfill" tags WHERE tags."clusterId" = "content_clusters".id), ''))
+          ELSE "feedSearchText"
+        END,
+        "feedStatsUpdatedAt" = CASE
+          WHEN "feedStatsUpdatedAt" IS NULL THEN CURRENT_TIMESTAMP
+          ELSE "feedStatsUpdatedAt"
+        END
       WHERE "feedStatsUpdatedAt" IS NULL;
 
       DROP TABLE IF EXISTS "_cluster_feed_backfill_targets";
@@ -418,10 +451,12 @@ function applyAdditiveSchemaUpgrades() {
     addColumnIfMissing("content_clusters", "feedTagsJson", "TEXT NOT NULL DEFAULT '[]'"),
     addColumnIfMissing("content_clusters", "feedStatsUpdatedAt", "DATETIME"),
   ].some(Boolean);
+  addColumnIfMissing("content_clusters", "earliestCreatedAt", "DATETIME");
 
   runSqlite([dbPath], {
     input: `
       CREATE INDEX IF NOT EXISTS "content_clusters_status_latestCreatedAt_idx" ON "content_clusters"("status", "latestCreatedAt");
+      CREATE INDEX IF NOT EXISTS "content_clusters_status_earliestCreatedAt_idx" ON "content_clusters"("status", "earliestCreatedAt");
       CREATE INDEX IF NOT EXISTS "content_clusters_status_displayRecommendScore_idx" ON "content_clusters"("status", "displayRecommendScore");
       CREATE INDEX IF NOT EXISTS "content_clusters_dominantGroupId_status_latestCreatedAt_idx" ON "content_clusters"("dominantGroupId", "status", "latestCreatedAt");
       CREATE INDEX IF NOT EXISTS "items_sourceId_status_moderationStatus_isAggregation_createdAt_idx" ON "items"("sourceId", "status", "moderationStatus", "isAggregation", "createdAt");

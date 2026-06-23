@@ -233,6 +233,7 @@ model ContentCluster {
   displaySourceCount    Int                  @default(0)
   displayAverageScore   Int                  @default(0)
   displayRecommendScore Int                  @default(0)
+  earliestCreatedAt     DateTime?
   latestCreatedAt       DateTime?
   dominantGroupId       String?
   feedSearchText        String?
@@ -245,6 +246,7 @@ model ContentCluster {
   dominantGroup         SourceGroup?         @relation(fields: [dominantGroupId], references: [id], onDelete: SetNull)
 
   @@index([status, latestPublishedAt])
+  @@index([status, earliestCreatedAt])
   @@index([status, latestCreatedAt])
   @@index([status, displayRecommendScore])
   @@index([dominantGroupId, status, latestCreatedAt])

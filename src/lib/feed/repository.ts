@@ -2455,9 +2455,10 @@ export async function getAdminCluster(clusterId: string) {
 //   * 标题策略一致（cluster 形态用 `ContentCluster.title`，
 //     single 形态用 `translatedTitle`/`originalTitle` 退化）
 // - 区别仅在于：trending 强制 24h 窗口 + 在外层计算 trendingScore 并按其取 Top N。
-//   排序键 = recommendScore * recency(createdAt, now) + multiSourceBoost(sourceCount) + velocityBoost(group).
-// - 排序输入（recommendScore / sourceCount / createdAt）均来自 entry_candidates，
-//   与 feed 列表同源；不再二次拼装 cluster 判定或聚合标题。
+//   排序键 = recommendScore * recency(scoredCreatedAt, now) + multiSourceBoost(sourceCount) + velocityBoost(group).
+// - 排序输入（recommendScore / sourceCount）来自 entry_candidates，
+//   cluster 的 scoredCreatedAt 额外取其下可展示子条目的最早 createdAt，避免持续报道用最新条目反复刷新热度。
+//   feed 列表仍保留 latestCreatedAt 作为展示/时间排序口径。
 
 type TrendingRow = {
   id: string;
@@ -2511,9 +2512,47 @@ export async function listTrendingEntries(
   // - recommendScore 来自 entry_candidates（cluster 形态为 cluster.displayRecommendScore，
   //   single 形态为 buildRecommendScoreSql(...)），与 feed 列表同源。
   // - sourceCount 来自 entry_candidates（cluster.displaySourceCount / 1）。
-  // - createdAt 来自 entry_candidates（cluster.latestCreatedAt / item.createdAt）。
+  // - scoredCreatedAt：cluster 优先用预计算的 earliestCreatedAt，缺失时兜底回查可展示子条目的最早 createdAt；
+  //   single 用 item.createdAt。
+  const scoredEntryCandidatesCte = Prisma.sql`
+    cluster_persisted_scored_times AS (
+      SELECT
+        ec.id AS id,
+        cc."earliestCreatedAt" AS "scoredCreatedAt"
+      FROM entry_candidates ec
+      INNER JOIN "content_clusters" cc ON cc.id = ec.id
+      WHERE ec.type = ${"cluster"}
+    ),
+    cluster_fallback_scored_times AS (
+      SELECT
+        ec.id AS id,
+        MIN(i."createdAt") AS "scoredCreatedAt"
+      FROM entry_candidates ec
+      LEFT JOIN cluster_persisted_scored_times cpst ON cpst.id = ec.id
+      INNER JOIN "items" i ON i."clusterId" = ec.id
+      INNER JOIN "sources" s ON s.id = i."sourceId"
+      WHERE ec.type = ${"cluster"}
+        AND cpst."scoredCreatedAt" IS NULL
+        AND i.status = ${"processed"}
+        AND i."moderationStatus" IN (${Prisma.join([...DISPLAYABLE_MODERATION_STATUSES])})
+        AND i."isAggregation" = ${false}
+        AND s.enabled = ${true}
+      GROUP BY ec.id
+    ),
+    scored_entry_candidates AS (
+      SELECT
+        ec.*,
+        CASE
+          WHEN ec.type = ${"cluster"} THEN COALESCE(cpst."scoredCreatedAt", cfst."scoredCreatedAt", ec."createdAt")
+          ELSE ec."createdAt"
+        END AS "scoredCreatedAt"
+      FROM entry_candidates ec
+      LEFT JOIN cluster_persisted_scored_times cpst ON cpst.id = ec.id
+      LEFT JOIN cluster_fallback_scored_times cfst ON cfst.id = ec.id
+    )
+  `;
   const recency = buildRecencyWeightSql({
-    createdAt: Prisma.sql`ec."createdAt"`,
+    createdAt: Prisma.sql`ec."scoredCreatedAt"`,
     now: nowSql,
   });
   const multiSource = buildMultiSourceBoostSql(Prisma.sql`ec."sourceCount"`);
@@ -2521,16 +2560,17 @@ export async function listTrendingEntries(
   // velocity 维度：按 entryGroupId（cluster.dominantGroupId / item.source.groupId）
   // 聚合 6h / 24h 内 entry_candidates 行数。derived table 内计算 ratio → boost，
   // 避免在主 SELECT 里直接出现 recentSum/baselineSum 引起歧义。
-  // 性能：entry_candidates 已被 feed 列表的 24h rangeStart 限制为 24h 内行，
+  // 性能：entry_candidates 已被 feed 列表的 24h rangeStart 限制为最新条目 24h 内行，
   // GROUP BY 维度为 entryGroupId（10 几个组级别），行数 ~ 几十。
   const velocityByGroupCte = Prisma.sql`
     velocity_by_group AS (
       SELECT
         "entryGroupId" AS "groupId",
-        SUM(CASE WHEN "createdAt" >= ${recentStartSql} THEN 1 ELSE 0 END) AS "recentSum",
-        SUM(CASE WHEN "createdAt" >= ${baselineStartSql} AND "createdAt" < ${recentStartSql} THEN 1 ELSE 0 END) AS "baselineSum"
-      FROM entry_candidates
+        SUM(CASE WHEN "scoredCreatedAt" >= ${recentStartSql} THEN 1 ELSE 0 END) AS "recentSum",
+        SUM(CASE WHEN "scoredCreatedAt" >= ${baselineStartSql} AND "scoredCreatedAt" < ${recentStartSql} THEN 1 ELSE 0 END) AS "baselineSum"
+      FROM scored_entry_candidates
       WHERE "entryGroupId" IS NOT NULL
+        AND "scoredCreatedAt" >= ${baselineStartSql}
       GROUP BY "entryGroupId"
     ),
     velocity_boost AS (
@@ -2552,6 +2592,7 @@ export async function listTrendingEntries(
 
   const rows = await prisma.$queryRaw<TrendingRow[]>(Prisma.sql`
     ${entryCandidatesCte},
+    ${scoredEntryCandidatesCte},
     ${velocityByGroupCte},
     with_trending AS (
       SELECT
@@ -2560,13 +2601,15 @@ export async function listTrendingEntries(
         ec."clusterId",
         ec.title,
         ec."createdAt",
+        ec."scoredCreatedAt",
         ec."recommendScore",
         ${trendingScore} AS "trendingScore",
         ec."itemCount",
         ec."sourceCount"
-      FROM entry_candidates ec
+      FROM scored_entry_candidates ec
       LEFT JOIN velocity_boost vb ON vb."groupId" = ec."entryGroupId"
       WHERE ec."recommendScore" >= ${TRENDING_MIN_RECOMMEND_SCORE}
+        AND ec."scoredCreatedAt" >= ${baselineStartSql}
     )
     SELECT
       id,
@@ -2579,7 +2622,7 @@ export async function listTrendingEntries(
       "itemCount",
       "sourceCount"
     FROM with_trending
-    ORDER BY "trendingScore" DESC, "recommendScore" DESC, "createdAt" DESC, id DESC
+    ORDER BY "trendingScore" DESC, "recommendScore" DESC, "scoredCreatedAt" DESC, id DESC
     LIMIT ${limit}
   `);
 

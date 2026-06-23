@@ -167,6 +167,7 @@ describe("cluster feed stats", () => {
       displayItemCount: 2,
       displaySourceCount: 2,
       displayAverageScore: 70,
+      earliestCreatedAt: new Date("2026-04-10T09:05:00.000Z"),
       latestCreatedAt: new Date("2026-04-10T10:05:00.000Z"),
       latestPublishedAt: new Date("2026-04-10T10:00:00.000Z"),
       dominantGroupId: researchGroup.id,

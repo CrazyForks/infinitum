@@ -82,6 +82,7 @@ describe("listTrendingEntries", () => {
         displaySourceCount: 2,
         displayAverageScore: 86,
         displayRecommendScore: 92,
+        earliestCreatedAt: hoursAgo(2),
         latestCreatedAt: hoursAgo(2),
       },
     });
@@ -269,6 +270,7 @@ describe("listTrendingEntries", () => {
         displaySourceCount: 1,
         displayAverageScore: 70,
         displayRecommendScore: 78,
+        earliestCreatedAt: hoursAgo(20),
         latestCreatedAt: hoursAgo(1),
       },
     });
@@ -307,6 +309,68 @@ describe("listTrendingEntries", () => {
           moderationStatus: "allowed",
           qualityScore: 70,
           qualityRationale: "新",
+          language: "zh",
+          createdAt: hoursAgo(1),
+        },
+      ],
+    });
+
+    // 候选 8: 老事件 30h 前开始、1h 前还有跟进报道；应按最早子条目判定，不再进入 24h 实时榜
+    await prisma.contentCluster.create({
+      data: {
+        id: "cluster-continuing-old",
+        kind: "topic",
+        title: "持续跟进的旧聚合",
+        summary: "旧事件仍有新报道",
+        score: 99,
+        itemCount: 2,
+        latestPublishedAt: hoursAgo(1),
+        status: "active",
+        fingerprint: "cluster-continuing-old",
+        createdAt: hoursAgo(30),
+        displayItemCount: 2,
+        displaySourceCount: 1,
+        displayAverageScore: 99,
+        displayRecommendScore: 100,
+        earliestCreatedAt: hoursAgo(30),
+        latestCreatedAt: hoursAgo(1),
+      },
+    });
+    await prisma.item.createMany({
+      data: [
+        {
+          id: "item-continuing-old-first",
+          sourceId: sourceD.id,
+          clusterId: "cluster-continuing-old",
+          originalUrl: "https://d.example.com/continuing-old-first",
+          canonicalUrl: "https://d.example.com/continuing-old-first",
+          urlHash: "hash-continuing-old-first",
+          dedupeSignature: "continuing-old-first",
+          originalTitle: "持续跟进的旧聚合 首发",
+          publishedAt: hoursAgo(30),
+          status: "processed",
+          analysisStatus: "succeeded",
+          moderationStatus: "allowed",
+          qualityScore: 99,
+          qualityRationale: "高分旧事件",
+          language: "zh",
+          createdAt: hoursAgo(30),
+        },
+        {
+          id: "item-continuing-old-followup",
+          sourceId: sourceD.id,
+          clusterId: "cluster-continuing-old",
+          originalUrl: "https://d.example.com/continuing-old-followup",
+          canonicalUrl: "https://d.example.com/continuing-old-followup",
+          urlHash: "hash-continuing-old-followup",
+          dedupeSignature: "continuing-old-followup",
+          originalTitle: "持续跟进的旧聚合 跟进",
+          publishedAt: hoursAgo(1),
+          status: "processed",
+          analysisStatus: "succeeded",
+          moderationStatus: "allowed",
+          qualityScore: 99,
+          qualityRationale: "高分新跟进",
           language: "zh",
           createdAt: hoursAgo(1),
         },
@@ -360,6 +424,24 @@ describe("listTrendingEntries", () => {
     // 因此带 clusterId 的 item 不再走 single 形态，避免与 cluster 形态重复。
     expect(ids).not.toContain("item-dup-old");
     expect(ids).not.toContain("item-dup-new");
+  });
+
+  it("scores cluster recency from the earliest displayable child item", async () => {
+    const entries = await listTrendingEntries(NOW, 50);
+    const cluster = entries.find((e) => e.id === "cluster-dup");
+
+    expect(cluster).toBeDefined();
+    expect(cluster!.createdAt).toBe(hoursAgo(1).toISOString());
+    // cluster-dup 的 latestCreatedAt 是 1h 前，但最早可展示子条目是 20h 前。
+    // recommendScore 78 * 20h 衰减 0.3 = 23.4；不能按 latestCreatedAt=1h 计算成 78。
+    expect(cluster!.trendingScore).toBeCloseTo(23.4, 5);
+  });
+
+  it("drops continuing clusters whose earliest displayable child is outside the 24h lookback", async () => {
+    const entries = await listTrendingEntries(NOW, 50);
+    const ids = entries.map((e) => e.id);
+
+    expect(ids).not.toContain("cluster-continuing-old");
   });
 
   it("promotes a single-cluster cluster to the single entry shape", async () => {
