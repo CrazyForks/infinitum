@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { AntdRegistry } from "@ant-design/nextjs-registry";
 import localFont from "next/font/local";
 
 import { ToastProvider } from "@/components/ui/toast";
@@ -71,7 +72,9 @@ export default function RootLayout({
   return (
     <html className={brandFont.variable} lang="zh-CN">
       <body>
-        <ToastProvider>{children}</ToastProvider>
+        <AntdRegistry>
+          <ToastProvider>{children}</ToastProvider>
+        </AntdRegistry>
       </body>
     </html>
   );

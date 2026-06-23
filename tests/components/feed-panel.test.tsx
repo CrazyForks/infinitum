@@ -2283,15 +2283,37 @@ describe("FeedPanel", () => {
     expect(actionGroup).toHaveClass("gap-0.5");
   });
 
-  it("shows aggregation parent metadata to admins for split child items", () => {
+  it("omits aggregation parent metadata from feed cards", async () => {
+    const user = userEvent.setup();
+    const clusterEntry = initialEntries.find((entry) => entry.type === "cluster");
     const singleEntry = initialEntries.find((entry) => entry.type === "single");
-    if (!singleEntry) {
-      throw new Error("missing single entry fixture");
+    if (!clusterEntry || !singleEntry) {
+      throw new Error("missing entry fixture");
     }
+    const clusterItems = clusterEntry.itemsPreview.map((item) => ({
+      ...item,
+      aggregationParent: {
+        id: "parent-1",
+        title: "AI 简报父条目",
+        originalUrl: "https://example.com/roundup",
+      },
+    }));
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () =>
+      new Response(
+        JSON.stringify({
+          items: clusterItems,
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
 
     render(
       <FeedPanel
         initialItems={[
+          {
+            ...clusterEntry,
+            itemsPreview: clusterItems,
+          },
           {
             ...singleEntry,
             aggregationParent: {
@@ -2311,8 +2333,11 @@ describe("FeedPanel", () => {
       />,
     );
 
-    const parentLink = screen.getByRole("link", { name: "拆条来源：AI 简报父条目" });
-    expect(parentLink).toHaveAttribute("href", "https://example.com/roundup");
+    await user.click(screen.getByRole("button", { name: "展开相关内容" }));
+    expect(await screen.findByRole("link", { name: "预览标题" })).toBeInTheDocument();
+
+    expect(screen.queryByText(/拆条来源/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "拆条来源：AI 简报父条目" })).not.toBeInTheDocument();
   });
 
   it("omits author metadata when the author is unknown", async () => {
