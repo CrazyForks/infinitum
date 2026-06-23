@@ -5,6 +5,7 @@ import {
   getCachedFeedFilterOptions,
   getCachedFeedItems,
   getCachedLatestFetchRunSnapshot,
+  getCachedTrendingEntries,
 } from "@/lib/feed/service";
 import { resolveFeedRequest } from "@/lib/feed/request";
 import type { FeedEntryDTO, FeedFilters, FeedRange } from "@/lib/feed/types";
@@ -56,7 +57,9 @@ function hasNonDefaultFeedFilter(filters: FeedFilters, page: number) {
       filters.groupId ||
       filters.sourceId ||
       filters.title ||
-      filters.tag,
+      filters.tag ||
+      filters.entryId ||
+      filters.entryType,
   );
 }
 
@@ -175,10 +178,11 @@ export default async function Home({ searchParams }: PageProps) {
   const resolvedSearchParams = (await searchParams) ?? {};
   const { filters, pagination } = resolveFeedRequest(resolvedSearchParams);
   const initialCreatedRangeExplicit = hasExplicitHomeCreatedTimeFilter(resolvedSearchParams);
-  const [feed, latestRunSnapshot, feedFilterOptions] = await Promise.all([
+  const [feed, latestRunSnapshot, feedFilterOptions, trending] = await Promise.all([
     getCachedFeedItems(filters, pagination),
     getCachedLatestFetchRunSnapshot(),
     getCachedFeedFilterOptions(),
+    getCachedTrendingEntries(),
   ]);
   const { title, description } = buildFeedMetadataText(filters);
   const pageUrl = getSiteOrigin();
@@ -212,6 +216,7 @@ export default async function Home({ searchParams }: PageProps) {
         initialGroupTotalCount={feed.groupTotalCount}
         availableSources={feedFilterOptions.sources}
         popularTags={feed.popularTags}
+        trending={trending}
       />
     </main>
   );

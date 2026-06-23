@@ -21,6 +21,8 @@ export async function GET(request: Request) {
       sourceId: filters.sourceId,
       title: filters.title,
       tag: filters.tag,
+      entryId: filters.entryId,
+      entryType: filters.entryType,
     },
     {
       headers: {

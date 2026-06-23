@@ -48,6 +48,8 @@ function buildFilters(overrides: Partial<Parameters<typeof getCachedFeedItems>[0
     sourceId: null,
     title: null,
     tag: "ai",
+    entryId: null,
+    entryType: null,
     rangeStart: new Date("2026-04-07T12:00:00.000Z"),
     rangeEnd: null,
     publishedRangeStart: null,

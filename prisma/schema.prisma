@@ -182,6 +182,7 @@ model Item {
   @@index([status, publishedAt])
   @@index([moderationStatus, publishedAt])
   @@index([status, moderationStatus, createdAt])
+  @@index([status, moderationStatus, isAggregation, createdAt])
   @@index([status, moderationStatus, updatedAt])
   @@index([clusterId, publishedAt])
   @@index([clusterId, status, moderationStatus, updatedAt])

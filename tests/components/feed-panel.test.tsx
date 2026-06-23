@@ -327,7 +327,6 @@ describe("FeedPanel", () => {
     expect(sidebarPanel?.className).toContain("lg:top-4");
     expect(sidebarPanel?.className).toContain("lg:max-h-[calc(100vh-2rem)]");
     expect(within(sidebar).getByRole("heading", { name: "分组筛选" })).toBeInTheDocument();
-    expect(within(sidebar).getByRole("button", { name: "收起分组筛选" })).toHaveAttribute("aria-expanded", "true");
     expect(within(sidebar).getByRole("button", { name: "全部内容 (2)" })).toBeInTheDocument();
     expect(within(sidebar).getByRole("button", { name: "AI (1)" })).toBeInTheDocument();
     expect(within(sidebar).getByRole("button", { name: "研究 (1)" })).toBeInTheDocument();
@@ -357,7 +356,7 @@ describe("FeedPanel", () => {
     expect(screen.getByRole("combobox", { name: "移动端分组筛选" })).toBeInTheDocument();
   });
 
-  it("supports collapsing and expanding the group sidebar content", async () => {
+  it("collapses and expands only the group filter options from the sidebar title row", async () => {
     const user = userEvent.setup();
 
     render(
@@ -377,22 +376,22 @@ describe("FeedPanel", () => {
     );
 
     const sidebar = screen.getByRole("complementary", { name: "分组筛选侧栏" });
+    const toggle = within(sidebar).getByRole("button", { name: "分组筛选" });
 
-    await user.click(within(sidebar).getByRole("button", { name: "收起分组筛选" }));
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await user.click(toggle);
 
-    expect(within(sidebar).getByRole("button", { name: "展开分组筛选" })).toHaveAttribute("aria-expanded", "false");
-    expect(within(sidebar).getByRole("button", { name: "展开分组筛选" })).toHaveTextContent("»");
-    expect(within(sidebar).queryByRole("heading", { name: "分组筛选" })).not.toBeInTheDocument();
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
     expect(within(sidebar).queryByRole("button", { name: "全部内容 (2)" })).not.toBeInTheDocument();
     expect(within(sidebar).queryByRole("button", { name: "AI (1)" })).not.toBeInTheDocument();
 
-    await user.click(within(sidebar).getByRole("button", { name: "展开分组筛选" }));
+    await user.click(toggle);
 
-    expect(within(sidebar).getByRole("button", { name: "收起分组筛选" })).toHaveAttribute("aria-expanded", "true");
-    expect(within(sidebar).getByRole("button", { name: "收起分组筛选" })).toHaveTextContent("«");
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
     expect(within(sidebar).getByRole("button", { name: "全部内容 (2)" })).toBeInTheDocument();
     expect(within(sidebar).getByRole("button", { name: "AI (1)" })).toBeInTheDocument();
   });
+
 
   it("requests the selected group immediately through the sidebar entry", async () => {
     const user = userEvent.setup();

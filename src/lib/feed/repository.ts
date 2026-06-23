@@ -10,7 +10,18 @@ import {
 
 import { prisma } from "@/lib/db";
 import { getDisplaySummary, getDisplayTitle, normalizeDisplaySummary, shouldTranslateTitle } from "@/lib/feed/presentation";
+import { HOUR_MS } from "@/config/constants";
 import { buildRecommendScoreSql, calculateRecommendScore } from "@/lib/feed/recommend-score";
+import {
+  TRENDING_LIMIT,
+  TRENDING_LOOKBACK_HOURS,
+  TRENDING_MIN_RECOMMEND_SCORE,
+  TRENDING_VELOCITY_BASELINE_HOURS,
+  TRENDING_VELOCITY_RECENT_HOURS,
+  buildMultiSourceBoostSql,
+  buildRecencyWeightSql,
+  buildVelocityBoostSql,
+} from "@/lib/feed/trending";
 import { toGroupBadge, type GroupBadge } from "@/lib/groups/badge";
 import { getDatabaseSearchTerms } from "@/lib/utils/search";
 import type {
@@ -19,6 +30,7 @@ import type {
   ClusterDTO,
   FeedGroupOption,
   FeedTagOption,
+  TrendingEntryDTO,
   FeedClusterPreviewItemDTO,
   FeedEntryDTO,
   FeedFilters,
@@ -1152,9 +1164,29 @@ function buildFeedEntryCandidatesCte(
     entry_candidates AS (
       SELECT *
       FROM all_entry_candidates
-      ${filters.groupId ? Prisma.sql`WHERE "entryGroupId" = ${filters.groupId}` : Prisma.empty}
+      ${buildEntryCandidateWhereClause(filters)}
     )
   `;
+}
+
+function buildEntryCandidateWhereClause(filters: Pick<FeedFilters, "groupId" | "entryId" | "entryType">) {
+  const clauses: Prisma.Sql[] = [];
+
+  if (filters.groupId) {
+    clauses.push(Prisma.sql`"entryGroupId" = ${filters.groupId}`);
+  }
+
+  if (filters.entryId) {
+    clauses.push(Prisma.sql`id = ${filters.entryId}`);
+  }
+
+  if (filters.entryType) {
+    clauses.push(Prisma.sql`type = ${filters.entryType}`);
+  }
+
+  return clauses.length > 0
+    ? Prisma.sql`WHERE ${Prisma.join(clauses, " AND ")}`
+    : Prisma.empty;
 }
 
 function buildFeedEntryCountCandidatesCte(
@@ -1490,12 +1522,17 @@ function buildEntityFeedEntryCandidatesCte(
       LEFT JOIN "content_clusters" c ON c.id = i."clusterId"
       WHERE ${Prisma.join(singleWhereClauses, " AND ")}
     ),
-    entry_candidates AS (
+    all_entry_candidates AS (
       SELECT id, type, NULL AS "clusterId", ${includeDisplayFields ? Prisma.sql`title, summary,` : Prisma.empty} "latestPublishedAt", "createdAt", score, "sourceCount", "itemCount", "totalItemCount", "entryGroupId", "recommendScore"
       FROM cluster_entries
       UNION ALL
       SELECT id, type, "clusterId", ${includeDisplayFields ? Prisma.sql`title, summary,` : Prisma.empty} "latestPublishedAt", "createdAt", score, "sourceCount", "itemCount", CAST(1 AS INTEGER) AS "totalItemCount", "entryGroupId", "recommendScore"
       FROM single_entries
+    ),
+    entry_candidates AS (
+      SELECT *
+      FROM all_entry_candidates
+      ${buildEntryCandidateWhereClause(filters)}
     )
   `;
 }
@@ -2405,4 +2442,155 @@ export async function getAdminCluster(clusterId: string) {
     itemCount: cluster.items.length,
     items: cluster.items.map(mapItemToClusterPreview),
   } satisfies ClusterDTO;
+}
+
+// =============================================================================
+// 实时榜单
+// =============================================================================
+//
+// 设计原则：
+// - 完全复用 `buildActiveFeedEntryCandidatesCte`（与首页 feed 列表共用），保证：
+//   * 候选 item 的过滤口径（status / moderationStatus / isAggregation / cluster status）一致
+//   * cluster 形态 / single 形态分支与"matchedItemCount > 1"判定规则一致
+//   * 标题策略一致（cluster 形态用 `ContentCluster.title`，
+//     single 形态用 `translatedTitle`/`originalTitle` 退化）
+// - 区别仅在于：trending 强制 24h 窗口 + 在外层计算 trendingScore 并按其取 Top N。
+//   排序键 = recommendScore * recency(createdAt, now) + multiSourceBoost(sourceCount) + velocityBoost(group).
+// - 排序输入（recommendScore / sourceCount / createdAt）均来自 entry_candidates，
+//   与 feed 列表同源；不再二次拼装 cluster 判定或聚合标题。
+
+type TrendingRow = {
+  id: string;
+  type: "single" | "cluster";
+  clusterId: string | null;
+  title: string;
+  createdAt: Date | string;
+  recommendScore: number | bigint;
+  trendingScore: number | bigint;
+  itemCount: number | bigint;
+  sourceCount: number | bigint;
+};
+
+export async function listTrendingEntries(
+  now: Date = new Date(),
+  limit: number = TRENDING_LIMIT,
+): Promise<TrendingEntryDTO[]> {
+  const nowMs = now.getTime();
+  const recentStartMs = nowMs - TRENDING_VELOCITY_RECENT_HOURS * HOUR_MS;
+  const baselineStartMs = nowMs - TRENDING_VELOCITY_BASELINE_HOURS * HOUR_MS;
+  const lookbackStartMs = nowMs - TRENDING_LOOKBACK_HOURS * HOUR_MS;
+  const nowSql = Prisma.sql`${nowMs}`;
+  const recentStartSql = Prisma.sql`${recentStartMs}`;
+  const baselineStartSql = Prisma.sql`${baselineStartMs}`;
+
+  // 复用 feed 列表的 entry_candidates：候选 + cluster/single 分形态 + 标题策略
+  const entryCandidatesCte = buildActiveFeedEntryCandidatesCte(
+    {
+      range: "today",
+      sort: "score_desc",
+      start: null,
+      end: null,
+      publishedStart: null,
+      publishedEnd: null,
+      groupId: null,
+      sourceId: null,
+      title: null,
+      tag: null,
+      entryId: null,
+      entryType: null,
+      rangeStart: new Date(lookbackStartMs),
+      rangeEnd: null,
+      publishedRangeStart: null,
+      publishedRangeEnd: null,
+    },
+    null,
+    { includeDisplayFields: true },
+  );
+
+  // 在 entry_candidates 之上追加 trendingScore 评分列。
+  // - recommendScore 来自 entry_candidates（cluster 形态为 cluster.displayRecommendScore，
+  //   single 形态为 buildRecommendScoreSql(...)），与 feed 列表同源。
+  // - sourceCount 来自 entry_candidates（cluster.displaySourceCount / 1）。
+  // - createdAt 来自 entry_candidates（cluster.latestCreatedAt / item.createdAt）。
+  const recency = buildRecencyWeightSql({
+    createdAt: Prisma.sql`ec."createdAt"`,
+    now: nowSql,
+  });
+  const multiSource = buildMultiSourceBoostSql(Prisma.sql`ec."sourceCount"`);
+
+  // velocity 维度：按 entryGroupId（cluster.dominantGroupId / item.source.groupId）
+  // 聚合 6h / 24h 内 entry_candidates 行数。derived table 内计算 ratio → boost，
+  // 避免在主 SELECT 里直接出现 recentSum/baselineSum 引起歧义。
+  // 性能：entry_candidates 已被 feed 列表的 24h rangeStart 限制为 24h 内行，
+  // GROUP BY 维度为 entryGroupId（10 几个组级别），行数 ~ 几十。
+  const velocityByGroupCte = Prisma.sql`
+    velocity_by_group AS (
+      SELECT
+        "entryGroupId" AS "groupId",
+        SUM(CASE WHEN "createdAt" >= ${recentStartSql} THEN 1 ELSE 0 END) AS "recentSum",
+        SUM(CASE WHEN "createdAt" >= ${baselineStartSql} AND "createdAt" < ${recentStartSql} THEN 1 ELSE 0 END) AS "baselineSum"
+      FROM entry_candidates
+      WHERE "entryGroupId" IS NOT NULL
+      GROUP BY "entryGroupId"
+    ),
+    velocity_boost AS (
+      SELECT
+        "groupId",
+        ${buildVelocityBoostSql({
+          recentSum: Prisma.sql`"recentSum"`,
+          baselineSum: Prisma.sql`"baselineSum"`,
+        })} AS "velocityBoost"
+      FROM velocity_by_group
+    )
+  `;
+
+  const trendingScore = Prisma.sql`
+    (ec."recommendScore" * ${recency})
+    + ${multiSource}
+    + COALESCE(vb."velocityBoost", 0)
+  `;
+
+  const rows = await prisma.$queryRaw<TrendingRow[]>(Prisma.sql`
+    ${entryCandidatesCte},
+    ${velocityByGroupCte},
+    with_trending AS (
+      SELECT
+        ec.id,
+        ec.type,
+        ec."clusterId",
+        ec.title,
+        ec."createdAt",
+        ec."recommendScore",
+        ${trendingScore} AS "trendingScore",
+        ec."itemCount",
+        ec."sourceCount"
+      FROM entry_candidates ec
+      LEFT JOIN velocity_boost vb ON vb."groupId" = ec."entryGroupId"
+      WHERE ec."recommendScore" >= ${TRENDING_MIN_RECOMMEND_SCORE}
+    )
+    SELECT
+      id,
+      type,
+      "clusterId",
+      title,
+      "createdAt",
+      "recommendScore",
+      "trendingScore",
+      "itemCount",
+      "sourceCount"
+    FROM with_trending
+    ORDER BY "trendingScore" DESC, "recommendScore" DESC, "createdAt" DESC, id DESC
+    LIMIT ${limit}
+  `);
+
+  return rows.map((row) => ({
+    id: row.id,
+    type: row.type,
+    title: row.title,
+    createdAt: toIsoString(row.createdAt),
+    recommendScore: toNumber(row.recommendScore),
+    trendingScore: toNumber(row.trendingScore),
+    itemCount: toNumber(row.itemCount),
+    sourceCount: toNumber(row.sourceCount),
+  }));
 }

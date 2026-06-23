@@ -30,6 +30,8 @@ type FeedPayload = {
   sourceId: string | null;
   title: string | null;
   tag: string | null;
+  entryId: string | null;
+  entryType: "single" | "cluster" | null;
 };
 
 type TaskRunResponse = {

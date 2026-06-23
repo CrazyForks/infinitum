@@ -10,6 +10,7 @@ import type {
   FeedSourceOption,
   FeedTagOption,
   FetchRunSnapshot,
+  TrendingEntryDTO,
 } from "@/lib/feed/types";
 
 export type FeedPanelProps = {
@@ -34,6 +35,7 @@ export type FeedPanelProps = {
   initialGroupTotalCount?: number;
   availableSources?: FeedSourceOption[];
   popularTags?: FeedTagOption[];
+  trending?: TrendingEntryDTO[];
 };
 
 export type FeedQueryState = {

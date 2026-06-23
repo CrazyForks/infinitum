@@ -19,7 +19,7 @@ type ResolvedFeedRequest = {
   };
 };
 
-const ADVANCED_FILTER_KEYS = ["sourceId", "title", "tag", "publishedStart", "publishedEnd"] as const;
+const ADVANCED_FILTER_KEYS = ["sourceId", "title", "tag", "publishedStart", "publishedEnd", "entryId", "entryType"] as const;
 const CREATED_TIME_FILTER_KEYS = ["range", "start", "end"] as const;
 
 function getSearchParamValue(searchParams: SearchParamSource, key: keyof FeedFilters | "page" | "size" | "includeTags") {
@@ -63,6 +63,8 @@ export function resolveFeedRequest(searchParams: SearchParamSource, now = new Da
   const sourceIdParam = getSearchParamValue(searchParams, "sourceId");
   const titleParam = getSearchParamValue(searchParams, "title");
   const tagParam = getSearchParamValue(searchParams, "tag");
+  const entryIdParam = getSearchParamValue(searchParams, "entryId");
+  const entryTypeParam = getSearchParamValue(searchParams, "entryType");
   const defaultRange = resolveDefaultRange(searchParams);
   return {
     filters: resolveFeedFilters(
@@ -77,6 +79,8 @@ export function resolveFeedRequest(searchParams: SearchParamSource, now = new Da
         sourceId: normalizeFeedFilterId(sourceIdParam),
         title: titleParam?.trim() ? titleParam.trim() : null,
         tag: normalizeFeedFilterId(tagParam),
+        entryId: normalizeFeedFilterId(entryIdParam),
+        entryType: entryTypeParam === "single" || entryTypeParam === "cluster" ? entryTypeParam : null,
       },
       now,
     ),

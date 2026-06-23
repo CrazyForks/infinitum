@@ -1,24 +1,27 @@
 "use client";
 
-import type { FeedGroupOption } from "@/lib/feed/types";
+import { useState } from "react";
+
+import type { FeedGroupOption, TrendingEntryDTO } from "@/lib/feed/types";
+import { TrendingBoard } from "@/components/feed/trending-board";
 import { cx } from "@/lib/ui/cx";
 import { formatGroupOptionLabel } from "@/components/feed/feed-panel.utils";
+import { IconFilter } from "@/components/ui/icons";
 
 export function GroupFilterSidebar({
   groups,
   totalCount,
   selectedGroupId,
-  expanded,
-  onToggle,
   onSelect,
+  trending,
 }: {
   groups: FeedGroupOption[];
   totalCount: number;
   selectedGroupId: string | null;
-  expanded: boolean;
-  onToggle: () => void;
   onSelect: (groupId: string) => void;
+  trending: TrendingEntryDTO[];
 }) {
+  const [groupFilterExpanded, setGroupFilterExpanded] = useState(true);
   const optionClassName =
     "flex w-full items-center justify-between rounded-sm px-3 py-2 text-left text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(59,130,246,0.28)]";
 
@@ -29,24 +32,26 @@ export function GroupFilterSidebar({
       className="w-full lg:h-full"
     >
       <div className="panel-raised rounded-sm border border-[color:var(--line)] p-4 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
-        <div className="mb-4 flex items-center justify-between">
-          {expanded ? (
-            <h2 className="inline-flex items-center gap-2 font-semibold text-[var(--foreground)]">
-              <span>分组筛选</span>
-            </h2>
-          ) : null}
-          <button
-            type="button"
-            aria-expanded={expanded}
-            aria-label={expanded ? "收起分组筛选" : "展开分组筛选"}
-            onClick={onToggle}
-            className="text-[var(--text-3)] transition hover:text-[var(--text-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(59,130,246,0.28)]"
-          >
-            {expanded ? "«" : "»"}
-          </button>
+        <div className="mb-4">
+          <h2>
+            <button
+              type="button"
+              aria-expanded={groupFilterExpanded}
+              onClick={() => setGroupFilterExpanded((current) => !current)}
+              className="flex w-full items-center justify-between gap-2 text-left font-semibold text-[var(--foreground)] transition hover:text-[var(--accent-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(59,130,246,0.28)]"
+            >
+              <span className="inline-flex items-center gap-2">
+                <IconFilter size={14} strokeWidth={2.2} className="text-[var(--accent-strong)]" />
+                <span>分组筛选</span>
+              </span>
+              <span aria-hidden className="text-[var(--text-3)]">
+                {groupFilterExpanded ? "▾" : "▸"}
+              </span>
+            </button>
+          </h2>
         </div>
 
-        {expanded ? (
+        {groupFilterExpanded ? (
           <div className="space-y-2">
             <button
               type="button"
@@ -86,6 +91,8 @@ export function GroupFilterSidebar({
             })}
           </div>
         ) : null}
+
+        {trending.length > 0 ? <TrendingBoard entries={trending} /> : null}
       </div>
     </aside>
   );

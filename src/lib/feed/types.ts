@@ -2,6 +2,7 @@ import type { GroupBadge } from "@/lib/groups/badge";
 
 export type FeedRange = "today" | "3d" | "7d" | "1m" | "1y" | "all";
 export type FeedSort = "time_desc" | "score_desc";
+export type FeedEntryType = "single" | "cluster";
 
 export type FeedFilters = {
   range: FeedRange;
@@ -14,6 +15,8 @@ export type FeedFilters = {
   sourceId: string | null;
   title: string | null;
   tag: string | null;
+  entryId: string | null;
+  entryType: FeedEntryType | null;
 };
 
 export const DEFAULT_FEED_PAGE_SIZE = 50;
@@ -199,4 +202,22 @@ export type SourceConfig = {
   aiParsingEnabled: boolean;
   aggregationEnabled?: boolean;
   aggregationDetectionEnabled?: boolean;
+};
+
+/**
+ * 实时榜单单条 DTO
+ * 侧边栏展示用的精简视图：仅含标题、来源/聚合标记、跳转 URL 与排序用分数。
+ */
+export type TrendingEntryDTO = {
+  id: string;
+  type: "single" | "cluster";
+  title: string;
+  sourceName?: string;
+  originalUrl?: string;
+  group?: GroupBadge | null;
+  createdAt: string;
+  recommendScore: number;
+  trendingScore: number;
+  itemCount: number;
+  sourceCount: number;
 };

@@ -453,6 +453,7 @@ export function FeedPanel({
   initialGroupTotalCount,
   availableSources = [],
   popularTags: initialPopularTags = [],
+  trending = [],
 }: FeedPanelProps) {
   const router = useRouter();
   const isAdmin = useClientAdminSession(initialIsAdmin, hydrateAdminClient);
@@ -499,7 +500,6 @@ export function FeedPanel({
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(
     Boolean(initialStartDate || initialEndDate || initialPublishedStartDate || initialPublishedEndDate || initialSourceId || initialTitle),
   );
-  const [groupSidebarExpanded, setGroupSidebarExpanded] = useState(true);
   const [readingProgress, setReadingProgress] = useState<ReadingProgress | null>(null);
   const [isReadingProgressHidden, setIsReadingProgressHidden] = useState(false);
   const [pendingRestoreEntryId, setPendingRestoreEntryId] = useState<string | null>(null);
@@ -1593,8 +1593,8 @@ export function FeedPanel({
       contentClassName="gap-5 sm:gap-6"
       contentPaddingClassName="px-4 pt-3 pb-6 sm:px-6 sm:pt-4 sm:pb-8 lg:px-8 lg:pt-4 lg:pb-10"
       sidebarContainerClassName={cx(
-        "flex-shrink-0 transition-all duration-300",
-        groupSidebarExpanded ? "lg:w-56" : "lg:w-12",
+        "flex-shrink-0",
+        "lg:w-64",
       )}
       sidebarVisibility="lg"
       sidebar={
@@ -1602,9 +1602,8 @@ export function FeedPanel({
           groups={groups}
           totalCount={groupTotalCount}
           selectedGroupId={groupId}
-          expanded={groupSidebarExpanded}
-          onToggle={() => setGroupSidebarExpanded((current) => !current)}
           onSelect={changeGroup}
+          trending={trending}
         />
       }
     >

@@ -133,6 +133,8 @@ export function resolveFeedFilters(
     sourceId: normalizeFeedFilterId(input.sourceId),
     title: input.title?.trim() ? input.title.trim() : null,
     tag: normalizeFeedFilterId(input.tag),
+    entryId: normalizeFeedFilterId(input.entryId),
+    entryType: input.entryType === "single" || input.entryType === "cluster" ? input.entryType : null,
     publishedStart,
     publishedEnd,
     publishedRangeStart: publishedStart ? buildDateBoundary(publishedStart, "start", timeZoneOffsetMinutes) : null,
