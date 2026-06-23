@@ -217,6 +217,7 @@ const TAG_TONES = [
   { bg: "#f4f4f5", border: "#71717a", text: "#3f3f46", active: "#52525b" },
 ];
 const POPULAR_TAG_DISPLAY_LIMIT = 12;
+const POPULAR_TAG_DISTRIBUTE_THRESHOLD = 0.75;
 
 function getTagToneKey(value: string) {
   let hash = 2166136261;
@@ -500,12 +501,14 @@ export function FeedPanel({
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(
     Boolean(initialStartDate || initialEndDate || initialPublishedStartDate || initialPublishedEndDate || initialSourceId || initialTitle),
   );
+  const [shouldDistributePopularTags, setShouldDistributePopularTags] = useState(false);
   const [readingProgress, setReadingProgress] = useState<ReadingProgress | null>(null);
   const [isReadingProgressHidden, setIsReadingProgressHidden] = useState(false);
   const [pendingRestoreEntryId, setPendingRestoreEntryId] = useState<string | null>(null);
   const progressWriteTimerRef = useRef<number | null>(null);
   const lastSavedProgressRef = useRef<string | null>(null);
   const pendingScrollToTopRef = useRef(false);
+  const popularTagListRef = useRef<HTMLDivElement | null>(null);
   const initialQuery: FeedQueryState = {
     range: initialRange,
     sort: initialSort,
@@ -583,6 +586,40 @@ export function FeedPanel({
   const visiblePopularTags = useMemo(() => {
     return popularTags.slice(0, POPULAR_TAG_DISPLAY_LIMIT);
   }, [popularTags]);
+
+  useEffect(() => {
+    const element = popularTagListRef.current;
+
+    if (!element || visiblePopularTags.length === 0) {
+      setShouldDistributePopularTags(false);
+      return;
+    }
+
+    const measure = () => {
+      const children = Array.from(element.children).filter(
+        (child): child is HTMLElement => child instanceof HTMLElement,
+      );
+      const computedStyle = window.getComputedStyle(element);
+      const gap = Number.parseFloat(computedStyle.columnGap || computedStyle.gap || "0") || 0;
+      const naturalWidth = children.reduce((sum, child) => sum + child.offsetWidth, 0)
+        + Math.max(0, children.length - 1) * gap;
+      const shouldDistribute = element.clientWidth > 0
+        && naturalWidth >= element.clientWidth * POPULAR_TAG_DISTRIBUTE_THRESHOLD;
+
+      setShouldDistributePopularTags((current) => current === shouldDistribute ? current : shouldDistribute);
+    };
+
+    measure();
+
+    const resizeObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    resizeObserver?.observe(element);
+    window.addEventListener("resize", measure);
+
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [visiblePopularTags]);
   const visibleClusterOptions = useMemo(() => {
     return clusterOptions.filter((cluster) => {
       if (cluster.status !== "active") {
@@ -1615,7 +1652,13 @@ export function FeedPanel({
             className="w-full min-w-0"
           >
             <div className="w-full min-w-0">
-              <div className="flex w-full min-w-0 flex-wrap items-center gap-1.5 lg:justify-between">
+              <div
+                ref={popularTagListRef}
+                className={cx(
+                  "flex max-h-[4.375rem] w-full min-w-0 flex-wrap items-center justify-start gap-1.5 overflow-hidden",
+                  shouldDistributePopularTags ? "lg:justify-between" : "",
+                )}
+              >
                 {visiblePopularTags.map((option, index) => {
                   const isActive = option.normalized === tag;
 
