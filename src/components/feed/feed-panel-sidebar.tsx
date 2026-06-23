@@ -52,7 +52,7 @@ export function GroupFilterSidebar({
         </div>
 
         {groupFilterExpanded ? (
-          <div className="space-y-2">
+          <div className="space-y-1">
             <button
               type="button"
               aria-pressed={selectedGroupId === null}
