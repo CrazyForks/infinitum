@@ -19,7 +19,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 import { FeedPanel } from "@/components/feed/feed-panel";
-import type { FeedEntryDTO, FeedGroupOption, FeedRange, FeedSort, FeedSourceOption } from "@/lib/feed/types";
+import type { FeedEntryDTO, FeedGroupOption, FeedRange, FeedSort, FeedSourceOption, FeedTagOption } from "@/lib/feed/types";
 
 type TestingRenderParameters = Parameters<typeof testingRender>;
 
@@ -696,6 +696,40 @@ describe("FeedPanel", () => {
       expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=today&sort=time_desc&tag=ios");
     });
     expect(getSelectRoot("创建时间")).toHaveTextContent("当天");
+  });
+
+  it("renders enough popular tags for the two-row desktop strip", () => {
+    const popularTags: FeedTagOption[] = Array.from({ length: 34 }, (_, index) => {
+      const tagNumber = index + 1;
+
+      return {
+        name: `Tag ${tagNumber}`,
+        normalized: `tag-${tagNumber}`,
+        count: 100 - index,
+      };
+    });
+
+    render(
+      <FeedPanel
+        initialItems={initialEntries}
+        initialRange="today"
+        initialCreatedRangeExplicit={false}
+        initialSort="time_desc"
+        initialStartDate={null}
+        initialEndDate={null}
+        initialNextCursor={null}
+        initialStatus={null}
+        isAdmin={false}
+        popularTags={popularTags}
+      />,
+    );
+
+    const tagButtons = screen.getAllByRole("button", { name: /筛选标签：/ });
+
+    expect(tagButtons).toHaveLength(32);
+    expect(screen.getByRole("button", { name: "筛选标签：Tag 32，69 条" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "筛选标签：Tag 33，68 条" })).not.toBeInTheDocument();
+    expect(tagButtons[0]?.parentElement).not.toHaveClass("lg:justify-between");
   });
 
   it("keeps the created time range when the user changes it before applying advanced filters", async () => {

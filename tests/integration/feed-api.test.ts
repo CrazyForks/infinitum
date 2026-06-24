@@ -288,6 +288,49 @@ describe("/api/feed", () => {
     vi.useRealTimers();
   });
 
+  it("returns the same number of popular tags as the two-row homepage display cap can render", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-10T12:00:00.000Z"));
+
+    const source = await prisma.source.findFirstOrThrow();
+    const taggedItems = Array.from({ length: 40 }, (_, index) => {
+      const itemNumber = String(index + 1).padStart(2, "0");
+
+      return {
+        id: `popular-tag-item-${itemNumber}`,
+        sourceId: source.id,
+        originalUrl: `https://api.example.com/popular-tag-${itemNumber}`,
+        canonicalUrl: `https://api.example.com/popular-tag-${itemNumber}`,
+        urlHash: `popular-tag-hash-${itemNumber}`,
+        dedupeSignature: `api feed|popular tag ${itemNumber}|2026-04-10t07:00:00.000z`,
+        originalTitle: `Popular Tag ${itemNumber}`,
+        translatedTitle: `热门标签 ${itemNumber}`,
+        author: "Author Tags",
+        publishedAt: new Date("2026-04-10T07:00:00.000Z"),
+        summaryText: `热门标签摘要 ${itemNumber}`,
+        status: "processed",
+        moderationStatus: "allowed",
+        qualityScore: 70,
+        qualityRationale: "热门标签测试",
+        language: "en",
+        createdAt: new Date(`2026-04-10T07:${itemNumber}:00.000Z`),
+      };
+    });
+
+    await prisma.item.createMany({ data: taggedItems });
+    await Promise.all(taggedItems.map((item, index) => replaceItemTags(item.id, [`Tag ${String(index + 1).padStart(2, "0")}`])));
+
+    const { GET } = await import("@/app/api/feed/route");
+    const response = await GET(
+      new Request("http://localhost/api/feed?range=7d"),
+    );
+    const json = await response.json();
+
+    expect(json.popularTags).toHaveLength(32);
+
+    vi.useRealTimers();
+  });
+
   it("filters single feed items by tag", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-10T12:00:00.000Z"));

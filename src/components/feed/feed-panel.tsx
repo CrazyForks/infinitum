@@ -216,8 +216,7 @@ const TAG_TONES = [
   { bg: "#fdf2f8", border: "#ec4899", text: "#be185d", active: "#db2777" },
   { bg: "#f4f4f5", border: "#71717a", text: "#3f3f46", active: "#52525b" },
 ];
-const POPULAR_TAG_DISPLAY_LIMIT = 12;
-const POPULAR_TAG_DISTRIBUTE_THRESHOLD = 0.75;
+const POPULAR_TAG_DISPLAY_LIMIT = 32;
 
 function getTagToneKey(value: string) {
   let hash = 2166136261;
@@ -255,6 +254,11 @@ type ReadingProgress = {
   page: number;
   size: number;
   updatedAt: string;
+};
+
+type PopularTagLayoutRow = {
+  keys: string[];
+  shouldDistribute: boolean;
 };
 
 function buildReadingProgressFilterKey(query: FeedQueryState) {
@@ -501,7 +505,7 @@ export function FeedPanel({
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(
     Boolean(initialStartDate || initialEndDate || initialPublishedStartDate || initialPublishedEndDate || initialSourceId || initialTitle),
   );
-  const [shouldDistributePopularTags, setShouldDistributePopularTags] = useState(false);
+  const [popularTagLayoutRows, setPopularTagLayoutRows] = useState<PopularTagLayoutRow[]>([]);
   const [readingProgress, setReadingProgress] = useState<ReadingProgress | null>(null);
   const [isReadingProgressHidden, setIsReadingProgressHidden] = useState(false);
   const [pendingRestoreEntryId, setPendingRestoreEntryId] = useState<string | null>(null);
@@ -591,7 +595,7 @@ export function FeedPanel({
     const element = popularTagListRef.current;
 
     if (!element || visiblePopularTags.length === 0) {
-      setShouldDistributePopularTags(false);
+      setPopularTagLayoutRows([]);
       return;
     }
 
@@ -599,14 +603,28 @@ export function FeedPanel({
       const children = Array.from(element.children).filter(
         (child): child is HTMLElement => child instanceof HTMLElement,
       );
+      if (element.clientWidth <= 0 || children.length === 0) {
+        setPopularTagLayoutRows([]);
+        return;
+      }
+
       const computedStyle = window.getComputedStyle(element);
       const gap = Number.parseFloat(computedStyle.columnGap || computedStyle.gap || "0") || 0;
-      const naturalWidth = children.reduce((sum, child) => sum + child.offsetWidth, 0)
-        + Math.max(0, children.length - 1) * gap;
-      const shouldDistribute = element.clientWidth > 0
-        && naturalWidth >= element.clientWidth * POPULAR_TAG_DISTRIBUTE_THRESHOLD;
+      const narrowestTagWidth = Math.min(...children.map((child) => child.offsetWidth));
+      const nextTagFitWidth = narrowestTagWidth + gap;
+      const visibleRowTops = [...new Set(children.map((child) => child.offsetTop))].sort((left, right) => left - right).slice(0, 2);
+      const visibleRows = visibleRowTops.map((rowTop) => children.filter((child) => child.offsetTop === rowTop));
+      const nextRows = visibleRows.map((row) => {
+        const keys = row.map((child) => child.dataset.tagKey).filter((key): key is string => Boolean(key));
+        const rowWidth = row.reduce((sum, child) => sum + child.offsetWidth, 0)
+          + Math.max(0, row.length - 1) * gap;
+        const remainingWidth = element.clientWidth - rowWidth;
+        const shouldDistribute = keys.length > 1 && remainingWidth < nextTagFitWidth;
 
-      setShouldDistributePopularTags((current) => current === shouldDistribute ? current : shouldDistribute);
+        return { keys, shouldDistribute };
+      });
+
+      setPopularTagLayoutRows((current) => JSON.stringify(current) === JSON.stringify(nextRows) ? current : nextRows);
     };
 
     measure();
@@ -620,6 +638,21 @@ export function FeedPanel({
       window.removeEventListener("resize", measure);
     };
   }, [visiblePopularTags]);
+  const visiblePopularTagRows = useMemo(() => {
+    if (popularTagLayoutRows.length === 0) {
+      return [{ options: visiblePopularTags, shouldDistribute: false }];
+    }
+
+    const optionByKey = new Map(visiblePopularTags.map((option) => [option.normalized, option]));
+    const rows = popularTagLayoutRows
+      .map((row) => ({
+        options: row.keys.map((key) => optionByKey.get(key)).filter((option): option is FeedTagOption => Boolean(option)),
+        shouldDistribute: row.shouldDistribute,
+      }))
+      .filter((row) => row.options.length > 0);
+
+    return rows.length > 0 ? rows : [{ options: visiblePopularTags, shouldDistribute: false }];
+  }, [popularTagLayoutRows, visiblePopularTags]);
   const visibleClusterOptions = useMemo(() => {
     return clusterOptions.filter((cluster) => {
       if (cluster.status !== "active") {
@@ -1595,7 +1628,7 @@ export function FeedPanel({
   const neutralBadgeClassName =
     "inline-flex items-center rounded-sm border border-[color:var(--line)] bg-[var(--surface-muted)] px-2 py-1 text-xs text-[var(--muted)]";
   const denseCardClassName =
-    "w-full rounded-lg border border-[color:var(--line)] bg-[var(--surface)] px-4 py-4 shadow-[var(--shadow-sm)] transition hover:border-[color:var(--line-strong)] hover:shadow-md sm:px-6 sm:py-5";
+    "w-full min-w-0 overflow-hidden rounded-lg border border-[color:var(--line)] bg-[var(--surface)] px-4 py-4 shadow-[var(--shadow-sm)] transition hover:border-[color:var(--line-strong)] hover:shadow-md sm:px-6 sm:py-5";
   const cardMetaRowClassName = "flex items-center gap-x-3 overflow-hidden text-sm text-[var(--muted)]";
   const cardSummaryClassName = "line-clamp-5 text-sm leading-6 text-[var(--muted)]";
   const clickableCardSummaryClassName =
@@ -1651,39 +1684,65 @@ export function FeedPanel({
             aria-label="热门标签"
             className="w-full min-w-0"
           >
-            <div className="w-full min-w-0">
+            <div className="relative w-full min-w-0">
               <div
                 ref={popularTagListRef}
-                className={cx(
-                  "flex max-h-[4.375rem] w-full min-w-0 flex-wrap items-center justify-start gap-1.5 overflow-hidden",
-                  shouldDistributePopularTags ? "lg:justify-between" : "",
-                )}
+                aria-hidden="true"
+                className="pointer-events-none invisible absolute inset-x-0 top-0 flex w-full min-w-0 flex-wrap items-center justify-start gap-1.5 overflow-visible"
               >
                 {visiblePopularTags.map((option, index) => {
                   const isActive = option.normalized === tag;
 
                   return (
-                    <button
+                    <span
                       key={option.normalized}
-                      type="button"
-                      onClick={() => toggleTag(option.normalized)}
-                      disabled={isPending}
-                      aria-pressed={isActive}
-                      aria-label={`筛选标签：${option.name}，${option.count} 条`}
-                      title={`${option.name} ${option.count}`}
+                      data-tag-key={option.normalized}
                       style={getTagButtonStyle(option, index, isActive)}
-                      className={cx(
-                        "inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-sm border px-2 text-xs font-semibold transition",
-                        "hover:-translate-y-0.5 hover:shadow-[var(--shadow-sm)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(59,130,246,0.28)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)]",
-                        "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-none",
-                        isActive ? "shadow-[var(--shadow-sm)]" : "",
-                      )}
+                      className="inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-sm border px-2 text-xs font-semibold"
                     >
                       <span>{option.name}</span>
                       <span className="shrink-0 text-[11px] font-bold opacity-75">{option.count}</span>
-                    </button>
+                    </span>
                   );
                 })}
+              </div>
+              <div className="grid max-h-[4.375rem] w-full min-w-0 gap-1.5 overflow-hidden">
+                {visiblePopularTagRows.map((row, rowIndex) => (
+                  <div
+                    key={`popular-tag-row-${rowIndex}`}
+                    className={cx(
+                      "flex h-8 w-full min-w-0 items-center gap-1.5 overflow-hidden",
+                      row.shouldDistribute ? "lg:justify-between" : "justify-start",
+                    )}
+                  >
+                    {row.options.map((option, index) => {
+                      const isActive = option.normalized === tag;
+                      const toneIndex = visiblePopularTags.findIndex((tagOption) => tagOption.normalized === option.normalized);
+
+                      return (
+                        <button
+                          key={option.normalized}
+                          type="button"
+                          onClick={() => toggleTag(option.normalized)}
+                          disabled={isPending}
+                          aria-pressed={isActive}
+                          aria-label={`筛选标签：${option.name}，${option.count} 条`}
+                          title={`${option.name} ${option.count}`}
+                          style={getTagButtonStyle(option, toneIndex >= 0 ? toneIndex : index, isActive)}
+                          className={cx(
+                            "inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-sm border px-2 text-xs font-semibold transition",
+                            "hover:shadow-[var(--shadow-sm)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(59,130,246,0.28)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)]",
+                            "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:shadow-none",
+                            isActive ? "shadow-[var(--shadow-sm)]" : "",
+                          )}
+                        >
+                          <span>{option.name}</span>
+                          <span className="shrink-0 text-[11px] font-bold opacity-75">{option.count}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ))}
               </div>
             </div>
           </section>
@@ -1692,7 +1751,7 @@ export function FeedPanel({
         <section
           role="region"
           aria-label="信息流筛选"
-          className="panel-raised w-full rounded-sm border border-[color:var(--line)] px-4 py-3 sm:px-6 sm:py-4"
+          className="panel-raised w-full min-w-0 overflow-hidden rounded-sm border border-[color:var(--line)] px-4 py-3 sm:px-6 sm:py-4"
         >
           <div className="flex flex-col gap-3">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -1924,7 +1983,7 @@ export function FeedPanel({
           </StatusBanner>
         ) : null}
 
-        <section role="region" aria-label="信息流结果" className="space-y-2.5">
+        <section role="region" aria-label="信息流结果" className="min-w-0 space-y-2.5">
           {/* 全选按钮（仅管理员可见） */}
           {isAdmin && items.length > 0 && (
             <div className="flex items-center gap-2 px-1">

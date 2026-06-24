@@ -44,6 +44,7 @@ import type {
 } from "@/lib/feed/types";
 
 const DISPLAYABLE_MODERATION_STATUSES = ["allowed", "restored"] as const;
+const POPULAR_FEED_TAG_QUERY_LIMIT = 32;
 const isClusterEntityFilteringEnabled = () => process.env.FEED_CLUSTER_ENTITY_FILTERING_ENABLED !== "false";
 const aggregationParentSelect = {
   id: true,
@@ -1728,7 +1729,7 @@ async function listPopularFeedTags(
     publishedRangeStart: Date | null;
     publishedRangeEnd: Date | null;
   },
-  limit = 20,
+  limit = POPULAR_FEED_TAG_QUERY_LIMIT,
 ): Promise<FeedTagOption[]> {
   const effectiveFilters = {
     ...filters,
