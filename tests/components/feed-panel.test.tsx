@@ -732,6 +732,84 @@ describe("FeedPanel", () => {
     expect(tagButtons[0]?.parentElement).not.toHaveClass("lg:justify-between");
   });
 
+  it("distributes a popular tag row when the next actual tag does not fit", async () => {
+    const popularTags: FeedTagOption[] = [
+      { name: "开源", normalized: "open-source", count: 29 },
+      { name: "Agent", normalized: "agent", count: 21 },
+      { name: "Anthropic", normalized: "anthropic", count: 17 },
+      { name: "OpenAI", normalized: "openai", count: 14 },
+      { name: "大模型", normalized: "large-model", count: 12 },
+      { name: "Meta", normalized: "meta", count: 10 },
+      { name: "字节跳动", normalized: "bytedance", count: 10 },
+      { name: "AI", normalized: "ai", count: 8 },
+      { name: "豆包", normalized: "doubao", count: 8 },
+      { name: "Google", normalized: "google", count: 7 },
+      { name: "AI安全", normalized: "ai-safety", count: 6 },
+      { name: "AI编程", normalized: "ai-programming", count: 6 },
+      { name: "Microsoft", normalized: "microsoft", count: 6 },
+    ];
+    const tagWidths = new Map<string, number>([
+      ["open-source", 59],
+      ["agent", 65],
+      ["anthropic", 89],
+      ["openai", 71],
+      ["large-model", 71],
+      ["meta", 59],
+      ["bytedance", 83],
+      ["ai", 42],
+      ["doubao", 54],
+      ["google", 66],
+      ["ai-safety", 66],
+      ["ai-programming", 66],
+      ["microsoft", 84],
+    ]);
+    const tagOrder = new Map(popularTags.map((tag, index) => [tag.normalized, index]));
+    const originalGetComputedStyle = window.getComputedStyle.bind(window);
+
+    vi.spyOn(window, "getComputedStyle").mockImplementation((element) => {
+      const computedStyle = originalGetComputedStyle(element);
+      if (element instanceof HTMLElement && element.getAttribute("aria-hidden") === "true") {
+        Object.defineProperty(computedStyle, "columnGap", { configurable: true, value: "6px" });
+        Object.defineProperty(computedStyle, "gap", { configurable: true, value: "6px" });
+      }
+
+      return computedStyle;
+    });
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function clientWidthMock() {
+      return this.getAttribute("aria-hidden") === "true" ? 936 : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockImplementation(function offsetWidthMock() {
+      const tagKey = this.dataset.tagKey;
+      return tagKey ? tagWidths.get(tagKey) ?? 0 : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, "offsetTop", "get").mockImplementation(function offsetTopMock() {
+      const tagKey = this.dataset.tagKey;
+      const index = tagKey ? tagOrder.get(tagKey) : undefined;
+      return typeof index === "number" && index >= 12 ? 38 : 0;
+    });
+
+    render(
+      <FeedPanel
+        initialItems={initialEntries}
+        initialRange="today"
+        initialCreatedRangeExplicit={false}
+        initialSort="time_desc"
+        initialStartDate={null}
+        initialEndDate={null}
+        initialNextCursor={null}
+        initialStatus={null}
+        isAdmin={false}
+        popularTags={popularTags}
+      />,
+    );
+
+    const firstRow = screen.getByRole("button", { name: "筛选标签：AI编程，6 条" }).parentElement;
+
+    await waitFor(() => {
+      expect(firstRow).toHaveClass("lg:justify-between");
+    });
+  });
+
   it("keeps the created time range when the user changes it before applying advanced filters", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () =>

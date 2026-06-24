@@ -610,8 +610,6 @@ export function FeedPanel({
 
       const computedStyle = window.getComputedStyle(element);
       const gap = Number.parseFloat(computedStyle.columnGap || computedStyle.gap || "0") || 0;
-      const narrowestTagWidth = Math.min(...children.map((child) => child.offsetWidth));
-      const nextTagFitWidth = narrowestTagWidth + gap;
       const visibleRowTops = [...new Set(children.map((child) => child.offsetTop))].sort((left, right) => left - right).slice(0, 2);
       const visibleRows = visibleRowTops.map((rowTop) => children.filter((child) => child.offsetTop === rowTop));
       const nextRows = visibleRows.map((row) => {
@@ -619,7 +617,10 @@ export function FeedPanel({
         const rowWidth = row.reduce((sum, child) => sum + child.offsetWidth, 0)
           + Math.max(0, row.length - 1) * gap;
         const remainingWidth = element.clientWidth - rowWidth;
-        const shouldDistribute = keys.length > 1 && remainingWidth < nextTagFitWidth;
+        const lastChild = row.at(-1);
+        const nextChild = lastChild ? children[children.indexOf(lastChild) + 1] : undefined;
+        const nextTagFitWidth = nextChild ? nextChild.offsetWidth + gap : 0;
+        const shouldDistribute = keys.length > 1 && nextTagFitWidth > 0 && remainingWidth < nextTagFitWidth;
 
         return { keys, shouldDistribute };
       });
