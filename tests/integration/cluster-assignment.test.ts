@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AiProvider } from "@/lib/ai/provider";
+import { CLUSTER_MERGE_SCAN_CLUSTER_LIMIT } from "@/config/constants";
 import {
   assignItemToCluster,
   detachItemFromCluster,
@@ -18,6 +19,34 @@ describe("cluster assignment", () => {
     await prisma.item.deleteMany();
     await prisma.contentCluster.deleteMany();
     await prisma.source.deleteMany();
+  });
+
+  it("limits cluster merge scans before local pair scoring", async () => {
+    const executeRawSpy = vi.spyOn(prisma, "$executeRaw").mockResolvedValue(0);
+    const findManySpy = vi.spyOn(prisma.contentCluster, "findMany").mockResolvedValue([]);
+
+    try {
+      const result = await executeClusterMerge(undefined, new Date("2026-04-21T10:00:00.000Z"));
+
+      expect(result).toMatchObject({
+        baseClusters: 0,
+        skipped: true,
+      });
+      expect(findManySpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orderBy: [
+            { latestPublishedAt: "desc" },
+            { updatedAt: "desc" },
+            { itemCount: "desc" },
+            { id: "asc" },
+          ],
+          take: CLUSTER_MERGE_SCAN_CLUSTER_LIMIT,
+        }),
+      );
+    } finally {
+      executeRawSpy.mockRestore();
+      findManySpy.mockRestore();
+    }
   });
 
   it("keeps sources with aggregation disabled out of cluster matching", async () => {

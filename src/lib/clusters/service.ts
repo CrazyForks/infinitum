@@ -4,6 +4,7 @@ import {
   CLUSTER_DIRECT_MATCH_MIN_GAP,
   CLUSTER_DIRECT_MATCH_MIN_SCORE,
   CLUSTER_LOOKBACK_MS,
+  CLUSTER_MERGE_SCAN_CLUSTER_LIMIT,
 } from "@/config/constants";
 
 import { createAiProvider, type AiEventSignature, type AiProvider } from "@/lib/ai/provider";
@@ -970,7 +971,13 @@ export async function executeClusterMerge(
         },
       },
     },
-    orderBy: { id: "asc" },
+    orderBy: [
+      { latestPublishedAt: "desc" },
+      { updatedAt: "desc" },
+      { itemCount: "desc" },
+      { id: "asc" },
+    ],
+    take: CLUSTER_MERGE_SCAN_CLUSTER_LIMIT,
   });
   const { candidates: allCandidates, allowedPairs, diagnostics } = buildClusterMergeCandidateSelection(recentClusters);
 
