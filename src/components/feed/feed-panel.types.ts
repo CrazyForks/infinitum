@@ -2,6 +2,7 @@ import type { Dayjs } from "dayjs";
 
 import type {
   ClusterDTO,
+  FeedEntryKey,
   FeedEntryDTO,
   FeedGroupOption,
   FeedPagination,
@@ -31,6 +32,7 @@ export type FeedPanelProps = {
   initialSourceId?: string | null;
   initialTitle?: string | null;
   initialTag?: string | null;
+  initialEntryKeys?: FeedEntryKey[];
   availableGroups?: FeedGroupOption[];
   initialGroupTotalCount?: number;
   availableSources?: FeedSourceOption[];
@@ -49,6 +51,7 @@ export type FeedQueryState = {
   sourceId: string | null;
   title: string | null;
   tag: string | null;
+  entryKeys: FeedEntryKey[];
   createdRangeExplicit?: boolean;
 };
 

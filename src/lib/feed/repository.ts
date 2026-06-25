@@ -1171,7 +1171,7 @@ function buildFeedEntryCandidatesCte(
   `;
 }
 
-function buildEntryCandidateWhereClause(filters: Pick<FeedFilters, "groupId" | "entryId" | "entryType">) {
+function buildEntryCandidateWhereClause(filters: Pick<FeedFilters, "groupId" | "entryId" | "entryType" | "entryKeys">) {
   const clauses: Prisma.Sql[] = [];
 
   if (filters.groupId) {
@@ -1183,7 +1183,11 @@ function buildEntryCandidateWhereClause(filters: Pick<FeedFilters, "groupId" | "
   }
 
   if (filters.entryType) {
-    clauses.push(Prisma.sql`type = ${filters.entryType}`);
+    clauses.push(Prisma.sql`"type" = ${filters.entryType}`);
+  }
+
+  if (filters.entryKeys.length > 0) {
+    clauses.push(Prisma.sql`("type" || ':' || id) IN (${Prisma.join(filters.entryKeys)})`);
   }
 
   return clauses.length > 0
@@ -1595,7 +1599,19 @@ function buildActiveFeedEntryCountCandidatesCte(
   return buildEntityFeedEntryCountCandidatesCte(filters, searchTerm);
 }
 
-function buildFeedEntryOrderBy(sort: FeedFilters["sort"]) {
+function buildFeedEntryOrderBy(sort: FeedFilters["sort"], entryKeys: FeedFilters["entryKeys"] = []) {
+  if (entryKeys.length > 0) {
+    return Prisma.sql`
+      ORDER BY CASE
+        ${Prisma.join(
+          entryKeys.map((entryKey, index) => Prisma.sql`WHEN "type" || ':' || id = ${entryKey} THEN ${index}`),
+          " ",
+        )}
+        ELSE ${entryKeys.length}
+      END ASC, id DESC
+    `;
+  }
+
   if (sort === "score_desc") {
     // 按综合推荐评分降序（AI锚点分 + 访客反馈 + 聚合加权）
     return Prisma.sql`ORDER BY "recommendScore" DESC, "latestPublishedAt" DESC, "itemCount" DESC, id DESC`;
@@ -1829,7 +1845,7 @@ export async function listFeedItems(
         "totalItemCount",
         "recommendScore"
       FROM entry_candidates
-      ${buildFeedEntryOrderBy(filters.sort)}
+      ${buildFeedEntryOrderBy(filters.sort, filters.entryKeys)}
       LIMIT ${pagination.size}
       OFFSET ${pageOffset}
     `);
@@ -2501,6 +2517,7 @@ export async function listTrendingEntries(
       tag: null,
       entryId: null,
       entryType: null,
+      entryKeys: [],
       rangeStart: new Date(lookbackStartMs),
       rangeEnd: null,
       publishedRangeStart: null,

@@ -333,6 +333,86 @@ describe("FeedPanel", () => {
     expect(screen.getByRole("combobox", { name: "移动端分组筛选" })).toBeInTheDocument();
   });
 
+  it("filters the right feed list to all trending entries from the sidebar", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          items: initialEntries,
+          groups: availableGroups,
+          groupTotalCount: 2,
+          popularTags: [],
+          pagination: { page: 1, size: 50, total: 2, totalPages: 1 },
+          nextCursor: null,
+          range: "all" satisfies FeedRange,
+          sort: "time_desc" satisfies FeedSort,
+          start: null,
+          end: null,
+          publishedStart: null,
+          publishedEnd: null,
+          groupId: null,
+          sourceId: null,
+          title: null,
+          tag: null,
+          entryId: null,
+          entryType: null,
+          entryKeys: ["cluster:cluster-1", "single:item-1"],
+        }),
+      ),
+    );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <FeedPanel
+        initialItems={initialEntries}
+        initialRange="7d"
+        initialSort="time_desc"
+        initialStartDate={null}
+        initialEndDate={null}
+        initialNextCursor={null}
+        initialStatus={null}
+        isAdmin={false}
+        availableGroups={availableGroups}
+        initialGroupTotalCount={2}
+        availableSources={availableSources}
+        trending={[
+          {
+            id: "cluster-1",
+            type: "cluster",
+            title: "OpenAI Agent 发布",
+            createdAt: "2026-04-10T09:00:00.000Z",
+            recommendScore: 90,
+            trendingScore: 120,
+            itemCount: 2,
+            sourceCount: 2,
+          },
+          {
+            id: "item-1",
+            type: "single",
+            title: "中文标题",
+            createdAt: "2026-04-09T09:00:00.000Z",
+            recommendScore: 72,
+            trendingScore: 95,
+            itemCount: 1,
+            sourceCount: 1,
+          },
+        ]}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "查看全部" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    const requestedUrl = getFetchUrl(fetchMock.mock.calls[0]![0]);
+    const requestSearch = new URLSearchParams(requestedUrl.split("?")[1]);
+    expect(requestSearch.get("range")).toBeNull();
+    expect(requestSearch.get("sort")).toBe("time_desc");
+    expect(requestSearch.get("entryKeys")).toBe("cluster:cluster-1,single:item-1");
+    expect(screen.getByText("榜单：全部 2 条")).toBeInTheDocument();
+  });
+
   it("keeps the group sidebar visible with an all option when no groups are available", () => {
     render(
       <FeedPanel

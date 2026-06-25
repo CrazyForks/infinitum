@@ -14,8 +14,10 @@ function buildEntryHref(entry: TrendingEntryDTO): string {
 
 export function TrendingBoard({
   entries,
+  onShowAll,
 }: {
   entries: TrendingEntryDTO[];
+  onShowAll: () => void;
 }) {
   if (entries.length === 0) return null;
 
@@ -31,7 +33,13 @@ export function TrendingBoard({
             <IconFlame size={14} strokeWidth={2.2} className="text-[#f97316]" />
             <span>实时榜单</span>
           </span>
-          <span aria-hidden className="w-3 shrink-0" />
+          <button
+            type="button"
+            onClick={onShowAll}
+            className="shrink-0 rounded-sm px-1 text-xs font-medium text-[var(--accent-strong)] transition hover:bg-[var(--accent-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(59,130,246,0.28)]"
+          >
+            查看全部
+          </button>
         </h2>
       </div>
       <ol className="space-y-1">

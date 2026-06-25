@@ -960,6 +960,7 @@ describe("listTrendingEntries", () => {
         tag: null,
         entryId: "item-warmup-1h",
         entryType: "single",
+        entryKeys: [],
       },
       NOW,
     );
@@ -984,6 +985,7 @@ describe("listTrendingEntries", () => {
         tag: null,
         entryId: "cluster-fresh-multi",
         entryType: "cluster",
+        entryKeys: [],
       },
       NOW,
     );
@@ -993,6 +995,31 @@ describe("listTrendingEntries", () => {
       includePopularTags: false,
     });
     expect(clusterFeed.items.map((item) => item.id)).toEqual(["cluster-fresh-multi"]);
+
+    const multiFilters = resolveFeedFilters(
+      {
+        range: "all",
+        sort: "time_desc",
+        start: null,
+        end: null,
+        publishedStart: null,
+        publishedEnd: null,
+        groupId: null,
+        sourceId: null,
+        title: null,
+        tag: null,
+        entryId: null,
+        entryType: null,
+        entryKeys: ["cluster:cluster-fresh-multi", "single:item-warmup-1h"],
+      },
+      NOW,
+    );
+    const multiFeed = await listFeedItems(multiFilters, {
+      page: 1,
+      size: 50,
+      includePopularTags: false,
+    });
+    expect(multiFeed.items.map((item) => item.id)).toEqual(["cluster-fresh-multi", "item-warmup-1h"]);
   });
 
   it("respects the limit argument", async () => {

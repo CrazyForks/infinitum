@@ -3,6 +3,7 @@ import type { GroupBadge } from "@/lib/groups/badge";
 export type FeedRange = "today" | "3d" | "7d" | "1m" | "1y" | "all";
 export type FeedSort = "time_desc" | "score_desc";
 export type FeedEntryType = "single" | "cluster";
+export type FeedEntryKey = `${FeedEntryType}:${string}`;
 
 export type FeedFilters = {
   range: FeedRange;
@@ -17,6 +18,7 @@ export type FeedFilters = {
   tag: string | null;
   entryId: string | null;
   entryType: FeedEntryType | null;
+  entryKeys: FeedEntryKey[];
 };
 
 export const DEFAULT_FEED_PAGE_SIZE = 50;

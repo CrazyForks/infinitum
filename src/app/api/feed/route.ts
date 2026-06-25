@@ -23,6 +23,7 @@ export async function GET(request: Request) {
       tag: filters.tag,
       entryId: filters.entryId,
       entryType: filters.entryType,
+      entryKeys: filters.entryKeys,
     },
     {
       headers: {

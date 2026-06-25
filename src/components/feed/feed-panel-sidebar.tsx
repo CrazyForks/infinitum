@@ -14,12 +14,14 @@ export function GroupFilterSidebar({
   selectedGroupId,
   onSelect,
   trending,
+  onShowAllTrending,
 }: {
   groups: FeedGroupOption[];
   totalCount: number;
   selectedGroupId: string | null;
   onSelect: (groupId: string) => void;
   trending: TrendingEntryDTO[];
+  onShowAllTrending: () => void;
 }) {
   const [groupFilterExpanded, setGroupFilterExpanded] = useState(true);
   const optionClassName =
@@ -92,7 +94,7 @@ export function GroupFilterSidebar({
           </div>
         ) : null}
 
-        {trending.length > 0 ? <TrendingBoard entries={trending} /> : null}
+        {trending.length > 0 ? <TrendingBoard entries={trending} onShowAll={onShowAllTrending} /> : null}
       </div>
     </aside>
   );

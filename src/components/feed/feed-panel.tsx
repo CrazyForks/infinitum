@@ -77,6 +77,7 @@ import { useClientAdminSession } from "@/components/ui/use-client-admin-session"
 import { RANGE_OPTIONS, SORT_OPTIONS } from "@/lib/feed/range";
 import type {
   ClusterDTO,
+  FeedEntryKey,
   FeedClusterPreviewItemDTO,
   FeedEntryDTO,
   FeedGroupOption,
@@ -172,6 +173,10 @@ function getVisibleAuthorLabel(author: string | null | undefined) {
   return normalized.length > 10 ? `${normalized.slice(0, 10)}...` : normalized;
 }
 
+function buildFeedEntryKey(entry: { type: FeedEntryDTO["type"]; id: string }): FeedEntryKey {
+  return `${entry.type}:${entry.id}`;
+}
+
 function GroupBadge({ group }: { group: FeedGroupBadge | null | undefined }) {
   if (!group) {
     return null;
@@ -245,6 +250,41 @@ function getTagButtonStyle(option: FeedTagOption, index: number, isActive: boole
   };
 }
 
+function PopularTagButton({
+  option,
+  toneIndex,
+  isActive,
+  disabled,
+  onSelect,
+}: {
+  option: FeedTagOption;
+  toneIndex: number;
+  isActive: boolean;
+  disabled: boolean;
+  onSelect: (tag: string) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(option.normalized)}
+      disabled={disabled}
+      aria-pressed={isActive}
+      aria-label={`筛选标签：${option.name}，${option.count} 条`}
+      title={`${option.name} ${option.count}`}
+      style={getTagButtonStyle(option, toneIndex, isActive)}
+      className={cx(
+        "inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-sm border px-2 text-xs font-semibold transition",
+        "hover:shadow-[var(--shadow-sm)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(59,130,246,0.28)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)]",
+        "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:shadow-none",
+        isActive ? "shadow-[var(--shadow-sm)]" : "",
+      )}
+    >
+      <span>{option.name}</span>
+      <span className="shrink-0 text-[11px] font-bold opacity-75">{option.count}</span>
+    </button>
+  );
+}
+
 const READING_PROGRESS_STORAGE_KEY = "infinitum.feed.readingProgress.v1";
 
 type ReadingProgress = {
@@ -273,11 +313,19 @@ function buildReadingProgressFilterKey(query: FeedQueryState) {
     sourceId: query.sourceId ?? "",
     title: query.title ?? "",
     tag: query.tag ?? "",
+    entryKeys: query.entryKeys,
   });
 }
 
 function hasAdvancedQueryFilter(query: FeedQueryState) {
-  return Boolean(query.sourceId || query.title || query.tag || query.publishedStartDate || query.publishedEndDate);
+  return Boolean(
+    query.sourceId ||
+      query.title ||
+      query.tag ||
+      query.entryKeys.length > 0 ||
+      query.publishedStartDate ||
+      query.publishedEndDate,
+  );
 }
 
 function normalizeImplicitCreatedRange(query: FeedQueryState): FeedQueryState {
@@ -454,6 +502,7 @@ export function FeedPanel({
   initialSourceId = null,
   initialTitle = null,
   initialTag = null,
+  initialEntryKeys = [],
   availableGroups = [],
   initialGroupTotalCount,
   availableSources = [],
@@ -478,6 +527,7 @@ export function FeedPanel({
   const [titleInput, setTitleInput] = useState<string>(normalizeSearchText(initialTitle) ?? "");
   const [titleFilter, setTitleFilter] = useState<string | null>(normalizeSearchText(initialTitle));
   const [tag, setTag] = useState<string | null>(normalizeOptionalId(initialTag));
+  const [entryKeys, setEntryKeys] = useState<FeedEntryKey[]>(initialEntryKeys);
   const [status, setStatus] = useState<FetchRunSnapshot | null>(initialStatus);
   const [groups, setGroups] = useState<FeedGroupOption[]>(availableGroups);
   const [popularTags, setPopularTags] = useState<FeedTagOption[]>(initialPopularTags);
@@ -524,6 +574,7 @@ export function FeedPanel({
     sourceId: normalizeOptionalId(initialSourceId),
     title: normalizeSearchText(initialTitle),
     tag: normalizeOptionalId(initialTag),
+    entryKeys: initialEntryKeys,
     createdRangeExplicit: initialCreatedRangeExplicit,
   };
   const [appliedQuery, setAppliedQuery] = useState<FeedQueryState>(initialQuery);
@@ -549,6 +600,7 @@ export function FeedPanel({
       sourceId: appliedQuery.sourceId,
       title: appliedQuery.title,
       tag: appliedQuery.tag,
+      entryKeys: appliedQuery.entryKeys,
     }),
     [appliedQuery],
   );
@@ -585,8 +637,24 @@ export function FeedPanel({
       filters.push(`标签：${popularTags.find((option) => option.normalized === tag)?.name ?? tag}`);
     }
 
+    if (entryKeys.length > 0) {
+      filters.push(`榜单：全部 ${entryKeys.length} 条`);
+    }
+
     return filters;
-  }, [availableGroups, availableSources, groupId, popularTags, sourceId, summary.publishedRangeLabel, summary.rangeLabel, summary.sortLabel, tag, titleFilter]);
+  }, [
+    availableGroups,
+    availableSources,
+    entryKeys.length,
+    groupId,
+    popularTags,
+    sourceId,
+    summary.publishedRangeLabel,
+    summary.rangeLabel,
+    summary.sortLabel,
+    tag,
+    titleFilter,
+  ]);
   const visiblePopularTags = useMemo(() => {
     return popularTags.slice(0, POPULAR_TAG_DISPLAY_LIMIT);
   }, [popularTags]);
@@ -641,7 +709,7 @@ export function FeedPanel({
   }, [visiblePopularTags]);
   const visiblePopularTagRows = useMemo(() => {
     if (popularTagLayoutRows.length === 0) {
-      return [{ options: visiblePopularTags, shouldDistribute: false }];
+      return [];
     }
 
     const optionByKey = new Map(visiblePopularTags.map((option) => [option.normalized, option]));
@@ -652,7 +720,7 @@ export function FeedPanel({
       }))
       .filter((row) => row.options.length > 0);
 
-    return rows.length > 0 ? rows : [{ options: visiblePopularTags, shouldDistribute: false }];
+    return rows;
   }, [popularTagLayoutRows, visiblePopularTags]);
   const visibleClusterOptions = useMemo(() => {
     return clusterOptions.filter((cluster) => {
@@ -746,6 +814,7 @@ export function FeedPanel({
     sourceId,
     title: titleFilter,
     tag,
+    entryKeys,
     createdRangeExplicit,
     ...overrides,
   });
@@ -810,6 +879,7 @@ export function FeedPanel({
     setTitleInput("");
     setTitleFilter(null);
     setTag(null);
+    setEntryKeys([]);
   };
 
   const toggleTag = (nextTag: string) => {
@@ -817,6 +887,46 @@ export function FeedPanel({
     const selectedTag = normalizedTag && normalizedTag !== tag ? normalizedTag : null;
     setTag(selectedTag);
     loadFeed(buildQuery({ tag: selectedTag }), 1, pageSize, { scrollToTop: true });
+  };
+
+  const showAllTrendingEntries = () => {
+    const nextEntryKeys = trending.map(buildFeedEntryKey);
+
+    if (nextEntryKeys.length === 0) {
+      return;
+    }
+
+    setRange("all");
+    setCreatedRangeExplicit(false);
+    setStartDate(null);
+    setEndDate(null);
+    setPublishedStartDate(null);
+    setPublishedEndDate(null);
+    setGroupId(null);
+    setSourceId(null);
+    setTitleInput("");
+    setTitleFilter(null);
+    setTag(null);
+    setEntryKeys(nextEntryKeys);
+
+    loadFeed(
+      buildQuery({
+        range: "all",
+        startDate: null,
+        endDate: null,
+        publishedStartDate: null,
+        publishedEndDate: null,
+        groupId: null,
+        sourceId: null,
+        title: null,
+        tag: null,
+        entryKeys: nextEntryKeys,
+        createdRangeExplicit: false,
+      }),
+      1,
+      pageSize,
+      { scrollToTop: true },
+    );
   };
 
   const refresh = () => {
@@ -1675,6 +1785,7 @@ export function FeedPanel({
           selectedGroupId={groupId}
           onSelect={changeGroup}
           trending={trending}
+          onShowAllTrending={showAllTrendingEntries}
         />
       }
     >
@@ -1707,44 +1818,52 @@ export function FeedPanel({
                   );
                 })}
               </div>
-              <div className="grid max-h-[4.375rem] w-full min-w-0 gap-1.5 overflow-hidden">
-                {visiblePopularTagRows.map((row, rowIndex) => (
-                  <div
-                    key={`popular-tag-row-${rowIndex}`}
-                    className={cx(
-                      "flex h-8 w-full min-w-0 items-center gap-1.5 overflow-hidden",
-                      row.shouldDistribute ? "lg:justify-between" : "justify-start",
-                    )}
-                  >
-                    {row.options.map((option, index) => {
-                      const isActive = option.normalized === tag;
-                      const toneIndex = visiblePopularTags.findIndex((tagOption) => tagOption.normalized === option.normalized);
+              {visiblePopularTagRows.length === 0 ? (
+                <div className="flex max-h-[4.375rem] w-full min-w-0 flex-wrap items-center gap-1.5 overflow-hidden">
+                  {visiblePopularTags.map((option, index) => {
+                    const isActive = option.normalized === tag;
 
-                      return (
-                        <button
-                          key={option.normalized}
-                          type="button"
-                          onClick={() => toggleTag(option.normalized)}
-                          disabled={isPending}
-                          aria-pressed={isActive}
-                          aria-label={`筛选标签：${option.name}，${option.count} 条`}
-                          title={`${option.name} ${option.count}`}
-                          style={getTagButtonStyle(option, toneIndex >= 0 ? toneIndex : index, isActive)}
-                          className={cx(
-                            "inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-sm border px-2 text-xs font-semibold transition",
-                            "hover:shadow-[var(--shadow-sm)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(59,130,246,0.28)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)]",
-                            "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:shadow-none",
-                            isActive ? "shadow-[var(--shadow-sm)]" : "",
-                          )}
-                        >
-                          <span>{option.name}</span>
-                          <span className="shrink-0 text-[11px] font-bold opacity-75">{option.count}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                ))}
-              </div>
+                    return (
+                      <PopularTagButton
+                        key={option.normalized}
+                        option={option}
+                        toneIndex={index}
+                        isActive={isActive}
+                        disabled={isPending}
+                        onSelect={toggleTag}
+                      />
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="grid max-h-[4.375rem] w-full min-w-0 gap-1.5 overflow-hidden">
+                  {visiblePopularTagRows.map((row, rowIndex) => (
+                    <div
+                      key={`popular-tag-row-${rowIndex}`}
+                      className={cx(
+                        "flex h-8 w-full min-w-0 items-center gap-1.5 overflow-hidden",
+                        row.shouldDistribute ? "lg:justify-between" : "justify-start",
+                      )}
+                    >
+                      {row.options.map((option, index) => {
+                        const isActive = option.normalized === tag;
+                        const toneIndex = visiblePopularTags.findIndex((tagOption) => tagOption.normalized === option.normalized);
+
+                        return (
+                          <PopularTagButton
+                            key={option.normalized}
+                            option={option}
+                            toneIndex={toneIndex >= 0 ? toneIndex : index}
+                            isActive={isActive}
+                            disabled={isPending}
+                            onSelect={toggleTag}
+                          />
+                        );
+                      })}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </section>
         ) : null}

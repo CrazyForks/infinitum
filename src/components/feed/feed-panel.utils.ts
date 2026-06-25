@@ -141,6 +141,7 @@ export function buildFeedSearch(
     sourceId,
     title,
     tag,
+    entryKeys,
     createdRangeExplicit = true,
   }: FeedQueryState,
   pagination?: {
@@ -194,6 +195,10 @@ export function buildFeedSearch(
 
   if (normalizedTag) {
     search.set("tag", normalizedTag);
+  }
+
+  if (entryKeys.length > 0) {
+    search.set("entryKeys", entryKeys.join(","));
   }
 
   if (page > 1) {

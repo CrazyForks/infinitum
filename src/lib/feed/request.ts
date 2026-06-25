@@ -2,6 +2,7 @@ import { DEFAULT_FEED_PAGE_SIZE, type FeedFilters, type FeedRange } from "@/lib/
 import {
   isFeedRange,
   isFeedSort,
+  normalizeFeedEntryKeys,
   normalizeFeedDateInput,
   normalizeFeedFilterId,
   resolveFeedFilters,
@@ -19,7 +20,16 @@ type ResolvedFeedRequest = {
   };
 };
 
-const ADVANCED_FILTER_KEYS = ["sourceId", "title", "tag", "publishedStart", "publishedEnd", "entryId", "entryType"] as const;
+const ADVANCED_FILTER_KEYS = [
+  "sourceId",
+  "title",
+  "tag",
+  "publishedStart",
+  "publishedEnd",
+  "entryId",
+  "entryType",
+  "entryKeys",
+] as const;
 const CREATED_TIME_FILTER_KEYS = ["range", "start", "end"] as const;
 
 function getSearchParamValue(searchParams: SearchParamSource, key: keyof FeedFilters | "page" | "size" | "includeTags") {
@@ -29,6 +39,15 @@ function getSearchParamValue(searchParams: SearchParamSource, key: keyof FeedFil
 
   const value = searchParams[key];
   return Array.isArray(value) ? value[0] : value;
+}
+
+function getSearchParamValues(searchParams: SearchParamSource, key: keyof FeedFilters | "page" | "size" | "includeTags") {
+  if (searchParams instanceof URLSearchParams) {
+    return searchParams.getAll(key);
+  }
+
+  const value = searchParams[key];
+  return Array.isArray(value) ? value : value ? [value] : [];
 }
 
 function parsePage(value: string | undefined): number {
@@ -42,7 +61,7 @@ function parsePageSize(value: string | undefined): number {
 }
 
 function hasParamValue(searchParams: SearchParamSource, key: keyof FeedFilters): boolean {
-  return Boolean(getSearchParamValue(searchParams, key)?.trim());
+  return getSearchParamValues(searchParams, key).some((value) => Boolean(value.trim()));
 }
 
 function resolveDefaultRange(searchParams: SearchParamSource): FeedRange {
@@ -65,6 +84,7 @@ export function resolveFeedRequest(searchParams: SearchParamSource, now = new Da
   const tagParam = getSearchParamValue(searchParams, "tag");
   const entryIdParam = getSearchParamValue(searchParams, "entryId");
   const entryTypeParam = getSearchParamValue(searchParams, "entryType");
+  const entryKeysParam = getSearchParamValues(searchParams, "entryKeys");
   const defaultRange = resolveDefaultRange(searchParams);
   return {
     filters: resolveFeedFilters(
@@ -81,6 +101,7 @@ export function resolveFeedRequest(searchParams: SearchParamSource, now = new Da
         tag: normalizeFeedFilterId(tagParam),
         entryId: normalizeFeedFilterId(entryIdParam),
         entryType: entryTypeParam === "single" || entryTypeParam === "cluster" ? entryTypeParam : null,
+        entryKeys: normalizeFeedEntryKeys(entryKeysParam),
       },
       now,
     ),

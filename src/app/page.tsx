@@ -62,7 +62,8 @@ function hasNonDefaultFeedFilter(filters: FeedFilters, page: number) {
       filters.title ||
       filters.tag ||
       filters.entryId ||
-      filters.entryType,
+      filters.entryType ||
+      filters.entryKeys.length > 0,
   );
 }
 
@@ -217,6 +218,7 @@ export default async function Home({ searchParams }: PageProps) {
         initialSourceId={filters.sourceId}
         initialTitle={filters.title}
         initialTag={filters.tag}
+        initialEntryKeys={filters.entryKeys}
         availableGroups={feed.groups}
         initialGroupTotalCount={feed.groupTotalCount}
         availableSources={feedFilterOptions.sources}

@@ -16,6 +16,7 @@ describe("feed request parsing", () => {
     expect(resolveFeedRequest({ sourceId: "source-1" }, now).filters.range).toBe("all");
     expect(resolveFeedRequest({ tag: "openai" }, now).filters.range).toBe("all");
     expect(resolveFeedRequest({ publishedStart: "2026-04-01" }, now).filters.range).toBe("all");
+    expect(resolveFeedRequest({ entryKeys: "single:item-a,cluster:cluster-a" }, now).filters.range).toBe("all");
   });
 
   it("prefers a valid explicit range over the advanced-filter default", () => {
@@ -29,6 +30,13 @@ describe("feed request parsing", () => {
 
     expect(resolveFeedRequest({ tag: " openai " }, now).filters.tag).toBe("openai");
     expect(resolveFeedRequest({ tag: " " }, now).filters.tag).toBeNull();
+  });
+
+  it("normalizes multi-entry filters", () => {
+    const now = new Date("2026-04-10T16:45:00.000Z");
+
+    expect(resolveFeedRequest({ entryKeys: " single:item-a ,bad-key,single:item-a,cluster:cluster-a " }, now).filters.entryKeys)
+      .toEqual(["single:item-a", "cluster:cluster-a"]);
   });
 
   it("allows callers to skip popular tag calculation", () => {

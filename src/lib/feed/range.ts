@@ -1,5 +1,5 @@
 import { DAY_MS, MINUTE_MS } from "@/config/constants";
-import type { FeedFilters, FeedRange, FeedSort } from "@/lib/feed/types";
+import type { FeedEntryKey, FeedFilters, FeedRange, FeedSort } from "@/lib/feed/types";
 
 export const DEFAULT_FEED_TIME_ZONE_OFFSET_MINUTES = -8 * 60;
 
@@ -20,10 +20,37 @@ export const SORT_OPTIONS: Array<{ value: FeedSort; label: string }> = [
 const RANGE_SET = new Set<FeedRange>(RANGE_OPTIONS.map((option) => option.value));
 const SORT_SET = new Set<FeedSort>(SORT_OPTIONS.map((option) => option.value));
 const FEED_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const FEED_ENTRY_KEY_PATTERN = /^(single|cluster):[A-Za-z0-9_-]+$/;
+const MAX_FEED_ENTRY_KEY_FILTERS = 50;
 
 export function normalizeFeedFilterId(value: string | null | undefined): string | null {
   const normalized = value?.trim();
   return normalized ? normalized : null;
+}
+
+export function normalizeFeedEntryKeys(value: string | string[] | null | undefined): FeedEntryKey[] {
+  const rawValues = Array.isArray(value) ? value : value ? [value] : [];
+  const seen = new Set<string>();
+  const keys: FeedEntryKey[] = [];
+
+  for (const rawValue of rawValues) {
+    for (const rawKey of rawValue.split(",")) {
+      const key = rawKey.trim();
+
+      if (!FEED_ENTRY_KEY_PATTERN.test(key) || seen.has(key)) {
+        continue;
+      }
+
+      seen.add(key);
+      keys.push(key as FeedEntryKey);
+
+      if (keys.length >= MAX_FEED_ENTRY_KEY_FILTERS) {
+        return keys;
+      }
+    }
+  }
+
+  return keys;
 }
 
 export function isFeedRange(value: string): value is FeedRange {
@@ -135,6 +162,7 @@ export function resolveFeedFilters(
     tag: normalizeFeedFilterId(input.tag),
     entryId: normalizeFeedFilterId(input.entryId),
     entryType: input.entryType === "single" || input.entryType === "cluster" ? input.entryType : null,
+    entryKeys: normalizeFeedEntryKeys(input.entryKeys),
     publishedStart,
     publishedEnd,
     publishedRangeStart: publishedStart ? buildDateBoundary(publishedStart, "start", timeZoneOffsetMinutes) : null,
