@@ -855,14 +855,14 @@ describe("FeedPanel", () => {
 
       return computedStyle;
     });
-    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function clientWidthMock() {
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function clientWidthMock(this: HTMLElement) {
       return this.getAttribute("aria-hidden") === "true" ? 936 : 0;
     });
-    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockImplementation(function offsetWidthMock() {
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockImplementation(function offsetWidthMock(this: HTMLElement) {
       const tagKey = this.dataset.tagKey;
       return tagKey ? tagWidths.get(tagKey) ?? 0 : 0;
     });
-    vi.spyOn(HTMLElement.prototype, "offsetTop", "get").mockImplementation(function offsetTopMock() {
+    vi.spyOn(HTMLElement.prototype, "offsetTop", "get").mockImplementation(function offsetTopMock(this: HTMLElement) {
       const tagKey = this.dataset.tagKey;
       const index = tagKey ? tagOrder.get(tagKey) : undefined;
       return typeof index === "number" && index >= 12 ? 38 : 0;

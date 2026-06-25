@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/db";
 import { refreshAllClusterFeedStats, refreshClusterFeedStats } from "@/lib/clusters/feed-stats";
@@ -293,7 +294,7 @@ describe("/api/feed", () => {
     vi.setSystemTime(new Date("2026-04-10T12:00:00.000Z"));
 
     const source = await prisma.source.findFirstOrThrow();
-    const taggedItems = Array.from({ length: 40 }, (_, index) => {
+    const taggedItems: Prisma.ItemCreateManyInput[] = Array.from({ length: 40 }, (_, index) => {
       const itemNumber = String(index + 1).padStart(2, "0");
 
       return {
@@ -318,7 +319,12 @@ describe("/api/feed", () => {
     });
 
     await prisma.item.createMany({ data: taggedItems });
-    await Promise.all(taggedItems.map((item, index) => replaceItemTags(item.id, [`Tag ${String(index + 1).padStart(2, "0")}`])));
+    await Promise.all(
+      taggedItems.map((_, index) => {
+        const itemNumber = String(index + 1).padStart(2, "0");
+        return replaceItemTags(`popular-tag-item-${itemNumber}`, [`Tag ${itemNumber}`]);
+      }),
+    );
 
     const { GET } = await import("@/app/api/feed/route");
     const response = await GET(
