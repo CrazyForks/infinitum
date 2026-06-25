@@ -1,8 +1,22 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createAiProvider } from "@/lib/ai/provider";
+import { normalizeModelResponseText } from "@/lib/ai/response-format";
 
 describe("ai provider", () => {
+  it("strips leading think blocks and code fences from model responses", () => {
+    expect(
+      normalizeModelResponseText([
+        "<think>",
+        "The user is asking me to reply with \"OK\".",
+        "</think>",
+        "```json",
+        "{\"summary\":\"这是摘要\",\"isAggregation\":false}",
+        "```",
+      ].join("\n")),
+    ).toBe(`{"summary":"这是摘要","isAggregation":false}`);
+  });
+
   it("turns approved merge pairs into conservative target-direct merge groups", async () => {
     const create = vi.fn().mockResolvedValue({
       choices: [
@@ -207,6 +221,50 @@ describe("ai provider", () => {
     expect(create).toHaveBeenCalledTimes(1);
   });
 
+  it("strips leading think blocks before parsing JSON summary responses", async () => {
+    const create = vi.fn().mockResolvedValue({
+      choices: [
+        {
+          message: {
+            content: `<think>
+The user is asking me to reply with "OK" in Chinese context. Simple request.
+</think>
+${JSON.stringify({
+  summary: "这是摘要",
+  isAggregation: false,
+})}`,
+          },
+        },
+      ],
+    });
+
+    const provider = createAiProvider(
+      {
+        apiKey: "sk-test",
+        baseURL: "https://example.com/v1",
+        model: "test-model",
+      },
+      undefined,
+      {
+        chat: {
+          completions: {
+            create,
+          },
+        },
+      },
+    );
+
+    const summary = await provider.summarizeItem("Input body", {
+      title: "Original title",
+      sourceName: "Example Feed",
+    });
+
+    expect(summary).toEqual({
+      summary: "这是摘要",
+      isAggregation: false,
+    });
+  });
+
   it("uses a detailed default item analysis prompt when no override is provided", async () => {
     const create = vi.fn().mockResolvedValue({
       choices: [
@@ -385,6 +443,44 @@ describe("ai provider", () => {
 
     expect(summary).toEqual({summary: body, isAggregation: false});
     expect(summary.summary).not.toMatch(/\.\.\.$/);
+  });
+
+  it("uses reasoning_content when JSON-mode providers leave message content empty", async () => {
+    const create = vi.fn().mockResolvedValue({
+      choices: [
+        {
+          message: {
+            content: "",
+            reasoning_content: JSON.stringify({
+              summary: "LongCat JSON mode summary",
+              isAggregation: false,
+            }),
+          },
+        },
+      ],
+    });
+    const provider = createAiProvider(
+      {
+        apiKey: "sk-test",
+        baseURL: "https://example.com/v1",
+        model: "test-model",
+      },
+      undefined,
+      {
+        chat: {
+          completions: {
+            create,
+          },
+        },
+      },
+    );
+
+    const summary = await provider.summarizeItem("Full article body that must not be stored as the summary.", {
+      title: "Original title",
+      sourceName: "Example Feed",
+    });
+
+    expect(summary).toEqual({summary: "LongCat JSON mode summary", isAggregation: false});
   });
 
   it("recovers item summary text from truncated json output", async () => {

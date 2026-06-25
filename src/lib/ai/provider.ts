@@ -22,6 +22,7 @@ import {
   DEFAULT_ITEM_SUMMARY_USER_PROMPT_TEMPLATE,
 } from "@/config/prompts";
 import type { RuntimeConfig } from "@/config/runtime";
+import { normalizeModelResponseText } from "@/lib/ai/response-format";
 import { shouldRegenerateChineseSummary } from "@/lib/ai/summary-language";
 import { normalizeItemTags } from "@/lib/tags/normalization";
 import { normalizeOptionalText } from "@/lib/utils/text";
@@ -118,6 +119,7 @@ type CompletionResponse = {
   choices?: Array<{
     message?: {
       content?: string | null;
+      reasoning_content?: string | null;
     };
   }>;
 };
@@ -326,12 +328,8 @@ function getFallbackAggregation(): ParsedAggregation {
   return { mainEvent: null, events: [] };
 }
 
-function stripCodeFence(value: string): string {
-  return value.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-}
-
 function parseSummaryAndClassification(rawContent: string, fallback: ItemSummaryResult): ItemSummaryResult {
-  const normalized = stripCodeFence(rawContent);
+  const normalized = normalizeModelResponseText(rawContent);
 
   if (!normalized) {
     return fallback;
@@ -380,7 +378,7 @@ function recoverSummaryFromJsonLikeOutput(value: string): string {
 }
 
 function parseSummaryOutput(rawContent: string, fallback: string): string {
-  const normalized = stripCodeFence(rawContent);
+  const normalized = normalizeModelResponseText(rawContent);
   return normalized || fallback;
 }
 
@@ -395,7 +393,7 @@ function parseAggregationOutput(
   fallback: ParsedAggregation,
   maxEvents = DEFAULT_PARSED_AGGREGATION_MAX_EVENTS,
 ): ParsedAggregation {
-  const normalized = stripCodeFence(rawContent);
+  const normalized = normalizeModelResponseText(rawContent);
 
   if (!normalized) {
     return fallback;
@@ -493,7 +491,7 @@ function parseJsonLikeEnrichment(
   fallback: AiEnrichment,
   translateTitle: boolean,
 ): ParsedEnrichmentResult {
-  const normalized = stripCodeFence(rawContent);
+  const normalized = normalizeModelResponseText(rawContent);
 
   try {
     const parsed = JSON.parse(normalized) as {
@@ -704,7 +702,7 @@ function buildClusterMergePairKey(leftId: string, rightId: string) {
 }
 
 function parseMergeGroups(rawContent: string, metadata: ClusterMergeInputMetadata): string[][] {
-  const normalized = stripCodeFence(rawContent);
+  const normalized = normalizeModelResponseText(rawContent);
   const validSet = new Set(metadata.validIds);
 
   try {
@@ -936,7 +934,7 @@ function parseClusterMergeInputMetadata(clustersJson: string): ClusterMergeInput
 }
 
 function parseClusterMatchCandidateId(rawContent: string, candidateIds: string[]): string | null {
-  const normalized = stripCodeFence(rawContent);
+  const normalized = normalizeModelResponseText(rawContent);
 
   try {
     const parsed = JSON.parse(normalized) as { clusterId?: string | null };
@@ -1004,7 +1002,13 @@ async function completeText(
     response_format: options?.responseFormat,
   }) as CompletionResponse;
 
-  return response.choices?.[0]?.message?.content?.trim() || "";
+  const message = response.choices?.[0]?.message;
+  const content = message?.content?.trim();
+  if (content) {
+    return normalizeModelResponseText(content);
+  }
+
+  return normalizeModelResponseText(message?.reasoning_content);
 }
 
 async function completeTextWithTransientRetry(

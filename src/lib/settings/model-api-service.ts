@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { normalizeModelResponseText } from "@/lib/ai/response-format";
 import {
   ensureRuntimeConfigSeeded,
   type FetchModelApiModelsInput,
@@ -279,9 +280,10 @@ export async function testModelApiConfig(
 
     try {
       const data = JSON.parse(rawResponse) as {
-        choices?: Array<{ message?: { content?: string | null } }>;
+        choices?: Array<{ message?: { content?: string | null; reasoning_content?: string | null } }>;
       };
-      content = data.choices?.[0]?.message?.content?.trim() || "";
+      const message = data.choices?.[0]?.message;
+      content = normalizeModelResponseText(message?.content || message?.reasoning_content);
     } catch {
       // 保留原始文本作为回退。
     }
