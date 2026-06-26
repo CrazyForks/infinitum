@@ -759,6 +759,7 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
     mergeResult = await executeClusterMerge(
       trackedAiProvider,
       options.now,
+      { liveClusterIds: affectedClusterIds },
     );
   } finally {
     stageTracker.finishStage(clusterMergeStage);

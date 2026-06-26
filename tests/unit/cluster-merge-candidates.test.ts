@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { CLUSTER_MERGE_CANDIDATE_LIMIT } from "@/config/constants";
+import { CLUSTER_MERGE_CANDIDATE_LIMIT, CLUSTER_MERGE_DIRTY_NEIGHBOR_SCAN_LIMIT } from "@/config/constants";
 import {
   buildClusterMergeCandidateInputHash,
   buildClusterMergeCandidateSelection,
@@ -378,6 +378,140 @@ describe("buildClusterMergeCandidates", () => {
     ]);
 
     expect(candidates.map((candidate) => candidate.id)).toEqual(["microsoft-contract", "openai-contract"]);
+  });
+
+  it("limits live dirty neighbor scoring while keeping highly related clean neighbors", () => {
+    const dirtyContract = createCandidate({
+      id: "openai-contract-dirty",
+      title: "OpenAI 与微软调整合作合同",
+      summary: "OpenAI 和微软调整云服务合作合同条款。",
+      fingerprint: "openai-contract-dirty",
+      mergeInputHash: "stale-hash",
+      eventType: "partnership",
+      eventSubject: "OpenAI",
+      eventAction: "变更",
+      eventObject: "微软合同",
+      eventDate: "2026-04-20",
+    });
+    const cleanContract = createCandidate({
+      id: "microsoft-contract-clean",
+      title: "微软和 OpenAI 调整合作协议",
+      summary: "微软与 OpenAI 对合作合同进行变更。",
+      fingerprint: "microsoft-contract-clean",
+      eventType: "partnership",
+      eventSubject: "微软",
+      eventAction: "变更",
+      eventObject: "OpenAI 合同",
+      eventDate: "2026-04-20",
+      latestPublishedAt: new Date("2026-04-20T10:00:00.000Z"),
+    });
+    const cleanNoise = Array.from({ length: CLUSTER_MERGE_DIRTY_NEIGHBOR_SCAN_LIMIT + 40 }, (_, index) => {
+      const candidate = createCandidate({
+        id: `clean-noise-${index}`,
+        title: `无关事件 ${index}`,
+        summary: `无关事件摘要 ${index}`,
+        fingerprint: `clean-noise-${index}`,
+        eventType: "other",
+        eventSubject: `Company ${index}`,
+        eventAction: "发布",
+        eventObject: `Product ${index}`,
+        eventDate: "2026-04-19",
+        latestPublishedAt: new Date(`2026-04-19T${String(index % 24).padStart(2, "0")}:00:00.000Z`),
+      });
+
+      return {
+        ...candidate,
+        mergeInputHash: buildClusterMergeCandidateInputHash(candidate),
+      };
+    });
+
+    const selection = buildClusterMergeCandidateSelection([
+      dirtyContract,
+      {
+        ...cleanContract,
+        mergeInputHash: buildClusterMergeCandidateInputHash(cleanContract),
+      },
+      ...cleanNoise,
+    ]);
+
+    expect(selection.diagnostics.totalPairs).toBeLessThanOrEqual(CLUSTER_MERGE_DIRTY_NEIGHBOR_SCAN_LIMIT);
+    expect(hasClusterMergeCandidateEdge(
+      selection.allowedPairs,
+      "openai-contract-dirty",
+      "microsoft-contract-clean",
+    )).toBe(true);
+  });
+
+  it("scores only scoped live clusters when live cluster ids are provided", () => {
+    const currentDirty = createCandidate({
+      id: "current-dirty",
+      title: "OpenAI 与微软调整合作合同",
+      summary: "OpenAI 和微软调整云服务合作合同条款。",
+      fingerprint: "current-dirty",
+      mergeInputHash: "stale-current",
+      eventType: "partnership",
+      eventSubject: "OpenAI",
+      eventAction: "变更",
+      eventObject: "微软合同",
+      eventDate: "2026-04-20",
+    });
+    const currentNeighbor = createCandidate({
+      id: "current-neighbor",
+      title: "微软和 OpenAI 调整合作协议",
+      summary: "微软与 OpenAI 对合作合同进行变更。",
+      fingerprint: "current-neighbor",
+      eventType: "partnership",
+      eventSubject: "微软",
+      eventAction: "变更",
+      eventObject: "OpenAI 合同",
+      eventDate: "2026-04-20",
+      latestPublishedAt: new Date("2026-04-20T10:00:00.000Z"),
+    });
+    const historicalDirty = createCandidate({
+      id: "historical-dirty",
+      title: "DeepSeek 灰度测试识图模式",
+      summary: "DeepSeek 在网页版灰度测试上线识图模式。",
+      fingerprint: "historical-dirty",
+      mergeInputHash: "stale-historical",
+      eventType: "update",
+      eventSubject: "DeepSeek",
+      eventAction: "上线",
+      eventObject: "识图模式",
+      latestPublishedAt: new Date("2026-04-20T11:00:00.000Z"),
+    });
+    const historicalNeighbor = createCandidate({
+      id: "historical-neighbor",
+      title: "DeepSeek 开启识图模式灰度测试",
+      summary: "DeepSeek 新增识图模式入口和视觉理解能力。",
+      fingerprint: "historical-neighbor",
+      eventType: "update",
+      eventSubject: "DeepSeek",
+      eventAction: "开启灰度测试",
+      eventObject: "多模态识图功能",
+      latestPublishedAt: new Date("2026-04-20T12:00:00.000Z"),
+    });
+
+    const selection = buildClusterMergeCandidateSelection(
+      [
+        currentDirty,
+        {
+          ...currentNeighbor,
+          mergeInputHash: buildClusterMergeCandidateInputHash(currentNeighbor),
+        },
+        historicalDirty,
+        {
+          ...historicalNeighbor,
+          mergeInputHash: buildClusterMergeCandidateInputHash(historicalNeighbor),
+        },
+      ],
+      { liveClusterIds: ["current-dirty"] },
+    );
+
+    expect(selection.candidates.map((candidate) => candidate.id).sort()).toEqual([
+      "current-dirty",
+      "current-neighbor",
+    ]);
+    expect(hasClusterMergeCandidateEdge(selection.allowedPairs, "historical-dirty", "historical-neighbor")).toBe(false);
   });
 
   it("rejects pairs that only share subject, action, and date but conflict on object", () => {

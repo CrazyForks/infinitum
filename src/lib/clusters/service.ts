@@ -1184,8 +1184,10 @@ function sleep(ms: number) {
 export async function executeClusterMerge(
   aiProvider: AiProvider | undefined,
   now: Date,
+  options?: { liveClusterIds?: Iterable<string> },
 ): Promise<ClusterMergePassResult> {
   const lookbackSince = new Date(now.getTime() - CLUSTER_LOOKBACK_MS);
+  const liveClusterIds = options?.liveClusterIds ? new Set(options.liveClusterIds) : null;
   const timings = {
     refreshItemCountsMs: 0,
     loadClustersMs: 0,
@@ -1204,8 +1206,14 @@ export async function executeClusterMerge(
   const loadStartedAt = Date.now();
   const recentClusters = await loadRecentMergeClusters(lookbackSince);
   timings.loadClustersMs = Date.now() - loadStartedAt;
+  const liveClusters = liveClusterIds
+    ? recentClusters.filter((cluster) => liveClusterIds.has(cluster.id))
+    : recentClusters;
   const selectionStartedAt = Date.now();
-  const liveSelection = buildClusterMergeCandidateSelection(recentClusters);
+  const liveSelection = buildClusterMergeCandidateSelection(
+    recentClusters,
+    liveClusterIds ? { liveClusterIds } : undefined,
+  );
   const precomputedSelection = mergePrecomputedCleanPairs({
     liveCandidates: liveSelection.candidates,
     liveAllowedPairs: liveSelection.allowedPairs,
@@ -1215,6 +1223,9 @@ export async function executeClusterMerge(
   timings.candidateSelectionMs = Date.now() - selectionStartedAt;
   const allCandidates = precomputedSelection.candidates;
   const allowedPairs = precomputedSelection.allowedPairs;
+  const evaluatedCandidates = liveClusterIds
+    ? [...new Map([...liveClusters, ...allCandidates].map((cluster) => [cluster.id, cluster])).values()]
+    : recentClusters;
   const diagnostics = liveSelection.diagnostics;
   timings.promptPairs = allowedPairs.length;
 
@@ -1241,7 +1252,7 @@ export async function executeClusterMerge(
 
   if (allCandidates.length < 2 || allowedPairs.length === 0) {
     const markStartedAt = Date.now();
-    await markClusterMergeCandidatesEvaluated(recentClusters);
+    await markClusterMergeCandidatesEvaluated(evaluatedCandidates);
     timings.markEvaluatedMs = Date.now() - markStartedAt;
 
     return {
@@ -1264,7 +1275,7 @@ export async function executeClusterMerge(
 
   if (allHashesMatch && precomputedSelection.usedCount === 0) {
     const markStartedAt = Date.now();
-    await markClusterMergeCandidatesEvaluated(recentClusters);
+    await markClusterMergeCandidatesEvaluated(evaluatedCandidates);
     timings.markEvaluatedMs = Date.now() - markStartedAt;
 
     return {
@@ -1282,7 +1293,7 @@ export async function executeClusterMerge(
   // If no AI provider, just update hashes and skip
   if (!aiProvider) {
     const markStartedAt = Date.now();
-    await markClusterMergeCandidatesEvaluated(recentClusters);
+    await markClusterMergeCandidatesEvaluated(evaluatedCandidates);
     timings.markEvaluatedMs = Date.now() - markStartedAt;
 
     return {
@@ -1311,7 +1322,7 @@ export async function executeClusterMerge(
     timings.aiMergeMs = Date.now() - aiMergeStartedAt;
     // On AI failure, update hashes and return without merging
     const markStartedAt = Date.now();
-    await markClusterMergeCandidatesEvaluated(recentClusters);
+    await markClusterMergeCandidatesEvaluated(evaluatedCandidates);
     timings.markEvaluatedMs = Date.now() - markStartedAt;
 
     return {
@@ -1374,7 +1385,7 @@ export async function executeClusterMerge(
   // Update mergeInputHash on evaluated candidates after merge. Deleted source
   // clusters are ignored by updateMany.
   const markStartedAt = Date.now();
-  await markClusterMergeCandidatesEvaluated(recentClusters);
+  await markClusterMergeCandidatesEvaluated(evaluatedCandidates);
   timings.markEvaluatedMs = Date.now() - markStartedAt;
 
   return {

@@ -65,6 +65,10 @@ const taskKindLabels = {
   item_reparse_aggregations: "聚合内容重拆",
 } as const;
 
+function getTaskKindLabel(kind: string) {
+  return taskKindLabels[kind as keyof typeof taskKindLabels] ?? kind;
+}
+
 const surfaceCardClassName =
   "rounded-[1.35rem] border border-[color:var(--line)] bg-[color-mix(in_srgb,var(--surface)_95%,transparent)] shadow-[var(--shadow-sm)]";
 const subtleCardClassName =
@@ -227,7 +231,7 @@ function TaskCard({
                 {statusLabels[task.status]}
               </TaskToneBadge>
               <TaskToneBadge tone="muted">
-                {taskKindLabels[task.kind]}
+                {getTaskKindLabel(task.kind)}
               </TaskToneBadge>
               {task.cancelRequestedAt ? (
                 <TaskToneBadge tone="warning">终止请求已提交</TaskToneBadge>

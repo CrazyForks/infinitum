@@ -92,6 +92,9 @@ export const CLUSTER_MERGE_SCAN_CLUSTER_LIMIT = 1000;
 /** 单次聚合合并最多消费的预计算 clean-clean 候选对 */
 export const CLUSTER_MERGE_PRECOMPUTED_CLEAN_PAIR_LIMIT = 20;
 
+/** 单个 dirty 聚合组在主链路最多实时评分的邻居数 */
+export const CLUSTER_MERGE_DIRTY_NEIGHBOR_SCAN_LIMIT = 400;
+
 /** 相同 clean-clean 候选对在内容未变化时最多复判次数 */
 export const CLUSTER_MERGE_CLEAN_PAIR_MAX_ATTEMPTS = 2;
 

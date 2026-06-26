@@ -565,9 +565,23 @@ describe("TaskMonitorPanel", () => {
       { ...baseTask, id: "task-summary", kind: "item_regenerate_summary", label: "摘要重生成", status: "succeeded" },
       { ...baseTask, id: "task-translation", kind: "item_regenerate_translation", label: "译文重生成", status: "succeeded" },
       { ...baseTask, id: "task-cluster", kind: "cluster_regenerate_summary", label: "聚合摘要重生成", status: "succeeded" },
+      { ...baseTask, id: "task-precompute", kind: "cluster_merge_precompute_clean_pairs", label: "合并候选预计算", status: "succeeded" },
       { ...baseTask, id: "task-daily", kind: "daily_report_generate", label: "AI 日报生成", status: "succeeded" },
       { ...baseTask, id: "task-cleanup", kind: "item_cleanup", label: "清理历史文章", status: "succeeded" },
     ];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            ...buildMonitorSnapshot(),
+            runningTasks: [],
+            recentTasks,
+            recentTotal: recentTasks.length,
+          }),
+        ),
+      ),
+    );
 
     renderWithProviders(
       <TaskMonitorPanel
@@ -589,6 +603,8 @@ describe("TaskMonitorPanel", () => {
       "文章自动清理",
       "聚合内容重拆",
     ]);
+
+    expect(within(await screen.findByRole("table")).getAllByText("合并候选预计算")).toHaveLength(2);
 
     await user.selectOptions(kindSelect, "item_cleanup");
 

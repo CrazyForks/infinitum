@@ -69,6 +69,10 @@ const kindOptions: Array<{ value: TaskKindFilter; label: string }> = [
   })),
 ];
 
+function getTaskKindLabel(kind: string) {
+  return kindLabels[kind as TaskRunSnapshot["kind"]] ?? kind;
+}
+
 const triggerLabels: Record<TaskRunSnapshot["triggerType"], string> = {
   scheduled: "定时调度",
   manual: "手动触发",
@@ -283,7 +287,7 @@ function buildTaskTimeline(task: TaskRunSnapshot) {
   if (task.startedAt) {
     timeline.push({
       key: "task_started",
-      title: kindLabels[task.kind],
+      title: getTaskKindLabel(task.kind),
       time: task.startedAt,
       detail: "开始",
       isActive: task.status === "running" && task.stageTimings.length === 0,
@@ -459,7 +463,7 @@ function TaskDetailModal({
             </div>
             <div>
               <span className="text-[var(--text-3)]">类型:</span>{" "}
-              {kindLabels[task.kind]}
+              {getTaskKindLabel(task.kind)}
             </div>
             <div>
               <span className="text-[var(--text-3)]">触发方式:</span>{" "}
@@ -966,7 +970,7 @@ export function TaskMonitorPanel({
                     </StatusTag>
                   </td>
                   <td className="px-4 py-3 text-[var(--text-2)]">
-                    {kindLabels[task.kind]}
+                    {getTaskKindLabel(task.kind)}
                   </td>
                   <td className="px-4 py-3 text-[var(--text-3)] text-xs">
                     <div>开始: {formatDateTime(task.startedAt)}</div>

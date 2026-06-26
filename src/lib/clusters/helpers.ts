@@ -7,6 +7,7 @@ import {
   CLUSTER_MERGE_AI_PAIR_MIN_SCORE,
   CLUSTER_MERGE_AI_PAIR_STRONG_SCORE,
   CLUSTER_MERGE_CANDIDATE_LIMIT,
+  CLUSTER_MERGE_DIRTY_NEIGHBOR_SCAN_LIMIT,
   CLUSTER_MERGE_RELATED_PAIR_LIMIT,
 } from "@/config/constants";
 import { type AiEventSignature, type AiProvider } from "@/lib/ai/provider";
@@ -1086,6 +1087,121 @@ function shouldSendMergePairToAi(score: number, relatedPairCount: number) {
   return score >= CLUSTER_MERGE_AI_PAIR_GRAY_SCORE && relatedPairCount <= 2;
 }
 
+type ClusterMergeNeighborMeta = {
+  cluster: ClusterMergeCandidate;
+  subject: string;
+  action: string | null;
+  object: string;
+  eventType: string | null;
+  eventDate: string | null;
+  publishedAtMs: number;
+  dirty: boolean;
+};
+
+function toClusterMergeNeighborMeta(
+  cluster: ClusterMergeCandidate,
+  dirtyIds: Set<string>,
+): ClusterMergeNeighborMeta {
+  return {
+    cluster,
+    subject: normalizeEventSubjectForStorage(cluster.eventSubject) ?? "",
+    action: normalizeEventActionForStorage(cluster.eventAction) ?? normalizeStoredEventType(cluster.eventType),
+    object: normalizeEventObjectForStorage(cluster.eventObject) ?? "",
+    eventType: normalizeStoredEventType(cluster.eventType),
+    eventDate: cluster.eventDate,
+    publishedAtMs: cluster.latestPublishedAt.getTime(),
+    dirty: dirtyIds.has(cluster.id),
+  };
+}
+
+function rankClusterMergeLiveNeighbor(left: ClusterMergeNeighborMeta, right: ClusterMergeNeighborMeta) {
+  let rank = 0;
+
+  if (right.dirty) {
+    rank += 100;
+  }
+
+  if (left.eventDate && right.eventDate && left.eventDate === right.eventDate) {
+    rank += 60;
+  }
+
+  if (left.object && right.object && left.object === right.object) {
+    rank += 50;
+  }
+
+  if (left.subject && right.subject && left.subject === right.subject) {
+    rank += 40;
+  }
+
+  if (left.action && right.action && left.action === right.action) {
+    rank += 20;
+  }
+
+  if (left.eventType && right.eventType && left.eventType === right.eventType) {
+    rank += 10;
+  }
+
+  const publishedAtDiffMs = Math.abs(left.publishedAtMs - right.publishedAtMs);
+  if (publishedAtDiffMs <= 24 * 60 * 60 * 1000) {
+    rank += 8;
+  } else if (publishedAtDiffMs <= 72 * 60 * 60 * 1000) {
+    rank += 4;
+  }
+
+  return rank;
+}
+
+function sortClusterMergeLiveNeighbors(left: ClusterMergeNeighborMeta, neighbors: ClusterMergeNeighborMeta[]) {
+  return neighbors
+    .map((neighbor) => ({
+      neighbor,
+      rank: rankClusterMergeLiveNeighbor(left, neighbor),
+    }))
+    .sort((a, b) => {
+      if (b.rank !== a.rank) {
+        return b.rank - a.rank;
+      }
+
+      if (b.neighbor.publishedAtMs !== a.neighbor.publishedAtMs) {
+        return b.neighbor.publishedAtMs - a.neighbor.publishedAtMs;
+      }
+
+      return a.neighbor.cluster.id.localeCompare(b.neighbor.cluster.id);
+    })
+    .map(({ neighbor }) => neighbor);
+}
+
+function selectClusterMergeLiveNeighbors(left: ClusterMergeNeighborMeta, metas: ClusterMergeNeighborMeta[]) {
+  const neighbors = metas.filter((meta) => meta.cluster.id !== left.cluster.id);
+  if (neighbors.length <= CLUSTER_MERGE_DIRTY_NEIGHBOR_SCAN_LIMIT) {
+    return neighbors;
+  }
+
+  const dirtyNeighbors = sortClusterMergeLiveNeighbors(left, neighbors.filter((meta) => meta.dirty));
+  const cleanNeighbors = sortClusterMergeLiveNeighbors(left, neighbors.filter((meta) => !meta.dirty));
+  const dirtyBudget = Math.min(dirtyNeighbors.length, Math.ceil(CLUSTER_MERGE_DIRTY_NEIGHBOR_SCAN_LIMIT / 2));
+  const cleanBudget = Math.min(cleanNeighbors.length, CLUSTER_MERGE_DIRTY_NEIGHBOR_SCAN_LIMIT - dirtyBudget);
+  const selected = [
+    ...dirtyNeighbors.slice(0, dirtyBudget),
+    ...cleanNeighbors.slice(0, cleanBudget),
+  ];
+
+  if (selected.length >= CLUSTER_MERGE_DIRTY_NEIGHBOR_SCAN_LIMIT) {
+    return selected;
+  }
+
+  const selectedIds = new Set(selected.map((meta) => meta.cluster.id));
+  const remaining = sortClusterMergeLiveNeighbors(
+    left,
+    [...dirtyNeighbors, ...cleanNeighbors].filter((meta) => !selectedIds.has(meta.cluster.id)),
+  );
+
+  return [
+    ...selected,
+    ...remaining.slice(0, CLUSTER_MERGE_DIRTY_NEIGHBOR_SCAN_LIMIT - selected.length),
+  ];
+}
+
 function incrementClusterMergeRejection(
   diagnostics: ClusterMergeCandidateDiagnostics,
   reason: ClusterMergePairRejectionReason | null,
@@ -1144,37 +1260,34 @@ export function filterClusterMergeSourcesByAllowedEdges(
   return sourceIds.filter((sourceId) => hasClusterMergeCandidateEdge(edges, targetId, sourceId));
 }
 
-export function buildClusterMergeCandidateSelection(clusters: ClusterMergeCandidate[]) {
+export function buildClusterMergeCandidateSelection(
+  clusters: ClusterMergeCandidate[],
+  options?: { liveClusterIds?: Iterable<string> },
+) {
   const selectedIds = new Set<string>();
   const bestScores = new Map<string, number>();
   const selectedEdges = new Map<string, ClusterMergeCandidateEdge>();
   const currentInputHashes = new Map(
     clusters.map((cluster) => [cluster.id, buildClusterMergeCandidateInputHash(cluster)]),
   );
-  const dirtyIds = new Set(
+  const liveClusterIds = options?.liveClusterIds ? new Set(options.liveClusterIds) : null;
+  const liveIds = liveClusterIds ?? new Set(
     clusters
       .filter((cluster) => cluster.mergeInputHash !== currentInputHashes.get(cluster.id))
       .map((cluster) => cluster.id),
   );
+  const metas = clusters.map((cluster) => toClusterMergeNeighborMeta(cluster, liveIds));
   const diagnostics = createClusterMergeCandidateDiagnostics();
+  const liveClusterCount = metas.filter((meta) => meta.dirty).length;
+  const cleanClusterCount = clusters.length - liveClusterCount;
+  diagnostics.cleanPairsSkipped = cleanClusterCount * Math.max(0, cleanClusterCount - 1);
 
-  for (let leftIndex = 0; leftIndex < clusters.length; leftIndex += 1) {
-    const left = clusters[leftIndex]!;
+  for (const leftMeta of metas.filter((meta) => meta.dirty)) {
+    const left = leftMeta.cluster;
     const relatedPairs: Array<{ right: ClusterMergeCandidate; score: number }> = [];
 
-    for (let rightIndex = 0; rightIndex < clusters.length; rightIndex += 1) {
-      if (leftIndex === rightIndex) {
-        continue;
-      }
-
-      const right = clusters[rightIndex]!;
-      const leftChanged = left.mergeInputHash !== currentInputHashes.get(left.id);
-      const rightChanged = right.mergeInputHash !== currentInputHashes.get(right.id);
-
-      if (!leftChanged && !rightChanged) {
-        diagnostics.cleanPairsSkipped += 1;
-        continue;
-      }
+    for (const rightMeta of selectClusterMergeLiveNeighbors(leftMeta, metas)) {
+      const right = rightMeta.cluster;
 
       const result = scoreClusterMergePair(left, right);
       diagnostics.totalPairs += 1;
@@ -1227,8 +1340,8 @@ export function buildClusterMergeCandidateSelection(clusters: ClusterMergeCandid
   const candidates = clusters
     .filter((cluster) => selectedIds.has(cluster.id))
     .sort((left, right) => {
-      const leftDirty = dirtyIds.has(left.id) ? 1 : 0;
-      const rightDirty = dirtyIds.has(right.id) ? 1 : 0;
+      const leftDirty = liveIds.has(left.id) ? 1 : 0;
+      const rightDirty = liveIds.has(right.id) ? 1 : 0;
       const leftBestScore = bestScores.get(left.id) ?? 0;
       const rightBestScore = bestScores.get(right.id) ?? 0;
 
@@ -1247,7 +1360,7 @@ export function buildClusterMergeCandidateSelection(clusters: ClusterMergeCandid
       return right.latestPublishedAt.getTime() - left.latestPublishedAt.getTime();
     });
   diagnostics.preLimitCandidates = candidates.length;
-  diagnostics.dirtyCandidateCount = candidates.filter((candidate) => dirtyIds.has(candidate.id)).length;
+  diagnostics.dirtyCandidateCount = candidates.filter((candidate) => liveIds.has(candidate.id)).length;
 
   const limitedCandidates = candidates.slice(0, CLUSTER_MERGE_CANDIDATE_LIMIT);
   const limitedCandidateIds = new Set(limitedCandidates.map((candidate) => candidate.id));
