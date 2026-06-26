@@ -1,6 +1,6 @@
 "use client";
 
-import { startTransition, useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -14,6 +14,7 @@ type GlobalHeaderProps = {
   resolveAdminClient?: boolean;
   showShadow?: boolean;
   rssHref?: string;
+  onHomeClick?: () => void;
 };
 
 const navItems = [
@@ -31,7 +32,14 @@ function getThemeStorage() {
   }
 }
 
-export function GlobalHeader({ activeNav, isAdmin: initialIsAdmin, resolveAdminClient = false, showShadow = true, rssHref }: GlobalHeaderProps) {
+export function GlobalHeader({
+  activeNav,
+  isAdmin: initialIsAdmin,
+  resolveAdminClient = false,
+  showShadow = true,
+  rssHref,
+  onHomeClick,
+}: GlobalHeaderProps) {
   const router = useRouter();
   const isAdmin = useClientAdminSession(initialIsAdmin, resolveAdminClient);
   const [isPending, setIsPending] = useState(false);
@@ -124,6 +132,15 @@ export function GlobalHeader({ activeNav, isAdmin: initialIsAdmin, resolveAdminC
     window.open("/api/feed/rss", "_blank", "noopener,noreferrer");
   };
 
+  const handleHomeClick = (event: ReactMouseEvent<HTMLAnchorElement>) => {
+    if (activeNav !== "home" || !onHomeClick) {
+      return;
+    }
+
+    event.preventDefault();
+    onHomeClick();
+  };
+
   return (
     <header
       className={cx(
@@ -137,6 +154,7 @@ export function GlobalHeader({ activeNav, isAdmin: initialIsAdmin, resolveAdminC
           <Link
             className="inline-flex shrink-0 items-center gap-2 text-[var(--foreground)]"
             href="/"
+            onClick={handleHomeClick}
           >
             <svg
               className="logo-mark h-7 w-7"
@@ -171,6 +189,7 @@ export function GlobalHeader({ activeNav, isAdmin: initialIsAdmin, resolveAdminC
                       : "text-[var(--text-2)] hover:bg-[var(--bg-muted)] hover:text-[var(--text-1)]",
                   )}
                   href={item.href}
+                  onClick={item.key === "home" ? handleHomeClick : undefined}
                 >
                   {item.label}
                 </Link>

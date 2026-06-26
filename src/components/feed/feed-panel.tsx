@@ -87,7 +87,7 @@ import type {
   FeedTagOption,
   FetchRunSnapshot,
 } from "@/lib/feed/types";
-import { FEED_PAGE_SIZE_OPTIONS } from "@/lib/feed/types";
+import { DEFAULT_FEED_PAGE_SIZE, FEED_PAGE_SIZE_OPTIONS } from "@/lib/feed/types";
 import type { GroupBadge as FeedGroupBadge } from "@/lib/groups/badge";
 import { cx } from "@/lib/ui/cx";
 import { matchesFuzzySearch } from "@/lib/utils/search";
@@ -222,6 +222,17 @@ const TAG_TONES = [
   { bg: "#f4f4f5", border: "#71717a", text: "#3f3f46", active: "#52525b" },
 ];
 const POPULAR_TAG_DISPLAY_LIMIT = 32;
+type TagButtonStyle = CSSProperties & {
+  "--tag-accent": string;
+  "--tag-bg": string;
+  "--tag-bg-hover": string;
+  "--tag-border": string;
+  "--tag-border-hover": string;
+  "--tag-text": string;
+  "--tag-active-bg": string;
+  "--tag-active-border": string;
+  "--tag-active-text": string;
+};
 
 function getTagToneKey(value: string) {
   let hash = 2166136261;
@@ -232,21 +243,19 @@ function getTagToneKey(value: string) {
   return Math.abs(hash) % TAG_TONES.length;
 }
 
-function getTagButtonStyle(option: FeedTagOption, index: number, isActive: boolean): CSSProperties {
+function getTagButtonStyle(option: FeedTagOption, index: number): TagButtonStyle {
   const tone = TAG_TONES[(getTagToneKey(option.normalized) + index * 7) % TAG_TONES.length] ?? TAG_TONES[0];
 
-  if (isActive) {
-    return {
-      backgroundColor: tone.active,
-      borderColor: tone.active,
-      color: "#ffffff",
-    };
-  }
-
   return {
-    backgroundColor: tone.bg,
-    borderColor: `${tone.border}66`,
-    color: tone.text,
+    "--tag-accent": tone.border,
+    "--tag-bg": tone.bg,
+    "--tag-bg-hover": `color-mix(in srgb, ${tone.border} 14%, #ffffff)`,
+    "--tag-border": `${tone.border}66`,
+    "--tag-border-hover": `${tone.border}99`,
+    "--tag-text": tone.text,
+    "--tag-active-bg": tone.active,
+    "--tag-active-border": tone.active,
+    "--tag-active-text": "#ffffff",
   };
 }
 
@@ -271,9 +280,9 @@ function PopularTagButton({
       aria-pressed={isActive}
       aria-label={`筛选标签：${option.name}，${option.count} 条`}
       title={`${option.name} ${option.count}`}
-      style={getTagButtonStyle(option, toneIndex, isActive)}
+      style={getTagButtonStyle(option, toneIndex)}
       className={cx(
-        "inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-sm border px-2 text-xs font-semibold transition",
+        "popular-tag-button inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-sm border px-2 text-xs font-semibold transition",
         "hover:shadow-[var(--shadow-sm)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(59,130,246,0.28)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)]",
         "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:shadow-none",
         isActive ? "shadow-[var(--shadow-sm)]" : "",
@@ -340,6 +349,23 @@ function normalizeImplicitCreatedRange(query: FeedQueryState): FeedQueryState {
   const nextRange = "today";
 
   return query.range === nextRange ? query : { ...query, range: nextRange };
+}
+
+function buildHomeFeedQuery(): FeedQueryState {
+  return {
+    range: "today",
+    sort: "time_desc",
+    startDate: null,
+    endDate: null,
+    publishedStartDate: null,
+    publishedEndDate: null,
+    groupId: null,
+    sourceId: null,
+    title: null,
+    tag: null,
+    entryKeys: [],
+    createdRangeExplicit: false,
+  };
 }
 
 function readStoredReadingProgress(filterKey: string): ReadingProgress | null {
@@ -766,6 +792,7 @@ export function FeedPanel({
     options?: {
       scrollToTop?: boolean;
       includePopularTags?: boolean;
+      replaceUrl?: string;
     },
   ) => {
     const normalizedQuery = normalizeImplicitCreatedRange(query);
@@ -781,7 +808,11 @@ export function FeedPanel({
 
     latestQueryRef.current = normalizedQuery;
     setAppliedQuery(normalizedQuery);
-    syncUrlWithQuery(normalizedQuery, page, size);
+    if (options?.replaceUrl) {
+      window.history.replaceState(null, "", options.replaceUrl);
+    } else {
+      syncUrlWithQuery(normalizedQuery, page, size);
+    }
     startTransition(async () => {
       const payload = await requestFeed(normalizedQuery, {
         page,
@@ -802,6 +833,32 @@ export function FeedPanel({
       }
     });
   }, [pageSize, availableGroups, syncUrlWithQuery, replaceFeedData]);
+
+  const resetHomeFeed = useCallback(() => {
+    const homeQuery = buildHomeFeedQuery();
+
+    setRange(homeQuery.range);
+    setCreatedRangeExplicit(false);
+    setSort(homeQuery.sort);
+    setStartDate(homeQuery.startDate);
+    setEndDate(homeQuery.endDate);
+    setPublishedStartDate(homeQuery.publishedStartDate);
+    setPublishedEndDate(homeQuery.publishedEndDate);
+    setGroupId(homeQuery.groupId);
+    setSourceId(homeQuery.sourceId);
+    setTitleInput("");
+    setTitleFilter(homeQuery.title);
+    setTag(homeQuery.tag);
+    setEntryKeys(homeQuery.entryKeys);
+    setAdvancedFiltersOpen(false);
+    setSelectedItems(new Set());
+
+    loadFeed(homeQuery, 1, DEFAULT_FEED_PAGE_SIZE, {
+      scrollToTop: true,
+      includePopularTags: true,
+      replaceUrl: "/",
+    });
+  }, [loadFeed]);
 
   const buildQuery = (overrides: Partial<FeedQueryState> = {}): FeedQueryState => ({
     range,
@@ -1769,6 +1826,7 @@ export function FeedPanel({
       header={{
         activeNav: "home",
         isAdmin,
+        onHomeClick: resetHomeFeed,
       }}
       footerPath="/"
       contentClassName="gap-5 sm:gap-6"
@@ -1803,14 +1861,12 @@ export function FeedPanel({
                 className="pointer-events-none invisible absolute inset-x-0 top-0 flex w-full min-w-0 flex-wrap items-center justify-start gap-1.5 overflow-visible"
               >
                 {visiblePopularTags.map((option, index) => {
-                  const isActive = option.normalized === tag;
-
                   return (
                     <span
                       key={option.normalized}
                       data-tag-key={option.normalized}
-                      style={getTagButtonStyle(option, index, isActive)}
-                      className="inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-sm border px-2 text-xs font-semibold"
+                      style={getTagButtonStyle(option, index)}
+                      className="popular-tag-button inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-sm border px-2 text-xs font-semibold"
                     >
                       <span>{option.name}</span>
                       <span className="shrink-0 text-[11px] font-bold opacity-75">{option.count}</span>

@@ -13,6 +13,7 @@ type PageShellHeader = {
   resolveAdminClient?: boolean;
   showShadow?: boolean;
   rssHref?: string;
+  onHomeClick?: () => void;
 };
 
 type PageShellProps = ComponentPropsWithoutRef<"main"> & {
@@ -57,6 +58,7 @@ export function PageShell({
           resolveAdminClient={header.resolveAdminClient}
           showShadow={header.showShadow}
           rssHref={header.rssHref}
+          onHomeClick={header.onHomeClick}
         />
       ) : null}
 

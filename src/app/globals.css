@@ -25,6 +25,10 @@
   --surface: #ffffff;
   --surface-muted: var(--bg-elevated);
   --surface-subtle: var(--bg-muted);
+  --control-surface: var(--surface);
+  --control-surface-hover: var(--surface-muted);
+  --control-line: var(--line-strong);
+  --control-line-focus: var(--accent);
   --foreground: var(--text-1);
   --muted: var(--text-2);
   --line: var(--border);
@@ -65,6 +69,10 @@
     --surface: #151922;
     --surface-muted: var(--bg-elevated);
     --surface-subtle: var(--bg-muted);
+    --control-surface: #131824;
+    --control-surface-hover: #171e2d;
+    --control-line: #30394a;
+    --control-line-focus: #4b8ee8;
     --foreground: var(--text-1);
     --muted: var(--text-2);
     --line: var(--border);
@@ -102,6 +110,10 @@ html[data-theme="dark"] {
   --surface: #151922;
   --surface-muted: var(--bg-elevated);
   --surface-subtle: var(--bg-muted);
+  --control-surface: #131824;
+  --control-surface-hover: #171e2d;
+  --control-line: #30394a;
+  --control-line-focus: #4b8ee8;
   --foreground: var(--text-1);
   --muted: var(--text-2);
   --line: var(--border);
@@ -138,6 +150,10 @@ html[data-theme="light"] {
   --surface: #ffffff;
   --surface-muted: var(--bg-elevated);
   --surface-subtle: var(--bg-muted);
+  --control-surface: var(--surface);
+  --control-surface-hover: var(--surface-muted);
+  --control-line: var(--line-strong);
+  --control-line-focus: var(--accent);
   --foreground: var(--text-1);
   --muted: var(--text-2);
   --line: var(--border);
@@ -447,8 +463,8 @@ main {
 
 .select-modern {
   appearance: none;
-  background-color: var(--surface);
-  border: 1px solid var(--line-strong);
+  background-color: var(--control-surface);
+  border: 1px solid var(--control-line);
   border-radius: 6px;
   color: var(--muted);
   font-size: 0.875rem;
@@ -472,9 +488,9 @@ main {
   min-height: 36px !important;
   box-sizing: border-box;
   padding: 0 12px !important;
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--control-line) !important;
   border-radius: 6px;
-  background: var(--surface);
+  background: var(--control-surface) !important;
   box-shadow: var(--shadow-sm);
   transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
   align-items: center;
@@ -488,7 +504,7 @@ main {
 .select-modern-antd .ant-select-selection-placeholder {
   line-height: 34px;
   font-size: 0.875rem;
-  color: var(--muted);
+  color: var(--muted) !important;
 }
 
 .select-modern-antd-multiline.ant-select-multiple {
@@ -500,9 +516,9 @@ main {
   min-height: 36px !important;
   height: auto !important;
   padding: 3px 8px !important;
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--control-line) !important;
   border-radius: 6px;
-  background: var(--surface);
+  background: var(--control-surface) !important;
   box-shadow: var(--shadow-sm);
   transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
   align-items: flex-start;
@@ -523,7 +539,7 @@ main {
   padding-inline: 10px 6px !important;
   line-height: 1.2 !important;
   color: var(--muted);
-  background: var(--surface-muted);
+  background: var(--control-surface-hover);
   border: 0;
   border-radius: 6px;
 }
@@ -553,9 +569,9 @@ main {
   min-height: 36px !important;
   height: 36px !important;
   padding: 3px 8px !important;
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--control-line) !important;
   border-radius: 6px;
-  background: var(--surface);
+  background: var(--control-surface) !important;
   box-shadow: var(--shadow-sm);
   transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
   align-items: center;
@@ -569,7 +585,7 @@ main {
 
 .select-modern-antd .ant-select-selection-placeholder,
 .select-modern-antd .ant-select-arrow {
-  color: var(--text-3);
+  color: var(--text-3) !important;
 }
 
 @keyframes slide-in {
@@ -590,14 +606,14 @@ main {
 
 .select-modern-antd .ant-select-selector:hover,
 .select-modern:hover {
-  border-color: var(--line-strong);
-  background: var(--surface-muted);
+  border-color: var(--control-line);
+  background: var(--control-surface-hover);
 }
 
 .select-modern-antd.ant-select-focused .ant-select-selector,
 .select-modern:focus-visible {
   outline: none;
-  border-color: var(--accent);
+  border-color: var(--control-line-focus) !important;
   box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.35);
 }
 
@@ -634,21 +650,21 @@ main {
 .ant-picker,
 .ant-picker-input > input {
   font-size: 0.875rem;
-  color: var(--muted);
+  color: var(--muted) !important;
 }
 
 .ant-picker {
-  border: 1px solid var(--line-strong);
-  background: var(--surface);
+  border: 1px solid var(--control-line);
+  background: var(--control-surface);
   box-shadow: var(--shadow-sm);
 }
 
 .ant-picker:hover {
-  border-color: var(--line-strong);
+  border-color: var(--control-line);
 }
 
 .ant-picker-focused {
-  border-color: var(--accent);
+  border-color: var(--control-line-focus);
   box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.35);
 }
 
@@ -658,4 +674,57 @@ main {
 .ant-picker-range-separator,
 .ant-picker-separator {
   color: var(--muted);
+}
+
+.popular-tag-button {
+  background: var(--tag-bg);
+  border-color: var(--tag-border);
+  color: var(--tag-text);
+}
+
+.popular-tag-button:hover {
+  background: var(--tag-bg-hover);
+  border-color: var(--tag-border-hover);
+}
+
+.popular-tag-button[aria-pressed="true"] {
+  background: var(--tag-active-bg);
+  border-color: var(--tag-active-border);
+  color: var(--tag-active-text);
+}
+
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme="light"]) .popular-tag-button {
+    background: color-mix(in srgb, var(--tag-accent) 14%, var(--surface));
+    border-color: color-mix(in srgb, var(--tag-accent) 42%, var(--line));
+    color: color-mix(in srgb, var(--tag-accent) 72%, var(--text-1));
+  }
+
+  html:not([data-theme="light"]) .popular-tag-button:hover {
+    background: color-mix(in srgb, var(--tag-accent) 20%, var(--surface));
+    border-color: color-mix(in srgb, var(--tag-accent) 58%, var(--line));
+  }
+
+  html:not([data-theme="light"]) .popular-tag-button[aria-pressed="true"] {
+    background: color-mix(in srgb, var(--tag-accent) 28%, var(--surface));
+    border-color: color-mix(in srgb, var(--tag-accent) 76%, var(--line));
+    color: var(--text-1);
+  }
+}
+
+html[data-theme="dark"] .popular-tag-button {
+  background: color-mix(in srgb, var(--tag-accent) 14%, var(--surface));
+  border-color: color-mix(in srgb, var(--tag-accent) 42%, var(--line));
+  color: color-mix(in srgb, var(--tag-accent) 72%, var(--text-1));
+}
+
+html[data-theme="dark"] .popular-tag-button:hover {
+  background: color-mix(in srgb, var(--tag-accent) 20%, var(--surface));
+  border-color: color-mix(in srgb, var(--tag-accent) 58%, var(--line));
+}
+
+html[data-theme="dark"] .popular-tag-button[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--tag-accent) 28%, var(--surface));
+  border-color: color-mix(in srgb, var(--tag-accent) 76%, var(--line));
+  color: var(--text-1);
 }

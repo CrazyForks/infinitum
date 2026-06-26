@@ -778,6 +778,104 @@ describe("FeedPanel", () => {
     expect(getSelectRoot("创建时间")).toHaveTextContent("当天");
   });
 
+  it("resets the feed to the initial home state from the active home nav after filtering by tag", async () => {
+    const user = userEvent.setup();
+    window.history.replaceState(null, "", "/");
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            items: [
+              {
+                ...initialEntries[1],
+                id: "item-tagged-ios",
+                title: "iOS 标签内容",
+              },
+            ],
+            pagination: { page: 1, size: 50, total: 1, totalPages: 1 },
+            nextCursor: null,
+            range: "today" satisfies FeedRange,
+            sort: "time_desc" satisfies FeedSort,
+            start: null,
+            end: null,
+            publishedStart: null,
+            publishedEnd: null,
+            groupId: null,
+            sourceId: null,
+            title: null,
+            tag: "ios",
+            popularTags: [{ name: "iOS", normalized: "ios", count: 5 }],
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            items: [
+              {
+                ...initialEntries[1],
+                id: "item-home-default",
+                title: "主页初始内容",
+              },
+            ],
+            pagination: { page: 1, size: 50, total: 1, totalPages: 1 },
+            nextCursor: null,
+            range: "today" satisfies FeedRange,
+            sort: "time_desc" satisfies FeedSort,
+            start: null,
+            end: null,
+            publishedStart: null,
+            publishedEnd: null,
+            groupId: null,
+            sourceId: null,
+            title: null,
+            tag: null,
+            popularTags: [{ name: "iOS", normalized: "ios", count: 5 }],
+          }),
+        ),
+      );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <FeedPanel
+        initialItems={initialEntries}
+        initialRange="today"
+        initialCreatedRangeExplicit={false}
+        initialSort="time_desc"
+        initialStartDate={null}
+        initialEndDate={null}
+        initialNextCursor={null}
+        initialStatus={null}
+        isAdmin={false}
+        popularTags={[{ name: "iOS", normalized: "ios", count: 5 }]}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "筛选标签：iOS，5 条" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=today&sort=time_desc&tag=ios");
+    });
+    expect(window.location.search).toBe("?range=today&sort=time_desc&tag=ios");
+    expect(await screen.findByText("iOS 标签内容")).toBeInTheDocument();
+    expect(screen.getByText("标签：iOS")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "筛选标签：iOS，5 条" })).toHaveAttribute("aria-pressed", "true");
+
+    await user.click(screen.getByRole("link", { name: "主页" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/feed?range=today&sort=time_desc");
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(window.location.pathname).toBe("/");
+    expect(window.location.search).toBe("");
+    expect(await screen.findByText("主页初始内容")).toBeInTheDocument();
+    expect(screen.queryByText("标签：iOS")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "筛选标签：iOS，5 条" })).toHaveAttribute("aria-pressed", "false");
+  });
+
   it("renders enough popular tags for the two-row desktop strip", () => {
     const popularTags: FeedTagOption[] = Array.from({ length: 34 }, (_, index) => {
       const tagNumber = index + 1;
