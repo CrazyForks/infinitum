@@ -1070,6 +1070,10 @@ function scoreClusterMergePair(left: ClusterMergeCandidate, right: ClusterMergeC
   };
 }
 
+export function scoreClusterMergeCandidatePair(left: ClusterMergeCandidate, right: ClusterMergeCandidate) {
+  return scoreClusterMergePair(left, right);
+}
+
 function shouldSendMergePairToAi(score: number, relatedPairCount: number) {
   if (score >= CLUSTER_MERGE_AI_PAIR_STRONG_SCORE) {
     return true;
@@ -1101,8 +1105,26 @@ function incrementClusterMergeRejection(
   }
 }
 
-function buildClusterMergeEdgeKey(leftId: string, rightId: string) {
+export function buildClusterMergeEdgeKey(leftId: string, rightId: string) {
   return [leftId, rightId].sort().join("\u0000");
+}
+
+export function buildClusterMergeCleanPairKey(
+  left: ClusterMergeCandidate,
+  right: ClusterMergeCandidate,
+) {
+  const pair = [
+    {
+      id: left.id,
+      inputHash: buildClusterMergeCandidateInputHash(left),
+    },
+    {
+      id: right.id,
+      inputHash: buildClusterMergeCandidateInputHash(right),
+    },
+  ].sort((a, b) => a.id.localeCompare(b.id));
+
+  return crypto.createHash("sha256").update(JSON.stringify(pair)).digest("hex");
 }
 
 export function hasClusterMergeCandidateEdge(
@@ -1146,6 +1168,14 @@ export function buildClusterMergeCandidateSelection(clusters: ClusterMergeCandid
       }
 
       const right = clusters[rightIndex]!;
+      const leftChanged = left.mergeInputHash !== currentInputHashes.get(left.id);
+      const rightChanged = right.mergeInputHash !== currentInputHashes.get(right.id);
+
+      if (!leftChanged && !rightChanged) {
+        diagnostics.cleanPairsSkipped += 1;
+        continue;
+      }
+
       const result = scoreClusterMergePair(left, right);
       diagnostics.totalPairs += 1;
 
@@ -1175,22 +1205,15 @@ export function buildClusterMergeCandidateSelection(clusters: ClusterMergeCandid
       })
       .filter((pair) => shouldSendMergePairToAi(pair.score, relatedPairs.length))
       .slice(0, CLUSTER_MERGE_RELATED_PAIR_LIMIT)) {
-      const leftChanged = left.mergeInputHash !== currentInputHashes.get(left.id);
-      const rightChanged = pair.right.mergeInputHash !== currentInputHashes.get(pair.right.id);
+      const edgeKey = buildClusterMergeEdgeKey(left.id, pair.right.id);
+      const existingEdge = selectedEdges.get(edgeKey);
       diagnostics.aiEligiblePairs += 1;
-
-      if (!leftChanged && !rightChanged) {
-        diagnostics.cleanPairsSkipped += 1;
-        continue;
-      }
-
       diagnostics.dirtyPairs += 1;
+
       selectedIds.add(left.id);
       selectedIds.add(pair.right.id);
       bestScores.set(left.id, Math.max(bestScores.get(left.id) ?? 0, pair.score));
       bestScores.set(pair.right.id, Math.max(bestScores.get(pair.right.id) ?? 0, pair.score));
-      const edgeKey = buildClusterMergeEdgeKey(left.id, pair.right.id);
-      const existingEdge = selectedEdges.get(edgeKey);
       if (!existingEdge || pair.score > existingEdge.score) {
         selectedEdges.set(edgeKey, {
           leftId: left.id,

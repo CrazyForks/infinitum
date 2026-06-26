@@ -1,6 +1,6 @@
 import type { BackgroundTaskRun } from "@prisma/client";
 
-import { executeClusterSummaryTask } from "@/lib/clusters/service";
+import { executeClusterMergeCleanPairPrecomputeTask, executeClusterSummaryTask } from "@/lib/clusters/service";
 import { executeDailyReportTask } from "@/lib/daily-report/service";
 import { runIngestionTask } from "@/lib/ingestion/service";
 import { executeItemCleanupTask, executeItemReanalyzeTask, executeItemRegenerationTask, executeItemReparseAggregationsTask } from "@/lib/items/service";
@@ -21,6 +21,9 @@ export async function executeTaskRun(taskRun: BackgroundTaskRun) {
       return;
     case "cluster_regenerate_summary":
       await executeClusterSummaryTask(taskRun);
+      return;
+    case "cluster_merge_precompute_clean_pairs":
+      await executeClusterMergeCleanPairPrecomputeTask(taskRun);
       return;
     case "daily_report_generate":
       await executeDailyReportTask(taskRun);

@@ -20,6 +20,7 @@ services:
   worker:
     image: docker.io/xiexiao064/infinitum-worker:latest
     restart: unless-stopped
+    cpus: "${WORKER_CPUS:-0.50}"
     environment:
       NODE_ENV: production
       DATABASE_URL: file:/app/data/dev.db

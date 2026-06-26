@@ -13,6 +13,7 @@ const TASK_KINDS = new Set([
   "item_regenerate_summary",
   "item_reanalyze",
   "cluster_regenerate_summary",
+  "cluster_merge_precompute_clean_pairs",
   "daily_report_generate",
   "item_cleanup",
   "item_reparse_aggregations",

@@ -4,6 +4,16 @@ import {
   CLUSTER_DIRECT_MATCH_MIN_GAP,
   CLUSTER_DIRECT_MATCH_MIN_SCORE,
   CLUSTER_LOOKBACK_MS,
+  CLUSTER_MERGE_AI_PAIR_GRAY_SCORE,
+  CLUSTER_MERGE_CANDIDATE_LIMIT,
+  CLUSTER_MERGE_CLEAN_PAIR_TTL_MS,
+  CLUSTER_MERGE_CLEAN_PAIR_MAX_ATTEMPTS,
+  CLUSTER_MERGE_PRECOMPUTE_BATCH_DELAY_MS,
+  CLUSTER_MERGE_PRECOMPUTE_BATCH_SIZE,
+  CLUSTER_MERGE_PRECOMPUTE_PAIR_SLICE_DELAY_MS,
+  CLUSTER_MERGE_PRECOMPUTE_PAIR_SLICE_SIZE,
+  CLUSTER_MERGE_PRECOMPUTE_PAIR_LIMIT,
+  CLUSTER_MERGE_PRECOMPUTED_CLEAN_PAIR_LIMIT,
   CLUSTER_MERGE_SCAN_CLUSTER_LIMIT,
 } from "@/config/constants";
 
@@ -12,6 +22,8 @@ import {
   buildCandidateRange,
   buildCandidateRangeKey,
   buildClusterEventSignature,
+  buildClusterMergeCleanPairKey,
+  buildClusterMergeEdgeKey,
   buildClusterFingerprintSeed,
   buildClusterMatchInput,
   buildClusterMergeCandidateInputHash,
@@ -31,7 +43,10 @@ import {
   normalizeFingerprint,
   rankClusterCandidates,
   rememberRecentCandidate,
+  scoreClusterMergeCandidatePair,
   toClusterAssignmentCandidate,
+  type ClusterMergeCandidate,
+  type ClusterMergeCandidateEdge,
 } from "@/lib/clusters/helpers";
 import {
   type ClusterAssignmentCandidate,
@@ -907,6 +922,9 @@ export type ClusterMergePassResult = {
   relatedPairs: number;
   aiEligiblePairs: number;
   cleanPairsSkipped: number;
+  precomputedCleanPairsUsed: number;
+  precomputedCleanPairsAttemptSkipped: number;
+  precomputedCleanPairsInvalidSkipped: number;
   dirtyPairs: number;
   preLimitCandidates: number;
   postLimitCandidates: number;
@@ -917,17 +935,200 @@ export type ClusterMergePassResult = {
   itemsMoved: number;
   failedGroups: number;
   affectedClusterIds: string[];
+  refreshItemCountsMs: number;
+  loadClustersMs: number;
+  candidateSelectionMs: number;
+  promptBuildMs: number;
+  promptChars: number;
+  promptPairs: number;
+  aiMergeMs: number;
+  applyMergeMs: number;
+  markEvaluatedMs: number;
 };
 
-type EvaluatedClusterMergeCandidate = Parameters<typeof buildClusterMergeCandidateInputHash>[0] & { id: string };
+type EvaluatedClusterMergeCandidate = Parameters<typeof buildClusterMergeCandidateInputHash>[0] & {
+  id: string;
+  mergeInputHash?: string | null;
+};
+
+function isClusterMergeCandidateClean(candidate: ClusterMergeCandidate) {
+  return candidate.mergeInputHash === buildClusterMergeCandidateInputHash(candidate);
+}
+
+type StoredCleanMergePair = {
+  id: string;
+  leftClusterId: string;
+  rightClusterId: string;
+  leftInputHash: string;
+  rightInputHash: string;
+  score: number;
+  attemptCount: number;
+};
+
+type PrecomputedCleanPairSelection = {
+  candidates: ClusterMergeCandidate[];
+  allowedPairs: ClusterMergeCandidateEdge[];
+  usedPairIdsByEdgeKey: Map<string, string>;
+  usedCount: number;
+  attemptSkipped: number;
+  invalidSkipped: number;
+};
+
+function addClusterMergeCandidate(candidateMap: Map<string, ClusterMergeCandidate>, candidate: ClusterMergeCandidate) {
+  if (candidateMap.size >= CLUSTER_MERGE_CANDIDATE_LIMIT && !candidateMap.has(candidate.id)) {
+    return false;
+  }
+
+  candidateMap.set(candidate.id, candidate);
+  return true;
+}
+
+function groupContainsClusterMergePair(group: string[], leftId: string, rightId: string) {
+  if (group.length < 2) {
+    return false;
+  }
+
+  const ids = new Set(group);
+  return ids.has(leftId) && ids.has(rightId);
+}
+
+async function loadStoredCleanMergePairs(now: Date) {
+  return prisma.clusterMergeCleanPairCandidate.findMany({
+    where: {
+      expiresAt: { gt: now },
+    },
+    orderBy: [
+      { score: "desc" },
+      { updatedAt: "desc" },
+      { id: "asc" },
+    ],
+    take: CLUSTER_MERGE_PRECOMPUTED_CLEAN_PAIR_LIMIT * 4,
+  });
+}
+
+function mergePrecomputedCleanPairs(input: {
+  liveCandidates: ClusterMergeCandidate[];
+  liveAllowedPairs: ClusterMergeCandidateEdge[];
+  recentClusters: ClusterMergeCandidate[];
+  storedPairs: StoredCleanMergePair[];
+}): PrecomputedCleanPairSelection {
+  const candidateMap = new Map(input.liveCandidates.map((candidate) => [candidate.id, candidate]));
+  const clustersById = new Map(input.recentClusters.map((cluster) => [cluster.id, cluster]));
+  const edgeMap = new Map(
+    input.liveAllowedPairs.map((edge) => [buildClusterMergeEdgeKey(edge.leftId, edge.rightId), edge]),
+  );
+  const usedPairIdsByEdgeKey = new Map<string, string>();
+  let usedCount = 0;
+  let attemptSkipped = 0;
+  let invalidSkipped = 0;
+
+  for (const pair of input.storedPairs) {
+    if (usedCount >= CLUSTER_MERGE_PRECOMPUTED_CLEAN_PAIR_LIMIT) {
+      break;
+    }
+
+    const left = clustersById.get(pair.leftClusterId);
+    const right = clustersById.get(pair.rightClusterId);
+
+    if (!left || !right) {
+      invalidSkipped += 1;
+      continue;
+    }
+
+    if (
+      pair.attemptCount >= CLUSTER_MERGE_CLEAN_PAIR_MAX_ATTEMPTS ||
+      buildClusterMergeCandidateInputHash(left) !== pair.leftInputHash ||
+      buildClusterMergeCandidateInputHash(right) !== pair.rightInputHash ||
+      !isClusterMergeCandidateClean(left) ||
+      !isClusterMergeCandidateClean(right)
+    ) {
+      attemptSkipped += pair.attemptCount >= CLUSTER_MERGE_CLEAN_PAIR_MAX_ATTEMPTS ? 1 : 0;
+      invalidSkipped += pair.attemptCount >= CLUSTER_MERGE_CLEAN_PAIR_MAX_ATTEMPTS ? 0 : 1;
+      continue;
+    }
+
+    const edgeKey = buildClusterMergeEdgeKey(left.id, right.id);
+    if (edgeMap.has(edgeKey)) {
+      continue;
+    }
+
+    if (!addClusterMergeCandidate(candidateMap, left) || !addClusterMergeCandidate(candidateMap, right)) {
+      break;
+    }
+
+    edgeMap.set(edgeKey, {
+      leftId: left.id,
+      rightId: right.id,
+      score: pair.score,
+    });
+    usedPairIdsByEdgeKey.set(edgeKey, pair.id);
+    usedCount += 1;
+  }
+
+  return {
+    candidates: [...candidateMap.values()],
+    allowedPairs: [...edgeMap.values()].sort((left, right) => {
+      if (right.score !== left.score) {
+        return right.score - left.score;
+      }
+
+      return buildClusterMergeEdgeKey(left.leftId, left.rightId).localeCompare(
+        buildClusterMergeEdgeKey(right.leftId, right.rightId),
+      );
+    }),
+    usedPairIdsByEdgeKey,
+    usedCount,
+    attemptSkipped,
+    invalidSkipped,
+  };
+}
+
+async function markDeclinedPrecomputedCleanMergePairs(
+  usedPairIdsByEdgeKey: Map<string, string>,
+  allowedPairs: ClusterMergeCandidateEdge[],
+  mergeGroups: string[][],
+) {
+  if (usedPairIdsByEdgeKey.size === 0) {
+    return;
+  }
+
+  const declinedPairIds: string[] = [];
+
+  for (const edge of allowedPairs) {
+    const edgeKey = buildClusterMergeEdgeKey(edge.leftId, edge.rightId);
+    const pairId = usedPairIdsByEdgeKey.get(edgeKey);
+
+    if (!pairId || mergeGroups.some((group) => groupContainsClusterMergePair(group, edge.leftId, edge.rightId))) {
+      continue;
+    }
+
+    declinedPairIds.push(pairId);
+  }
+
+  if (declinedPairIds.length === 0) {
+    return;
+  }
+
+  await prisma.clusterMergeCleanPairCandidate.updateMany({
+    where: { id: { in: declinedPairIds } },
+    data: {
+      attemptCount: { increment: 1 },
+      lastEvaluatedAt: new Date(),
+    },
+  });
+}
 
 async function markClusterMergeCandidatesEvaluated(candidates: EvaluatedClusterMergeCandidate[]) {
-  if (candidates.length === 0) {
+  const changedCandidates = candidates.filter(
+    (candidate) => candidate.mergeInputHash !== buildClusterMergeCandidateInputHash(candidate),
+  );
+
+  if (changedCandidates.length === 0) {
     return;
   }
 
   await prisma.$transaction(
-    candidates.map((candidate) =>
+    changedCandidates.map((candidate) =>
       prisma.contentCluster.updateMany({
         where: { id: candidate.id },
         data: { mergeInputHash: buildClusterMergeCandidateInputHash(candidate) },
@@ -936,12 +1137,7 @@ async function markClusterMergeCandidatesEvaluated(candidates: EvaluatedClusterM
   );
 }
 
-export async function executeClusterMerge(
-  aiProvider: AiProvider | undefined,
-  now: Date,
-): Promise<ClusterMergePassResult> {
-  const lookbackSince = new Date(now.getTime() - CLUSTER_LOOKBACK_MS);
-
+async function refreshRecentClusterItemCounts(lookbackSince: Date) {
   // Refresh itemCount for clusters in the lookback window.
   // Newly created clusters only get fully refreshed during cluster_finalize,
   // which runs AFTER merge.
@@ -956,10 +1152,10 @@ export async function executeClusterMerge(
     WHERE status = 'active'
     AND latestPublishedAt >= ${lookbackSince.getTime()}
   `;
+}
 
-  // Load active clusters within the 7-day window, then locally narrow them
-  // before asking AI to judge merge groups.
-  const recentClusters = await prisma.contentCluster.findMany({
+async function loadRecentMergeClusters(lookbackSince: Date) {
+  return prisma.contentCluster.findMany({
     where: {
       status: "active",
       latestPublishedAt: { gte: lookbackSince },
@@ -979,7 +1175,48 @@ export async function executeClusterMerge(
     ],
     take: CLUSTER_MERGE_SCAN_CLUSTER_LIMIT,
   });
-  const { candidates: allCandidates, allowedPairs, diagnostics } = buildClusterMergeCandidateSelection(recentClusters);
+}
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+export async function executeClusterMerge(
+  aiProvider: AiProvider | undefined,
+  now: Date,
+): Promise<ClusterMergePassResult> {
+  const lookbackSince = new Date(now.getTime() - CLUSTER_LOOKBACK_MS);
+  const timings = {
+    refreshItemCountsMs: 0,
+    loadClustersMs: 0,
+    candidateSelectionMs: 0,
+    promptBuildMs: 0,
+    promptChars: 0,
+    promptPairs: 0,
+    aiMergeMs: 0,
+    applyMergeMs: 0,
+    markEvaluatedMs: 0,
+  };
+
+  const refreshStartedAt = Date.now();
+  await refreshRecentClusterItemCounts(lookbackSince);
+  timings.refreshItemCountsMs = Date.now() - refreshStartedAt;
+  const loadStartedAt = Date.now();
+  const recentClusters = await loadRecentMergeClusters(lookbackSince);
+  timings.loadClustersMs = Date.now() - loadStartedAt;
+  const selectionStartedAt = Date.now();
+  const liveSelection = buildClusterMergeCandidateSelection(recentClusters);
+  const precomputedSelection = mergePrecomputedCleanPairs({
+    liveCandidates: liveSelection.candidates,
+    liveAllowedPairs: liveSelection.allowedPairs,
+    recentClusters,
+    storedPairs: await loadStoredCleanMergePairs(now),
+  });
+  timings.candidateSelectionMs = Date.now() - selectionStartedAt;
+  const allCandidates = precomputedSelection.candidates;
+  const allowedPairs = precomputedSelection.allowedPairs;
+  const diagnostics = liveSelection.diagnostics;
+  timings.promptPairs = allowedPairs.length;
 
   const baseResult = {
     baseClusters: recentClusters.length,
@@ -992,15 +1229,24 @@ export async function executeClusterMerge(
     relatedPairs: diagnostics.relatedPairs,
     aiEligiblePairs: diagnostics.aiEligiblePairs,
     cleanPairsSkipped: diagnostics.cleanPairsSkipped,
+    precomputedCleanPairsUsed: precomputedSelection.usedCount,
+    precomputedCleanPairsAttemptSkipped: precomputedSelection.attemptSkipped,
+    precomputedCleanPairsInvalidSkipped: precomputedSelection.invalidSkipped,
     dirtyPairs: diagnostics.dirtyPairs,
     preLimitCandidates: diagnostics.preLimitCandidates,
-    postLimitCandidates: diagnostics.postLimitCandidates,
+    postLimitCandidates: allCandidates.length,
     dirtyCandidates: diagnostics.dirtyCandidateCount,
+    ...timings,
   };
 
   if (allCandidates.length < 2 || allowedPairs.length === 0) {
+    const markStartedAt = Date.now();
+    await markClusterMergeCandidatesEvaluated(recentClusters);
+    timings.markEvaluatedMs = Date.now() - markStartedAt;
+
     return {
       ...baseResult,
+      ...timings,
       aiMergeGroups: 0,
       skipped: true,
       mergedCount: 0,
@@ -1016,9 +1262,14 @@ export async function executeClusterMerge(
     (candidate) => candidate.mergeInputHash === buildClusterMergeCandidateInputHash(candidate),
   );
 
-  if (allHashesMatch) {
+  if (allHashesMatch && precomputedSelection.usedCount === 0) {
+    const markStartedAt = Date.now();
+    await markClusterMergeCandidatesEvaluated(recentClusters);
+    timings.markEvaluatedMs = Date.now() - markStartedAt;
+
     return {
       ...baseResult,
+      ...timings,
       aiMergeGroups: 0,
       skipped: true,
       mergedCount: 0,
@@ -1030,10 +1281,13 @@ export async function executeClusterMerge(
 
   // If no AI provider, just update hashes and skip
   if (!aiProvider) {
-    await markClusterMergeCandidatesEvaluated(allCandidates);
+    const markStartedAt = Date.now();
+    await markClusterMergeCandidatesEvaluated(recentClusters);
+    timings.markEvaluatedMs = Date.now() - markStartedAt;
 
     return {
       ...baseResult,
+      ...timings,
       aiMergeGroups: 0,
       skipped: true,
       mergedCount: 0,
@@ -1044,17 +1298,25 @@ export async function executeClusterMerge(
   }
 
   // Build merge candidates and call AI
+  const promptBuildStartedAt = Date.now();
   const clustersJson = buildClusterMergeInput(allCandidates, allowedPairs);
+  timings.promptBuildMs = Date.now() - promptBuildStartedAt;
+  timings.promptChars = clustersJson.length;
   let mergeGroups: string[][];
 
+  const aiMergeStartedAt = Date.now();
   try {
     mergeGroups = await aiProvider.mergeClusters(clustersJson);
   } catch {
+    timings.aiMergeMs = Date.now() - aiMergeStartedAt;
     // On AI failure, update hashes and return without merging
-    await markClusterMergeCandidatesEvaluated(allCandidates);
+    const markStartedAt = Date.now();
+    await markClusterMergeCandidatesEvaluated(recentClusters);
+    timings.markEvaluatedMs = Date.now() - markStartedAt;
 
     return {
       ...baseResult,
+      ...timings,
       aiMergeGroups: 0,
       skipped: true,
       mergedCount: 0,
@@ -1063,6 +1325,12 @@ export async function executeClusterMerge(
       affectedClusterIds: [],
     };
   }
+  timings.aiMergeMs = Date.now() - aiMergeStartedAt;
+  await markDeclinedPrecomputedCleanMergePairs(
+    precomputedSelection.usedPairIdsByEdgeKey,
+    allowedPairs,
+    mergeGroups,
+  );
 
   // Execute merges
   const affectedClusterIds = new Set<string>();
@@ -1070,6 +1338,7 @@ export async function executeClusterMerge(
   let itemsMoved = 0;
   let failedGroups = 0;
 
+  const applyMergeStartedAt = Date.now();
   for (const group of mergeGroups) {
     if (group.length < 2) continue;
 
@@ -1100,13 +1369,17 @@ export async function executeClusterMerge(
       failedGroups += 1;
     }
   }
+  timings.applyMergeMs = Date.now() - applyMergeStartedAt;
 
   // Update mergeInputHash on evaluated candidates after merge. Deleted source
   // clusters are ignored by updateMany.
-  await markClusterMergeCandidatesEvaluated(allCandidates);
+  const markStartedAt = Date.now();
+  await markClusterMergeCandidatesEvaluated(recentClusters);
+  timings.markEvaluatedMs = Date.now() - markStartedAt;
 
   return {
     ...baseResult,
+    ...timings,
     aiMergeGroups: mergeGroups.filter((group) => group.length >= 2).length,
     skipped: false,
     mergedCount,
@@ -1114,6 +1387,185 @@ export async function executeClusterMerge(
     failedGroups,
     affectedClusterIds: [...affectedClusterIds],
   };
+}
+
+export type ClusterMergeCleanPairPrecomputeResult = {
+  baseClusters: number;
+  cleanClusters: number;
+  scoredPairs: number;
+  candidatePairs: number;
+  storedPairs: number;
+  durationMs: number;
+};
+
+function toCleanPairCandidateRecord(left: ClusterMergeCandidate, right: ClusterMergeCandidate, score: number) {
+  const [first, second] = [left, right].sort((a, b) => a.id.localeCompare(b.id));
+
+  return {
+    pairKey: buildClusterMergeCleanPairKey(first, second),
+    leftClusterId: first.id,
+    rightClusterId: second.id,
+    leftInputHash: buildClusterMergeCandidateInputHash(first),
+    rightInputHash: buildClusterMergeCandidateInputHash(second),
+    score,
+  };
+}
+
+async function upsertCleanPairCandidates(input: {
+  pairs: Array<ReturnType<typeof toCleanPairCandidateRecord>>;
+  expiresAt: Date;
+}) {
+  if (input.pairs.length === 0) {
+    return;
+  }
+
+  await prisma.$transaction(
+    input.pairs.map((pair) =>
+      prisma.clusterMergeCleanPairCandidate.upsert({
+        where: { pairKey: pair.pairKey },
+        create: {
+          ...pair,
+          expiresAt: input.expiresAt,
+        },
+        update: {
+          leftClusterId: pair.leftClusterId,
+          rightClusterId: pair.rightClusterId,
+          leftInputHash: pair.leftInputHash,
+          rightInputHash: pair.rightInputHash,
+          score: pair.score,
+          expiresAt: input.expiresAt,
+        },
+      }),
+    ),
+  );
+}
+
+export async function precomputeClusterMergeCleanPairs(now = new Date()): Promise<ClusterMergeCleanPairPrecomputeResult> {
+  const startedAt = Date.now();
+  const lookbackSince = new Date(now.getTime() - CLUSTER_LOOKBACK_MS);
+  const expiresAt = new Date(now.getTime() + CLUSTER_MERGE_CLEAN_PAIR_TTL_MS);
+
+  await refreshRecentClusterItemCounts(lookbackSince);
+  await prisma.clusterMergeCleanPairCandidate.deleteMany({
+    where: { expiresAt: { lte: now } },
+  });
+
+  const recentClusters = await loadRecentMergeClusters(lookbackSince);
+  const cleanClusters = recentClusters.filter(isClusterMergeCandidateClean);
+  const candidates: Array<ReturnType<typeof toCleanPairCandidateRecord>> = [];
+  let scoredPairs = 0;
+  let scoredPairsInSlice = 0;
+
+  for (let leftStart = 0; leftStart < cleanClusters.length; leftStart += CLUSTER_MERGE_PRECOMPUTE_BATCH_SIZE) {
+    const leftEnd = Math.min(cleanClusters.length, leftStart + CLUSTER_MERGE_PRECOMPUTE_BATCH_SIZE);
+
+    for (let leftIndex = leftStart; leftIndex < leftEnd; leftIndex += 1) {
+      const left = cleanClusters[leftIndex]!;
+
+      for (let rightIndex = leftIndex + 1; rightIndex < cleanClusters.length; rightIndex += 1) {
+        const right = cleanClusters[rightIndex]!;
+        const result = scoreClusterMergeCandidatePair(left, right);
+        scoredPairs += 1;
+        scoredPairsInSlice += 1;
+
+        if (result.rejected || result.score < CLUSTER_MERGE_AI_PAIR_GRAY_SCORE) {
+          if (
+            scoredPairsInSlice >= CLUSTER_MERGE_PRECOMPUTE_PAIR_SLICE_SIZE &&
+            CLUSTER_MERGE_PRECOMPUTE_PAIR_SLICE_DELAY_MS > 0
+          ) {
+            scoredPairsInSlice = 0;
+            await sleep(CLUSTER_MERGE_PRECOMPUTE_PAIR_SLICE_DELAY_MS);
+          }
+          continue;
+        }
+
+        candidates.push(toCleanPairCandidateRecord(left, right, result.score));
+        if (
+          scoredPairsInSlice >= CLUSTER_MERGE_PRECOMPUTE_PAIR_SLICE_SIZE &&
+          CLUSTER_MERGE_PRECOMPUTE_PAIR_SLICE_DELAY_MS > 0
+        ) {
+          scoredPairsInSlice = 0;
+          await sleep(CLUSTER_MERGE_PRECOMPUTE_PAIR_SLICE_DELAY_MS);
+        }
+      }
+    }
+
+    if (candidates.length > CLUSTER_MERGE_PRECOMPUTE_PAIR_LIMIT * 4) {
+      candidates.sort((left, right) => right.score - left.score || left.pairKey.localeCompare(right.pairKey));
+      candidates.splice(CLUSTER_MERGE_PRECOMPUTE_PAIR_LIMIT * 2);
+    }
+
+    if (leftEnd < cleanClusters.length && CLUSTER_MERGE_PRECOMPUTE_BATCH_DELAY_MS > 0) {
+      await sleep(CLUSTER_MERGE_PRECOMPUTE_BATCH_DELAY_MS);
+    }
+  }
+
+  candidates.sort((left, right) => right.score - left.score || left.pairKey.localeCompare(right.pairKey));
+  const topCandidates = candidates.slice(0, CLUSTER_MERGE_PRECOMPUTE_PAIR_LIMIT);
+  await upsertCleanPairCandidates({ pairs: topCandidates, expiresAt });
+
+  return {
+    baseClusters: recentClusters.length,
+    cleanClusters: cleanClusters.length,
+    scoredPairs,
+    candidatePairs: candidates.length,
+    storedPairs: topCandidates.length,
+    durationMs: Date.now() - startedAt,
+  };
+}
+
+export async function enqueueClusterMergeCleanPairPrecomputeTask(input?: {
+  triggerType?: "scheduled" | "manual" | "admin_action";
+}) {
+  const activeTaskCount = await prisma.backgroundTaskRun.count({
+    where: {
+      kind: "cluster_merge_precompute_clean_pairs",
+      status: { in: ["queued", "running"] },
+    },
+  });
+
+  if (activeTaskCount > 0) {
+    return null;
+  }
+
+  return enqueueTaskRun({
+    kind: "cluster_merge_precompute_clean_pairs",
+    triggerType: input?.triggerType ?? "manual",
+    label: "合并候选预计算",
+  });
+}
+
+export async function executeClusterMergeCleanPairPrecomputeTask(taskRun: {
+  id: string;
+}) {
+  await updateTaskRun(taskRun.id, {
+    status: "running",
+    progressCurrent: 0,
+    progressTotal: 1,
+    progressLabel: "正在预计算聚合合并候选",
+  });
+
+  try {
+    const result = await precomputeClusterMergeCleanPairs();
+    await updateTaskRun(taskRun.id, {
+      status: "succeeded",
+      progressCurrent: 1,
+      progressTotal: 1,
+      progressLabel: `已预计算 ${result.storedPairs}/${result.candidatePairs} 个合并候选，扫描 ${result.scoredPairs} 对`,
+      finishedAt: new Date(),
+    });
+    return result;
+  } catch (error) {
+    await updateTaskRun(taskRun.id, {
+      status: "failed",
+      progressCurrent: 1,
+      progressTotal: 1,
+      progressLabel: "聚合合并候选预计算失败",
+      errorSummary: error instanceof Error ? error.message : "Unknown clean pair precompute error",
+      finishedAt: new Date(),
+    });
+    throw error;
+  }
 }
 
 type ClusterMergeResult = {

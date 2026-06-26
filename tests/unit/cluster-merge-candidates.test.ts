@@ -299,6 +299,48 @@ describe("buildClusterMergeCandidates", () => {
     expect(candidates).toEqual([]);
   });
 
+  it("skips clean-clean merge pairs before local scoring", () => {
+    const openaiContract = createCandidate({
+      id: "openai-contract",
+      title: "OpenAI 与微软调整合作合同",
+      summary: "OpenAI 和微软调整云服务合作合同条款。",
+      fingerprint: "openai-contract",
+      eventType: "partnership",
+      eventSubject: "OpenAI",
+      eventAction: "变更",
+      eventObject: "微软合同",
+      eventDate: "2026-04-20",
+    });
+    const microsoftContract = createCandidate({
+      id: "microsoft-contract",
+      title: "微软和 OpenAI 调整合作协议",
+      summary: "微软与 OpenAI 对合作合同进行变更。",
+      fingerprint: "microsoft-contract",
+      eventType: "partnership",
+      eventSubject: "微软",
+      eventAction: "变更",
+      eventObject: "OpenAI 合同",
+      eventDate: "2026-04-20",
+      latestPublishedAt: new Date("2026-04-20T10:00:00.000Z"),
+    });
+
+    const selection = buildClusterMergeCandidateSelection([
+      {
+        ...openaiContract,
+        mergeInputHash: buildClusterMergeCandidateInputHash(openaiContract),
+      },
+      {
+        ...microsoftContract,
+        mergeInputHash: buildClusterMergeCandidateInputHash(microsoftContract),
+      },
+    ]);
+
+    expect(selection.candidates).toEqual([]);
+    expect(selection.allowedPairs).toEqual([]);
+    expect(selection.diagnostics.totalPairs).toBe(0);
+    expect(selection.diagnostics.cleanPairsSkipped).toBe(2);
+  });
+
   it("keeps evaluated neighbors when a related candidate is new or changed", () => {
     const evaluatedContract = createCandidate({
       id: "openai-contract",

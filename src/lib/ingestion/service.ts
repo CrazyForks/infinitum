@@ -6,6 +6,7 @@ import { INGESTION_PROGRESS_FLUSH_INTERVAL_MS } from "@/config/constants";
 import type { RuntimeConfig } from "@/config/runtime";
 import { createAiProvider } from "@/lib/ai/provider";
 import {
+  enqueueClusterMergeCleanPairPrecomputeTask,
   executeClusterMerge,
   recomputeCluster,
   type ClusterRecomputeResult,
@@ -773,6 +774,9 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
     relatedPairs: mergeResult.relatedPairs,
     aiEligiblePairs: mergeResult.aiEligiblePairs,
     cleanPairsSkipped: mergeResult.cleanPairsSkipped,
+    precomputedCleanPairsUsed: mergeResult.precomputedCleanPairsUsed,
+    precomputedCleanPairsAttemptSkipped: mergeResult.precomputedCleanPairsAttemptSkipped,
+    precomputedCleanPairsInvalidSkipped: mergeResult.precomputedCleanPairsInvalidSkipped,
     dirtyPairs: mergeResult.dirtyPairs,
     preLimitCandidates: mergeResult.preLimitCandidates,
     postLimitCandidates: mergeResult.postLimitCandidates,
@@ -782,6 +786,15 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
     merged: mergeResult.mergedCount,
     itemsMoved: mergeResult.itemsMoved,
     failedGroups: mergeResult.failedGroups,
+    refreshItemCountsMs: mergeResult.refreshItemCountsMs,
+    loadClustersMs: mergeResult.loadClustersMs,
+    candidateSelectionMs: mergeResult.candidateSelectionMs,
+    promptBuildMs: mergeResult.promptBuildMs,
+    promptChars: mergeResult.promptChars,
+    promptPairs: mergeResult.promptPairs,
+    aiMergeMs: mergeResult.aiMergeMs,
+    applyMergeMs: mergeResult.applyMergeMs,
+    markEvaluatedMs: mergeResult.markEvaluatedMs,
   };
   if (mergeResult.affectedClusterIds.length > 0) {
     for (const clusterId of mergeResult.affectedClusterIds) {
@@ -1087,6 +1100,10 @@ export async function runIngestionTask(taskRun: BackgroundTaskRun, options?: Par
     taskTimeline: latestTaskTimeline,
     finishedAt: completedRun.finishedAt,
   });
+
+  if (completedRun.errorSummary !== TASK_RUN_CANCELLED_MESSAGE) {
+    await enqueueClusterMergeCleanPairPrecomputeTask({ triggerType });
+  }
 
   return completedRun;
 }

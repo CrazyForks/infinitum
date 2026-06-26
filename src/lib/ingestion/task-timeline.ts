@@ -70,6 +70,9 @@ export type IngestionTimelineCounters = {
     relatedPairs: number;
     aiEligiblePairs: number;
     cleanPairsSkipped: number;
+    precomputedCleanPairsUsed: number;
+    precomputedCleanPairsAttemptSkipped: number;
+    precomputedCleanPairsInvalidSkipped: number;
     dirtyPairs: number;
     preLimitCandidates: number;
     postLimitCandidates: number;
@@ -79,6 +82,15 @@ export type IngestionTimelineCounters = {
     merged: number;
     itemsMoved: number;
     failedGroups: number;
+    refreshItemCountsMs: number;
+    loadClustersMs: number;
+    candidateSelectionMs: number;
+    promptBuildMs: number;
+    promptChars: number;
+    promptPairs: number;
+    aiMergeMs: number;
+    applyMergeMs: number;
+    markEvaluatedMs: number;
   };
   clusterFinalize: {
     recomputed: number;
@@ -205,6 +217,9 @@ export function createIngestionTimelineCounters(): IngestionTimelineCounters {
       relatedPairs: 0,
       aiEligiblePairs: 0,
       cleanPairsSkipped: 0,
+      precomputedCleanPairsUsed: 0,
+      precomputedCleanPairsAttemptSkipped: 0,
+      precomputedCleanPairsInvalidSkipped: 0,
       dirtyPairs: 0,
       preLimitCandidates: 0,
       postLimitCandidates: 0,
@@ -214,6 +229,15 @@ export function createIngestionTimelineCounters(): IngestionTimelineCounters {
       merged: 0,
       itemsMoved: 0,
       failedGroups: 0,
+      refreshItemCountsMs: 0,
+      loadClustersMs: 0,
+      candidateSelectionMs: 0,
+      promptBuildMs: 0,
+      promptChars: 0,
+      promptPairs: 0,
+      aiMergeMs: 0,
+      applyMergeMs: 0,
+      markEvaluatedMs: 0,
     },
     clusterFinalize: {
       recomputed: 0,
@@ -441,10 +465,22 @@ export function buildIngestionTaskTimeline(input: {
         { label: "相关Pair", value: counters.clusterMerge.relatedPairs },
         { label: "AI候选Pair", value: counters.clusterMerge.aiEligiblePairs },
         { label: "Hash跳过", value: counters.clusterMerge.cleanPairsSkipped },
+        { label: "预计算Pair", value: counters.clusterMerge.precomputedCleanPairsUsed },
+        { label: "预计算限次", value: counters.clusterMerge.precomputedCleanPairsAttemptSkipped },
+        { label: "预计算失效", value: counters.clusterMerge.precomputedCleanPairsInvalidSkipped },
         { label: "Dirty Pair", value: counters.clusterMerge.dirtyPairs },
         { label: "裁剪前", value: counters.clusterMerge.preLimitCandidates },
         { label: "候选组", value: counters.clusterMerge.candidates },
         { label: "Dirty候选", value: counters.clusterMerge.dirtyCandidates },
+        { label: "送模Pair", value: counters.clusterMerge.promptPairs },
+        { label: "输入字符", value: counters.clusterMerge.promptChars },
+        { label: "刷新数量ms", value: counters.clusterMerge.refreshItemCountsMs },
+        { label: "加载候选ms", value: counters.clusterMerge.loadClustersMs },
+        { label: "候选计算ms", value: counters.clusterMerge.candidateSelectionMs },
+        { label: "构造输入ms", value: counters.clusterMerge.promptBuildMs },
+        { label: "模型调用ms", value: counters.clusterMerge.aiMergeMs },
+        { label: "执行合并ms", value: counters.clusterMerge.applyMergeMs },
+        { label: "标记Hashms", value: counters.clusterMerge.markEvaluatedMs },
         { label: "AI返回组", value: counters.clusterMerge.aiMergeGroups },
         { label: "跳过", value: counters.clusterMerge.skipped ? 1 : 0 },
         { label: "合并后", value: counters.clusterMerge.candidates - counters.clusterMerge.merged },

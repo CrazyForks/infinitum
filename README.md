@@ -76,6 +76,12 @@ docker compose pull
 docker compose up -d
 ```
 
+Worker 默认限制为 `0.50` 核，避免后台任务打满宿主机 CPU。需要调整时，在 compose 同目录的 `.env` 或 shell 环境中设置：
+
+```bash
+WORKER_CPUS=0.75
+```
+
 在 `docker-compose.yml` 中至少替换以下值：
 
 - `ADMIN_PASSWORD`：管理员登录密码

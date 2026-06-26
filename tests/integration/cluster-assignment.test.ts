@@ -8,6 +8,7 @@ import {
   executeClusterMerge,
   mergeClusters,
   mergeSelectedItemsToLargestCluster,
+  precomputeClusterMergeCleanPairs,
   splitClusterIntoSingletons,
 } from "@/lib/clusters/service";
 import { prisma } from "@/lib/db";
@@ -16,6 +17,7 @@ import { getAdminCluster } from "@/lib/feed/repository";
 describe("cluster assignment", () => {
   beforeEach(async () => {
     await prisma.backgroundTaskRun.deleteMany();
+    await prisma.clusterMergeCleanPairCandidate.deleteMany();
     await prisma.item.deleteMany();
     await prisma.contentCluster.deleteMany();
     await prisma.source.deleteMany();
@@ -887,6 +889,144 @@ describe("cluster assignment", () => {
         },
       }),
     ).resolves.toBe(2);
+  });
+
+  it("uses precomputed clean-clean pairs and stops after two declined attempts", async () => {
+    const source = await prisma.source.create({
+      data: {
+        name: "Clean Pair Retry Feed",
+        rssUrl: "https://clean-pair-retry.example.com/feed.xml",
+        siteUrl: "https://clean-pair-retry.example.com",
+        enabled: true,
+        aiParsingEnabled: true,
+        aggregationEnabled: true,
+      },
+    });
+    await prisma.contentCluster.createMany({
+      data: [
+        {
+          id: "openai-clean-contract-cluster",
+          kind: "topic",
+          title: "OpenAI 与微软调整合作合同",
+          summary: "OpenAI 和微软调整云服务合作合同条款。",
+          score: 84,
+          itemCount: 1,
+          latestPublishedAt: new Date("2026-04-20T09:00:00.000Z"),
+          status: "active",
+          fingerprint: "openai-clean-contract",
+          eventType: "partnership",
+          eventSubject: "OpenAI",
+          eventAction: "变更",
+          eventObject: "微软合同",
+          eventDate: "2026-04-20",
+        },
+        {
+          id: "microsoft-clean-contract-cluster",
+          kind: "topic",
+          title: "微软和 OpenAI 调整合作协议",
+          summary: "微软与 OpenAI 对合作合同进行变更。",
+          score: 86,
+          itemCount: 1,
+          latestPublishedAt: new Date("2026-04-20T10:00:00.000Z"),
+          status: "active",
+          fingerprint: "microsoft-clean-contract",
+          eventType: "partnership",
+          eventSubject: "微软",
+          eventAction: "变更",
+          eventObject: "OpenAI 合同",
+          eventDate: "2026-04-20",
+        },
+      ],
+    });
+    await prisma.item.createMany({
+      data: [
+        {
+          id: "openai-clean-contract-item",
+          sourceId: source.id,
+          clusterId: "openai-clean-contract-cluster",
+          originalUrl: "https://clean-pair-retry.example.com/openai-contract",
+          canonicalUrl: "https://clean-pair-retry.example.com/openai-contract",
+          urlHash: "openai-clean-contract-hash",
+          dedupeSignature: "clean-contract|openai",
+          originalTitle: "OpenAI 与微软调整合作合同",
+          publishedAt: new Date("2026-04-20T09:00:00.000Z"),
+          summaryText: "OpenAI 和微软调整云服务合作合同条款。",
+          language: "zh",
+          status: "processed",
+          moderationStatus: "allowed",
+          qualityScore: 84,
+          qualityRationale: "relevant",
+          eventType: "partnership",
+          eventSubject: "OpenAI",
+          eventAction: "变更",
+          eventObject: "微软合同",
+          eventDate: "2026-04-20",
+        },
+        {
+          id: "microsoft-clean-contract-item",
+          sourceId: source.id,
+          clusterId: "microsoft-clean-contract-cluster",
+          originalUrl: "https://clean-pair-retry.example.com/microsoft-contract",
+          canonicalUrl: "https://clean-pair-retry.example.com/microsoft-contract",
+          urlHash: "microsoft-clean-contract-hash",
+          dedupeSignature: "clean-contract|microsoft",
+          originalTitle: "微软和 OpenAI 调整合作协议",
+          publishedAt: new Date("2026-04-20T10:00:00.000Z"),
+          summaryText: "微软与 OpenAI 对合作合同进行变更。",
+          language: "zh",
+          status: "processed",
+          moderationStatus: "allowed",
+          qualityScore: 86,
+          qualityRationale: "relevant",
+          eventType: "partnership",
+          eventSubject: "微软",
+          eventAction: "变更",
+          eventObject: "OpenAI 合同",
+          eventDate: "2026-04-20",
+        },
+      ],
+    });
+    const mergeClustersAi = vi.fn().mockResolvedValue([]);
+    const aiProvider = {
+      mergeClusters: mergeClustersAi,
+    } as unknown as AiProvider;
+    const now = new Date("2026-04-21T10:00:00.000Z");
+
+    const firstPass = await executeClusterMerge(aiProvider, now);
+    const precomputeResult = await precomputeClusterMergeCleanPairs(now);
+    const storedPair = await prisma.clusterMergeCleanPairCandidate.findFirstOrThrow({
+      where: {
+        leftClusterId: { in: ["openai-clean-contract-cluster", "microsoft-clean-contract-cluster"] },
+        rightClusterId: { in: ["openai-clean-contract-cluster", "microsoft-clean-contract-cluster"] },
+      },
+    });
+    const secondPass = await executeClusterMerge(aiProvider, now);
+    const thirdPass = await executeClusterMerge(aiProvider, now);
+    const fourthPass = await executeClusterMerge(aiProvider, now);
+    const updatedStoredPair = await prisma.clusterMergeCleanPairCandidate.findUniqueOrThrow({
+      where: { id: storedPair.id },
+    });
+
+    expect(firstPass.dirtyPairs).toBeGreaterThan(0);
+    expect(firstPass.precomputedCleanPairsUsed).toBe(0);
+    expect(precomputeResult.storedPairs).toBe(1);
+    expect(secondPass).toMatchObject({
+      dirtyPairs: 0,
+      precomputedCleanPairsUsed: 1,
+    });
+    expect(thirdPass).toMatchObject({
+      dirtyPairs: 0,
+      precomputedCleanPairsUsed: 1,
+    });
+    expect(fourthPass).toMatchObject({
+      candidates: 0,
+      skipped: true,
+      dirtyPairs: 0,
+      precomputedCleanPairsUsed: 0,
+    });
+    expect(fourthPass.precomputedCleanPairsAttemptSkipped).toBeGreaterThan(0);
+    expect(updatedStoredPair.attemptCount).toBe(2);
+    expect(mergeClustersAi).toHaveBeenCalledTimes(3);
   });
 
   it("does not send singleton merge candidates to AI when key objects conflict", async () => {

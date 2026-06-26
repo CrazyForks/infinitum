@@ -54,6 +54,7 @@ const statusLabels = {
 } as const;
 
 const taskKindLabels = {
+  cluster_merge_precompute_clean_pairs: "合并候选预计算",
   cluster_regenerate_summary: "聚合摘要重生成",
   daily_report_generate: "AI 日报生成",
   ingestion: "抓取任务",

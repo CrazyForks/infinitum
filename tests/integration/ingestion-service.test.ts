@@ -218,6 +218,17 @@ describe("runIngestion", () => {
       { label: "新建", value: 1 },
     ]));
     expect(taskTimeline[5]?.metrics.find((metric) => metric.label === "累计耗时ms")?.value).toEqual(expect.any(Number));
+    expect(taskTimeline[6]?.metrics).toEqual(expect.arrayContaining([
+      { label: "送模Pair", value: expect.any(Number) },
+      { label: "输入字符", value: expect.any(Number) },
+      { label: "刷新数量ms", value: expect.any(Number) },
+      { label: "加载候选ms", value: expect.any(Number) },
+      { label: "候选计算ms", value: expect.any(Number) },
+      { label: "构造输入ms", value: expect.any(Number) },
+      { label: "模型调用ms", value: expect.any(Number) },
+      { label: "执行合并ms", value: expect.any(Number) },
+      { label: "标记Hashms", value: expect.any(Number) },
+    ]));
     expect(taskTimeline[7]?.metrics).toEqual([
       { label: "参与重算", value: 1 },
       { label: "完成更新", value: 1 },

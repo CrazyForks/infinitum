@@ -89,6 +89,30 @@ export const CLUSTER_MERGE_RELATED_PAIR_LIMIT = 3;
 /** 单次聚合合并最多扫描的候选聚合组数 */
 export const CLUSTER_MERGE_SCAN_CLUSTER_LIMIT = 1000;
 
+/** 单次聚合合并最多消费的预计算 clean-clean 候选对 */
+export const CLUSTER_MERGE_PRECOMPUTED_CLEAN_PAIR_LIMIT = 20;
+
+/** 相同 clean-clean 候选对在内容未变化时最多复判次数 */
+export const CLUSTER_MERGE_CLEAN_PAIR_MAX_ATTEMPTS = 2;
+
+/** clean-clean 预计算候选有效期 */
+export const CLUSTER_MERGE_CLEAN_PAIR_TTL_MS = CLUSTER_LOOKBACK_MS;
+
+/** clean-clean 预计算任务每批处理的左侧聚合组数 */
+export const CLUSTER_MERGE_PRECOMPUTE_BATCH_SIZE = 10;
+
+/** clean-clean 预计算任务批次间隔，降低 CPU 峰值 */
+export const CLUSTER_MERGE_PRECOMPUTE_BATCH_DELAY_MS = 50;
+
+/** clean-clean 预计算任务单个 CPU 切片最多评分的候选对数 */
+export const CLUSTER_MERGE_PRECOMPUTE_PAIR_SLICE_SIZE = 250;
+
+/** clean-clean 预计算任务 CPU 切片间隔，避免 worker 长时间独占单核 */
+export const CLUSTER_MERGE_PRECOMPUTE_PAIR_SLICE_DELAY_MS = 25;
+
+/** clean-clean 预计算任务最多保留的候选对数 */
+export const CLUSTER_MERGE_PRECOMPUTE_PAIR_LIMIT = 500;
+
 /** 单次聚合合并最多发送给 AI 的候选组数 */
 export const CLUSTER_MERGE_CANDIDATE_LIMIT = 80;
 
