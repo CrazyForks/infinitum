@@ -76,9 +76,15 @@ function makeSqliteSchemaIdempotent(sql) {
 }
 
 function runSqlite(commandArgs, options = {}) {
+  const { input, ...execOptions } = options;
+  const sqliteInput = typeof input === "string"
+    ? `PRAGMA busy_timeout = ${sqliteBusyTimeoutMs};\n${input}`
+    : input;
+
   return execFileSync("sqlite3", commandArgs, {
     stdio: ["pipe", "inherit", "inherit"],
-    ...options,
+    ...execOptions,
+    input: sqliteInput,
   });
 }
 
