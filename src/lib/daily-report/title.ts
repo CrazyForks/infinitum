@@ -20,7 +20,25 @@ export function trimDailyReportTitleSeparators(value: string) {
 }
 
 export function truncateDailyReportTitleText(value: string, maxLength: number) {
-  return trimDailyReportTitleSeparators(Array.from(value).slice(0, maxLength).join(""));
+  const text = trimDailyReportTitleSeparators(value);
+  if (Array.from(text).length <= maxLength) return text;
+
+  const segments = text
+    .split(/、+/)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+
+  if (segments.length > 1) {
+    let nextText = "";
+    for (const segment of segments) {
+      const candidate = nextText ? `${nextText}、${segment}` : segment;
+      if (Array.from(candidate).length > maxLength) break;
+      nextText = candidate;
+    }
+    if (nextText) return trimDailyReportTitleSeparators(nextText);
+  }
+
+  return trimDailyReportTitleSeparators(Array.from(text).slice(0, maxLength).join(""));
 }
 
 export function normalizeDailyReportHeadline(value: unknown, maxLength = DAILY_REPORT_HEADLINE_MAX_LENGTH) {

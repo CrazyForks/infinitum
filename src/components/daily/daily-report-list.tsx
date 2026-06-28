@@ -361,19 +361,19 @@ export function DailyReportList({
                     ) : null}
                     <div className="min-w-0">
                       <div className={cx("min-w-0", isAdmin ? "pr-28 sm:pr-32" : "")}>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h2 className="text-lg font-semibold text-[var(--foreground)]">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <h2 className="min-w-0 text-lg font-semibold text-[var(--foreground)]">
                             <Link
                               href={`/daily/${report.date}`}
                               target="_blank"
                               rel="noreferrer"
-                              className="transition hover:text-[var(--accent-strong)] hover:underline"
+                              className="block min-w-0 truncate transition hover:text-[var(--accent-strong)] hover:underline"
                             >
                               {report.title}
                             </Link>
                           </h2>
                           {isAdmin ? (
-                            <span className={cx("rounded-sm px-2 py-0.5 text-xs", statusClass(report.status))}>
+                            <span className={cx("shrink-0 rounded-sm px-2 py-0.5 text-xs", statusClass(report.status))}>
                               {statusLabel(report.status)}
                             </span>
                           ) : null}

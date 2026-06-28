@@ -146,6 +146,10 @@ describe("daily report utilities", () => {
     expect(parsed).not.toHaveProperty("title");
     expect(parsed.headline).toBe("OpenAI 发布新模型、开发者工具更新");
     expect(parsed.blocks[1]).toMatchObject({ type: "section", title: "热点事件" });
+    expect(parseDailyReportContent(JSON.stringify({
+      ...content,
+      headline: "GPT-5.6 有限预览、Mythos 5 白名单恢复、亚马逊加码印度、DeepSeek 开源提速、OpenAI 版权诉讼升温",
+    }), 2).headline).toBe("GPT-5.6 有限预览、Mythos 5 白名单恢复、亚马逊加码印度、DeepSeek 开源提速、OpenAI 版权诉讼升温");
     expect(() => parseDailyReportContent(JSON.stringify({
       blocks: content.blocks.map((block) =>
         block.type === "section" && block.title === "热点事件"

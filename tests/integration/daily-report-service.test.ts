@@ -752,13 +752,18 @@ describe("daily report service", () => {
       }],
     });
 
-    expect(fallbackTitle).toBe("06-27日报 | OpenAI 正式发布 GPT-5.6 系列，采取有限预览、Anthropic Mythos 5");
+    expect(fallbackTitle).toBe("06-27日报 | OpenAI 正式发布 GPT-5.6 系列，采取有限预览");
     expect(Array.from(fallbackTitle).length).toBeLessThanOrEqual(64);
 
     expect(Array.from(buildDailyReportTitle("2026-06-27", {
       headline: "GPT-5.6 有限预览、Mythos 5 白名单恢复、OpenAI 版权诉讼升温、Agent 工程化加速、企业成本路由调整",
       blocks: [],
     })).length).toBeLessThanOrEqual(64);
+
+    expect(buildDailyReportTitle("2026-06-27", {
+      headline: "GPT-5.6 有限预览、Mythos 5 白名单恢复、亚马逊加码印度、DeepSeek 开源提速、OpenAI 版权诉讼升温",
+      blocks: [],
+    })).toBe("06-27日报 | GPT-5.6 有限预览、Mythos 5 白名单恢复、亚马逊加码印度、DeepSeek 开源提速");
   });
 
   it("persists stable source numbers and source snapshots when generating a report", async () => {
