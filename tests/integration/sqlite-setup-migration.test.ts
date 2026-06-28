@@ -25,6 +25,35 @@ afterEach(() => {
 });
 
 describe("sqlite setup", () => {
+  it("keeps Prisma migration history replayable from an empty shadow database", () => {
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), "infinitum-prisma-shadow-"));
+    const shadowDbPath = path.join(tempDir, "shadow.db");
+
+    tempDirs.push(tempDir);
+
+    const output = execFileSync(
+      "npx",
+      [
+        "prisma",
+        "migrate",
+        "diff",
+        "--from-migrations",
+        "prisma/migrations",
+        "--to-schema-datamodel",
+        "prisma/schema.prisma",
+        "--shadow-database-url",
+        `file:${shadowDbPath}`,
+        "--script",
+      ],
+      {
+        cwd: process.cwd(),
+        encoding: "utf8",
+      },
+    ).trim();
+
+    expect(output).toBe("-- This is an empty migration.");
+  }, 30_000);
+
   it("serializes concurrent setup runs with a lock", { timeout: 15000 }, async () => {
     const tempDir = mkdtempSync(path.join(os.tmpdir(), "infinitum-sqlite-lock-"));
     const dbPath = path.join(tempDir, "concurrent.db");

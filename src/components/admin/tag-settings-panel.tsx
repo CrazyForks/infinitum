@@ -27,6 +27,7 @@ import { cx } from "@/lib/ui/cx";
 const DEFAULT_PAGE_SIZE = 10;
 const MERGE_CANDIDATE_PAGE_SIZE = 100;
 const DEFAULT_SUGGESTION_PAGE_SIZE = 10;
+const SUGGESTION_LOAD_DEBOUNCE_MS = 250;
 
 function formatTagCount(count: number) {
   return `${count} 条`;
@@ -756,10 +757,10 @@ export function TagSettingsPanel() {
 
     const timeoutId = window.setTimeout(() => {
       void loadSuggestions();
-    }, 0);
+    }, suggestionSearch.trim() ? SUGGESTION_LOAD_DEBOUNCE_MS : 0);
 
     return () => window.clearTimeout(timeoutId);
-  }, [isSuggestionModalOpen, loadSuggestions]);
+  }, [isSuggestionModalOpen, loadSuggestions, suggestionSearch]);
 
   function handleClearFilters() {
     setSearch("");

@@ -4,7 +4,14 @@ import { prisma } from "@/lib/db";
 import { refreshClusterFeedStatsSafely } from "@/lib/clusters/feed-stats";
 import { invalidateFeedCache } from "@/lib/feed/cache";
 import { normalizeItemTags, normalizeTagName, type NormalizedTag } from "@/lib/tags/normalization";
-import { calculateTagSimilarity, type TagSimilarityReason } from "@/lib/tags/similarity";
+import {
+  calculateTagSimilarity,
+  compactTagSimilarityText,
+  normalizeTagSimilarityText,
+  sortedTagSimilarityTokenKey,
+  tokenizeTagSimilarityText,
+  type TagSimilarityReason,
+} from "@/lib/tags/similarity";
 
 type PrismaTransaction = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
 
@@ -14,6 +21,9 @@ const DEFAULT_TAG_SUGGESTION_LIMIT = 30;
 const MAX_TAG_SUGGESTION_LIMIT = 100;
 const AUTO_CANONICAL_CONFIDENCE_THRESHOLD = 0.95;
 const SUGGESTION_CONFIDENCE_THRESHOLD = 0.82;
+const MAX_TAG_SUGGESTION_CANDIDATE_PAIRS = 20_000;
+const MAX_TAG_SUGGESTION_TOKEN_BUCKET_SIZE = 200;
+const MAX_TAG_SUGGESTION_EDIT_BUCKET_SIZE = 80;
 
 export type AdminTagAlias = {
   id: string;
@@ -71,6 +81,18 @@ type TagCandidate = {
     items: number;
     aliases: number;
   };
+};
+
+type TagSuggestionCandidatePair = {
+  left: TagCandidate;
+  right: TagCandidate;
+};
+
+type TagSuggestionDraft = {
+  sourceTag: TagCandidate;
+  targetTag: TagCandidate;
+  baseConfidence: number;
+  reason: TagSimilarityReason;
 };
 
 function normalizePage(value: number | null | undefined) {
@@ -176,6 +198,158 @@ function resolveSuggestionDirection(left: TagCandidate, right: TagCandidate) {
   const [targetTag, sourceTag] = [left, right].sort(compareCanonicalPreference);
 
   return { sourceTag, targetTag };
+}
+
+function getComparableTagTexts(tag: TagCandidate) {
+  return [
+    tag.name,
+    tag.normalized,
+    ...((tag.aliases ?? []).flatMap((alias) => [alias.aliasName, alias.aliasNormalized])),
+  ].filter((value, index, values) => value && values.indexOf(value) === index);
+}
+
+function tagMatchesSuggestionSearch(tag: TagCandidate, search: string) {
+  if (!search) {
+    return true;
+  }
+
+  return getComparableTagTexts(tag).some((value) => normalizeTagSimilarityText(value).includes(search));
+}
+
+function addTagToIndex(index: Map<string, TagCandidate[]>, key: string, tag: TagCandidate) {
+  if (!key) {
+    return;
+  }
+
+  const tags = index.get(key) ?? [];
+  if (!tags.some((existingTag) => existingTag.id === tag.id)) {
+    tags.push(tag);
+    index.set(key, tags);
+  }
+}
+
+function addCandidatePair(
+  pairs: TagSuggestionCandidatePair[],
+  seenPairIds: Set<string>,
+  left: TagCandidate,
+  right: TagCandidate,
+  matchedTagIds: Set<string> | null,
+) {
+  if (left.id === right.id || pairs.length >= MAX_TAG_SUGGESTION_CANDIDATE_PAIRS) {
+    return;
+  }
+
+  if (matchedTagIds && !matchedTagIds.has(left.id) && !matchedTagIds.has(right.id)) {
+    return;
+  }
+
+  const pairId = left.id < right.id ? `${left.id}:${right.id}` : `${right.id}:${left.id}`;
+  if (seenPairIds.has(pairId)) {
+    return;
+  }
+
+  seenPairIds.add(pairId);
+  pairs.push({ left, right });
+}
+
+function addPairsFromBucket(
+  pairs: TagSuggestionCandidatePair[],
+  seenPairIds: Set<string>,
+  bucket: TagCandidate[],
+  matchedTagIds: Set<string> | null,
+  maxBucketSize: number,
+) {
+  if (bucket.length < 2 || bucket.length > maxBucketSize) {
+    return;
+  }
+
+  for (let leftIndex = 0; leftIndex < bucket.length; leftIndex += 1) {
+    const left = bucket[leftIndex];
+    if (!left) {
+      continue;
+    }
+
+    for (let rightIndex = leftIndex + 1; rightIndex < bucket.length; rightIndex += 1) {
+      const right = bucket[rightIndex];
+      if (!right) {
+        continue;
+      }
+
+      addCandidatePair(pairs, seenPairIds, left, right, matchedTagIds);
+      if (pairs.length >= MAX_TAG_SUGGESTION_CANDIDATE_PAIRS) {
+        return;
+      }
+    }
+  }
+}
+
+function buildTagSuggestionCandidatePairs(tags: TagCandidate[], search: string) {
+  const exactIndexes = new Map<string, TagCandidate[]>();
+  const tokenIndexes = new Map<string, TagCandidate[]>();
+  const editIndexes = new Map<string, TagCandidate[]>();
+  const matchedTagIds = search
+    ? new Set(tags.filter((tag) => tagMatchesSuggestionSearch(tag, search)).map((tag) => tag.id))
+    : null;
+
+  if (matchedTagIds && matchedTagIds.size === 0) {
+    return [];
+  }
+
+  for (const tag of tags) {
+    for (const text of getComparableTagTexts(tag)) {
+      const compact = compactTagSimilarityText(text);
+      const sortedTokenKey = sortedTagSimilarityTokenKey(text);
+      const tokens = tokenizeTagSimilarityText(text);
+
+      addTagToIndex(exactIndexes, `compact:${compact}`, tag);
+      addTagToIndex(exactIndexes, `sorted:${sortedTokenKey}`, tag);
+
+      for (const token of tokens) {
+        if (token.length >= 2) {
+          addTagToIndex(tokenIndexes, `token:${token}`, tag);
+        }
+      }
+
+      if (compact.length >= 5) {
+        addTagToIndex(editIndexes, `edit:${compact.slice(0, 3)}:${Math.floor(compact.length / 2)}`, tag);
+      }
+    }
+  }
+
+  const pairs: TagSuggestionCandidatePair[] = [];
+  const seenPairIds = new Set<string>();
+
+  for (const bucket of exactIndexes.values()) {
+    addPairsFromBucket(
+      pairs,
+      seenPairIds,
+      bucket,
+      matchedTagIds,
+      Number.MAX_SAFE_INTEGER,
+    );
+  }
+
+  for (const bucket of tokenIndexes.values()) {
+    addPairsFromBucket(
+      pairs,
+      seenPairIds,
+      bucket,
+      matchedTagIds,
+      MAX_TAG_SUGGESTION_TOKEN_BUCKET_SIZE,
+    );
+  }
+
+  for (const bucket of editIndexes.values()) {
+    addPairsFromBucket(
+      pairs,
+      seenPairIds,
+      bucket,
+      matchedTagIds,
+      MAX_TAG_SUGGESTION_EDIT_BUCKET_SIZE,
+    );
+  }
+
+  return pairs;
 }
 
 function buildSuggestionId(sourceTag: TagCandidate, targetTag: TagCandidate) {
@@ -502,7 +676,7 @@ export async function listAdminTagSuggestions(input?: {
 }): Promise<AdminTagSuggestionList> {
   const page = normalizePage(input?.page);
   const pageSize = normalizeSuggestionLimit(input?.pageSize ?? input?.limit);
-  const search = input?.search?.trim().toLocaleLowerCase() ?? "";
+  const search = normalizeTagSimilarityText(input?.search ?? "");
   const tags: TagCandidate[] = await prisma.tag.findMany({
     include: {
       aliases: {
@@ -529,117 +703,110 @@ export async function listAdminTagSuggestions(input?: {
     };
   }
 
-  const [itemTags, suppressedDecisions] = await Promise.all([
-    prisma.itemTag.findMany({
-      where: {
-        tagId: {
-          in: tags.map((tag) => tag.id),
-        },
-      },
-      select: {
-        itemId: true,
-        tagId: true,
-      },
-    }),
-    prisma.tagSuggestionDecision.findMany({
-      select: {
-        sourceTagNormalized: true,
-        targetTagNormalized: true,
-      },
-    }),
-  ]);
-  const itemIdsByTagId = buildItemTagSets(itemTags);
+  const suppressedDecisions = await prisma.tagSuggestionDecision.findMany({
+    select: {
+      sourceTagNormalized: true,
+      targetTagNormalized: true,
+    },
+  });
   const suppressedPairs = new Set(
     suppressedDecisions.map((decision) => buildSuppressedPairKey(
       decision.sourceTagNormalized,
       decision.targetTagNormalized,
     )),
   );
-  const suggestions: AdminTagSuggestion[] = [];
+  const suggestionDrafts: TagSuggestionDraft[] = [];
   const seenPairs = new Set<string>();
 
-  for (let leftIndex = 0; leftIndex < tags.length; leftIndex += 1) {
-    const left = tags[leftIndex];
-    if (!left) {
+  for (const { left, right } of buildTagSuggestionCandidatePairs(tags, search)) {
+    const similarity = getBestTagSimilarity(left, right);
+    if (!similarity || similarity.confidence < SUGGESTION_CONFIDENCE_THRESHOLD) {
       continue;
     }
 
-    for (let rightIndex = leftIndex + 1; rightIndex < tags.length; rightIndex += 1) {
-      const right = tags[rightIndex];
-      if (!right) {
-        continue;
-      }
+    const { sourceTag, targetTag } = resolveSuggestionDirection(left, right);
+    const pairKey = buildSuggestionId(sourceTag, targetTag);
+    const suppressedPairKey = buildSuppressedPairKey(sourceTag.normalized, targetTag.normalized);
 
-      const similarity = getBestTagSimilarity(left, right);
-      if (!similarity || similarity.confidence < SUGGESTION_CONFIDENCE_THRESHOLD) {
-        continue;
-      }
-
-      const { sourceTag, targetTag } = resolveSuggestionDirection(left, right);
-      const pairKey = buildSuggestionId(sourceTag, targetTag);
-      const suppressedPairKey = buildSuppressedPairKey(sourceTag.normalized, targetTag.normalized);
-
-      if (seenPairs.has(pairKey) || suppressedPairs.has(suppressedPairKey)) {
-        continue;
-      }
-
-      seenPairs.add(pairKey);
-      const sharedItemCount = countSharedItems(
-        itemIdsByTagId.get(sourceTag.id),
-        itemIdsByTagId.get(targetTag.id),
-      );
-      const confidence = getSuggestionConfidence(
-        sourceTag,
-        targetTag,
-        similarity.confidence,
-        sharedItemCount,
-      );
-      const reasons = [getSimilarityReasonLabel(similarity.reason)];
-
-      if (sharedItemCount > 0) {
-        reasons.push(`已有 ${sharedItemCount} 条内容同时带有两个标签`);
-      }
-
-      if (sourceTag._count.items <= 2) {
-        reasons.push("来源标签使用量较低，适合优先治理");
-      }
-
-      suggestions.push({
-        id: pairKey,
-        sourceTag: serializeTagSummary(sourceTag),
-        targetTag: serializeTagSummary(targetTag),
-        confidence,
-        reasons,
-        affectedItemCount: sourceTag._count.items,
-      });
+    if (seenPairs.has(pairKey) || suppressedPairs.has(suppressedPairKey)) {
+      continue;
     }
+
+    seenPairs.add(pairKey);
+    suggestionDrafts.push({
+      sourceTag,
+      targetTag,
+      baseConfidence: similarity.confidence,
+      reason: similarity.reason,
+    });
   }
 
-  suggestions.sort((left, right) => {
-    if (left.confidence !== right.confidence) {
-      return right.confidence - left.confidence;
+  suggestionDrafts.sort((left, right) => {
+    if (left.baseConfidence !== right.baseConfidence) {
+      return right.baseConfidence - left.baseConfidence;
     }
 
-    if (left.affectedItemCount !== right.affectedItemCount) {
-      return right.affectedItemCount - left.affectedItemCount;
+    if (left.sourceTag._count.items !== right.sourceTag._count.items) {
+      return right.sourceTag._count.items - left.sourceTag._count.items;
     }
 
     return left.sourceTag.name.localeCompare(right.sourceTag.name, "zh-CN");
   });
 
-  const filteredSuggestions = search
-    ? suggestions.filter((suggestion) => [
-        suggestion.sourceTag.name,
-        suggestion.sourceTag.normalized,
-        suggestion.targetTag.name,
-        suggestion.targetTag.normalized,
-      ].some((value) => value.toLocaleLowerCase().includes(search)))
-    : suggestions;
   const skip = (page - 1) * pageSize;
+  const pageDrafts = suggestionDrafts.slice(skip, skip + pageSize);
+  const pageTagIds = [...new Set(pageDrafts.flatMap((suggestion) => [
+    suggestion.sourceTag.id,
+    suggestion.targetTag.id,
+  ]))];
+  const itemTags = pageTagIds.length > 0
+    ? await prisma.itemTag.findMany({
+        where: {
+          tagId: {
+            in: pageTagIds,
+          },
+        },
+        select: {
+          itemId: true,
+          tagId: true,
+        },
+      })
+    : [];
+  const itemIdsByTagId = buildItemTagSets(itemTags);
+  const suggestions = pageDrafts.map((suggestion) => {
+    const sharedItemCount = countSharedItems(
+      itemIdsByTagId.get(suggestion.sourceTag.id),
+      itemIdsByTagId.get(suggestion.targetTag.id),
+    );
+    const confidence = getSuggestionConfidence(
+      suggestion.sourceTag,
+      suggestion.targetTag,
+      suggestion.baseConfidence,
+      sharedItemCount,
+    );
+    const reasons = [getSimilarityReasonLabel(suggestion.reason)];
+
+    if (sharedItemCount > 0) {
+      reasons.push(`已有 ${sharedItemCount} 条内容同时带有两个标签`);
+    }
+
+    if (suggestion.sourceTag._count.items <= 2) {
+      reasons.push("来源标签使用量较低，适合优先治理");
+    }
+
+    return {
+      id: buildSuggestionId(suggestion.sourceTag, suggestion.targetTag),
+      sourceTag: serializeTagSummary(suggestion.sourceTag),
+      targetTag: serializeTagSummary(suggestion.targetTag),
+      confidence,
+      reasons,
+      affectedItemCount: suggestion.sourceTag._count.items,
+    };
+  });
 
   return {
-    suggestions: filteredSuggestions.slice(skip, skip + pageSize),
-    totalCount: filteredSuggestions.length,
+    suggestions,
+    totalCount: suggestionDrafts.length,
     page,
     pageSize,
   };

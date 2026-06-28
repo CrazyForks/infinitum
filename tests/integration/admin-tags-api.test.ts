@@ -198,4 +198,41 @@ describe("/api/admin/settings/tags", () => {
     const suppressedJson = await suppressedResponse.json();
     expect(suppressedJson.totalCount).toBe(0);
   });
+
+  it("keeps tag governance suggestion scans bounded for large tag sets", async () => {
+    await prisma.tag.createMany({
+      data: [
+        ...Array.from({ length: 600 }, (_, index) => ({
+          name: `Unrelated Topic ${index}`,
+          normalized: `unrelated topic ${index}`,
+        })),
+        {
+          name: "AI Agent",
+          normalized: "ai agent",
+        },
+        {
+          name: "AI Agents",
+          normalized: "ai agents",
+        },
+      ],
+    });
+
+    const { GET } = await import("@/app/api/admin/settings/tags/suggestions/route");
+    const startedAt = performance.now();
+    const response = await GET(new Request("http://localhost/api/admin/settings/tags/suggestions?page=1&pageSize=10"));
+    const elapsedMs = performance.now() - startedAt;
+    const json = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(elapsedMs).toBeLessThan(1_500);
+    expect(json.totalCount).toBeGreaterThanOrEqual(1);
+    expect(json.suggestions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sourceTag: expect.objectContaining({ name: "AI Agents" }),
+          targetTag: expect.objectContaining({ name: "AI Agent" }),
+        }),
+      ]),
+    );
+  });
 });
