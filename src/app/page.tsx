@@ -10,6 +10,7 @@ import {
 } from "@/lib/feed/service";
 import { resolveFeedRequest } from "@/lib/feed/request";
 import type { FeedEntryDTO, FeedFilters, FeedRange } from "@/lib/feed/types";
+import { listPublicHeaderLinks } from "@/lib/settings/service";
 import {
   buildBreadcrumbListJsonLd,
   buildWebSiteJsonLd,
@@ -184,11 +185,12 @@ export default async function Home({ searchParams }: PageProps) {
   const resolvedSearchParams = (await searchParams) ?? {};
   const { filters, pagination } = resolveFeedRequest(resolvedSearchParams);
   const initialCreatedRangeExplicit = hasExplicitHomeCreatedTimeFilter(resolvedSearchParams);
-  const [feed, latestRunSnapshot, feedFilterOptions, trending] = await Promise.all([
+  const [feed, latestRunSnapshot, feedFilterOptions, trending, headerLinks] = await Promise.all([
     getCachedFeedItems(filters, pagination),
     getCachedLatestFetchRunSnapshot(),
     getCachedFeedFilterOptions(),
     getCachedTrendingEntries(),
+    listPublicHeaderLinks(),
   ]);
   const { title, description } = buildFeedMetadataText(filters);
   const pageUrl = getSiteOrigin(requestHeaders);
@@ -224,6 +226,7 @@ export default async function Home({ searchParams }: PageProps) {
         availableSources={feedFilterOptions.sources}
         popularTags={feed.popularTags}
         trending={trending}
+        initialHeaderLinks={headerLinks}
       />
     </main>
   );

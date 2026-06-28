@@ -440,6 +440,26 @@ function applyAdditiveSchemaUpgrades() {
     });
   }
 
+  if (!ftsTableExists("header_links")) {
+    runSqlite([dbPath], {
+      input: `
+        CREATE TABLE IF NOT EXISTS "header_links" (
+          "id" TEXT NOT NULL PRIMARY KEY,
+          "label" TEXT NOT NULL,
+          "url" TEXT NOT NULL,
+          "enabled" BOOLEAN NOT NULL DEFAULT true,
+          "sortOrder" INTEGER NOT NULL DEFAULT 0,
+          "openInNewTab" BOOLEAN NOT NULL DEFAULT true,
+          "rel" TEXT NOT NULL DEFAULT 'noopener noreferrer',
+          "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          "updatedAt" DATETIME NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS "header_links_enabled_sortOrder_idx" ON "header_links"("enabled", "sortOrder");
+        CREATE INDEX IF NOT EXISTS "header_links_sortOrder_label_idx" ON "header_links"("sortOrder", "label");
+      `,
+    });
+  }
+
   const clusterFeedStatsColumnsAdded = [
     addColumnIfMissing("content_clusters", "displayItemCount", "INTEGER NOT NULL DEFAULT 0"),
     addColumnIfMissing("content_clusters", "displaySourceCount", "INTEGER NOT NULL DEFAULT 0"),

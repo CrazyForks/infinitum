@@ -4,6 +4,7 @@ import { headers } from "next/headers";
 import { DailyReportList } from "@/components/daily/daily-report-list";
 import { BackToTopButton } from "@/components/ui/back-to-top-button";
 import { listDailyReportArchiveWeeks, listDailyReports } from "@/lib/daily-report/repository";
+import { listPublicHeaderLinks } from "@/lib/settings/service";
 import { PageShell } from "@/components/ui/page-shell";
 import {
   buildBreadcrumbListJsonLd,
@@ -98,7 +99,7 @@ export default async function DailyPage({ searchParams }: DailyPageProps) {
   const page = Number.isFinite(rawPage) && rawPage >= 1 ? rawPage : 1;
   const pageSize = Number.isFinite(rawPageSize) && rawPageSize >= 1 && rawPageSize <= 100 ? rawPageSize : 20;
 
-  const [{ reports, total }, weeks] = await Promise.all([
+  const [{ reports, total }, weeks, headerLinks] = await Promise.all([
     listDailyReports({
       isAdmin: false,
       status: selectedStatus,
@@ -110,6 +111,7 @@ export default async function DailyPage({ searchParams }: DailyPageProps) {
       isAdmin: false,
       status: selectedStatus,
     }),
+    listPublicHeaderLinks(),
   ]);
   const origin = getSiteOrigin(requestHeaders);
   const jsonLd = buildDailyListJsonLd(reports, origin);
@@ -121,6 +123,7 @@ export default async function DailyPage({ searchParams }: DailyPageProps) {
         isAdmin: false,
         resolveAdminClient: true,
         rssHref: "/api/daily/rss",
+        customLinks: headerLinks,
       }}
       contentPaddingClassName="px-4 pt-3 pb-6 sm:px-6 sm:pt-4 sm:pb-8 lg:px-8 lg:pt-4 lg:pb-10"
       footerPath="/daily"

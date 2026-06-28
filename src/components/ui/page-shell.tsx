@@ -4,6 +4,7 @@ import { AppFooter } from "@/components/ui/app-footer";
 import { GlobalHeader } from "@/components/ui/global-header";
 import { PageViewTracker } from "@/components/ui/page-view-tracker";
 import { cx } from "@/lib/ui/cx";
+import type { AdminHeaderLink } from "@/lib/settings/types";
 
 type PageShellNav = "home" | "daily" | "admin" | null;
 
@@ -13,6 +14,7 @@ type PageShellHeader = {
   resolveAdminClient?: boolean;
   showShadow?: boolean;
   rssHref?: string;
+  customLinks?: AdminHeaderLink[];
   onHomeClick?: () => void;
 };
 
@@ -58,6 +60,7 @@ export function PageShell({
           resolveAdminClient={header.resolveAdminClient}
           showShadow={header.showShadow}
           rssHref={header.rssHref}
+          customLinks={header.customLinks}
           onHomeClick={header.onHomeClick}
         />
       ) : null}

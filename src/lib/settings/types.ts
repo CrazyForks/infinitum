@@ -48,9 +48,22 @@ export type AdminPromptConfig = {
   updatedAt: string;
 };
 
+export type AdminHeaderLink = {
+  id: string;
+  label: string;
+  url: string;
+  enabled: boolean;
+  sortOrder: number;
+  openInNewTab: boolean;
+  rel: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type AdminSettingsSnapshot = {
   modelApiConfigs: AdminModelApiConfig[];
   promptConfigs: AdminPromptConfig[];
+  headerLinks?: AdminHeaderLink[];
   contentExtraction: {
     id: string;
     jinaEnabled: boolean;

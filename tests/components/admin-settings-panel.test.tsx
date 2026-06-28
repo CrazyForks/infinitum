@@ -311,6 +311,103 @@ describe("AdminSettingsPanel", () => {
     expect(screen.getByText("抓取并发：")).toBeInTheDocument();
   });
 
+  it("creates a configured header link from the navigation settings section", async () => {
+    const user = userEvent.setup();
+    const fetchMock = createSourceSettingsFetchMock(buildInitialSettings().sources, (url, init) => {
+      const parsedUrl = new URL(url, "http://localhost");
+
+      if (init?.method === "POST" && parsedUrl.pathname === "/api/admin/settings/header-links") {
+        return new Response(
+          JSON.stringify({
+            link: {
+              id: "header-link-aff",
+              label: "AFF",
+              url: "https://shawnxie.top/aff/",
+              enabled: true,
+              sortOrder: 0,
+              openInNewTab: true,
+              rel: "sponsored noopener noreferrer",
+              createdAt: "2026-06-28T00:00:00.000Z",
+              updatedAt: "2026-06-28T00:00:00.000Z",
+            },
+          }),
+          { status: 201 },
+        );
+      }
+
+      return undefined;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderWithProviders(
+      <AdminSettingsPanel
+        initialSettings={{ ...buildInitialSettings(), headerLinks: [] }}
+        activeSection="header-links"
+        embedMode
+      />,
+    );
+
+    await user.click(screen.getAllByRole("button", { name: /新增链接/ })[0]);
+    await user.type(screen.getByLabelText("名称"), "AFF");
+    await user.type(screen.getByLabelText("URL"), "https://shawnxie.top/aff/");
+    await user.click(screen.getByRole("button", { name: "保存" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("AFF")).toBeInTheDocument();
+    });
+    expect(screen.getByRole("link", { name: "https://shawnxie.top/aff/" })).toHaveAttribute(
+      "href",
+      "https://shawnxie.top/aff/",
+    );
+    expect(fetchMock).toHaveBeenCalledWith("/api/admin/settings/header-links", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        label: "AFF",
+        url: "https://shawnxie.top/aff/",
+        enabled: true,
+        sortOrder: 0,
+        openInNewTab: true,
+        rel: "sponsored noopener noreferrer",
+      }),
+    });
+  });
+
+  it("renders header link cards with drag handles instead of move buttons", () => {
+    renderWithProviders(
+      <AdminSettingsPanel
+        initialSettings={{
+          ...buildInitialSettings(),
+          headerLinks: [
+            {
+              id: "header-link-aff",
+              label: "AFF",
+              url: "https://shawnxie.top/aff/",
+              enabled: true,
+              sortOrder: 0,
+              openInNewTab: true,
+              rel: "sponsored noopener noreferrer",
+              createdAt: "2026-06-28T00:00:00.000Z",
+              updatedAt: "2026-06-28T00:00:00.000Z",
+            },
+          ],
+        }}
+        activeSection="header-links"
+        embedMode
+      />,
+    );
+
+    expect(screen.getByText("导航栏配置")).toBeInTheDocument();
+    expect(screen.getByText("新窗口")).toBeInTheDocument();
+    expect(screen.getByText("AFF/赞助")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "拖动排序" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "上移" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "下移" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/rel="/)).not.toBeInTheDocument();
+  });
+
   it("switches to prompt settings from the sidebar tabs", async () => {
     const user = userEvent.setup();
 

@@ -30,6 +30,14 @@ export {
   listPromptConfigs,
   updatePromptConfig,
 } from "@/lib/settings/prompt-config-service";
+export {
+  createHeaderLink,
+  deleteHeaderLink,
+  listAdminHeaderLinks,
+  listPublicHeaderLinks,
+  reorderHeaderLinks,
+  updateHeaderLink,
+} from "@/lib/settings/header-link-service";
 export { getAdminSettings, getIngestionRuntimeConfig } from "@/lib/settings/runtime-service";
 export {
   createSource,

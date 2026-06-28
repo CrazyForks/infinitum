@@ -7,6 +7,7 @@ import { BackToTopButton } from "@/components/ui/back-to-top-button";
 import { getAdminSession } from "@/lib/admin/session";
 import { getDailyReportByDate } from "@/lib/daily-report/repository";
 import { normalizeDailyReportDate } from "@/lib/daily-report/date";
+import { listPublicHeaderLinks } from "@/lib/settings/service";
 import { PageShell } from "@/components/ui/page-shell";
 import type { DailyReportDetailDTO } from "@/lib/daily-report/types";
 import {
@@ -130,7 +131,10 @@ export default async function DailyReportPage({ params }: DailyReportPageProps) 
     notFound();
   }
 
-  const report = await getDailyReportByDate(date, false);
+  const [report, headerLinks] = await Promise.all([
+    getDailyReportByDate(date, false),
+    listPublicHeaderLinks(),
+  ]);
   const origin = getSiteOrigin(requestHeaders);
   const jsonLd = report ? buildDailyReportJsonLd(report, origin) : null;
 
@@ -142,6 +146,7 @@ export default async function DailyReportPage({ params }: DailyReportPageProps) 
         resolveAdminClient: true,
         showShadow: false,
         rssHref: "/api/daily/rss",
+        customLinks: headerLinks,
       }}
       contentClassName="max-w-none gap-0"
       contentPaddingClassName="px-0 pt-0 pb-6 sm:pb-8 lg:pb-10"

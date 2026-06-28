@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { IconGithub, IconLock, IconLogout, IconMonitor, IconMoon, IconRss, IconSettings, IconSun } from "@/components/ui/icons";
 import { cx } from "@/lib/ui/cx";
 import { useClientAdminSession } from "@/components/ui/use-client-admin-session";
+import type { AdminHeaderLink } from "@/lib/settings/types";
 
 type GlobalHeaderProps = {
   activeNav: "home" | "daily" | "admin" | null;
@@ -14,6 +15,7 @@ type GlobalHeaderProps = {
   resolveAdminClient?: boolean;
   showShadow?: boolean;
   rssHref?: string;
+  customLinks?: AdminHeaderLink[];
   onHomeClick?: () => void;
 };
 
@@ -38,6 +40,7 @@ export function GlobalHeader({
   resolveAdminClient = false,
   showShadow = true,
   rssHref,
+  customLinks = [],
   onHomeClick,
 }: GlobalHeaderProps) {
   const router = useRouter();
@@ -195,6 +198,17 @@ export function GlobalHeader({
                 </Link>
               );
             })}
+            {customLinks.map((link) => (
+              <a
+                key={link.id}
+                className="px-3 py-1 rounded-sm text-[var(--text-2)] transition hover:bg-[var(--bg-muted)] hover:text-[var(--text-1)]"
+                href={link.url}
+                target={link.openInNewTab ? "_blank" : undefined}
+                rel={link.openInNewTab ? link.rel : undefined}
+              >
+                {link.label}
+              </a>
+            ))}
           </nav>
         </div>
 

@@ -76,6 +76,34 @@ describe("GlobalHeader", () => {
     expect(screen.getByRole("link", { name: "主页" })).not.toHaveAttribute("aria-current", "page");
   });
 
+  it("renders configured header links in the main navigation", () => {
+    render(
+      <GlobalHeader
+        activeNav="home"
+        isAdmin={false}
+        customLinks={[
+          {
+            id: "header-link-aff",
+            label: "AFF",
+            url: "https://shawnxie.top/aff/",
+            enabled: true,
+            sortOrder: 0,
+            openInNewTab: true,
+            rel: "sponsored noopener noreferrer",
+            createdAt: "2026-06-28T00:00:00.000Z",
+            updatedAt: "2026-06-28T00:00:00.000Z",
+          },
+        ]}
+      />,
+    );
+
+    const link = screen.getByRole("link", { name: "AFF" });
+
+    expect(link).toHaveAttribute("href", "https://shawnxie.top/aff/");
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(link).toHaveAttribute("rel", "sponsored noopener noreferrer");
+  });
+
   it("opens the default homepage rss feed without page filters", async () => {
     const user = userEvent.setup();
     const openMock = vi.fn();

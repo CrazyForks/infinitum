@@ -7,6 +7,7 @@ import {
   serializeAdminContentExtractionConfig,
   serializeRuntimeContentExtractionConfig,
 } from "@/lib/settings/content-extraction-service";
+import { listAdminHeaderLinks } from "@/lib/settings/header-link-service";
 import {
   ensureRuntimeConfigSeeded,
   pickPromptConfigByType,
@@ -111,6 +112,7 @@ export async function getAdminSettings(): Promise<AdminSettingsSnapshot> {
     dailyReportSchedule,
     cleanupSchedule,
     contentExtractionConfig,
+    headerLinks,
   ] = await Promise.all([
     prisma.modelApiConfig.findMany({
       orderBy: [{ isDefault: "desc" }, { createdAt: "desc" }],
@@ -139,6 +141,7 @@ export async function getAdminSettings(): Promise<AdminSettingsSnapshot> {
     ensureDefaultDailyReportSchedule(),
     ensureDefaultItemCleanupSchedule(),
     ensureContentExtractionConfig(),
+    listAdminHeaderLinks(),
   ]);
 
   const defaultModelConfig = modelApiConfigs.find((config) => config.isDefault);
@@ -156,6 +159,7 @@ export async function getAdminSettings(): Promise<AdminSettingsSnapshot> {
   return {
     modelApiConfigs: modelApiConfigs.map(serializeAdminModelApiConfig),
     promptConfigs: promptConfigs.map((config) => serializeAdminPromptConfig(config, defaultModelConfig)),
+    headerLinks,
     contentExtraction: serializeAdminContentExtractionConfig(contentExtractionConfig),
     blacklistKeywords: blacklist.map((entry) => entry.keyword),
     taskSchedule: toTaskScheduleSnapshot(taskSchedule) as AdminSettingsSnapshot["taskSchedule"],

@@ -44,6 +44,16 @@ type GroupReorderPayload = {
   groups?: AdminSettingsSnapshot["groups"];
 };
 
+type HeaderLinksPayload = {
+  error?: string;
+  links?: NonNullable<AdminSettingsSnapshot["headerLinks"]>;
+};
+
+type HeaderLinkPayload = {
+  error?: string;
+  link?: NonNullable<AdminSettingsSnapshot["headerLinks"]>[number];
+};
+
 export type AdminTagAlias = {
   id: string;
   aliasName: string;
@@ -242,6 +252,62 @@ export async function reorderSourceGroups(groupIds: string[]) {
   }
 
   return payload.groups;
+}
+
+export async function saveHeaderLink(
+  input: {
+    id?: string | null;
+    label: string;
+    url: string;
+    enabled: boolean;
+    sortOrder: number;
+    openInNewTab: boolean;
+    rel: string;
+  },
+) {
+  const payload = await requestAdminSettingsJson<HeaderLinkPayload>(
+    input.id ? `/api/admin/settings/header-links/${input.id}` : "/api/admin/settings/header-links",
+    input.id ? "PATCH" : "POST",
+    {
+      label: input.label,
+      url: input.url,
+      enabled: input.enabled,
+      sortOrder: input.sortOrder,
+      openInNewTab: input.openInNewTab,
+      rel: input.rel,
+    },
+    "导航栏配置保存失败。",
+  );
+
+  if (!payload.link) {
+    throw new Error("导航栏配置保存失败。");
+  }
+
+  return payload.link;
+}
+
+export async function deleteHeaderLink(id: string) {
+  await requestAdminSettingsJson<{ error?: string }>(
+    `/api/admin/settings/header-links/${id}`,
+    "DELETE",
+    {},
+    "导航栏配置删除失败。",
+  );
+}
+
+export async function reorderHeaderLinks(linkIds: string[]) {
+  const payload = await requestAdminSettingsJson<HeaderLinksPayload>(
+    "/api/admin/settings/header-links/reorder",
+    "PATCH",
+    { linkIds },
+    "导航栏配置排序保存失败。",
+  );
+
+  if (!payload.links) {
+    throw new Error("导航栏配置排序保存失败。");
+  }
+
+  return payload.links;
 }
 
 export async function listAdminTags(input: {

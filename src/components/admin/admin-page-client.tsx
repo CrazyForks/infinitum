@@ -27,12 +27,12 @@ import {
   IconSplit,
   IconMonitor,
 } from "@/components/ui/icons";
-import type { AdminSettingsSnapshot, PromptConfigType } from "@/lib/settings/types";
+import type { AdminHeaderLink, AdminSettingsSnapshot, PromptConfigType } from "@/lib/settings/types";
 
 type PrimaryTab = "monitoring" | "settings";
 type MonitorSubSection = "dashboard" | "content" | "tasks";
 type ContentSubSection = "filtered" | "clusters" | "splits" | "tags";
-type SettingsSection = "groups" | "sources" | "ai" | "content" | "tasks";
+type SettingsSection = "groups" | "sources" | "navigation" | "ai" | "content" | "tasks";
 type AISubSection = "model-api" | "prompt";
 type ContentSettingsSubSection = "blacklist" | "content-extraction";
 type TaskSettingsSubSection = "ingestion" | "daily-report" | "cleanup";
@@ -75,6 +75,7 @@ function normalizeSettingsSection(value: string | null): SettingsSection {
   if (
     value === "groups" ||
     value === "sources" ||
+    value === "navigation" ||
     value === "ai" ||
     value === "content" ||
     value === "tasks"
@@ -177,7 +178,7 @@ function resolveCollapsedSections(routeState: AdminRouteState) {
   };
 }
 
-export function AdminPageClient() {
+export function AdminPageClient({ headerLinks = [] }: { headerLinks?: AdminHeaderLink[] }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
@@ -481,6 +482,10 @@ export function AdminPageClient() {
       return <AdminSettingsPanel initialSettings={settings!} activeSection="sources" embedMode />;
     }
 
+    if (primaryTab === "settings" && settingsSection === "navigation") {
+      return <AdminSettingsPanel initialSettings={settings!} activeSection="header-links" embedMode />;
+    }
+
     if (
       primaryTab === "settings" &&
       settingsSection === "content" &&
@@ -506,7 +511,7 @@ export function AdminPageClient() {
 
   return (
     <>
-      <GlobalHeader activeNav="admin" isAdmin={true} />
+      <GlobalHeader activeNav="admin" isAdmin={true} customLinks={headerLinks} />
       <div className="flex min-h-screen flex-col bg-[var(--background)]">
         <div className="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 pt-6">
           <div className="flex gap-1 border-b border-[color:var(--line)]">
@@ -749,6 +754,28 @@ export function AdminPageClient() {
                         <span className="inline-flex items-center gap-2">
                           <IconGlobe className="h-4 w-4" />
                           <span>信息源管理</span>
+                        </span>
+                      </SelectableButton>
+
+                      <SelectableButton
+                        onClick={() => {
+                          setCollapsedSections((prev) => ({
+                            ...prev,
+                            ai: true,
+                            content: true,
+                            tasks: true,
+                          }));
+                          navigateAdmin({
+                            primaryTab: "settings",
+                            settingsSection: "navigation",
+                          });
+                        }}
+                        active={settingsSection === "navigation"}
+                        variant="menu"
+                      >
+                        <span className="inline-flex items-center gap-2">
+                          <IconLink className="h-4 w-4" />
+                          <span>导航栏配置</span>
                         </span>
                       </SelectableButton>
 

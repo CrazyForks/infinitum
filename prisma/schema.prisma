@@ -344,6 +344,22 @@ model ContentExtractionConfig {
   @@map("content_extraction_configs")
 }
 
+model HeaderLink {
+  id           String   @id @default(cuid())
+  label        String
+  url          String
+  enabled      Boolean  @default(true)
+  sortOrder    Int      @default(0)
+  openInNewTab Boolean  @default(true)
+  rel          String   @default("noopener noreferrer")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([enabled, sortOrder])
+  @@index([sortOrder, label])
+  @@map("header_links")
+}
+
 model BackgroundTaskRun {
   id                   String                @id @default(cuid())
   kind                 BackgroundTaskKind

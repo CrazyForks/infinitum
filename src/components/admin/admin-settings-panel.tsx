@@ -20,12 +20,15 @@ import { useEffect, useRef, useState, useTransition } from "react";
 
 import {
   importSourcesFromOpmlText,
+  deleteHeaderLink,
+  reorderHeaderLinks,
   reorderSourceGroups,
   resolveSourceFromRssUrl,
   saveContentExtractionConfig,
   saveDefaultDailyReportSchedule,
   saveDefaultIngestionSchedule,
   saveDefaultItemCleanupSchedule,
+  saveHeaderLink,
   submitAdminSettingsAction,
 } from "@/components/admin/admin-settings-panel.api";
 import { AiSettingsPanel } from "@/components/admin/ai-settings-panel";
@@ -81,6 +84,7 @@ type AdminSettingsSection =
   | "tags"
   | "blacklist"
   | "groups"
+  | "header-links"
   | "sources"
   | "content-extraction"
   | "task-ingestion"
@@ -101,12 +105,23 @@ const settingsNavItems: Array<{
   { key: "tags", label: "标签管理" },
   { key: "blacklist", label: "黑名单" },
   { key: "groups", label: "分组" },
+  { key: "header-links", label: "导航栏配置" },
   { key: "sources", label: "信息源" },
   { key: "content-extraction", label: "正文解析" },
   { key: "task-ingestion", label: "采集任务" },
   { key: "task-daily-report", label: "日报任务" },
   { key: "task-cleanup", label: "清理任务" },
 ] as const;
+const HEADER_LINK_REL_DEFAULT = "noopener noreferrer";
+const HEADER_LINK_REL_SPONSORED = "sponsored noopener noreferrer";
+const headerLinkRelOptions = [
+  { value: HEADER_LINK_REL_DEFAULT, label: "普通链接" },
+  { value: HEADER_LINK_REL_SPONSORED, label: "AFF/赞助链接" },
+];
+
+function normalizeHeaderLinkRelOption(rel: string) {
+  return rel.split(/\s+/).includes("sponsored") ? HEADER_LINK_REL_SPONSORED : HEADER_LINK_REL_DEFAULT;
+}
 
 function toDateTimeLocalValue(value: string | null | undefined) {
   if (!value) {
@@ -223,6 +238,7 @@ export function AdminSettingsPanel({
   initialPromptType,
 }: AdminSettingsPanelProps) {
   type AdminSource = AdminSettingsSnapshot["sources"][number];
+  type AdminHeaderLink = NonNullable<AdminSettingsSnapshot["headerLinks"]>[number];
   const [isPending, startTransition] = useTransition();
   const { showToast } = useToast();
   const [sourceGroupOverrides, setSourceGroupOverrides] = useState<Record<string, { groupId: string | null; groupName: string | null }>>({});
@@ -235,6 +251,17 @@ export function AdminSettingsPanel({
   const [showCreateGroupComposer, setShowCreateGroupComposer] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
   const [orderedGroups, setOrderedGroups] = useState(initialSettings.groups);
+  const [headerLinks, setHeaderLinks] = useState<AdminHeaderLink[]>(initialSettings.headerLinks ?? []);
+  const [headerLinkFormMode, setHeaderLinkFormMode] = useState<"create" | "edit" | null>(null);
+  const [editingHeaderLinkId, setEditingHeaderLinkId] = useState<string | null>(null);
+  const [headerLinkDeleteTarget, setHeaderLinkDeleteTarget] = useState<AdminHeaderLink | null>(null);
+  const [headerLinkForm, setHeaderLinkForm] = useState({
+    label: "",
+    url: "",
+    enabled: true,
+    openInNewTab: true,
+    rel: "sponsored noopener noreferrer",
+  });
   const [sourceGroupLinkTarget, setSourceGroupLinkTarget] = useState<AdminSettingsSnapshot["groups"][number] | null>(null);
   const [sourceGroupLinkSearch, setSourceGroupLinkSearch] = useState("");
   const [sourceGroupAssociationConfirm, setSourceGroupAssociationConfirm] = useState<{
@@ -702,6 +729,127 @@ export function AdminSettingsPanel({
     });
   };
 
+  const openCreateHeaderLinkForm = () => {
+    setHeaderLinkFormMode("create");
+    setEditingHeaderLinkId(null);
+    setHeaderLinkForm({
+      label: "",
+      url: "",
+      enabled: true,
+      openInNewTab: true,
+      rel: HEADER_LINK_REL_SPONSORED,
+    });
+  };
+
+  const openEditHeaderLinkForm = (link: AdminHeaderLink) => {
+    setHeaderLinkFormMode("edit");
+    setEditingHeaderLinkId(link.id);
+    setHeaderLinkForm({
+      label: link.label,
+      url: link.url,
+      enabled: link.enabled,
+      openInNewTab: link.openInNewTab,
+      rel: normalizeHeaderLinkRelOption(link.rel),
+    });
+  };
+
+  const closeHeaderLinkForm = () => {
+    setHeaderLinkFormMode(null);
+    setEditingHeaderLinkId(null);
+  };
+
+  const saveHeaderLinkForm = () => {
+    const label = headerLinkForm.label.trim();
+    const url = headerLinkForm.url.trim();
+
+    if (!label) {
+      showToast("请输入链接名称。", "error");
+      return;
+    }
+
+    if (label.length > 20) {
+      showToast("链接名称不能超过 20 个字符。", "error");
+      return;
+    }
+
+    try {
+      const parsedUrl = new URL(url);
+      if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+        showToast("链接 URL 仅支持 http 或 https。", "error");
+        return;
+      }
+    } catch {
+      showToast("请输入有效的链接 URL。", "error");
+      return;
+    }
+
+    const currentLink = editingHeaderLinkId
+      ? headerLinks.find((link) => link.id === editingHeaderLinkId)
+      : null;
+    const sortOrder = currentLink?.sortOrder ?? headerLinks.length;
+
+    startTransition(async () => {
+      try {
+        const savedLink = await saveHeaderLink({
+          id: editingHeaderLinkId,
+          label,
+          url,
+          enabled: headerLinkForm.enabled,
+          sortOrder,
+          openInNewTab: headerLinkForm.openInNewTab,
+          rel: headerLinkForm.rel,
+        });
+
+        setHeaderLinks((current) => {
+          const existingIndex = current.findIndex((link) => link.id === savedLink.id);
+          if (existingIndex < 0) {
+            return [...current, savedLink].sort((a, b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label));
+          }
+
+          const next = [...current];
+          next[existingIndex] = savedLink;
+          return next.sort((a, b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label));
+        });
+        closeHeaderLinkForm();
+        showToast(headerLinkFormMode === "edit" ? "导航栏配置已更新。" : "导航栏配置已创建。", "success");
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : "导航栏配置保存失败。", "error");
+      }
+    });
+  };
+
+  const confirmDeleteHeaderLink = () => {
+    if (!headerLinkDeleteTarget) {
+      return;
+    }
+
+    startTransition(async () => {
+      try {
+        await deleteHeaderLink(headerLinkDeleteTarget.id);
+        setHeaderLinks((current) => current.filter((link) => link.id !== headerLinkDeleteTarget.id));
+        setHeaderLinkDeleteTarget(null);
+        showToast("导航栏配置已删除。", "success");
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : "导航栏配置删除失败。", "error");
+      }
+    });
+  };
+
+  const saveHeaderLinkOrder = (nextLinks: AdminHeaderLink[]) => {
+    setHeaderLinks(nextLinks.map((link, index) => ({ ...link, sortOrder: index })));
+
+    startTransition(async () => {
+      try {
+        const savedLinks = await reorderHeaderLinks(nextLinks.map((link) => link.id));
+        setHeaderLinks(savedLinks);
+        showToast("导航栏配置排序已保存。", "success");
+      } catch (error) {
+        setHeaderLinks(headerLinks);
+        showToast(error instanceof Error ? error.message : "导航栏配置排序保存失败。", "error");
+      }
+    });
+  };
+
   const groupSortSensors = useSensors(
     useSensor(PointerSensor),
     useSensor(KeyboardSensor, {
@@ -726,6 +874,23 @@ export function AdminSettingsPanel({
     const nextGroups = arrayMove(orderedGroups, oldIndex, newIndex);
     setOrderedGroups(nextGroups);
     saveGroupOrder(nextGroups);
+  };
+
+  const handleHeaderLinkDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+
+    if (!over || active.id === over.id) {
+      return;
+    }
+
+    const oldIndex = headerLinks.findIndex((link) => link.id === active.id);
+    const newIndex = headerLinks.findIndex((link) => link.id === over.id);
+
+    if (oldIndex < 0 || newIndex < 0) {
+      return;
+    }
+
+    saveHeaderLinkOrder(arrayMove(headerLinks, oldIndex, newIndex));
   };
 
   const handleSaveSource = () => {
@@ -1374,6 +1539,183 @@ export function AdminSettingsPanel({
                 {sourceGroupAssociationConfirm?.nextGroupId === null
                   ? `确认取消「${sourceGroupAssociationConfirm?.source.name ?? ""}」与「${sourceGroupAssociationConfirm?.group.name ?? ""}」的分组关联？`
                   : `确认将「${sourceGroupAssociationConfirm?.source.name ?? ""}」关联到「${sourceGroupAssociationConfirm?.group.name ?? ""}」？`}
+              </p>
+            </ModalShell>
+          </div>
+        ) : null}
+
+        {activeSection === "header-links" ? (
+          <div
+            className={cx(
+              "w-full min-w-0",
+              embedMode
+                ? ""
+                : "rounded-sm border border-[color:var(--line)] bg-[var(--surface)] p-6 shadow-[0_1px_3px_rgba(0,0,0,0.06)]",
+            )}
+          >
+            <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
+              <div className="space-y-1">
+                <h2 className="text-lg font-semibold text-[var(--text-1)]" id="settings-header-links">
+                  导航栏配置
+                </h2>
+                <p className="text-sm text-[var(--text-3)]">
+                  维护显示在站点 header 主导航中的外部链接。
+                </p>
+              </div>
+              <Button
+                variant="primary"
+                size="md"
+                onClick={openCreateHeaderLinkForm}
+              >
+                + 新增链接
+              </Button>
+            </div>
+
+            {headerLinkFormMode ? (
+              <div className="mb-4 rounded-lg border border-[color:var(--line)] bg-[var(--surface)] px-3 py-3 shadow-[0_1px_3px_rgba(0,0,0,0.06)]">
+                <div className="grid gap-3 lg:grid-cols-[120px_minmax(220px,1fr)_180px] lg:items-end">
+                  <FormField label="名称" htmlFor="header-link-label">
+                    <TextInput
+                      id="header-link-label"
+                      placeholder="AFF"
+                      value={headerLinkForm.label}
+                      onChange={(event) =>
+                        setHeaderLinkForm((current) => ({ ...current, label: event.target.value }))
+                      }
+                    />
+                  </FormField>
+                  <FormField label="URL" htmlFor="header-link-url">
+                    <TextInput
+                      id="header-link-url"
+                      placeholder="https://shawnxie.top/aff/"
+                      value={headerLinkForm.url}
+                      onChange={(event) =>
+                        setHeaderLinkForm((current) => ({ ...current, url: event.target.value }))
+                      }
+                    />
+                  </FormField>
+                  <FormField
+                    label="链接类型"
+                    htmlFor="header-link-rel"
+                  >
+                    <SelectField
+                      id="header-link-rel"
+                      options={headerLinkRelOptions}
+                      value={headerLinkForm.rel}
+                      showSearch={false}
+                      onChange={(value) =>
+                        setHeaderLinkForm((current) => ({
+                          ...current,
+                          rel: typeof value === "string" ? value : HEADER_LINK_REL_DEFAULT,
+                        }))
+                      }
+                    />
+                  </FormField>
+                </div>
+
+                <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex flex-wrap items-center gap-4">
+                    <label className="inline-flex items-center gap-2 text-sm text-[var(--text-2)]">
+                      <input
+                        type="checkbox"
+                        className={checkboxInputClassName}
+                        checked={headerLinkForm.enabled}
+                        onChange={(event) =>
+                          setHeaderLinkForm((current) => ({ ...current, enabled: event.target.checked }))
+                        }
+                      />
+                      启用
+                    </label>
+                    <label className="inline-flex items-center gap-2 text-sm text-[var(--text-2)]">
+                      <input
+                        type="checkbox"
+                        className={checkboxInputClassName}
+                        checked={headerLinkForm.openInNewTab}
+                        onChange={(event) =>
+                          setHeaderLinkForm((current) => ({ ...current, openInNewTab: event.target.checked }))
+                        }
+                      />
+                      新窗口打开
+                    </label>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={closeHeaderLinkForm}
+                      disabled={isPending}
+                    >
+                      取消
+                    </Button>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={saveHeaderLinkForm}
+                      disabled={isPending}
+                    >
+                      保存
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {headerLinks.length ? (
+              <DndContext sensors={groupSortSensors} collisionDetection={closestCenter} onDragEnd={handleHeaderLinkDragEnd}>
+                <SortableContext items={headerLinks.map((link) => link.id)} strategy={verticalListSortingStrategy}>
+                  <div className="space-y-3">
+                    {headerLinks.map((link) => (
+                      <HeaderLinkRow
+                        key={link.id}
+                        link={link}
+                        onEdit={openEditHeaderLinkForm}
+                        onDelete={setHeaderLinkDeleteTarget}
+                      />
+                    ))}
+                  </div>
+                </SortableContext>
+              </DndContext>
+            ) : (
+              <EmptyState
+                className="text-[var(--text-3)]"
+                action={
+                  <Button variant="primary" size="md" onClick={openCreateHeaderLinkForm}>
+                    新增链接
+                  </Button>
+                }
+              >
+                暂无导航栏配置
+              </EmptyState>
+            )}
+
+            <ModalShell
+              isOpen={Boolean(headerLinkDeleteTarget)}
+              onClose={() => setHeaderLinkDeleteTarget(null)}
+              title="删除导航栏配置"
+              widthClassName="max-w-md"
+              bodyClassName="space-y-3 p-6"
+              footerClassName="border-t border-[color:var(--line)] bg-[var(--bg-muted)] p-6"
+              footer={
+                <div className="flex justify-end gap-2">
+                  <Button
+                    variant="secondary"
+                    onClick={() => setHeaderLinkDeleteTarget(null)}
+                    disabled={isPending}
+                  >
+                    取消
+                  </Button>
+                  <Button
+                    variant="danger"
+                    onClick={confirmDeleteHeaderLink}
+                    disabled={isPending}
+                  >
+                    删除
+                  </Button>
+                </div>
+              }
+            >
+              <p className="text-sm leading-6 text-[var(--text-2)]">
+                确认删除「{headerLinkDeleteTarget?.label ?? ""}」？删除后 header 将不再显示该链接。
               </p>
             </ModalShell>
           </div>
@@ -2432,6 +2774,109 @@ function AdminWorkspaceSidebar({
         })}
       </div>
     </aside>
+  );
+}
+
+function HeaderLinkRow({
+  link,
+  onEdit,
+  onDelete,
+}: {
+  link: NonNullable<AdminSettingsSnapshot["headerLinks"]>[number];
+  onEdit: (link: NonNullable<AdminSettingsSnapshot["headerLinks"]>[number]) => void;
+  onDelete: (link: NonNullable<AdminSettingsSnapshot["headerLinks"]>[number]) => void;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: link.id });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.55 : 1,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={cx(
+        "rounded-lg border border-[color:var(--line)] bg-[var(--surface)] px-3 py-3 transition hover:shadow-[0_1px_3px_rgba(0,0,0,0.06)]",
+        isDragging && "opacity-60 ring-2 ring-[rgba(59,130,246,0.35)]",
+      )}
+    >
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-center gap-3">
+          <button
+            type="button"
+            {...attributes}
+            {...listeners}
+            className="cursor-grab rounded-sm px-1 text-[var(--text-3)] transition hover:text-[var(--text-2)] active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(59,130,246,0.35)]"
+            title="拖动排序"
+            aria-label="拖动排序"
+          >
+            <IconGrip className="h-4 w-4" />
+          </button>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-sm font-semibold text-[var(--text-1)]">
+                {link.label}
+              </h3>
+              <span
+                className={cx(
+                  "rounded-sm px-2 py-0.5 text-xs",
+                  link.enabled
+                    ? "bg-[var(--success-surface)] text-[var(--success-ink)]"
+                    : "bg-[var(--bg-muted)] text-[var(--text-3)]",
+                )}
+              >
+                {link.enabled ? "启用" : "停用"}
+              </span>
+              <span className="rounded-sm bg-[var(--bg-muted)] px-2 py-0.5 text-xs text-[var(--text-2)]">
+                {link.openInNewTab ? "新窗口" : "当前页"}
+              </span>
+              {link.rel.includes("sponsored") ? (
+                <span className="rounded-sm bg-[var(--accent-soft)] px-2 py-0.5 text-xs text-[var(--accent)]">
+                  AFF/赞助
+                </span>
+              ) : null}
+            </div>
+            <a
+              className="mt-1 block truncate text-sm text-[var(--text-3)] hover:text-[var(--accent)]"
+              href={link.url}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {link.url}
+            </a>
+          </div>
+        </div>
+
+        <div className="flex gap-1">
+          <IconButton
+            variant="secondary"
+            size="sm"
+            title="编辑"
+            onClick={() => onEdit(link)}
+          >
+            <IconEdit className="h-4 w-4" />
+          </IconButton>
+          <IconButton
+            variant="secondary"
+            size="sm"
+            title="删除"
+            className="text-[var(--danger-ink)] hover:bg-[var(--danger-surface)] hover:text-[var(--danger-ink)]"
+            onClick={() => onDelete(link)}
+          >
+            <IconTrash className="h-4 w-4" />
+          </IconButton>
+        </div>
+      </div>
+    </div>
   );
 }
 

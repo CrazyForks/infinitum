@@ -8,6 +8,7 @@ const createModelApiConfig = vi.fn();
 const createPromptConfig = vi.fn();
 const getModelApiConfig = vi.fn();
 const updatePromptConfig = vi.fn();
+const createHeaderLink = vi.fn();
 
 vi.mock("@/lib/admin/session", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/admin/session")>();
@@ -26,6 +27,7 @@ vi.mock("@/lib/settings/service", async (importOriginal) => {
     getAdminSettings,
     createModelApiConfig,
     createPromptConfig,
+    createHeaderLink,
     getModelApiConfig,
     updatePromptConfig,
   };
@@ -165,6 +167,51 @@ describe("/api/admin/settings", () => {
       customHeaders: {},
       isEnabled: true,
       isDefault: true,
+    });
+  });
+
+  it("creates header links for admins", async () => {
+    requireAdmin.mockResolvedValue(undefined);
+    createHeaderLink.mockResolvedValue({
+      id: "header-link-aff",
+      label: "AFF",
+      url: "https://shawnxie.top/aff/",
+      enabled: true,
+      sortOrder: 0,
+      openInNewTab: true,
+      rel: "sponsored noopener noreferrer",
+      createdAt: "2026-06-28T00:00:00.000Z",
+      updatedAt: "2026-06-28T00:00:00.000Z",
+    });
+
+    const { POST } = await import("@/app/api/admin/settings/header-links/route");
+    const response = await POST(
+      new Request("http://localhost/api/admin/settings/header-links", {
+        method: "POST",
+        body: JSON.stringify({
+          label: "AFF",
+          url: "https://shawnxie.top/aff/",
+          enabled: true,
+          sortOrder: 0,
+          openInNewTab: true,
+          rel: "sponsored noopener noreferrer",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+      }),
+    );
+    const json = await response.json();
+
+    expect(response.status).toBe(201);
+    expect(json.link.label).toBe("AFF");
+    expect(createHeaderLink).toHaveBeenCalledWith({
+      label: "AFF",
+      url: "https://shawnxie.top/aff/",
+      enabled: true,
+      sortOrder: 0,
+      openInNewTab: true,
+      rel: "sponsored noopener noreferrer",
     });
   });
 

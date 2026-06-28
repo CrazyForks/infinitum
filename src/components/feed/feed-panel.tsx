@@ -534,6 +534,7 @@ export function FeedPanel({
   availableSources = [],
   popularTags: initialPopularTags = [],
   trending = [],
+  initialHeaderLinks = [],
 }: FeedPanelProps) {
   const router = useRouter();
   const isAdmin = useClientAdminSession(initialIsAdmin, hydrateAdminClient);
@@ -1827,6 +1828,7 @@ export function FeedPanel({
         activeNav: "home",
         isAdmin,
         onHomeClick: resetHomeFeed,
+        customLinks: initialHeaderLinks,
       }}
       footerPath="/"
       contentClassName="gap-5 sm:gap-6"
