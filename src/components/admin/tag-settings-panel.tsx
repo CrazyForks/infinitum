@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState, useTransition } from "react"
 
 import {
   addAdminTagAlias,
+  autoMergeHighConfidenceAdminTagSuggestions,
   deleteAdminTagAlias,
   dismissAdminTagSuggestion,
   type AdminTag,
@@ -61,6 +62,7 @@ type TagSuggestionPanelProps = {
   onPageSizeChange: (pageSize: number) => void;
   onOpenMergeChoice: (suggestion: AdminTagSuggestion) => void;
   onOpenDismissChoice: (suggestion: AdminTagSuggestion) => void;
+  onAutoMergeHighConfidence: () => void;
   onRefresh: () => void;
 };
 
@@ -79,6 +81,7 @@ function TagSuggestionModal({
   onPageSizeChange,
   onOpenMergeChoice,
   onOpenDismissChoice,
+  onAutoMergeHighConfidence,
   onRefresh,
 }: TagSuggestionPanelProps) {
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
@@ -93,13 +96,19 @@ function TagSuggestionModal({
       bodyClassName="space-y-4 p-4 max-h-[76vh] overflow-y-auto"
       footerClassName="border-t border-[color:var(--line)] bg-[var(--bg-muted)] p-4"
       footer={
-        <div className="flex justify-end gap-2">
-          <Button onClick={onRefresh} variant="secondary" disabled={isBusy}>
-            刷新建议
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <Button className="gap-2" onClick={onAutoMergeHighConfidence} variant="primary" disabled={isBusy}>
+            <IconMerge className="h-4 w-4" />
+            自动合并高置信
           </Button>
-          <Button onClick={onClose} variant="secondary" disabled={isBusy}>
-            关闭
-          </Button>
+          <div className="flex items-center justify-end gap-2">
+            <Button onClick={onRefresh} variant="secondary" disabled={isBusy}>
+              刷新建议
+            </Button>
+            <Button onClick={onClose} variant="secondary" disabled={isBusy}>
+              关闭
+            </Button>
+          </div>
         </div>
       }
     >
@@ -840,6 +849,14 @@ export function TagSettingsPanel() {
     await loadSuggestions();
   }
 
+  async function handleAutoMergeHighConfidenceSuggestions() {
+    const result = await autoMergeHighConfidenceAdminTagSuggestions();
+    const failedText = result.failedCount > 0 ? `，${result.failedCount} 条失败` : "";
+    const skippedText = result.skippedCount > 0 ? `，${result.skippedCount} 条已跳过` : "";
+    showToast(`已自动合并 ${result.mergedCount} 个高置信标签${skippedText}${failedText}。`);
+    await reloadAfterTagMutation();
+  }
+
   function runModalAction(action: () => Promise<void>) {
     startTransition(async () => {
       try {
@@ -1016,6 +1033,7 @@ export function TagSettingsPanel() {
         }}
         onOpenMergeChoice={setMergeChoiceSuggestion}
         onOpenDismissChoice={setDismissChoiceSuggestion}
+        onAutoMergeHighConfidence={() => runModalAction(handleAutoMergeHighConfidenceSuggestions)}
         onRefresh={() => {
           startTransition(async () => {
             await loadSuggestions();

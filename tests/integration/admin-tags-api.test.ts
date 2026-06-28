@@ -199,6 +199,71 @@ describe("/api/admin/settings/tags", () => {
     expect(suppressedJson.totalCount).toBe(0);
   });
 
+  it("auto-merges high-confidence existing tag suggestions for admins", async () => {
+    await createSourceAndItems();
+    const canonical = await prisma.tag.create({
+      data: {
+        name: "OpenAI",
+        normalized: "openai",
+      },
+    });
+    const variant = await prisma.tag.create({
+      data: {
+        name: "Open AI",
+        normalized: "open ai",
+      },
+    });
+    await prisma.itemTag.createMany({
+      data: [
+        {
+          itemId: "admin-tag-a",
+          tagId: canonical.id,
+        },
+        {
+          itemId: "admin-tag-b",
+          tagId: variant.id,
+        },
+      ],
+    });
+
+    const { POST } = await import("@/app/api/admin/settings/tags/suggestions/route");
+    const response = await POST(new Request("http://localhost/api/admin/settings/tags/suggestions", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "auto_merge_high_confidence",
+      }),
+    }));
+    const json = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(json).toMatchObject({
+      scannedCount: 1,
+      mergedCount: 1,
+      failedCount: 0,
+    });
+    await expect(prisma.tag.findMany({
+      include: {
+        aliases: true,
+        items: true,
+      },
+    })).resolves.toEqual([
+      expect.objectContaining({
+        id: canonical.id,
+        normalized: "openai",
+        aliases: [
+          expect.objectContaining({
+            aliasNormalized: "open ai",
+            createdBy: "system:auto-merge",
+          }),
+        ],
+        items: expect.arrayContaining([
+          expect.objectContaining({ itemId: "admin-tag-a" }),
+          expect.objectContaining({ itemId: "admin-tag-b" }),
+        ]),
+      }),
+    ]);
+  });
+
   it("keeps tag governance suggestion scans bounded for large tag sets", async () => {
     await prisma.tag.createMany({
       data: [

@@ -2,7 +2,11 @@ import { z } from "zod";
 
 import { adminErrorResponse } from "@/lib/admin/http";
 import { requireAdmin } from "@/lib/admin/session";
-import { dismissTagSuggestion, listAdminTagSuggestions } from "@/lib/tags/service";
+import {
+  autoMergeHighConfidenceTagSuggestions,
+  dismissTagSuggestion,
+  listAdminTagSuggestions,
+} from "@/lib/tags/service";
 
 const tagSuggestionQuerySchema = z.object({
   search: z.string().nullable().optional(),
@@ -16,6 +20,14 @@ const tagSuggestionDecisionSchema = z.object({
   targetTagId: z.string().min(1),
   decision: z.enum(["ignored", "kept"]),
 });
+
+const tagSuggestionPostSchema = z.union([
+  tagSuggestionDecisionSchema,
+  z.object({
+    action: z.literal("auto_merge_high_confidence"),
+    limit: z.number().int().positive().optional(),
+  }),
+]);
 
 export async function GET(request: Request) {
   try {
@@ -37,9 +49,13 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     await requireAdmin();
-    const body = tagSuggestionDecisionSchema.parse(await request.json());
+    const body = tagSuggestionPostSchema.parse(await request.json());
 
-    return Response.json(await dismissTagSuggestion(body));
+    if ("sourceTagId" in body) {
+      return Response.json(await dismissTagSuggestion(body));
+    }
+
+    return Response.json(await autoMergeHighConfidenceTagSuggestions({ limit: body.limit }));
   } catch (error) {
     return adminErrorResponse(error);
   }

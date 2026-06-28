@@ -20,6 +20,7 @@ const MAX_TAG_PAGE_SIZE = 100;
 const DEFAULT_TAG_SUGGESTION_LIMIT = 30;
 const MAX_TAG_SUGGESTION_LIMIT = 100;
 const AUTO_CANONICAL_CONFIDENCE_THRESHOLD = 0.95;
+const DEFAULT_AUTO_MERGE_SUGGESTION_LIMIT = 30;
 const SUGGESTION_CONFIDENCE_THRESHOLD = 0.82;
 const MAX_TAG_SUGGESTION_CANDIDATE_PAIRS = 20_000;
 const MAX_TAG_SUGGESTION_TOKEN_BUCKET_SIZE = 200;
@@ -65,6 +66,14 @@ export type AdminTagSuggestionList = {
   totalCount: number;
   page: number;
   pageSize: number;
+};
+
+export type AdminTagAutoMergeResult = {
+  scannedCount: number;
+  mergedCount: number;
+  affectedClusterCount: number;
+  skippedCount: number;
+  failedCount: number;
 };
 
 type TagCandidate = {
@@ -668,6 +677,22 @@ function buildSuppressedPairKey(sourceTagNormalized: string, targetTagNormalized
   return `${sourceTagNormalized}\u0000${targetTagNormalized}`;
 }
 
+async function loadSuppressedTagSuggestionPairs() {
+  const suppressedDecisions = await prisma.tagSuggestionDecision.findMany({
+    select: {
+      sourceTagNormalized: true,
+      targetTagNormalized: true,
+    },
+  });
+
+  return new Set(
+    suppressedDecisions.map((decision) => buildSuppressedPairKey(
+      decision.sourceTagNormalized,
+      decision.targetTagNormalized,
+    )),
+  );
+}
+
 export async function listAdminTagSuggestions(input?: {
   limit?: number | null;
   search?: string | null;
@@ -703,18 +728,7 @@ export async function listAdminTagSuggestions(input?: {
     };
   }
 
-  const suppressedDecisions = await prisma.tagSuggestionDecision.findMany({
-    select: {
-      sourceTagNormalized: true,
-      targetTagNormalized: true,
-    },
-  });
-  const suppressedPairs = new Set(
-    suppressedDecisions.map((decision) => buildSuppressedPairKey(
-      decision.sourceTagNormalized,
-      decision.targetTagNormalized,
-    )),
-  );
+  const suppressedPairs = await loadSuppressedTagSuggestionPairs();
   const suggestionDrafts: TagSuggestionDraft[] = [];
   const seenPairs = new Set<string>();
 
@@ -809,6 +823,99 @@ export async function listAdminTagSuggestions(input?: {
     totalCount: suggestionDrafts.length,
     page,
     pageSize,
+  };
+}
+
+export async function autoMergeHighConfidenceTagSuggestions(input?: {
+  limit?: number | null;
+}): Promise<AdminTagAutoMergeResult> {
+  const limit = normalizeSuggestionLimit(input?.limit ?? DEFAULT_AUTO_MERGE_SUGGESTION_LIMIT);
+  const tags: TagCandidate[] = await prisma.tag.findMany({
+    include: {
+      aliases: {
+        select: {
+          aliasName: true,
+          aliasNormalized: true,
+        },
+      },
+      _count: {
+        select: {
+          items: true,
+          aliases: true,
+        },
+      },
+    },
+  });
+  const suppressedPairs = await loadSuppressedTagSuggestionPairs();
+  const plans: Array<{ sourceTagId: string; targetTagId: string }> = [];
+  const seenPairs = new Set<string>();
+
+  for (const { left, right } of buildTagSuggestionCandidatePairs(tags, "")) {
+    if (plans.length >= limit) {
+      break;
+    }
+
+    const similarity = getBestTagSimilarity(left, right);
+    if (!similarity || similarity.confidence < AUTO_CANONICAL_CONFIDENCE_THRESHOLD) {
+      continue;
+    }
+
+    const { sourceTag, targetTag } = resolveSuggestionDirection(left, right);
+    const pairKey = buildSuggestionId(sourceTag, targetTag);
+    const suppressedPairKey = buildSuppressedPairKey(sourceTag.normalized, targetTag.normalized);
+
+    if (seenPairs.has(pairKey) || suppressedPairs.has(suppressedPairKey)) {
+      continue;
+    }
+
+    seenPairs.add(pairKey);
+    plans.push({
+      sourceTagId: sourceTag.id,
+      targetTagId: targetTag.id,
+    });
+  }
+
+  let mergedCount = 0;
+  let affectedClusterCount = 0;
+  let skippedCount = 0;
+  let failedCount = 0;
+
+  for (const plan of plans) {
+    const existingTags = await prisma.tag.findMany({
+      where: {
+        id: {
+          in: [plan.sourceTagId, plan.targetTagId],
+        },
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (existingTags.length !== 2) {
+      skippedCount += 1;
+      continue;
+    }
+
+    try {
+      const result = await mergeTags({
+        targetTagId: plan.targetTagId,
+        sourceTagIds: [plan.sourceTagId],
+        createdBy: "system:auto-merge",
+      });
+      mergedCount += result.mergedCount;
+      affectedClusterCount += result.affectedClusterCount;
+    } catch {
+      failedCount += 1;
+    }
+  }
+
+  return {
+    scannedCount: plans.length,
+    mergedCount,
+    affectedClusterCount,
+    skippedCount,
+    failedCount,
   };
 }
 

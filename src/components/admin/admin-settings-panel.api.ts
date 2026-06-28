@@ -114,6 +114,15 @@ type TagSuggestionDecisionPayload = {
   ok: boolean;
 };
 
+type TagSuggestionAutoMergePayload = {
+  error?: string;
+  scannedCount: number;
+  mergedCount: number;
+  affectedClusterCount: number;
+  skippedCount: number;
+  failedCount: number;
+};
+
 async function requestAdminSettingsJson<T extends { error?: string }>(
   url: string,
   method: string,
@@ -436,5 +445,19 @@ export async function dismissAdminTagSuggestion(input: {
     "POST",
     input,
     "标签治理建议处理失败。",
+  );
+}
+
+export async function autoMergeHighConfidenceAdminTagSuggestions(input?: {
+  limit?: number;
+}) {
+  return requestAdminSettingsJson<TagSuggestionAutoMergePayload>(
+    "/api/admin/settings/tags/suggestions",
+    "POST",
+    {
+      action: "auto_merge_high_confidence",
+      limit: input?.limit,
+    },
+    "高置信标签自动合并失败。",
   );
 }
