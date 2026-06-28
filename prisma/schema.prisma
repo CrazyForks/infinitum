@@ -480,6 +480,20 @@ model TagAlias {
   @@map("tag_aliases")
 }
 
+model TagSuggestionDecision {
+  id                       String   @id @default(cuid())
+  sourceTagNormalized      String
+  targetTagNormalized      String
+  decision                 String
+  decidedBy                String   @default("admin")
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  @@unique([sourceTagNormalized, targetTagNormalized])
+  @@index([decision])
+  @@map("tag_suggestion_decisions")
+}
+
 model ItemTag {
   id        String   @id @default(cuid())
   itemId    String

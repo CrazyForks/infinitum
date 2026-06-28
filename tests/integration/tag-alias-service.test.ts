@@ -107,6 +107,37 @@ describe("tag aliases and merge", () => {
     expect(tags[0]?.aliases.map((alias) => alias.aliasNormalized)).toEqual(["智能体"]);
   });
 
+  it("auto-canonicalizes high-confidence new tag variants before writing item tags", async () => {
+    const source = await createSource();
+    await createItem({
+      id: "canonical-openai-item",
+      sourceId: source.id,
+      title: "OpenAI 发布模型",
+    });
+    await createItem({
+      id: "variant-open-ai-item",
+      sourceId: source.id,
+      title: "Open AI 发布工具",
+    });
+
+    await replaceItemTags("canonical-openai-item", ["OpenAI"]);
+    await replaceItemTags("variant-open-ai-item", ["Open AI"]);
+
+    const tags = await prisma.tag.findMany({
+      include: {
+        aliases: true,
+        items: true,
+      },
+      orderBy: { normalized: "asc" },
+    });
+
+    expect(tags).toHaveLength(1);
+    expect(tags[0]?.normalized).toBe("openai");
+    expect(tags[0]?.items).toHaveLength(2);
+    expect(tags[0]?.aliases.map((alias) => alias.aliasNormalized)).toEqual(["open ai"]);
+    expect(tags[0]?.aliases[0]?.createdBy).toBe("system:auto-canonical");
+  });
+
   it("merges source tags into the canonical tag and preserves old names as aliases", async () => {
     const source = await createSource();
     await createCluster();
@@ -132,16 +163,32 @@ describe("tag aliases and merge", () => {
     });
 
     await replaceItemTags("target-item", ["AI Agent"]);
-    await replaceItemTags("source-item", ["AI Agents"]);
-    await replaceItemTags("overlap-item", ["AI Agent", "AI Agents"]);
-    await refreshClusterFeedStats(["tag-alias-cluster"]);
-
     const target = await prisma.tag.findUniqueOrThrow({
       where: { normalized: "ai agent" },
     });
-    const sourceTag = await prisma.tag.findUniqueOrThrow({
-      where: { normalized: "ai agents" },
+    const sourceTag = await prisma.tag.create({
+      data: {
+        name: "AI Agents",
+        normalized: "ai agents",
+      },
     });
+    await prisma.itemTag.createMany({
+      data: [
+        {
+          itemId: "source-item",
+          tagId: sourceTag.id,
+        },
+        {
+          itemId: "overlap-item",
+          tagId: target.id,
+        },
+        {
+          itemId: "overlap-item",
+          tagId: sourceTag.id,
+        },
+      ],
+    });
+    await refreshClusterFeedStats(["tag-alias-cluster"]);
 
     const result = await mergeTags({
       targetTagId: target.id,

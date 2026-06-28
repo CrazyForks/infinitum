@@ -5,15 +5,18 @@ import { useCallback, useEffect, useMemo, useState, useTransition } from "react"
 import {
   addAdminTagAlias,
   deleteAdminTagAlias,
+  dismissAdminTagSuggestion,
   type AdminTag,
+  type AdminTagSuggestion,
   listAdminTags,
+  listAdminTagSuggestions,
   mergeAdminTags,
 } from "@/components/admin/admin-settings-panel.api";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FilterInput } from "@/components/ui/filter-input";
 import { IconButton } from "@/components/ui/icon-button";
-import { IconMerge, IconPlus, IconRotateCw, IconTrash } from "@/components/ui/icons";
+import { IconCheck, IconMerge, IconPlus, IconRotateCw, IconTrash, IconX } from "@/components/ui/icons";
 import { ModalShell } from "@/components/ui/modal-shell";
 import { PaginationControls } from "@/components/ui/pagination-controls";
 import { StatusBanner } from "@/components/ui/status-banner";
@@ -23,6 +26,7 @@ import { cx } from "@/lib/ui/cx";
 
 const DEFAULT_PAGE_SIZE = 10;
 const MERGE_CANDIDATE_PAGE_SIZE = 100;
+const DEFAULT_SUGGESTION_PAGE_SIZE = 10;
 
 function formatTagCount(count: number) {
   return `${count} 条`;
@@ -35,6 +39,289 @@ function formatDateTime(value: string) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value));
+}
+
+function formatConfidence(value: number) {
+  return `${Math.round(value * 100)}%`;
+}
+
+type TagSuggestionPanelProps = {
+  suggestions: AdminTagSuggestion[];
+  totalCount: number;
+  page: number;
+  pageSize: number;
+  search: string;
+  isOpen: boolean;
+  isBusy: boolean;
+  error: string | null;
+  onClose: () => void;
+  onSearchChange: (value: string) => void;
+  onPageChange: (page: number) => void;
+  onPageSizeChange: (pageSize: number) => void;
+  onOpenMergeChoice: (suggestion: AdminTagSuggestion) => void;
+  onOpenDismissChoice: (suggestion: AdminTagSuggestion) => void;
+  onRefresh: () => void;
+};
+
+function TagSuggestionModal({
+  suggestions,
+  totalCount,
+  page,
+  pageSize,
+  search,
+  isOpen,
+  isBusy,
+  error,
+  onClose,
+  onSearchChange,
+  onPageChange,
+  onPageSizeChange,
+  onOpenMergeChoice,
+  onOpenDismissChoice,
+  onRefresh,
+}: TagSuggestionPanelProps) {
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+
+  return (
+    <ModalShell
+      isOpen={isOpen}
+      onClose={onClose}
+      title="治理建议"
+      widthClassName="max-w-6xl"
+      headerClassName="border-b border-[color:var(--line)] p-4"
+      bodyClassName="space-y-4 p-4 max-h-[76vh] overflow-y-auto"
+      footerClassName="border-t border-[color:var(--line)] bg-[var(--bg-muted)] p-4"
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button onClick={onRefresh} variant="secondary" disabled={isBusy}>
+            刷新建议
+          </Button>
+          <Button onClick={onClose} variant="secondary" disabled={isBusy}>
+            关闭
+          </Button>
+        </div>
+      }
+    >
+      <div className="space-y-4">
+        <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+          <div className="max-w-2xl text-sm leading-6 text-[var(--muted)]">
+            系统按名称相似度、别名和内容共现识别可合并标签。合并前需要选择方向；不合并和临时忽略会隐藏当前建议对。
+          </div>
+          <div className="w-full md:w-72">
+            <FilterInput
+              id="tag-suggestion-keyword"
+              label="筛选标签"
+              ariaLabel="治理建议标签筛选"
+              placeholder="搜索来源或目标标签"
+              value={search}
+              onChange={onSearchChange}
+            />
+          </div>
+        </div>
+
+        {error ? <StatusBanner tone="error">{error}</StatusBanner> : null}
+
+        {suggestions.length === 0 ? (
+          <EmptyState className="border-0 bg-[var(--bg-muted)]">
+            {search.trim() ? "暂无匹配建议" : "暂无待处理建议"}
+          </EmptyState>
+        ) : (
+          <div className="w-full overflow-x-auto">
+            <table className="w-full table-auto text-sm">
+              <thead className="bg-[var(--bg-muted)] text-[var(--muted)]">
+                <tr>
+                  <th className="w-[22%] px-3 py-2 text-left">来源标签</th>
+                  <th className="w-[22%] px-3 py-2 text-left">目标标签</th>
+                  <th className="w-[10%] whitespace-nowrap px-3 py-2 text-left">置信度</th>
+                  <th className="w-[12%] whitespace-nowrap px-3 py-2 text-left">影响</th>
+                  <th className="w-[22%] px-3 py-2 text-left">原因</th>
+                  <th className="w-[12%] whitespace-nowrap px-3 py-2 text-right">操作</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[color:var(--line)]">
+                {suggestions.map((suggestion) => (
+                  <tr key={suggestion.id} className="align-top transition-colors hover:bg-[var(--bg-muted)]">
+                    <td className="px-3 py-3">
+                      <div className="font-medium text-[var(--foreground)]">{suggestion.sourceTag.name}</div>
+                      <div className="mt-1 text-xs text-[var(--muted)]">
+                        {formatTagCount(suggestion.sourceTag.itemCount)}
+                      </div>
+                    </td>
+                    <td className="px-3 py-3">
+                      <div className="font-medium text-[var(--foreground)]">{suggestion.targetTag.name}</div>
+                      <div className="mt-1 text-xs text-[var(--muted)]">
+                        {formatTagCount(suggestion.targetTag.itemCount)}
+                      </div>
+                    </td>
+                    <td className="px-3 py-3 font-medium text-[var(--accent-strong)]">
+                      {formatConfidence(suggestion.confidence)}
+                    </td>
+                    <td className="px-3 py-3 text-[var(--text-2)]">
+                      {formatTagCount(suggestion.affectedItemCount)}
+                    </td>
+                    <td className="px-3 py-3 text-xs leading-5 text-[var(--text-2)]">
+                      {suggestion.reasons.join("；")}
+                    </td>
+                    <td className="px-3 py-3 text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <IconButton
+                          aria-label={`选择合并方向：${suggestion.sourceTag.name}`}
+                          title="选择合并方向"
+                          size="sm"
+                          variant="ghost"
+                          disabled={isBusy}
+                          onClick={() => onOpenMergeChoice(suggestion)}
+                        >
+                          <IconMerge className="h-4 w-4" />
+                        </IconButton>
+                        <IconButton
+                          aria-label={`处理治理建议：${suggestion.sourceTag.name}`}
+                          title="处理治理建议"
+                          size="sm"
+                          variant="ghost"
+                          disabled={isBusy}
+                          onClick={() => onOpenDismissChoice(suggestion)}
+                        >
+                          <IconX className="h-4 w-4" />
+                        </IconButton>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {totalCount > 0 ? (
+          <PaginationControls
+            totalItems={totalCount}
+            page={page}
+            totalPages={totalPages}
+            pageSize={pageSize}
+            onPageChange={onPageChange}
+            onPageSizeChange={onPageSizeChange}
+            disabled={isBusy}
+          />
+        ) : null}
+      </div>
+    </ModalShell>
+  );
+}
+
+type SuggestionChoiceModalProps = {
+  suggestion: AdminTagSuggestion | null;
+  isOpen: boolean;
+  isBusy: boolean;
+  onClose: () => void;
+  onMergeToTarget: () => void;
+  onMergeToSource: () => void;
+};
+
+function SuggestionMergeChoiceModal({
+  suggestion,
+  isOpen,
+  isBusy,
+  onClose,
+  onMergeToTarget,
+  onMergeToSource,
+}: SuggestionChoiceModalProps) {
+  return (
+    <ModalShell
+      isOpen={isOpen}
+      onClose={onClose}
+      title="选择合并方向"
+      widthClassName="max-w-xl"
+      headerClassName="border-b border-[color:var(--line)] p-4"
+      bodyClassName="space-y-4 p-4"
+      footerClassName="border-t border-[color:var(--line)] bg-[var(--bg-muted)] p-4"
+      footer={
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button onClick={onClose} variant="secondary" disabled={isBusy}>
+            取消
+          </Button>
+          <Button onClick={onMergeToSource} variant="secondary" disabled={isBusy} className="gap-2">
+            <IconMerge className="h-4 w-4" />
+            合并到来源
+          </Button>
+          <Button onClick={onMergeToTarget} variant="primary" disabled={isBusy} className="gap-2">
+            <IconMerge className="h-4 w-4" />
+            合并到目标
+          </Button>
+        </div>
+      }
+    >
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="rounded-lg border border-[color:var(--line)] p-3">
+          <div className="text-xs text-[var(--text-3)]">来源标签</div>
+          <div className="mt-1 text-sm font-medium text-[var(--foreground)]">
+            {suggestion?.sourceTag.name ?? "-"}
+          </div>
+        </div>
+        <div className="rounded-lg border border-[color:var(--accent-soft)] bg-[var(--accent-soft)]/30 p-3">
+          <div className="text-xs text-[var(--text-3)]">目标标签</div>
+          <div className="mt-1 text-sm font-medium text-[var(--foreground)]">
+            {suggestion?.targetTag.name ?? "-"}
+          </div>
+        </div>
+      </div>
+      <p className="text-sm leading-6 text-[var(--muted)]">
+        “合并到目标”会保留目标标签；“合并到来源”会保留来源标签，并把目标标签合并过去。
+      </p>
+    </ModalShell>
+  );
+}
+
+type SuggestionDismissChoiceModalProps = {
+  suggestion: AdminTagSuggestion | null;
+  isOpen: boolean;
+  isBusy: boolean;
+  onClose: () => void;
+  onKeepSeparate: () => void;
+  onIgnore: () => void;
+};
+
+function SuggestionDismissChoiceModal({
+  suggestion,
+  isOpen,
+  isBusy,
+  onClose,
+  onKeepSeparate,
+  onIgnore,
+}: SuggestionDismissChoiceModalProps) {
+  return (
+    <ModalShell
+      isOpen={isOpen}
+      onClose={onClose}
+      title="处理治理建议"
+      widthClassName="max-w-xl"
+      headerClassName="border-b border-[color:var(--line)] p-4"
+      bodyClassName="space-y-4 p-4"
+      footerClassName="border-t border-[color:var(--line)] bg-[var(--bg-muted)] p-4"
+      footer={
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button onClick={onClose} variant="secondary" disabled={isBusy}>
+            取消
+          </Button>
+          <Button onClick={onIgnore} variant="secondary" disabled={isBusy} className="gap-2">
+            <IconX className="h-4 w-4" />
+            临时忽略
+          </Button>
+          <Button onClick={onKeepSeparate} variant="primary" disabled={isBusy} className="gap-2">
+            <IconCheck className="h-4 w-4" />
+            不合并
+          </Button>
+        </div>
+      }
+    >
+      <div className="rounded-lg border border-[color:var(--line)] bg-[var(--bg-muted)] p-3 text-sm text-[var(--text-2)]">
+        {suggestion ? `${suggestion.sourceTag.name} / ${suggestion.targetTag.name}` : "标签建议"}
+      </div>
+      <p className="text-sm leading-6 text-[var(--muted)]">
+        “不合并”表示确认两者都应保留为规范标签；“临时忽略”表示暂不处理这条建议。两种操作都会隐藏当前建议对。
+      </p>
+    </ModalShell>
+  );
 }
 
 type TagManageModalProps = {
@@ -396,6 +683,11 @@ export function TagSettingsPanel() {
   const { showToast } = useToast();
   const [isPending, startTransition] = useTransition();
   const [tags, setTags] = useState<AdminTag[]>([]);
+  const [suggestions, setSuggestions] = useState<AdminTagSuggestion[]>([]);
+  const [suggestionTotalCount, setSuggestionTotalCount] = useState(0);
+  const [suggestionSearch, setSuggestionSearch] = useState("");
+  const [suggestionPage, setSuggestionPage] = useState(1);
+  const [suggestionPageSize, setSuggestionPageSize] = useState(DEFAULT_SUGGESTION_PAGE_SIZE);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
@@ -405,6 +697,10 @@ export function TagSettingsPanel() {
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [isMergeModalOpen, setIsMergeModalOpen] = useState(false);
   const [isAliasModalOpen, setIsAliasModalOpen] = useState(false);
+  const [isSuggestionModalOpen, setIsSuggestionModalOpen] = useState(false);
+  const [mergeChoiceSuggestion, setMergeChoiceSuggestion] = useState<AdminTagSuggestion | null>(null);
+  const [dismissChoiceSuggestion, setDismissChoiceSuggestion] = useState<AdminTagSuggestion | null>(null);
+  const [suggestionError, setSuggestionError] = useState<string | null>(null);
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
 
   const managingTag = useMemo(
@@ -430,6 +726,21 @@ export function TagSettingsPanel() {
     }
   }, [managingTagId, page, pageSize, search]);
 
+  const loadSuggestions = useCallback(async () => {
+    try {
+      const payload = await listAdminTagSuggestions({
+        search: suggestionSearch,
+        page: suggestionPage,
+        pageSize: suggestionPageSize,
+      });
+      setSuggestionError(null);
+      setSuggestions(payload.suggestions);
+      setSuggestionTotalCount(payload.totalCount);
+    } catch (loadError) {
+      setSuggestionError(loadError instanceof Error ? loadError.message : "标签治理建议加载失败。");
+    }
+  }, [suggestionPage, suggestionPageSize, suggestionSearch]);
+
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
       void loadTags();
@@ -438,6 +749,18 @@ export function TagSettingsPanel() {
     return () => window.clearTimeout(timeoutId);
   }, [loadTags]);
 
+  useEffect(() => {
+    if (!isSuggestionModalOpen) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      void loadSuggestions();
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [isSuggestionModalOpen, loadSuggestions]);
+
   function handleClearFilters() {
     setSearch("");
     setPage(1);
@@ -445,8 +768,18 @@ export function TagSettingsPanel() {
 
   function handleRefresh() {
     startTransition(async () => {
-      await loadTags();
+      await Promise.all([
+        loadTags(),
+        isSuggestionModalOpen ? loadSuggestions() : Promise.resolve(),
+      ]);
     });
+  }
+
+  async function reloadAfterTagMutation() {
+    await Promise.all([
+      loadTags(),
+      isSuggestionModalOpen ? loadSuggestions() : Promise.resolve(),
+    ]);
   }
 
   async function handleAddAlias(aliasName: string) {
@@ -460,13 +793,13 @@ export function TagSettingsPanel() {
     });
     showToast("别名已添加。");
     setIsAliasModalOpen(false);
-    await loadTags();
+    await reloadAfterTagMutation();
   }
 
   async function handleDeleteAlias(aliasId: string) {
     await deleteAdminTagAlias(aliasId);
     showToast("别名已删除。");
-    await loadTags();
+    await reloadAfterTagMutation();
   }
 
   async function handleMerge(sourceTagIds: string[]) {
@@ -480,7 +813,30 @@ export function TagSettingsPanel() {
     });
     showToast(`已合并 ${result.mergedCount} 个标签。`);
     setIsMergeModalOpen(false);
-    await loadTags();
+    await reloadAfterTagMutation();
+  }
+
+  async function handleSuggestionMerge(suggestion: AdminTagSuggestion, direction: "target" | "source") {
+    const targetTagId = direction === "target" ? suggestion.targetTag.id : suggestion.sourceTag.id;
+    const sourceTagIds = [direction === "target" ? suggestion.sourceTag.id : suggestion.targetTag.id];
+    const result = await mergeAdminTags({
+      targetTagId,
+      sourceTagIds,
+    });
+    showToast(`已合并 ${result.mergedCount} 个标签。`);
+    setMergeChoiceSuggestion(null);
+    await reloadAfterTagMutation();
+  }
+
+  async function handleSuggestionDismiss(suggestion: AdminTagSuggestion, decision: "ignored" | "kept") {
+    await dismissAdminTagSuggestion({
+      sourceTagId: suggestion.sourceTag.id,
+      targetTagId: suggestion.targetTag.id,
+      decision,
+    });
+    showToast(decision === "kept" ? "已保留为规范标签。" : "已忽略该建议。");
+    setDismissChoiceSuggestion(null);
+    await loadSuggestions();
   }
 
   function runModalAction(action: () => Promise<void>) {
@@ -514,6 +870,17 @@ export function TagSettingsPanel() {
     setIsMergeModalOpen(true);
   }
 
+  function openSuggestionModal() {
+    setIsSuggestionModalOpen(true);
+    setSuggestionPage(1);
+  }
+
+  function closeSuggestionModal() {
+    setIsSuggestionModalOpen(false);
+    setMergeChoiceSuggestion(null);
+    setDismissChoiceSuggestion(null);
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -524,6 +891,9 @@ export function TagSettingsPanel() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <Button onClick={openSuggestionModal} variant="secondary" disabled={isPending}>
+            治理建议
+          </Button>
           <Button onClick={handleClearFilters} variant="secondary" disabled={!hasFilters}>
             清空筛选
           </Button>
@@ -623,6 +993,68 @@ export function TagSettingsPanel() {
           disabled={isPending}
         />
       ) : null}
+
+      <TagSuggestionModal
+        suggestions={suggestions}
+        totalCount={suggestionTotalCount}
+        page={suggestionPage}
+        pageSize={suggestionPageSize}
+        search={suggestionSearch}
+        isOpen={isSuggestionModalOpen}
+        isBusy={isPending}
+        error={suggestionError}
+        onClose={closeSuggestionModal}
+        onSearchChange={(value) => {
+          setSuggestionSearch(value);
+          setSuggestionPage(1);
+        }}
+        onPageChange={setSuggestionPage}
+        onPageSizeChange={(nextPageSize) => {
+          setSuggestionPageSize(nextPageSize);
+          setSuggestionPage(1);
+        }}
+        onOpenMergeChoice={setMergeChoiceSuggestion}
+        onOpenDismissChoice={setDismissChoiceSuggestion}
+        onRefresh={() => {
+          startTransition(async () => {
+            await loadSuggestions();
+          });
+        }}
+      />
+
+      <SuggestionMergeChoiceModal
+        suggestion={mergeChoiceSuggestion}
+        isOpen={Boolean(mergeChoiceSuggestion)}
+        isBusy={isPending}
+        onClose={() => setMergeChoiceSuggestion(null)}
+        onMergeToTarget={() => {
+          if (mergeChoiceSuggestion) {
+            runModalAction(() => handleSuggestionMerge(mergeChoiceSuggestion, "target"));
+          }
+        }}
+        onMergeToSource={() => {
+          if (mergeChoiceSuggestion) {
+            runModalAction(() => handleSuggestionMerge(mergeChoiceSuggestion, "source"));
+          }
+        }}
+      />
+
+      <SuggestionDismissChoiceModal
+        suggestion={dismissChoiceSuggestion}
+        isOpen={Boolean(dismissChoiceSuggestion)}
+        isBusy={isPending}
+        onClose={() => setDismissChoiceSuggestion(null)}
+        onKeepSeparate={() => {
+          if (dismissChoiceSuggestion) {
+            runModalAction(() => handleSuggestionDismiss(dismissChoiceSuggestion, "kept"));
+          }
+        }}
+        onIgnore={() => {
+          if (dismissChoiceSuggestion) {
+            runModalAction(() => handleSuggestionDismiss(dismissChoiceSuggestion, "ignored"));
+          }
+        }}
+      />
 
       <TagManageModal
         tag={managingTag}

@@ -63,6 +63,7 @@ describe("/api/admin/settings/tags", () => {
   beforeEach(async () => {
     requireAdmin.mockResolvedValue(undefined);
     await prisma.item.deleteMany();
+    await prisma.tagSuggestionDecision.deleteMany();
     await prisma.tag.deleteMany();
     await prisma.source.deleteMany();
   });
@@ -124,5 +125,77 @@ describe("/api/admin/settings/tags", () => {
 
     expect(response.status).toBe(200);
     expect(json.alias.aliasNormalized).toBe("智能体");
+  });
+
+  it("lists and suppresses tag governance suggestions for admins", async () => {
+    await createSourceAndItems();
+    const canonical = await prisma.tag.create({
+      data: {
+        name: "OpenAI",
+        normalized: "openai",
+      },
+    });
+    const variant = await prisma.tag.create({
+      data: {
+        name: "Open AI",
+        normalized: "open ai",
+      },
+    });
+    await prisma.itemTag.createMany({
+      data: [
+        {
+          itemId: "admin-tag-a",
+          tagId: canonical.id,
+        },
+        {
+          itemId: "admin-tag-b",
+          tagId: variant.id,
+        },
+      ],
+    });
+
+    const { GET, POST } = await import("@/app/api/admin/settings/tags/suggestions/route");
+    const response = await GET(new Request("http://localhost/api/admin/settings/tags/suggestions?search=open&page=1&pageSize=10"));
+    const json = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(json.totalCount).toBe(1);
+    expect(json.page).toBe(1);
+    expect(json.pageSize).toBe(10);
+    expect(json.suggestions[0]).toMatchObject({
+      sourceTag: {
+        id: variant.id,
+        name: "Open AI",
+      },
+      targetTag: {
+        id: canonical.id,
+        name: "OpenAI",
+      },
+      affectedItemCount: 1,
+    });
+    expect(json.suggestions[0].confidence).toBeGreaterThanOrEqual(0.95);
+
+    const dismissResponse = await POST(new Request("http://localhost/api/admin/settings/tags/suggestions", {
+      method: "POST",
+      body: JSON.stringify({
+        sourceTagId: variant.id,
+        targetTagId: canonical.id,
+        decision: "kept",
+      }),
+    }));
+
+    expect(dismissResponse.status).toBe(200);
+    await expect(prisma.tagSuggestionDecision.findUnique({
+      where: {
+        sourceTagNormalized_targetTagNormalized: {
+          sourceTagNormalized: "open ai",
+          targetTagNormalized: "openai",
+        },
+      },
+    })).resolves.toMatchObject({ decision: "kept" });
+
+    const suppressedResponse = await GET(new Request("http://localhost/api/admin/settings/tags/suggestions?search=open&page=1&pageSize=10"));
+    const suppressedJson = await suppressedResponse.json();
+    expect(suppressedJson.totalCount).toBe(0);
   });
 });

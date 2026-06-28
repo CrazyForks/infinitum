@@ -4,11 +4,16 @@ import { prisma } from "@/lib/db";
 import { refreshClusterFeedStatsSafely } from "@/lib/clusters/feed-stats";
 import { invalidateFeedCache } from "@/lib/feed/cache";
 import { normalizeItemTags, normalizeTagName, type NormalizedTag } from "@/lib/tags/normalization";
+import { calculateTagSimilarity, type TagSimilarityReason } from "@/lib/tags/similarity";
 
 type PrismaTransaction = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
 
 const DEFAULT_TAG_PAGE_SIZE = 30;
 const MAX_TAG_PAGE_SIZE = 100;
+const DEFAULT_TAG_SUGGESTION_LIMIT = 30;
+const MAX_TAG_SUGGESTION_LIMIT = 100;
+const AUTO_CANONICAL_CONFIDENCE_THRESHOLD = 0.95;
+const SUGGESTION_CONFIDENCE_THRESHOLD = 0.82;
 
 export type AdminTagAlias = {
   id: string;
@@ -34,6 +39,38 @@ export type AdminTagList = {
   totalCount: number;
   page: number;
   pageSize: number;
+};
+
+export type AdminTagSuggestion = {
+  id: string;
+  sourceTag: Pick<AdminTag, "id" | "name" | "normalized" | "itemCount" | "aliasCount">;
+  targetTag: Pick<AdminTag, "id" | "name" | "normalized" | "itemCount" | "aliasCount">;
+  confidence: number;
+  reasons: string[];
+  affectedItemCount: number;
+};
+
+export type AdminTagSuggestionList = {
+  suggestions: AdminTagSuggestion[];
+  totalCount: number;
+  page: number;
+  pageSize: number;
+};
+
+type TagCandidate = {
+  id: string;
+  name: string;
+  normalized: string;
+  createdAt: Date;
+  updatedAt: Date;
+  aliases?: Array<{
+    aliasName: string;
+    aliasNormalized: string;
+  }>;
+  _count: {
+    items: number;
+    aliases: number;
+  };
 };
 
 function normalizePage(value: number | null | undefined) {
@@ -84,6 +121,122 @@ function serializeAdminTag(tag: {
   };
 }
 
+function normalizeSuggestionLimit(value: number | null | undefined) {
+  if (!Number.isInteger(value) || !value || value <= 0) {
+    return DEFAULT_TAG_SUGGESTION_LIMIT;
+  }
+
+  return Math.min(value, MAX_TAG_SUGGESTION_LIMIT);
+}
+
+function serializeTagSummary(tag: TagCandidate): AdminTagSuggestion["sourceTag"] {
+  return {
+    id: tag.id,
+    name: tag.name,
+    normalized: tag.normalized,
+    itemCount: tag._count.items,
+    aliasCount: tag._count.aliases,
+  };
+}
+
+function getSimilarityReasonLabel(reason: TagSimilarityReason) {
+  switch (reason) {
+    case "compact_match":
+      return "空格差异，高置信重复";
+    case "punctuation_match":
+      return "标点差异，高置信重复";
+    case "singular_match":
+      return "英文单复数或词序差异";
+    case "token_overlap":
+      return "关键词高度重叠";
+    case "edit_distance":
+      return "拼写距离接近";
+    default:
+      return "标签表达接近";
+  }
+}
+
+function compareCanonicalPreference(left: TagCandidate, right: TagCandidate) {
+  if (left._count.items !== right._count.items) {
+    return right._count.items - left._count.items;
+  }
+
+  if (left._count.aliases !== right._count.aliases) {
+    return right._count.aliases - left._count.aliases;
+  }
+
+  if (left.name.length !== right.name.length) {
+    return left.name.length - right.name.length;
+  }
+
+  return left.createdAt.getTime() - right.createdAt.getTime();
+}
+
+function resolveSuggestionDirection(left: TagCandidate, right: TagCandidate) {
+  const [targetTag, sourceTag] = [left, right].sort(compareCanonicalPreference);
+
+  return { sourceTag, targetTag };
+}
+
+function buildSuggestionId(sourceTag: TagCandidate, targetTag: TagCandidate) {
+  return `${sourceTag.id}:${targetTag.id}`;
+}
+
+function getSuggestionConfidence(
+  sourceTag: TagCandidate,
+  targetTag: TagCandidate,
+  baseConfidence: number,
+  sharedItemCount: number,
+) {
+  if (sourceTag._count.items === 0 || sharedItemCount === 0) {
+    return baseConfidence;
+  }
+
+  const overlapRatio = sharedItemCount / sourceTag._count.items;
+  const overlapBoost = overlapRatio >= 0.8 ? 0.04 : overlapRatio >= 0.5 ? 0.02 : 0;
+
+  return Math.min(0.99, baseConfidence + overlapBoost);
+}
+
+async function addCanonicalAliasIfSafe(
+  tx: PrismaTransaction,
+  input: {
+    tagId: string;
+    tagNormalized: string;
+    aliasName: string;
+    aliasNormalized: string;
+  },
+) {
+  if (input.aliasNormalized === input.tagNormalized) {
+    return;
+  }
+
+  const existingAlias = await tx.tagAlias.findUnique({
+    where: { aliasNormalized: input.aliasNormalized },
+  });
+
+  if (existingAlias) {
+    return;
+  }
+
+  const conflictingTag = await tx.tag.findUnique({
+    where: { normalized: input.aliasNormalized },
+  });
+
+  if (conflictingTag) {
+    return;
+  }
+
+  await tx.tagAlias.create({
+    data: {
+      tagId: input.tagId,
+      aliasName: input.aliasName,
+      aliasNormalized: input.aliasNormalized,
+      createdBy: "system:auto-canonical",
+    },
+  });
+}
+
 async function resolveCanonicalTagsInTransaction(
   tx: PrismaTransaction,
   tags: NormalizedTag[],
@@ -103,14 +256,85 @@ async function resolveCanonicalTagsInTransaction(
     },
   });
   const aliasByNormalized = new Map(aliases.map((alias) => [alias.aliasNormalized, alias.tag]));
+  const exactTags = await tx.tag.findMany({
+    where: {
+      normalized: {
+        in: tags.map((tag) => tag.normalized),
+      },
+    },
+  });
+  const exactTagByNormalized = new Map(exactTags.map((tag) => [tag.normalized, tag]));
+  const unresolvedTags = tags.filter(
+    (tag) => !aliasByNormalized.has(tag.normalized) && !exactTagByNormalized.has(tag.normalized),
+  );
+  const fuzzyCandidates: TagCandidate[] = unresolvedTags.length > 0
+    ? await tx.tag.findMany({
+        include: {
+          aliases: {
+            select: {
+              aliasName: true,
+              aliasNormalized: true,
+            },
+          },
+          _count: {
+            select: {
+              items: true,
+              aliases: true,
+            },
+          },
+        },
+      })
+    : [];
   const seen = new Set<string>();
   const canonicalTags: NormalizedTag[] = [];
 
   for (const tag of tags) {
     const canonicalTag = aliasByNormalized.get(tag.normalized);
-    const nextTag = canonicalTag
+    const exactTag = exactTagByNormalized.get(tag.normalized);
+    let nextTag = canonicalTag
       ? { name: canonicalTag.name, normalized: canonicalTag.normalized }
-      : tag;
+      : exactTag
+        ? { name: exactTag.name, normalized: exactTag.normalized }
+        : tag;
+
+    if (!canonicalTag && !exactTag && fuzzyCandidates.length > 0) {
+      const bestMatch = fuzzyCandidates
+        .map((candidate) => {
+          const tagSimilarity = calculateTagSimilarity(tag.name, candidate.name)
+            ?? calculateTagSimilarity(tag.normalized, candidate.normalized);
+          const aliasSimilarity = candidate.aliases
+            ?.map((alias) => calculateTagSimilarity(tag.name, alias.aliasName)
+              ?? calculateTagSimilarity(tag.normalized, alias.aliasNormalized))
+            .filter((similarity): similarity is NonNullable<typeof similarity> => Boolean(similarity))
+            .sort((left, right) => right.confidence - left.confidence)[0];
+          const similarity = [tagSimilarity, aliasSimilarity]
+            .filter((value): value is NonNullable<typeof value> => Boolean(value))
+            .sort((left, right) => right.confidence - left.confidence)[0];
+
+          return similarity ? { candidate, similarity } : null;
+        })
+        .filter((match): match is NonNullable<typeof match> => Boolean(match))
+        .sort((left, right) => {
+          if (left.similarity.confidence !== right.similarity.confidence) {
+            return right.similarity.confidence - left.similarity.confidence;
+          }
+
+          return compareCanonicalPreference(left.candidate, right.candidate);
+        })[0];
+
+      if (bestMatch && bestMatch.similarity.confidence >= AUTO_CANONICAL_CONFIDENCE_THRESHOLD) {
+        nextTag = {
+          name: bestMatch.candidate.name,
+          normalized: bestMatch.candidate.normalized,
+        };
+        await addCanonicalAliasIfSafe(tx, {
+          tagId: bestMatch.candidate.id,
+          tagNormalized: bestMatch.candidate.normalized,
+          aliasName: tag.name,
+          aliasNormalized: tag.normalized,
+        });
+      }
+    }
 
     if (seen.has(nextTag.normalized)) {
       continue;
@@ -217,6 +441,253 @@ export async function listAdminTags(input?: {
     page,
     pageSize,
   };
+}
+
+function getBestTagSimilarity(left: TagCandidate, right: TagCandidate) {
+  const values = [
+    calculateTagSimilarity(left.name, right.name),
+    calculateTagSimilarity(left.normalized, right.normalized),
+    ...((left.aliases ?? []).flatMap((leftAlias) => [
+      calculateTagSimilarity(leftAlias.aliasName, right.name),
+      calculateTagSimilarity(leftAlias.aliasNormalized, right.normalized),
+    ])),
+    ...((right.aliases ?? []).flatMap((rightAlias) => [
+      calculateTagSimilarity(left.name, rightAlias.aliasName),
+      calculateTagSimilarity(left.normalized, rightAlias.aliasNormalized),
+    ])),
+  ].filter((similarity): similarity is NonNullable<typeof similarity> => Boolean(similarity));
+
+  return values.sort((leftSimilarity, rightSimilarity) => rightSimilarity.confidence - leftSimilarity.confidence)[0]
+    ?? null;
+}
+
+function buildItemTagSets(itemTags: Array<{ itemId: string; tagId: string }>) {
+  const itemIdsByTagId = new Map<string, Set<string>>();
+
+  for (const itemTag of itemTags) {
+    const itemIds = itemIdsByTagId.get(itemTag.tagId) ?? new Set<string>();
+    itemIds.add(itemTag.itemId);
+    itemIdsByTagId.set(itemTag.tagId, itemIds);
+  }
+
+  return itemIdsByTagId;
+}
+
+function countSharedItems(left: Set<string> | undefined, right: Set<string> | undefined) {
+  if (!left || !right) {
+    return 0;
+  }
+
+  const [smaller, larger] = left.size <= right.size ? [left, right] : [right, left];
+  let count = 0;
+
+  for (const itemId of smaller) {
+    if (larger.has(itemId)) {
+      count += 1;
+    }
+  }
+
+  return count;
+}
+
+function buildSuppressedPairKey(sourceTagNormalized: string, targetTagNormalized: string) {
+  return `${sourceTagNormalized}\u0000${targetTagNormalized}`;
+}
+
+export async function listAdminTagSuggestions(input?: {
+  limit?: number | null;
+  search?: string | null;
+  page?: number | null;
+  pageSize?: number | null;
+}): Promise<AdminTagSuggestionList> {
+  const page = normalizePage(input?.page);
+  const pageSize = normalizeSuggestionLimit(input?.pageSize ?? input?.limit);
+  const search = input?.search?.trim().toLocaleLowerCase() ?? "";
+  const tags: TagCandidate[] = await prisma.tag.findMany({
+    include: {
+      aliases: {
+        select: {
+          aliasName: true,
+          aliasNormalized: true,
+        },
+      },
+      _count: {
+        select: {
+          items: true,
+          aliases: true,
+        },
+      },
+    },
+  });
+
+  if (tags.length < 2) {
+    return {
+      suggestions: [],
+      totalCount: 0,
+      page,
+      pageSize,
+    };
+  }
+
+  const [itemTags, suppressedDecisions] = await Promise.all([
+    prisma.itemTag.findMany({
+      where: {
+        tagId: {
+          in: tags.map((tag) => tag.id),
+        },
+      },
+      select: {
+        itemId: true,
+        tagId: true,
+      },
+    }),
+    prisma.tagSuggestionDecision.findMany({
+      select: {
+        sourceTagNormalized: true,
+        targetTagNormalized: true,
+      },
+    }),
+  ]);
+  const itemIdsByTagId = buildItemTagSets(itemTags);
+  const suppressedPairs = new Set(
+    suppressedDecisions.map((decision) => buildSuppressedPairKey(
+      decision.sourceTagNormalized,
+      decision.targetTagNormalized,
+    )),
+  );
+  const suggestions: AdminTagSuggestion[] = [];
+  const seenPairs = new Set<string>();
+
+  for (let leftIndex = 0; leftIndex < tags.length; leftIndex += 1) {
+    const left = tags[leftIndex];
+    if (!left) {
+      continue;
+    }
+
+    for (let rightIndex = leftIndex + 1; rightIndex < tags.length; rightIndex += 1) {
+      const right = tags[rightIndex];
+      if (!right) {
+        continue;
+      }
+
+      const similarity = getBestTagSimilarity(left, right);
+      if (!similarity || similarity.confidence < SUGGESTION_CONFIDENCE_THRESHOLD) {
+        continue;
+      }
+
+      const { sourceTag, targetTag } = resolveSuggestionDirection(left, right);
+      const pairKey = buildSuggestionId(sourceTag, targetTag);
+      const suppressedPairKey = buildSuppressedPairKey(sourceTag.normalized, targetTag.normalized);
+
+      if (seenPairs.has(pairKey) || suppressedPairs.has(suppressedPairKey)) {
+        continue;
+      }
+
+      seenPairs.add(pairKey);
+      const sharedItemCount = countSharedItems(
+        itemIdsByTagId.get(sourceTag.id),
+        itemIdsByTagId.get(targetTag.id),
+      );
+      const confidence = getSuggestionConfidence(
+        sourceTag,
+        targetTag,
+        similarity.confidence,
+        sharedItemCount,
+      );
+      const reasons = [getSimilarityReasonLabel(similarity.reason)];
+
+      if (sharedItemCount > 0) {
+        reasons.push(`已有 ${sharedItemCount} 条内容同时带有两个标签`);
+      }
+
+      if (sourceTag._count.items <= 2) {
+        reasons.push("来源标签使用量较低，适合优先治理");
+      }
+
+      suggestions.push({
+        id: pairKey,
+        sourceTag: serializeTagSummary(sourceTag),
+        targetTag: serializeTagSummary(targetTag),
+        confidence,
+        reasons,
+        affectedItemCount: sourceTag._count.items,
+      });
+    }
+  }
+
+  suggestions.sort((left, right) => {
+    if (left.confidence !== right.confidence) {
+      return right.confidence - left.confidence;
+    }
+
+    if (left.affectedItemCount !== right.affectedItemCount) {
+      return right.affectedItemCount - left.affectedItemCount;
+    }
+
+    return left.sourceTag.name.localeCompare(right.sourceTag.name, "zh-CN");
+  });
+
+  const filteredSuggestions = search
+    ? suggestions.filter((suggestion) => [
+        suggestion.sourceTag.name,
+        suggestion.sourceTag.normalized,
+        suggestion.targetTag.name,
+        suggestion.targetTag.normalized,
+      ].some((value) => value.toLocaleLowerCase().includes(search)))
+    : suggestions;
+  const skip = (page - 1) * pageSize;
+
+  return {
+    suggestions: filteredSuggestions.slice(skip, skip + pageSize),
+    totalCount: filteredSuggestions.length,
+    page,
+    pageSize,
+  };
+}
+
+export async function dismissTagSuggestion(input: {
+  sourceTagId: string;
+  targetTagId: string;
+  decision: "ignored" | "kept";
+  decidedBy?: string;
+}) {
+  if (input.sourceTagId === input.targetTagId) {
+    throw new Error("来源标签和目标标签不能相同。");
+  }
+
+  const [sourceTag, targetTag] = await Promise.all([
+    prisma.tag.findUnique({
+      where: { id: input.sourceTagId },
+    }),
+    prisma.tag.findUnique({
+      where: { id: input.targetTagId },
+    }),
+  ]);
+
+  if (!sourceTag || !targetTag) {
+    throw new Error("标签建议对应的标签不存在。");
+  }
+
+  await prisma.tagSuggestionDecision.upsert({
+    where: {
+      sourceTagNormalized_targetTagNormalized: {
+        sourceTagNormalized: sourceTag.normalized,
+        targetTagNormalized: targetTag.normalized,
+      },
+    },
+    update: {
+      decision: input.decision,
+      decidedBy: input.decidedBy ?? "admin",
+    },
+    create: {
+      sourceTagNormalized: sourceTag.normalized,
+      targetTagNormalized: targetTag.normalized,
+      decision: input.decision,
+      decidedBy: input.decidedBy ?? "admin",
+    },
+  });
+
+  return { ok: true };
 }
 
 async function upsertTagAliasInTransaction(

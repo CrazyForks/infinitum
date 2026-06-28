@@ -46,15 +46,62 @@ const tagListPayload = {
   pageSize: 10,
 };
 
+const tagSuggestionPayload = {
+  suggestions: [
+    {
+      id: "tag-agents:tag-agent",
+      sourceTag: {
+        id: "tag-agents",
+        name: "AI Agents",
+        normalized: "ai agents",
+        itemCount: 3,
+        aliasCount: 0,
+      },
+      targetTag: {
+        id: "tag-agent",
+        name: "AI Agent",
+        normalized: "ai agent",
+        itemCount: 12,
+        aliasCount: 1,
+      },
+      confidence: 0.96,
+      reasons: ["英文单复数或词序差异"],
+      affectedItemCount: 3,
+    },
+  ],
+  totalCount: 1,
+  page: 1,
+  pageSize: 10,
+};
+
+function createFetchMock() {
+  return vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
+    const url = String(input);
+
+    if (url === "/api/admin/settings/tags/suggestions" && init?.method === "POST") {
+      return new Response(JSON.stringify({ ok: true }));
+    }
+
+    if (url.startsWith("/api/admin/settings/tags/suggestions")) {
+      return new Response(JSON.stringify(tagSuggestionPayload));
+    }
+
+    if (url === "/api/admin/settings/tags/merge" && init?.method === "POST") {
+      return new Response(JSON.stringify({ mergedCount: 1, affectedClusterCount: 0 }));
+    }
+
+    return new Response(JSON.stringify(tagListPayload));
+  });
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
 describe("TagSettingsPanel", () => {
   it("loads tags with database pagination and shows management actions", async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () =>
-      new Response(JSON.stringify(tagListPayload)),
-    );
+    const user = userEvent.setup();
+    const fetchMock = createFetchMock();
     vi.stubGlobal("fetch", fetchMock);
 
     renderWithProviders(<TagSettingsPanel />);
@@ -70,26 +117,55 @@ describe("TagSettingsPanel", () => {
     });
 
     expect(screen.getByRole("heading", { name: "标签管理" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "治理建议" })).not.toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/admin/settings/tags/suggestions?page=1&pageSize=10", expect.anything());
+    expect(screen.getByRole("button", { name: "治理建议" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "清空筛选" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "刷新" })).toBeInTheDocument();
-    expect(screen.getByText("AI Agent")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "AI Agent" })).toBeInTheDocument();
     expect(screen.queryByText("ai agent")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "应用筛选" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "AI Agent" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "新增别名：AI Agent" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "合并标签：AI Agent" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "治理建议" }));
+    const suggestionDialog = await screen.findByRole("dialog", { name: "治理建议" });
+    expect(within(suggestionDialog).getByText("目标标签")).toBeInTheDocument();
+    expect(within(suggestionDialog).getByText("AI Agents")).toBeInTheDocument();
+    expect(within(suggestionDialog).getByText("AI Agent")).toBeInTheDocument();
+    expect(within(suggestionDialog).getByRole("button", { name: "选择合并方向：AI Agents" })).toBeInTheDocument();
+    expect(within(suggestionDialog).getByRole("button", { name: "处理治理建议：AI Agents" })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/admin/settings/tags/suggestions?page=1&pageSize=10", {
+        method: "GET",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: undefined,
+      });
+    });
+
+    await user.type(within(suggestionDialog).getByLabelText("治理建议标签筛选"), "Agent");
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/admin/settings/tags/suggestions?search=Agent&page=1&pageSize=10", {
+        method: "GET",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: undefined,
+      });
+    });
   });
 
   it("opens tag detail from the tag name and action modals from operation icons", async () => {
     const user = userEvent.setup();
-    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () =>
-      new Response(JSON.stringify(tagListPayload)),
-    );
+    const fetchMock = createFetchMock();
     vi.stubGlobal("fetch", fetchMock);
 
     renderWithProviders(<TagSettingsPanel />);
 
-    await screen.findByText("AI Agent");
+    await screen.findByRole("button", { name: "AI Agent" });
 
     await user.click(screen.getByRole("button", { name: "AI Agent" }));
     const manageDialog = screen.getByRole("dialog", { name: "标签详情" });
@@ -126,5 +202,69 @@ describe("TagSettingsPanel", () => {
 
     await user.click(screen.getByRole("button", { name: "合并标签：AI Agent" }));
     expect(screen.getByRole("dialog", { name: "合并标签" })).toBeInTheDocument();
+  });
+
+  it("confirms and dismisses tag governance suggestions", async () => {
+    const user = userEvent.setup();
+    const fetchMock = createFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderWithProviders(<TagSettingsPanel />);
+
+    await screen.findByRole("button", { name: "治理建议" });
+    await user.click(screen.getByRole("button", { name: "治理建议" }));
+    const suggestionDialog = await screen.findByRole("dialog", { name: "治理建议" });
+
+    await user.click(within(suggestionDialog).getByRole("button", { name: "选择合并方向：AI Agents" }));
+    const mergeChoiceDialog = screen.getByRole("dialog", { name: "选择合并方向" });
+    await user.click(within(mergeChoiceDialog).getByRole("button", { name: "合并到目标" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/admin/settings/tags/merge", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          targetTagId: "tag-agent",
+          sourceTagIds: ["tag-agents"],
+        }),
+      });
+    });
+
+    await user.click(within(suggestionDialog).getByRole("button", { name: "选择合并方向：AI Agents" }));
+    const reverseMergeChoiceDialog = screen.getByRole("dialog", { name: "选择合并方向" });
+    await user.click(within(reverseMergeChoiceDialog).getByRole("button", { name: "合并到来源" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/admin/settings/tags/merge", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          targetTagId: "tag-agents",
+          sourceTagIds: ["tag-agent"],
+        }),
+      });
+    });
+
+    await user.click(within(suggestionDialog).getByRole("button", { name: "处理治理建议：AI Agents" }));
+    const dismissChoiceDialog = screen.getByRole("dialog", { name: "处理治理建议" });
+    await user.click(within(dismissChoiceDialog).getByRole("button", { name: "临时忽略" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/admin/settings/tags/suggestions", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          sourceTagId: "tag-agents",
+          targetTagId: "tag-agent",
+          decision: "ignored",
+        }),
+      });
+    });
   });
 });

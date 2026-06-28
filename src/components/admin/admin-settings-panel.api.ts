@@ -81,6 +81,23 @@ export type AdminTagListPayload = {
   pageSize: number;
 };
 
+export type AdminTagSuggestion = {
+  id: string;
+  sourceTag: Pick<AdminTag, "id" | "name" | "normalized" | "itemCount" | "aliasCount">;
+  targetTag: Pick<AdminTag, "id" | "name" | "normalized" | "itemCount" | "aliasCount">;
+  confidence: number;
+  reasons: string[];
+  affectedItemCount: number;
+};
+
+export type AdminTagSuggestionListPayload = {
+  error?: string;
+  suggestions: AdminTagSuggestion[];
+  totalCount: number;
+  page: number;
+  pageSize: number;
+};
+
 type TagAliasPayload = {
   error?: string;
   alias?: AdminTagAlias;
@@ -90,6 +107,11 @@ type TagMergePayload = {
   error?: string;
   mergedCount: number;
   affectedClusterCount: number;
+};
+
+type TagSuggestionDecisionPayload = {
+  error?: string;
+  ok: boolean;
 };
 
 async function requestAdminSettingsJson<T extends { error?: string }>(
@@ -372,5 +394,47 @@ export async function mergeAdminTags(input: {
     "POST",
     input,
     "标签合并失败。",
+  );
+}
+
+export async function listAdminTagSuggestions(input?: {
+  search?: string;
+  page?: number;
+  pageSize?: number;
+  limit?: number;
+}) {
+  const search = new URLSearchParams();
+  if (input?.search?.trim()) {
+    search.set("search", input.search.trim());
+  }
+  if (input?.page) {
+    search.set("page", String(input.page));
+  }
+  if (input?.pageSize) {
+    search.set("pageSize", String(input.pageSize));
+  }
+  if (input?.limit) {
+    search.set("limit", String(input.limit));
+  }
+  const queryString = search.toString();
+
+  return requestAdminSettingsJson<AdminTagSuggestionListPayload>(
+    `/api/admin/settings/tags/suggestions${queryString ? `?${queryString}` : ""}`,
+    "GET",
+    undefined,
+    "标签治理建议加载失败。",
+  );
+}
+
+export async function dismissAdminTagSuggestion(input: {
+  sourceTagId: string;
+  targetTagId: string;
+  decision: "ignored" | "kept";
+}) {
+  return requestAdminSettingsJson<TagSuggestionDecisionPayload>(
+    "/api/admin/settings/tags/suggestions",
+    "POST",
+    input,
+    "标签治理建议处理失败。",
   );
 }
