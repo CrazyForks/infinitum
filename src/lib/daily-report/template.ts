@@ -33,7 +33,7 @@ export const DAILY_REPORT_SYSTEM_ROLE_PROMPT =
   "你是中文 AI 新闻日报编辑。请只基于输入候选内容生成一份 Briefing 型 AI 日报。最终响应必须是单个合法 JSON 对象；不要输出代码块、Markdown 文档、前后说明或任何 JSON 之外的文本。JSON 字段内仅在模板规则允许时使用有限行内 Markdown。";
 
 export const DEFAULT_DAILY_REPORT_HEADLINE_INSTRUCTION =
-  "写 2-3 个当天最值得传播的真实主题，用“、”分隔；不要包含日期、年份、日报、AI 日报、Markdown、引号或尾随标点；会与“MM-DD日报 | ”前缀合成最终标题，合成后不得超过 64 个字。";
+  "基于最终输出的“热点事件”栏目全部条目生成标题主题，在 64 字限制内尽量覆盖每个热点事件的核心主体或动作；主题数量不固定，不强行凑数，也不要从其他栏目或趋势观察中提炼抽象主题；用“、”分隔；不要包含日期、年份、日报、AI 日报、Markdown、引号或尾随标点；会与“MM-DD日报 | ”前缀合成最终标题。";
 
 export const DEFAULT_DAILY_REPORT_RECENT_TOPIC_RULES = [
   "如果候选内容与最近 7 天已写主题只是同一事件的重复报道，不要再次写入。",

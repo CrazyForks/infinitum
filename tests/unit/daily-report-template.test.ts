@@ -23,7 +23,7 @@ describe("daily report template config", () => {
     expect(prompt).toContain("section block「开源与工具」：可为空；有相关内容时输出 1-5 条");
     expect(prompt).toContain("section block「数据与洞察」：可为空；有相关内容时输出 1-5 条");
     expect(prompt).toContain("items 为空数组时会在渲染时自动隐藏");
-    expect(prompt).toContain("headline 字段：写 2-3 个当天最值得传播的真实主题");
+    expect(prompt).toContain("headline 字段：基于最终输出的“热点事件”栏目全部条目生成标题主题");
     expect(prompt).toContain("历史主题去重规则：");
     expect(prompt).toContain("如果候选内容与最近 7 天已写主题只是同一事件的重复报道");
     expect(prompt).toContain("每条正文约 120-260 字");

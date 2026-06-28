@@ -752,7 +752,7 @@ describe("AdminSettingsPanel", () => {
       recentTopicRules: string[];
       blocks: Array<{ title: string }>;
     };
-    expect(template.headlineInstruction).toContain("当天最值得传播");
+    expect(template.headlineInstruction).toContain("热点事件");
     expect(template.recentTopicRules[0]).toContain("最近 7 天已写主题");
     expect(template.blocks[0].title).toBe("趋势观察");
   });
