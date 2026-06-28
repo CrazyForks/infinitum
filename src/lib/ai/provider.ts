@@ -24,6 +24,7 @@ import {
 import type { RuntimeConfig } from "@/config/runtime";
 import { normalizeModelResponseText } from "@/lib/ai/response-format";
 import { shouldRegenerateChineseSummary } from "@/lib/ai/summary-language";
+import { buildDailyReportRuntimeFallbackInstructionLines } from "@/lib/daily-report/runtime-rules";
 import { normalizeItemTags } from "@/lib/tags/normalization";
 import { normalizeOptionalText } from "@/lib/utils/text";
 
@@ -299,35 +300,29 @@ function renderPromptTemplate(template: string, values: Record<string, string | 
   return template.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, key: string) => String(values[key] ?? ""));
 }
 
-function buildDailyReportUserPrompt(promptTemplate: string, input: {
+function buildDailyReportUserPrompt(config: {
+  systemPrompt: string;
+  promptTemplate: string;
+}, input: {
   date: string;
   timezone: string;
   articles: unknown[];
   recentTopics?: unknown[];
 }) {
   const recentTopicsJson = JSON.stringify(input.recentTopics ?? []);
-  const rendered = renderPromptTemplate(promptTemplate, {
+  const rendered = renderPromptTemplate(config.promptTemplate, {
     date: input.date,
     timezone: input.timezone,
     articlesJson: JSON.stringify(input.articles),
     recentTopicsJson,
   });
-
-  if (/\{\{\s*recentTopicsJson\s*\}\}/.test(promptTemplate)) {
-    return rendered;
-  }
-
-  return [
-    rendered,
-    "",
-    "最近 7 天已写主题 JSON：",
+  const extraInstructions = buildDailyReportRuntimeFallbackInstructionLines({
+    systemPrompt: config.systemPrompt,
+    promptTemplate: config.promptTemplate,
     recentTopicsJson,
-    "",
-    "历史主题使用规则：",
-    "1. 如果候选内容与最近 7 天已写主题只是同一事件的重复报道，不要再次写入。",
-    "2. 如果确有新动作、新数据、新影响或状态变化，可以写入，但必须写成后续进展，避免重复介绍背景。",
-    "3. 不要因为同一公司、同一模型或同一抽象主题相似就机械过滤；判断重点是是否有新的事实增量。",
-  ].join("\n");
+  });
+
+  return [rendered, ...extraInstructions].join("\n");
 }
 
 function getFallbackEnrichment(
@@ -1375,7 +1370,7 @@ export function createAiProvider(
     async generateDailyReport(input) {
       return completeTextWithCircuitBreaker(
         dailyReportConfig,
-        buildDailyReportUserPrompt(dailyReportConfig.promptTemplate, input),
+        buildDailyReportUserPrompt(dailyReportConfig, input),
         {
           responseFormat: { type: "json_object" },
         },

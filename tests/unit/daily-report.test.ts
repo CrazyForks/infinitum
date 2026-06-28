@@ -140,9 +140,11 @@ describe("daily report utilities", () => {
     const parsed = parseDailyReportContent(JSON.stringify({
       ...content,
       title: "模型返回的标题会被忽略",
+      headline: "2026-04-24日报 | OpenAI 发布新模型、开发者工具更新、",
     }), 2);
 
     expect(parsed).not.toHaveProperty("title");
+    expect(parsed.headline).toBe("OpenAI 发布新模型、开发者工具更新");
     expect(parsed.blocks[1]).toMatchObject({ type: "section", title: "热点事件" });
     expect(() => parseDailyReportContent(JSON.stringify({
       blocks: content.blocks.map((block) =>
@@ -347,6 +349,7 @@ describe("daily report block rendering and legacy normalization", () => {
 
   it("normalizes legacy persisted content into blocks", () => {
     const normalized = normalizeDailyReportContent({
+      headline: "04-24日报 | OpenAI 发布新模型、开发者工具更新、",
       openingLabel: "今日速览",
       openingSummary: "本期覆盖模型发布、产业合作与开源工具三条主线，附带工程实践与生态影响评估。",
       sections: {
@@ -371,6 +374,7 @@ describe("daily report block rendering and legacy normalization", () => {
       closingThought: "整体来看主线还是收敛在模型能力和工程工具上，后续需要持续观察实际落地情况。",
     });
 
+    expect(normalized.headline).toBe("OpenAI 发布新模型、开发者工具更新");
     expect(normalized.blocks[0]).toMatchObject({ type: "text", title: "今日速览" });
     expect(normalized.blocks[1]).toMatchObject({
       type: "section",

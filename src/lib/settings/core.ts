@@ -8,6 +8,7 @@ import {
   compileDailyReportTemplatePrompt,
   DEFAULT_DAILY_REPORT_TEMPLATE_JSON,
   parseDailyReportTemplateJson,
+  stringifyDailyReportTemplate,
 } from "@/lib/daily-report/template";
 import type { SourceConfig } from "@/lib/feed/types";
 import { getDefaultPromptConfigName, getDefaultPromptSampling, getDefaultPromptTemplate } from "@/lib/settings/ai-config";
@@ -357,7 +358,7 @@ export function resolveTemplateJsonForSave(input: SavePromptConfigInput) {
 
   const template = parseDailyReportTemplateJson(templateJson);
   return {
-    templateJson,
+    templateJson: template ? stringifyDailyReportTemplate(template) : templateJson,
     systemPrompt: template ? compileDailyReportTemplatePrompt(template) : input.systemPrompt?.trim() || null,
   };
 }

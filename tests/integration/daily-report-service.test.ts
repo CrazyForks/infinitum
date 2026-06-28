@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { prisma } from "@/lib/db";
 import {
+  buildDailyReportTitle,
   executeDailyReportTask,
   generateDailyReport,
 } from "@/lib/daily-report/service";
@@ -26,6 +27,7 @@ const REPORT_DATE = "2026-04-24";
 
 function buildDailyReportOutput() {
   return JSON.stringify({
+    headline: "OpenAI 发布新模型、开发者工具更新",
     blocks: [
       {
         type: "text",
@@ -721,7 +723,42 @@ describe("daily report service", () => {
     expect(report.status).toBe("draft");
     expect(report.publishedAt).toBeNull();
     expect(report.errorMessage).toBeNull();
-    expect(report.renderedMarkdown).toContain(`# ${REPORT_DATE} AI 日报`);
+    expect(report.title).toBe("04-24日报 | OpenAI 发布新模型、开发者工具更新");
+    expect(report.renderedMarkdown).toContain("# 04-24日报 | OpenAI 发布新模型、开发者工具更新");
+  });
+
+  it("formats generated report titles for public-account publishing", () => {
+    expect(buildDailyReportTitle("2026-06-27", {
+      headline: "2026-06-27日报 | GPT-5.6 有限预览、Mythos 5 白名单恢复、",
+      blocks: [],
+    })).toBe("06-27日报 | GPT-5.6 有限预览、Mythos 5 白名单恢复");
+
+    const fallbackTitle = buildDailyReportTitle("2026-06-27", {
+      blocks: [{
+        type: "section",
+        title: "热点事件",
+        items: [
+          {
+            title: "OpenAI 正式发布 GPT-5.6 系列，采取有限预览",
+            body: "正文内容足够长，满足日报条目的基础校验要求。",
+            sourceIds: [1],
+          },
+          {
+            title: "Anthropic Mythos 5 向美国白名单机构恢复访问",
+            body: "正文内容足够长，满足日报条目的基础校验要求。",
+            sourceIds: [2],
+          },
+        ],
+      }],
+    });
+
+    expect(fallbackTitle).toBe("06-27日报 | OpenAI 正式发布 GPT-5.6 系列，采取有限预览、Anthropic Mythos 5");
+    expect(Array.from(fallbackTitle).length).toBeLessThanOrEqual(64);
+
+    expect(Array.from(buildDailyReportTitle("2026-06-27", {
+      headline: "GPT-5.6 有限预览、Mythos 5 白名单恢复、OpenAI 版权诉讼升温、Agent 工程化加速、企业成本路由调整",
+      blocks: [],
+    })).length).toBeLessThanOrEqual(64);
   });
 
   it("persists stable source numbers and source snapshots when generating a report", async () => {

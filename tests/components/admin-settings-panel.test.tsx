@@ -679,7 +679,9 @@ describe("AdminSettingsPanel", () => {
     await user.click(screen.getByRole("button", { name: "AI 日报" }));
     await user.click(screen.getAllByRole("button", { name: /创建配置/i })[0]);
     dialog = screen.getByRole("dialog", { name: "创建新提示词配置" });
-    expect(within(dialog).getByText(/可使用占位符：\s+\{\{date\}\} \/ \{\{timezone\}\} \/ \{\{articlesJson\}\}/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/可使用占位符：\s+\{\{date\}\} \/ \{\{timezone\}\} \/ \{\{articlesJson\}\} \/ \{\{recentTopicsJson\}\}/)).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("标题规则")).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("历史主题去重规则")).toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "取消" }));
   });
 
@@ -745,7 +747,13 @@ describe("AdminSettingsPanel", () => {
     });
     const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
     const payload = JSON.parse(String(request.body)) as { templateJson: string };
-    const template = JSON.parse(payload.templateJson) as { blocks: Array<{ title: string }> };
+    const template = JSON.parse(payload.templateJson) as {
+      headlineInstruction: string;
+      recentTopicRules: string[];
+      blocks: Array<{ title: string }>;
+    };
+    expect(template.headlineInstruction).toContain("当天最值得传播");
+    expect(template.recentTopicRules[0]).toContain("最近 7 天已写主题");
     expect(template.blocks[0].title).toBe("趋势观察");
   });
 

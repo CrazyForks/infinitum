@@ -12,6 +12,7 @@ describe("daily report template config", () => {
     const prompt = compileDailyReportTemplatePrompt(DEFAULT_DAILY_REPORT_TEMPLATE);
 
     expect(prompt).toContain('"blocks"');
+    expect(prompt).toContain('"headline":"GPT-5.6 有限预览、Mythos 5 白名单恢复"');
     expect(prompt).toContain('"type":"text"');
     expect(prompt).toContain('"title":"摘要"');
     expect(prompt).toContain('"title":"趋势观察"');
@@ -22,6 +23,9 @@ describe("daily report template config", () => {
     expect(prompt).toContain("section block「开源与工具」：可为空；有相关内容时输出 1-5 条");
     expect(prompt).toContain("section block「数据与洞察」：可为空；有相关内容时输出 1-5 条");
     expect(prompt).toContain("items 为空数组时会在渲染时自动隐藏");
+    expect(prompt).toContain("headline 字段：写 2-3 个当天最值得传播的真实主题");
+    expect(prompt).toContain("历史主题去重规则：");
+    expect(prompt).toContain("如果候选内容与最近 7 天已写主题只是同一事件的重复报道");
     expect(prompt).toContain("每条正文约 120-260 字");
     expect(prompt).toContain("每条正文约 80-180 字");
     expect(prompt).toContain("每个 item 必须包含 title、body、sourceIds");
@@ -33,6 +37,8 @@ describe("daily report template config", () => {
 
   it("uses block and note config when compiling", () => {
     const template = parseDailyReportTemplateJson(DEFAULT_DAILY_REPORT_TEMPLATE_JSON)!;
+    template.headlineInstruction = "写一个适合公众号传播的短标题主题。";
+    template.recentTopicRules = ["重复事件不再写入。"];
     template.blocks = [
       {
         type: "text",
@@ -59,9 +65,23 @@ describe("daily report template config", () => {
     const prompt = compileDailyReportTemplatePrompt(template);
 
     expect(prompt).toContain('"title":"产业信号","items":[{"title":"...","body":"...","notes":[{"label":"信号","text":"..."}],"sourceIds":[1,2]}]');
+    expect(prompt).toContain("headline 字段：写一个适合公众号传播的短标题主题。");
     expect(prompt).toContain("section block「产业信号」：输出 1-2 条，聚焦产业变化。");
     expect(prompt).toContain("items 为空数组时会在渲染时自动隐藏");
     expect(prompt).toContain("信号 必填：说明为什么重要。");
+    expect(prompt).toContain("1. 重复事件不再写入。");
+  });
+
+  it("backfills headline and recent topic rules for older blocks template json", () => {
+    const oldTemplate = {
+      blocks: DEFAULT_DAILY_REPORT_TEMPLATE.blocks,
+      globalRules: DEFAULT_DAILY_REPORT_TEMPLATE.globalRules,
+    };
+
+    const template = parseDailyReportTemplateJson(JSON.stringify(oldTemplate))!;
+
+    expect(template.headlineInstruction).toContain("MM-DD日报");
+    expect(template.recentTopicRules[0]).toContain("最近 7 天已写主题");
   });
 
   it("always compiles empty sections as hidden by render default", () => {

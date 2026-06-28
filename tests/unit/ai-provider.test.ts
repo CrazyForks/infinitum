@@ -2,6 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createAiProvider } from "@/lib/ai/provider";
 import { normalizeModelResponseText } from "@/lib/ai/response-format";
+import {
+  DEFAULT_DAILY_REPORT_PROMPT,
+  DEFAULT_DAILY_REPORT_USER_PROMPT_TEMPLATE,
+} from "@/config/prompts";
 
 describe("ai provider", () => {
   it("strips leading think blocks and code fences from model responses", () => {
@@ -1287,8 +1291,56 @@ ${JSON.stringify({
 
     const userContent = create.mock.calls[0]?.[0]?.messages?.[1]?.content;
     expect(userContent).toContain("候选内容 JSON");
+    expect(userContent).toContain("日报标题字段规则");
+    expect(userContent).toContain("顶层必须包含 headline 字段");
+    expect(userContent).toContain("MM-DD日报 | ");
     expect(userContent).toContain("最近 7 天已写主题 JSON");
     expect(userContent).toContain("昨日已写主题");
     expect(userContent).toContain("历史主题使用规则");
+  });
+
+  it("does not append daily report fallback rules when the prompt config is current", async () => {
+    const create = vi.fn().mockResolvedValue({
+      choices: [
+        {
+          message: {
+            content: "{}",
+          },
+        },
+      ],
+    });
+    const provider = createAiProvider(
+      {
+        apiKey: "sk-test",
+        baseURL: "https://example.com/v1",
+        model: "test-model",
+      },
+      {
+        dailyReport: {
+          systemPrompt: DEFAULT_DAILY_REPORT_PROMPT,
+          promptTemplate: DEFAULT_DAILY_REPORT_USER_PROMPT_TEMPLATE,
+        },
+      },
+      {
+        chat: {
+          completions: {
+            create,
+          },
+        },
+      },
+    );
+
+    await provider.generateDailyReport({
+      date: "2026-04-24",
+      timezone: "Asia/Shanghai",
+      articles: [{ id: 1, title: "今日候选" }],
+      recentTopics: [{ date: "2026-04-23", title: "昨日已写主题" }],
+    });
+
+    const userContent = create.mock.calls[0]?.[0]?.messages?.[1]?.content;
+    expect(userContent).toContain("最近 7 天已写主题 JSON");
+    expect(userContent).toContain("昨日已写主题");
+    expect(userContent).not.toContain("日报标题字段规则");
+    expect(userContent).not.toContain("历史主题使用规则");
   });
 });

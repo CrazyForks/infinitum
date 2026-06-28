@@ -9,6 +9,7 @@ import {
   type DailyReportTextBlock,
 } from "@/lib/daily-report/types";
 import { stripDailyReportGeneratedLabel } from "@/lib/daily-report/validator";
+import { normalizeDailyReportHeadline } from "@/lib/daily-report/title";
 
 function asText(value: unknown): string {
   if (typeof value === "string") return stripDailyReportGeneratedLabel(value);
@@ -183,11 +184,17 @@ export function normalizeDailyReportContent(value: unknown): DailyReportContent 
   }
   const input = value as Record<string, unknown>;
   if (Array.isArray(input.blocks)) {
+    const headline = normalizeDailyReportHeadline(input.headline);
     return {
+      ...(headline ? { headline } : {}),
       blocks: input.blocks.map(normalizeBlock).filter((entry): entry is DailyReportBlock => Boolean(entry)),
     };
   }
-  return { blocks: legacyToBlocks(input) };
+  const headline = normalizeDailyReportHeadline(input.headline);
+  return {
+    ...(headline ? { headline } : {}),
+    blocks: legacyToBlocks(input),
+  };
 }
 
 function getDailyReportTextBlocks(content: DailyReportContent): DailyReportTextBlock[] {

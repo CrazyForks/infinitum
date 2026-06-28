@@ -3,6 +3,7 @@ import {
   type DailyReportItem,
   type DailyReportItemNote,
 } from "@/lib/daily-report/types";
+import { normalizeDailyReportHeadline } from "@/lib/daily-report/title";
 
 function stripCodeFence(value: string) {
   return value.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
@@ -42,6 +43,7 @@ export function parseDailyReportContent(rawContent: string, maxSourceId: number)
 
   const input = parsed as Record<string, unknown>;
   const errors: string[] = [];
+  const headline = normalizeDailyReportHeadline(input.headline);
 
   const requireTitle = (value: unknown, path: string) => {
     const title = stripDailyReportGeneratedLabel(value);
@@ -152,5 +154,8 @@ export function parseDailyReportContent(rawContent: string, maxSourceId: number)
     throw new Error(`日报输出校验失败：${errors.slice(0, 8).join("；")}`);
   }
 
-  return { blocks };
+  return {
+    ...(headline ? { headline } : {}),
+    blocks,
+  };
 }

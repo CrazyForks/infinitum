@@ -5,6 +5,8 @@ export const DEFAULT_CLOSING_LABEL = "趋势观察";
 
 export const DAILY_REPORT_OPENING_LABEL_MAX_LENGTH = 20;
 export const DAILY_REPORT_CLOSING_LABEL_MAX_LENGTH = 20;
+export const DAILY_REPORT_TITLE_MAX_LENGTH = 64;
+export const DAILY_REPORT_HEADLINE_MAX_LENGTH = 48;
 
 export type DailyReportStatus = "draft" | "published" | "failed";
 
@@ -70,6 +72,7 @@ export type DailyReportSectionBlock = {
 export type DailyReportBlock = DailyReportTextBlock | DailyReportSectionBlock;
 
 export type DailyReportContent = {
+  headline?: string;
   blocks: DailyReportBlock[];
   openingLabel?: string;
   openingSummary?: string;

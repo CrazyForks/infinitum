@@ -18,6 +18,10 @@ import {
 } from "@/lib/daily-report/repository";
 import { renderDailyReportMarkdown } from "@/lib/daily-report/renderer";
 import {
+  formatDailyReportTitle,
+  normalizeDailyReportHeadline,
+} from "@/lib/daily-report/title";
+import {
   DAILY_REPORT_TIMEZONE,
   type DailyReportCandidate,
   type DailyReportContent,
@@ -40,8 +44,19 @@ const DAILY_REPORT_RECENT_TOPIC_CONTEXT_LIMIT = 120;
 const MAX_DAILY_REPORT_EXPANDED_SOURCES_PER_CANDIDATE = 5;
 const DISPLAYABLE_DAILY_REPORT_SOURCE_STATUSES = ["allowed", "restored"] as const;
 
-function buildDailyReportTitle(date: string) {
-  return `${date} AI 日报`;
+function getFallbackDailyReportHeadline(content: DailyReportContent) {
+  const sectionTitles = getDailyReportSectionBlocks(content)
+    .flatMap((section) => section.items.map((item) => item.title))
+    .map((title) => normalizeDailyReportHeadline(title))
+    .filter(Boolean);
+  return normalizeDailyReportHeadline(sectionTitles.slice(0, 3).join("、"));
+}
+
+export function buildDailyReportTitle(date: string, content?: DailyReportContent) {
+  const headline = content
+    ? normalizeDailyReportHeadline(content.headline) || getFallbackDailyReportHeadline(content)
+    : "";
+  return formatDailyReportTitle(date, headline);
 }
 
 function buildInputHash(
@@ -781,7 +796,7 @@ export async function generateDailyReport(input: {
     sourceRows,
     groupIds: dailyReportGroupIds,
   });
-  const title = buildDailyReportTitle(date);
+  const title = buildDailyReportTitle(date, content);
   const renderedMarkdown = renderDailyReportMarkdown(
     content,
     candidates,

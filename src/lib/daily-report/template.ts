@@ -23,6 +23,8 @@ export type DailyReportTemplateSectionBlock = {
 export type DailyReportTemplateBlock = DailyReportTemplateTextBlock | DailyReportTemplateSectionBlock;
 
 export type DailyReportTemplateConfig = {
+  headlineInstruction: string;
+  recentTopicRules: string[];
   blocks: DailyReportTemplateBlock[];
   globalRules: string[];
 };
@@ -30,7 +32,18 @@ export type DailyReportTemplateConfig = {
 export const DAILY_REPORT_SYSTEM_ROLE_PROMPT =
   "你是中文 AI 新闻日报编辑。请只基于输入候选内容生成一份 Briefing 型 AI 日报。最终响应必须是单个合法 JSON 对象；不要输出代码块、Markdown 文档、前后说明或任何 JSON 之外的文本。JSON 字段内仅在模板规则允许时使用有限行内 Markdown。";
 
+export const DEFAULT_DAILY_REPORT_HEADLINE_INSTRUCTION =
+  "写 2-3 个当天最值得传播的真实主题，用“、”分隔；不要包含日期、年份、日报、AI 日报、Markdown、引号或尾随标点；会与“MM-DD日报 | ”前缀合成最终标题，合成后不得超过 64 个字。";
+
+export const DEFAULT_DAILY_REPORT_RECENT_TOPIC_RULES = [
+  "如果候选内容与最近 7 天已写主题只是同一事件的重复报道，不要再次写入。",
+  "如果确有新动作、新数据、新影响或状态变化，可以写入，但必须写成后续进展，避免重复介绍背景。",
+  "不要因为同一公司、同一模型或同一抽象主题相似就机械过滤；判断重点是是否有新的事实增量。",
+];
+
 export const DEFAULT_DAILY_REPORT_TEMPLATE: DailyReportTemplateConfig = {
+  headlineInstruction: DEFAULT_DAILY_REPORT_HEADLINE_INSTRUCTION,
+  recentTopicRules: DEFAULT_DAILY_REPORT_RECENT_TOPIC_RULES,
   blocks: [
     {
       type: "text",
@@ -111,7 +124,6 @@ export const DEFAULT_DAILY_REPORT_TEMPLATE: DailyReportTemplateConfig = {
     "多个来源只能用于同一事件的互证；如果只是主题相近但事实不同，应拆成不同条目或只保留最相关来源。",
     "只使用输入候选内容和合法来源编号，不编造事实、来源或输入之外的信息。",
     "同一事件只出现一次，避免跨栏目重复。",
-    "参考最近 7 天已写主题：如果候选内容只是同一事件的重复报道，不要再次写入；如果有明确新动作、新数据、新影响或状态变化，可以写入但要写成后续进展，避免重复介绍背景。",
     "正文只写内容本身，不要带栏目名、字段名或标签前缀。",
     "除模板允许的加粗和斜体外，不要输出链接、图片、标题、表格、列表或其他 Markdown 结构。",
   ],
@@ -148,6 +160,11 @@ export function normalizeDailyReportTemplateConfig(value: unknown): DailyReportT
     : cloneDefaultTemplate().blocks;
 
   return {
+    headlineInstruction: nonEmptyText(input.headlineInstruction, DEFAULT_DAILY_REPORT_TEMPLATE.headlineInstruction),
+    recentTopicRules:
+      Array.isArray(input.recentTopicRules) && input.recentTopicRules.length > 0
+        ? input.recentTopicRules.filter((rule): rule is string => typeof rule === "string" && Boolean(rule.trim())).map((rule) => rule.trim())
+        : [...DEFAULT_DAILY_REPORT_TEMPLATE.recentTopicRules],
     blocks: sourceBlocks.map((block, index) => {
       const defaultBlock = DEFAULT_DAILY_REPORT_TEMPLATE.blocks[index] ?? DEFAULT_DAILY_REPORT_TEMPLATE.blocks[0];
       if (block.type === "section") {
@@ -182,6 +199,16 @@ function assertNonEmptyText(value: unknown, label: string) {
   }
 }
 
+function withDailyReportTemplateCompatibilityDefaults(template: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...template,
+    headlineInstruction: nonEmptyText(template.headlineInstruction, DEFAULT_DAILY_REPORT_TEMPLATE.headlineInstruction),
+    recentTopicRules: Array.isArray(template.recentTopicRules)
+      ? template.recentTopicRules
+      : [...DEFAULT_DAILY_REPORT_TEMPLATE.recentTopicRules],
+  };
+}
+
 export function validateDailyReportTemplateConfig(templateInput: unknown): DailyReportTemplateConfig {
   if (!isObject(templateInput)) {
     throw new Error("日报模板配置必须是 JSON 对象。");
@@ -189,6 +216,10 @@ export function validateDailyReportTemplateConfig(templateInput: unknown): Daily
   const template = templateInput as DailyReportTemplateConfig;
   if (!Array.isArray(template.blocks) || template.blocks.length === 0) {
     throw new Error("日报模板至少需要 1 个 block。");
+  }
+  assertNonEmptyText(template.headlineInstruction, "标题规则");
+  if (!Array.isArray(template.recentTopicRules)) {
+    throw new Error("历史主题去重规则必须是数组。");
   }
   for (const [index, block] of template.blocks.entries()) {
     const label = `第 ${index + 1} 个 block`;
@@ -213,7 +244,7 @@ export function validateDailyReportTemplateConfig(templateInput: unknown): Daily
     throw new Error(`${label} type 必须是 text 或 section。`);
   }
   if (!Array.isArray(template.globalRules)) {
-    throw new Error("全局规则必须是数组。");
+    throw new Error("内容全局规则必须是数组。");
   }
   return template;
 }
@@ -229,8 +260,9 @@ export function parseDailyReportTemplateJson(value: string | null | undefined): 
   if (!isObject(parsed) || !Array.isArray((parsed as Partial<DailyReportTemplateConfig>).blocks)) {
     throw new Error("日报模板 JSON 必须包含 blocks 数组。");
   }
-  validateDailyReportTemplateConfig(parsed);
-  const template = normalizeDailyReportTemplateConfig(parsed);
+  const input = withDailyReportTemplateCompatibilityDefaults(parsed);
+  validateDailyReportTemplateConfig(input);
+  const template = normalizeDailyReportTemplateConfig(input);
   validateDailyReportTemplateConfig(template);
   return template;
 }
@@ -256,6 +288,7 @@ function buildBlockExample(block: DailyReportTemplateBlock) {
 export function compileDailyReportTemplatePrompt(templateInput: DailyReportTemplateConfig): string {
   const template = validateDailyReportTemplateConfig(normalizeDailyReportTemplateConfig(templateInput));
   const outputShape = {
+    headline: "GPT-5.6 有限预览、Mythos 5 白名单恢复",
     blocks: template.blocks.map(buildBlockExample),
   };
   const lines = [
@@ -265,14 +298,17 @@ export function compileDailyReportTemplatePrompt(templateInput: DailyReportTempl
     JSON.stringify(outputShape),
     "",
     "通用结构规则：",
-    "1. section block 的 items 为空数组时会在渲染时自动隐藏；有 items 时，每个 item 必须包含 title、body、sourceIds。",
-    "2. item.title 写事件标题；item.body 写正文；sourceIds 只使用输入候选内容中的合法来源编号。",
-    "3. notes 只按栏目配置输出 label/text；无配置时输出空数组。",
+    "1. 最终 JSON 顶层必须包含 headline 字段。",
+    "2. section block 的 items 为空数组时会在渲染时自动隐藏；有 items 时，每个 item 必须包含 title、body、sourceIds。",
+    "3. item.title 写事件标题；item.body 写正文；sourceIds 只使用输入候选内容中的合法来源编号。",
+    "4. notes 只按栏目配置输出 label/text；无配置时输出空数组。",
     "",
     "输出要求：",
   ];
 
   let index = 1;
+  lines.push(`${index}. headline 字段：${template.headlineInstruction}`);
+  index += 1;
   for (const block of template.blocks) {
     if (block.type === "text") {
       lines.push(`${index}. text block「${block.title}」：type 固定为 "text"，title 固定为“${block.title}”；body 字段：${block.bodyInstruction}`);
@@ -292,6 +328,14 @@ export function compileDailyReportTemplatePrompt(templateInput: DailyReportTempl
     if (!rule.trim()) continue;
     lines.push(`${index}. ${rule.trim()}`);
     index += 1;
+  }
+
+  if (template.recentTopicRules.length > 0) {
+    lines.push("", "历史主题去重规则：");
+    for (const [ruleIndex, rule] of template.recentTopicRules.entries()) {
+      if (!rule.trim()) continue;
+      lines.push(`${ruleIndex + 1}. ${rule.trim()}`);
+    }
   }
 
   return lines.join("\n");

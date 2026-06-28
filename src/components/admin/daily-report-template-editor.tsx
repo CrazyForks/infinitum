@@ -157,13 +157,37 @@ export function DailyReportTemplateEditor({ value, onChange, onError }: DailyRep
 
   return (
     <div className="space-y-4 rounded-sm border border-[color:var(--line)] bg-[var(--surface)] p-4">
-      <FormBlock label="全局规则">
+      <FormBlock label="标题规则">
+        <TextArea
+          rows={3}
+          value={template.headlineInstruction}
+          onChange={(event) =>
+            updateTemplate((draft) => {
+              draft.headlineInstruction = event.target.value;
+            })
+          }
+        />
+      </FormBlock>
+
+      <FormBlock label="内容全局规则">
         <TextArea
           rows={5}
           value={formatDailyReportGlobalRulesForEditor(template.globalRules)}
           onChange={(event) =>
             updateTemplate((draft) => {
               draft.globalRules = parseDailyReportGlobalRulesFromEditor(event.target.value);
+            })
+          }
+        />
+      </FormBlock>
+
+      <FormBlock label="历史主题去重规则">
+        <TextArea
+          rows={4}
+          value={formatDailyReportGlobalRulesForEditor(template.recentTopicRules)}
+          onChange={(event) =>
+            updateTemplate((draft) => {
+              draft.recentTopicRules = parseDailyReportGlobalRulesFromEditor(event.target.value);
             })
           }
         />
