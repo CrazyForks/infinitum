@@ -311,6 +311,47 @@ describe("regenerateItemContent", () => {
     expect(regenerated.errorMessage).toContain("Upstream regeneration failed");
   });
 
+  it("keeps the old value when regenerated summary resembles full article text", async () => {
+    const source = await prisma.source.create({
+      data: {
+        name: "Example Feed",
+        rssUrl: "https://example.com/feed.xml",
+        siteUrl: "https://example.com",
+        enabled: true,
+        aiParsingEnabled: true,
+      },
+    });
+    const fullText = "Body for regeneration that must not be stored as a summary. ".repeat(40).trim();
+    const item = await prisma.item.create({
+      data: {
+        sourceId: source.id,
+        originalUrl: "https://example.com/posts/source-like-summary",
+        canonicalUrl: "https://example.com/posts/source-like-summary",
+        urlHash: "hash-source-like-summary",
+        dedupeSignature: "example|source-like-summary|2026-04-10t10:05:00.000z",
+        originalTitle: "OpenAI model update",
+        translatedTitle: "保留原标题",
+        summaryText: "保留原摘要",
+        publishedAt: new Date("2026-04-10T10:05:00.000Z"),
+        status: "processed",
+        language: "en",
+        fullText,
+      },
+    });
+
+    const regenerated = await regenerateItemContent(item.id, "summary", {
+      aiProvider: buildAiProviderMock({
+        summarizeItem: vi.fn().mockResolvedValue({summary: fullText, isAggregation: false}),
+        summarizeCluster: vi.fn().mockResolvedValue("聚合摘要"),
+        matchClusterCandidate: vi.fn().mockResolvedValue(null),
+      }),
+    });
+
+    expect(regenerated.summaryText).toBe("保留原摘要");
+    expect(regenerated.summaryStatus).toBe("failed");
+    expect(regenerated.errorMessage).toContain("Invalid item summary response");
+  });
+
   it("keeps the old value and records the error when regenerated summaries remain English", async () => {
     const source = await prisma.source.create({
       data: {

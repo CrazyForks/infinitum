@@ -173,10 +173,6 @@ function getVisibleAuthorLabel(author: string | null | undefined) {
   return normalized.length > 10 ? `${normalized.slice(0, 10)}...` : normalized;
 }
 
-function buildFeedEntryKey(entry: { type: FeedEntryDTO["type"]; id: string }): FeedEntryKey {
-  return `${entry.type}:${entry.id}`;
-}
-
 function GroupBadge({ group }: { group: FeedGroupBadge | null | undefined }) {
   if (!group) {
     return null;
@@ -533,7 +529,6 @@ export function FeedPanel({
   initialGroupTotalCount,
   availableSources = [],
   popularTags: initialPopularTags = [],
-  trending = [],
   initialHeaderLinks = [],
 }: FeedPanelProps) {
   const router = useRouter();
@@ -665,7 +660,7 @@ export function FeedPanel({
     }
 
     if (entryKeys.length > 0) {
-      filters.push(`榜单：全部 ${entryKeys.length} 条`);
+      filters.push(`精确筛选：${entryKeys.length} 条`);
     }
 
     return filters;
@@ -945,46 +940,6 @@ export function FeedPanel({
     const selectedTag = normalizedTag && normalizedTag !== tag ? normalizedTag : null;
     setTag(selectedTag);
     loadFeed(buildQuery({ tag: selectedTag }), 1, pageSize, { scrollToTop: true });
-  };
-
-  const showAllTrendingEntries = () => {
-    const nextEntryKeys = trending.map(buildFeedEntryKey);
-
-    if (nextEntryKeys.length === 0) {
-      return;
-    }
-
-    setRange("all");
-    setCreatedRangeExplicit(false);
-    setStartDate(null);
-    setEndDate(null);
-    setPublishedStartDate(null);
-    setPublishedEndDate(null);
-    setGroupId(null);
-    setSourceId(null);
-    setTitleInput("");
-    setTitleFilter(null);
-    setTag(null);
-    setEntryKeys(nextEntryKeys);
-
-    loadFeed(
-      buildQuery({
-        range: "all",
-        startDate: null,
-        endDate: null,
-        publishedStartDate: null,
-        publishedEndDate: null,
-        groupId: null,
-        sourceId: null,
-        title: null,
-        tag: null,
-        entryKeys: nextEntryKeys,
-        createdRangeExplicit: false,
-      }),
-      1,
-      pageSize,
-      { scrollToTop: true },
-    );
   };
 
   const refresh = () => {
@@ -1835,7 +1790,7 @@ export function FeedPanel({
       contentPaddingClassName="px-4 pt-3 pb-6 sm:px-6 sm:pt-4 sm:pb-8 lg:px-8 lg:pt-4 lg:pb-10"
       sidebarContainerClassName={cx(
         "flex-shrink-0",
-        "lg:w-64",
+        "lg:w-56",
       )}
       sidebarVisibility="lg"
       sidebar={
@@ -1844,8 +1799,6 @@ export function FeedPanel({
           totalCount={groupTotalCount}
           selectedGroupId={groupId}
           onSelect={changeGroup}
-          trending={trending}
-          onShowAllTrending={showAllTrendingEntries}
         />
       }
     >

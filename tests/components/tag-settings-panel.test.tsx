@@ -145,11 +145,11 @@ describe("TagSettingsPanel", () => {
     expect(within(suggestionDialog).getByText("目标标签")).toBeInTheDocument();
     expect(within(suggestionDialog).getByText("AI Agents")).toBeInTheDocument();
     expect(within(suggestionDialog).getByText("AI Agent")).toBeInTheDocument();
-    expect(within(suggestionDialog).getByLabelText("治理建议排序")).toHaveValue("confidence_desc");
+    expect(within(suggestionDialog).getByLabelText("治理建议排序")).toHaveValue("affected_desc");
     expect(within(suggestionDialog).getByRole("button", { name: "选择合并方向：AI Agents" })).toBeInTheDocument();
     expect(within(suggestionDialog).getByRole("button", { name: "处理治理建议：AI Agents" })).toBeInTheDocument();
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("/api/admin/settings/tags/suggestions?sort=confidence_desc&page=1&pageSize=10", {
+      expect(fetchMock).toHaveBeenCalledWith("/api/admin/settings/tags/suggestions?sort=affected_desc&page=1&pageSize=10", {
         method: "GET",
         headers: {
           "content-type": "application/json",
@@ -160,7 +160,7 @@ describe("TagSettingsPanel", () => {
 
     await user.type(within(suggestionDialog).getByLabelText("治理建议标签筛选"), "Agent");
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("/api/admin/settings/tags/suggestions?search=Agent&sort=confidence_desc&page=1&pageSize=10", {
+      expect(fetchMock).toHaveBeenCalledWith("/api/admin/settings/tags/suggestions?search=Agent&sort=affected_desc&page=1&pageSize=10", {
         method: "GET",
         headers: {
           "content-type": "application/json",
@@ -169,9 +169,9 @@ describe("TagSettingsPanel", () => {
       });
     });
 
-    await user.selectOptions(within(suggestionDialog).getByLabelText("治理建议排序"), "affected_desc");
+    await user.selectOptions(within(suggestionDialog).getByLabelText("治理建议排序"), "confidence_desc");
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("/api/admin/settings/tags/suggestions?search=Agent&sort=affected_desc&page=1&pageSize=10", {
+      expect(fetchMock).toHaveBeenCalledWith("/api/admin/settings/tags/suggestions?search=Agent&sort=confidence_desc&page=1&pageSize=10", {
         method: "GET",
         headers: {
           "content-type": "application/json",

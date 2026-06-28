@@ -23,6 +23,7 @@ import {
 } from "@/config/prompts";
 import type { RuntimeConfig } from "@/config/runtime";
 import { normalizeModelResponseText } from "@/lib/ai/response-format";
+import { requireUsableGeneratedSummary } from "@/lib/ai/summary-quality";
 import { shouldRegenerateChineseSummary } from "@/lib/ai/summary-language";
 import { buildDailyReportRuntimeFallbackInstructionLines } from "@/lib/daily-report/runtime-rules";
 import { normalizeItemTags } from "@/lib/tags/normalization";
@@ -346,8 +347,8 @@ function getFallbackEnrichment(
   };
 }
 
-function getFallbackSummary(inputText: string): ItemSummaryResult {
-  return { summary: inputText.trim(), isAggregation: false };
+function getFallbackSummary(): ItemSummaryResult {
+  return { summary: "", isAggregation: false };
 }
 
 function getFallbackAggregation(): ParsedAggregation {
@@ -358,7 +359,7 @@ function parseSummaryAndClassification(rawContent: string, fallback: ItemSummary
   const normalized = normalizeModelResponseText(rawContent);
 
   if (!normalized) {
-    return fallback;
+    throw new Error("Invalid item summary response: empty response.");
   }
 
   try {
@@ -378,8 +379,7 @@ function parseSummaryAndClassification(rawContent: string, fallback: ItemSummary
     return { summary: recoveredSummary, isAggregation: fallback.isAggregation };
   }
 
-  // Tolerant fallback: treat the whole output as the summary, mark non-aggregation.
-  return { summary: normalized, isAggregation: fallback.isAggregation };
+  throw new Error("Invalid item summary response: expected JSON with a non-empty summary.");
 }
 
 function recoverSummaryFromJsonLikeOutput(value: string): string {
@@ -509,7 +509,8 @@ function normalizeParsedEvent(raw: Partial<ParsedEvent>): ParsedEvent | null {
 function buildChineseSummaryRetryPrompt(userContent: string) {
   return `${userContent}
 
-重要：上一次输出不是中文摘要。请重新生成，必须使用中文，且只输出中文摘要正文。`;
+重要：上一次输出不是中文摘要。请重新生成，必须使用中文，并只输出 JSON：
+{"summary":"100-200字中文摘要","isAggregation":false}`;
 }
 
 function parseJsonLikeEnrichment(
@@ -1180,7 +1181,7 @@ export function createAiProvider(
 
   return {
     async summarizeItem(inputText, metadata) {
-      const fallback = getFallbackSummary(inputText);
+      const fallback = getFallbackSummary();
       const userContent = renderPromptTemplate(itemSummaryConfig.promptTemplate, {
         title: metadata.title,
         sourceName: metadata.sourceName ?? "未知来源",
@@ -1195,10 +1196,14 @@ export function createAiProvider(
       );
 
       if (output == null) {
-        return fallback;
+        throw new Error("Item summary unavailable: model client is not configured.");
       }
 
-      const result = parseSummaryAndClassification(output, fallback);
+      const parsedResult = parseSummaryAndClassification(output, fallback);
+      const result = {
+        summary: requireUsableGeneratedSummary(parsedResult.summary, inputText),
+        isAggregation: parsedResult.isAggregation,
+      };
 
       if (!shouldRegenerateChineseSummary(result.summary)) {
         return result;
@@ -1213,10 +1218,14 @@ export function createAiProvider(
       );
 
       if (retryOutput == null) {
-        return result;
+        throw new Error("Item summary unavailable: retry model client is not configured.");
       }
 
-      return parseSummaryAndClassification(retryOutput, result);
+      const retryResult = parseSummaryAndClassification(retryOutput, result);
+      return {
+        summary: requireUsableGeneratedSummary(retryResult.summary, inputText),
+        isAggregation: retryResult.isAggregation,
+      };
     },
     async parseAggregation(inputText, metadata) {
       const fallback = getFallbackAggregation();

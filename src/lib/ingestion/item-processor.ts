@@ -2,6 +2,7 @@ import type { Item } from "@prisma/client";
 
 import { AGGREGATION_PARSE_STATUS, RETRIABLE_AGGREGATION_PARSE_STATUSES } from "@/lib/aggregation/status";
 import { persistAggregationChildItems } from "@/lib/aggregation/persist";
+import { normalizeStoredSummary, requireUsableGeneratedSummary } from "@/lib/ai/summary-quality";
 import type { AiEventSignature } from "@/lib/ai/provider";
 import type { ClusterAssignmentCoordinator } from "@/lib/clusters/helpers";
 import { assignItemToCluster } from "@/lib/clusters/service";
@@ -155,16 +156,11 @@ export function deriveSourceConcurrency(itemConcurrency: number) {
   return Math.max(1, Math.min(4, Math.ceil(itemConcurrency / 2)));
 }
 
-function buildFallbackSummary(rssExcerpt: string | null, fallbackBody: string | null): string | null {
+function buildFallbackSummary(rssExcerpt: string | null): string | null {
   const sanitizedExcerpt = stripHtmlTags(rssExcerpt);
-  const sanitizedBody = stripHtmlTags(fallbackBody);
 
   if (sanitizedExcerpt) {
     return sanitizedExcerpt;
-  }
-
-  if (sanitizedBody) {
-    return sanitizedBody;
   }
 
   return null;
@@ -174,7 +170,7 @@ function hasSucceededSummary(existing?: {
   summaryStatus?: string | null;
   summaryText?: string | null;
 } | null) {
-  return existing?.summaryStatus === "succeeded" && Boolean(stripHtmlTags(existing.summaryText));
+  return existing?.summaryStatus === "succeeded" && Boolean(normalizeStoredSummary(existing.summaryText));
 }
 
 function hasSucceededAnalysis(existing?: {
@@ -610,7 +606,7 @@ export async function processFeedItem({
     const canReuseExistingCompletedAnalysis = Boolean(existing && !analysisInputsChanged && hasSucceededAnalysis(existing));
 
     if (canReuseExistingSummary) {
-      summaryText = stripHtmlTags(existing?.summaryText) || buildFallbackSummary(rssExcerpt, fullText || rssContent);
+      summaryText = normalizeStoredSummary(existing?.summaryText) || buildFallbackSummary(rssExcerpt);
       summaryStatus = "succeeded";
     } else {
       const summaryStartedAt = Date.now();
@@ -621,7 +617,7 @@ export async function processFeedItem({
         });
         addElapsed(timings, "summaryMs", summaryStartedAt);
 
-        summaryText = stripHtmlTags(summaryOutput.summary) || buildFallbackSummary(rssExcerpt, fullText || rssContent);
+        summaryText = requireUsableGeneratedSummary(summaryOutput.summary, summarySourceText);
         isAggregation = aggregationDetectionEnabled && summaryOutput.isAggregation === true;
         aggregationCheckedAt = aggregationDetectionEnabled ? new Date() : null;
         aggregationParseStatus = aggregationDetectionEnabled
@@ -634,7 +630,7 @@ export async function processFeedItem({
         appendIssue(issues, error, "Unknown item summary error");
         summaryFailed = true;
         summaryStatus = "failed";
-        summaryText = buildFallbackSummary(rssExcerpt, fullText || rssContent);
+        summaryText = buildFallbackSummary(rssExcerpt);
       }
     }
 
@@ -785,7 +781,7 @@ export async function processFeedItem({
       // Aggregation parse failed: run enrichContent on the parent as a regular item.
       const analysisStartedAt = Date.now();
       try {
-        const enrichment = await aiProvider.enrichContent(summaryText || originalTitle, {
+        const enrichment = await aiProvider.enrichContent(summaryText || summarySourceText || originalTitle, {
           title: originalTitle,
           sourceName,
           translateTitle,
@@ -821,7 +817,7 @@ export async function processFeedItem({
     } else {
       const analysisStartedAt = Date.now();
       try {
-        const enrichment = await aiProvider.enrichContent(summaryText || originalTitle, {
+        const enrichment = await aiProvider.enrichContent(summaryText || summarySourceText || originalTitle, {
           title: originalTitle,
           sourceName,
           translateTitle,
@@ -862,7 +858,7 @@ export async function processFeedItem({
       translatedTitle = originalTitle;
     }
 
-    summaryText = buildFallbackSummary(rssExcerpt, fullText || rssContent);
+    summaryText = buildFallbackSummary(rssExcerpt);
     summaryStatus = "pending";
     analysisStatus = "pending";
     moderationStatus = "allowed";

@@ -5,6 +5,7 @@ import {
   RETRIABLE_AGGREGATION_PARSE_STATUSES,
 } from "@/lib/aggregation/status";
 import { createAiProvider, type AiEventSignature, type AiProvider, type ParsedAggregation } from "@/lib/ai/provider";
+import { normalizeStoredSummary, requireUsableGeneratedSummary } from "@/lib/ai/summary-quality";
 import { retryChineseSummary } from "@/lib/ai/summary-language";
 import { invalidateDailyReportCache } from "@/lib/daily-report/cache";
 import { assignItemToCluster, recomputeCluster } from "@/lib/clusters/service";
@@ -15,7 +16,7 @@ import {
 } from "@/lib/aggregation/persist";
 import { prisma } from "@/lib/db";
 import { invalidateFeedCache } from "@/lib/feed/cache";
-import { shouldTranslateTitle, stripHtmlTags } from "@/lib/feed/presentation";
+import { shouldTranslateTitle } from "@/lib/feed/presentation";
 import { buildAggregationParsingInput } from "@/lib/ingestion/model-input";
 import { normalizeStoredEventType } from "@/lib/clusters/normalization";
 import { getIngestionRuntimeConfig } from "@/lib/settings/service";
@@ -100,7 +101,7 @@ function getItemSourceText(item: Item): string {
 }
 
 function normalizeSummary(summary: string | null | undefined): string | null {
-  return stripHtmlTags(summary) || null;
+  return normalizeStoredSummary(summary);
 }
 
 async function replaceItemTagsSafely(itemId: string, tags: unknown) {
@@ -135,7 +136,7 @@ async function resolveItemSummaryResult(
       async (metadata) => {
         const result = await aiProvider.summarizeItem(inputText, metadata);
         isAggregation = result.isAggregation;
-        return result.summary;
+        return requireUsableGeneratedSummary(result.summary, inputText);
       },
       {
         title: item.originalTitle,

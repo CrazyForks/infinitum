@@ -37,6 +37,11 @@ describe("feed presentation fallbacks", () => {
     expect(getDisplaySummary(null, null, "<div>Body preview</div>")).toBe("Body preview");
   });
 
+  it("hides historical overlong summaries that resemble full article text", () => {
+    expect(getDisplaySummary("正文".repeat(500), "RSS excerpt", null)).toBe("RSS excerpt");
+    expect(getDisplaySummary("正文".repeat(500), null, null)).toBe("暂无摘要");
+  });
+
   it("strips common summary labels before display", () => {
     expect(normalizeDisplaySummary("摘要：真正的摘要正文")).toBe("真正的摘要正文");
     expect(normalizeDisplaySummary("**摘要：**真正的摘要正文")).toBe("真正的摘要正文");

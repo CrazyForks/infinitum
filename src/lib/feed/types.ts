@@ -205,21 +205,3 @@ export type SourceConfig = {
   aggregationEnabled?: boolean;
   aggregationDetectionEnabled?: boolean;
 };
-
-/**
- * 实时榜单单条 DTO
- * 侧边栏展示用的精简视图：仅含标题、来源/聚合标记、跳转 URL 与排序用分数。
- */
-export type TrendingEntryDTO = {
-  id: string;
-  type: "single" | "cluster";
-  title: string;
-  sourceName?: string;
-  originalUrl?: string;
-  group?: GroupBadge | null;
-  createdAt: string;
-  recommendScore: number;
-  trendingScore: number;
-  itemCount: number;
-  sourceCount: number;
-};

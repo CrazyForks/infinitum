@@ -1,29 +1,20 @@
 "use client";
 
-import { useState } from "react";
-
-import type { FeedGroupOption, TrendingEntryDTO } from "@/lib/feed/types";
-import { TrendingBoard } from "@/components/feed/trending-board";
+import type { FeedGroupOption } from "@/lib/feed/types";
 import { cx } from "@/lib/ui/cx";
 import { formatGroupOptionLabel } from "@/components/feed/feed-panel.utils";
-import { IconFilter } from "@/components/ui/icons";
 
 export function GroupFilterSidebar({
   groups,
   totalCount,
   selectedGroupId,
   onSelect,
-  trending,
-  onShowAllTrending,
 }: {
   groups: FeedGroupOption[];
   totalCount: number;
   selectedGroupId: string | null;
   onSelect: (groupId: string) => void;
-  trending: TrendingEntryDTO[];
-  onShowAllTrending: () => void;
 }) {
-  const [groupFilterExpanded, setGroupFilterExpanded] = useState(true);
   const optionClassName =
     "flex w-full items-center justify-between rounded-sm px-3 py-2 text-left text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(59,130,246,0.28)]";
 
@@ -35,66 +26,49 @@ export function GroupFilterSidebar({
     >
       <div className="panel-raised rounded-sm border border-[color:var(--line)] p-4 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
         <div className="mb-4">
-          <h2>
-            <button
-              type="button"
-              aria-expanded={groupFilterExpanded}
-              onClick={() => setGroupFilterExpanded((current) => !current)}
-              className="flex w-full items-center justify-between gap-2 text-left font-semibold text-[var(--foreground)] transition hover:text-[var(--accent-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(59,130,246,0.28)]"
-            >
-              <span className="inline-flex items-center gap-2">
-                <IconFilter size={14} strokeWidth={2.2} className="text-[var(--accent-strong)]" />
-                <span>分组筛选</span>
-              </span>
-              <span aria-hidden className="text-[var(--text-3)]">
-                {groupFilterExpanded ? "▾" : "▸"}
-              </span>
-            </button>
+          <h2 className="inline-flex items-center gap-2 font-semibold text-[var(--foreground)]">
+            <span>分组筛选</span>
           </h2>
         </div>
 
-        {groupFilterExpanded ? (
-          <div className="space-y-1">
-            <button
-              type="button"
-              aria-pressed={selectedGroupId === null}
-              aria-label={formatGroupOptionLabel("全部内容", totalCount)}
-              onClick={() => onSelect("")}
-              className={cx(
-                optionClassName,
-                selectedGroupId === null
-                  ? "bg-[var(--accent-soft)] text-[var(--accent-strong)]"
-                  : "text-[var(--text-2)] hover:bg-[var(--bg-muted)]",
-              )}
-            >
-              <span>{formatGroupOptionLabel("全部内容", totalCount)}</span>
-            </button>
+        <div className="space-y-2">
+          <button
+            type="button"
+            aria-pressed={selectedGroupId === null}
+            aria-label={formatGroupOptionLabel("全部内容", totalCount)}
+            onClick={() => onSelect("")}
+            className={cx(
+              optionClassName,
+              selectedGroupId === null
+                ? "bg-[var(--accent-soft)] text-[var(--accent-strong)]"
+                : "text-[var(--text-2)] hover:bg-[var(--bg-muted)]",
+            )}
+          >
+            <span>{formatGroupOptionLabel("全部内容", totalCount)}</span>
+          </button>
 
-            {groups.map((group) => {
-              const isActive = selectedGroupId === group.id;
+          {groups.map((group) => {
+            const isActive = selectedGroupId === group.id;
 
-              return (
-                <button
-                  key={group.id}
-                  type="button"
-                  aria-pressed={isActive}
-                  aria-label={formatGroupOptionLabel(group.name, group.count)}
-                  onClick={() => onSelect(group.id)}
-                  className={cx(
-                    optionClassName,
-                    isActive
-                      ? "bg-[var(--accent-soft)] text-[var(--accent-strong)]"
-                      : "text-[var(--text-2)] hover:bg-[var(--bg-muted)]",
-                  )}
-                >
-                  <span>{formatGroupOptionLabel(group.name, group.count)}</span>
-                </button>
-              );
-            })}
-          </div>
-        ) : null}
-
-        {trending.length > 0 ? <TrendingBoard entries={trending} onShowAll={onShowAllTrending} /> : null}
+            return (
+              <button
+                key={group.id}
+                type="button"
+                aria-pressed={isActive}
+                aria-label={formatGroupOptionLabel(group.name, group.count)}
+                onClick={() => onSelect(group.id)}
+                className={cx(
+                  optionClassName,
+                  isActive
+                    ? "bg-[var(--accent-soft)] text-[var(--accent-strong)]"
+                    : "text-[var(--text-2)] hover:bg-[var(--bg-muted)]",
+                )}
+              >
+                <span>{formatGroupOptionLabel(group.name, group.count)}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
     </aside>
   );

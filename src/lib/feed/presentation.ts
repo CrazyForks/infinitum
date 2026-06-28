@@ -1,3 +1,5 @@
+import { MAX_ITEM_SUMMARY_CHARS } from "@/lib/ai/summary-quality";
+
 const ENGLISH_LETTER_PATTERN = /[A-Za-z]/g;
 const CJK_PATTERN = /[\u3400-\u9FFF]/;
 const HTML_TAG_PATTERN = /<[^>]+>/g;
@@ -40,5 +42,6 @@ export function getDisplaySummary(
 }
 
 export function normalizeDisplaySummary(value: string | null | undefined): string {
-  return stripHtmlTags(value).replace(SUMMARY_PREFIX_PATTERN, "").trim();
+  const summary = stripHtmlTags(value).replace(SUMMARY_PREFIX_PATTERN, "").trim();
+  return summary.length > MAX_ITEM_SUMMARY_CHARS ? "" : summary;
 }

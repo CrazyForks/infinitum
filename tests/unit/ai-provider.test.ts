@@ -333,7 +333,7 @@ ${JSON.stringify({
       choices: [
         {
           message: {
-            content: "中文摘要",
+            content: JSON.stringify({summary: "中文摘要", isAggregation: false}),
           },
         },
       ],
@@ -396,7 +396,7 @@ ${JSON.stringify({
     expect(enriched.tags).toEqual([]);
   });
 
-  it("keeps item summary fallback text untruncated when no api key is configured", async () => {
+  it("rejects item summarization when no api key is configured", async () => {
     const provider = createAiProvider({
       apiKey: "",
       baseURL: "",
@@ -404,16 +404,13 @@ ${JSON.stringify({
     });
     const body = "Fallback summary body. ".repeat(30).trim();
 
-    const summary = await provider.summarizeItem(body, {
+    await expect(provider.summarizeItem(body, {
       title: "Original title",
       sourceName: "Example Feed",
-    });
-
-    expect(summary).toEqual({summary: body, isAggregation: false});
-    expect(summary.summary).not.toMatch(/\.\.\.$/);
+    })).rejects.toThrow(/model client is not configured/i);
   });
 
-  it("keeps empty item summary response fallback text untruncated", async () => {
+  it("rejects empty item summary responses instead of returning source text", async () => {
     const create = vi.fn().mockResolvedValue({
       choices: [
         {
@@ -440,13 +437,43 @@ ${JSON.stringify({
     );
     const body = "Empty model response fallback body. ".repeat(30).trim();
 
-    const summary = await provider.summarizeItem(body, {
+    await expect(provider.summarizeItem(body, {
       title: "Original title",
       sourceName: "Example Feed",
-    });
+    })).rejects.toThrow(/empty response/i);
+  });
 
-    expect(summary).toEqual({summary: body, isAggregation: false});
-    expect(summary.summary).not.toMatch(/\.\.\.$/);
+  it("rejects long non-json item summary responses instead of storing source-like text", async () => {
+    const sourceText = "Full article paragraph. ".repeat(80).trim();
+    const create = vi.fn().mockResolvedValue({
+      choices: [
+        {
+          message: {
+            content: sourceText,
+          },
+        },
+      ],
+    });
+    const provider = createAiProvider(
+      {
+        apiKey: "sk-test",
+        baseURL: "https://example.com/v1",
+        model: "test-model",
+      },
+      undefined,
+      {
+        chat: {
+          completions: {
+            create,
+          },
+        },
+      },
+    );
+
+    await expect(provider.summarizeItem(sourceText, {
+      title: "Original title",
+      sourceName: "Example Feed",
+    })).rejects.toThrow(/expected JSON/i);
   });
 
   it("uses reasoning_content when JSON-mode providers leave message content empty", async () => {
@@ -531,7 +558,10 @@ ${JSON.stringify({
         choices: [
           {
             message: {
-              content: "SAS explains AI is just a tool for enterprise customers.",
+              content: JSON.stringify({
+                summary: "SAS explains AI is just a tool for enterprise customers.",
+                isAggregation: false,
+              }),
             },
           },
         ],
@@ -540,7 +570,10 @@ ${JSON.stringify({
         choices: [
           {
             message: {
-              content: "SAS 强调 AI 只是服务企业客户的工具。",
+              content: JSON.stringify({
+                summary: "SAS 强调 AI 只是服务企业客户的工具。",
+                isAggregation: false,
+              }),
             },
           },
         ],
@@ -679,7 +712,7 @@ ${JSON.stringify({
       choices: [
         {
           message: {
-            content: "条目摘要结果",
+            content: JSON.stringify({summary: "条目摘要结果", isAggregation: false}),
           },
         },
       ],
@@ -723,7 +756,7 @@ ${JSON.stringify({
         choices: [
           {
             message: {
-              content: "默认模型摘要",  // still string content from mock — provider parses it
+              content: JSON.stringify({summary: "默认模型摘要", isAggregation: false}),
             },
           },
         ],

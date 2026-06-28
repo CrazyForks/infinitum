@@ -11,7 +11,6 @@ import type {
   FeedSourceOption,
   FeedTagOption,
   FetchRunSnapshot,
-  TrendingEntryDTO,
 } from "@/lib/feed/types";
 import type { AdminHeaderLink } from "@/lib/settings/types";
 
@@ -38,7 +37,6 @@ export type FeedPanelProps = {
   initialGroupTotalCount?: number;
   availableSources?: FeedSourceOption[];
   popularTags?: FeedTagOption[];
-  trending?: TrendingEntryDTO[];
   initialHeaderLinks?: AdminHeaderLink[];
 };
 

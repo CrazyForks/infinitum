@@ -19,9 +19,10 @@ const DEFAULT_TAG_PAGE_SIZE = 30;
 const MAX_TAG_PAGE_SIZE = 100;
 const DEFAULT_TAG_SUGGESTION_LIMIT = 30;
 const MAX_TAG_SUGGESTION_LIMIT = 100;
-const AUTO_CANONICAL_CONFIDENCE_THRESHOLD = 0.95;
-const DEFAULT_AUTO_MERGE_SUGGESTION_LIMIT = 30;
+const AUTO_CANONICAL_CONFIDENCE_THRESHOLD = 0.98;
+const DEFAULT_AUTO_MERGE_SUGGESTION_LIMIT = 100;
 const SUGGESTION_CONFIDENCE_THRESHOLD = 0.82;
+const DEFAULT_MIN_TAG_SUGGESTION_AFFECTED_COUNT = 3;
 const TAG_SUGGESTION_CANDIDATE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const TAG_SUGGESTION_CANDIDATE_CREATE_BATCH_SIZE = 500;
 const MAX_TAG_SUGGESTION_CANDIDATE_PAIRS = 20_000;
@@ -187,7 +188,7 @@ function normalizeSuggestionLimit(value: number | null | undefined) {
 }
 
 function normalizeSuggestionSort(value: string | null | undefined): AdminTagSuggestionSort {
-  return value === "affected_desc" ? "affected_desc" : "confidence_desc";
+  return value === "confidence_desc" ? "confidence_desc" : "affected_desc";
 }
 
 function serializeTagSummary(tag: TagCandidate): AdminTagSuggestion["sourceTag"] {
@@ -934,6 +935,13 @@ export async function listAdminTagSuggestions(input?: {
   const tagSearchWhere = search ? buildTagSuggestionSearchWhere(rawSearch, search) : null;
   const where: Prisma.TagSuggestionCandidateWhereInput = {
     status: "active",
+    ...(!tagSearchWhere
+      ? {
+          affectedItemCount: {
+            gte: DEFAULT_MIN_TAG_SUGGESTION_AFFECTED_COUNT,
+          },
+        }
+      : {}),
     ...(tagSearchWhere
       ? {
           OR: [

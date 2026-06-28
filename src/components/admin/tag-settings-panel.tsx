@@ -716,7 +716,7 @@ export function TagSettingsPanel() {
   const [suggestions, setSuggestions] = useState<AdminTagSuggestion[]>([]);
   const [suggestionTotalCount, setSuggestionTotalCount] = useState(0);
   const [suggestionSearch, setSuggestionSearch] = useState("");
-  const [suggestionSort, setSuggestionSort] = useState<AdminTagSuggestionSort>("confidence_desc");
+  const [suggestionSort, setSuggestionSort] = useState<AdminTagSuggestionSort>("affected_desc");
   const [suggestionPage, setSuggestionPage] = useState(1);
   const [suggestionPageSize, setSuggestionPageSize] = useState(DEFAULT_SUGGESTION_PAGE_SIZE);
   const [search, setSearch] = useState("");

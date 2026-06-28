@@ -232,6 +232,9 @@ describe("/api/admin/settings/tags", () => {
       createAdminTagItem(source.id, "admin-tag-c"),
       createAdminTagItem(source.id, "admin-tag-d"),
       createAdminTagItem(source.id, "admin-tag-e"),
+      createAdminTagItem(source.id, "admin-tag-f"),
+      createAdminTagItem(source.id, "admin-tag-g"),
+      createAdminTagItem(source.id, "admin-tag-h"),
     ]);
     const openAi = await prisma.tag.create({
       data: {
@@ -260,12 +263,21 @@ describe("/api/admin/settings/tags", () => {
     await prisma.itemTag.createMany({
       data: [
         { itemId: "admin-tag-a", tagId: openAi.id },
+        { itemId: "admin-tag-c", tagId: openAi.id },
+        { itemId: "admin-tag-d", tagId: openAi.id },
+        { itemId: "admin-tag-e", tagId: openAi.id },
         { itemId: "admin-tag-b", tagId: openAiVariant.id },
+        { itemId: "admin-tag-f", tagId: openAiVariant.id },
+        { itemId: "admin-tag-g", tagId: openAiVariant.id },
         { itemId: "admin-tag-a", tagId: aiAgent.id },
         { itemId: "admin-tag-c", tagId: aiAgent.id },
         { itemId: "admin-tag-d", tagId: aiAgent.id },
+        { itemId: "admin-tag-e", tagId: aiAgent.id },
+        { itemId: "admin-tag-h", tagId: aiAgent.id },
         { itemId: "admin-tag-b", tagId: aiAgents.id },
-        { itemId: "admin-tag-e", tagId: aiAgents.id },
+        { itemId: "admin-tag-f", tagId: aiAgents.id },
+        { itemId: "admin-tag-g", tagId: aiAgents.id },
+        { itemId: "admin-tag-h", tagId: aiAgents.id },
       ],
     });
     await precomputeTagSuggestionCandidates();
@@ -286,7 +298,7 @@ describe("/api/admin/settings/tags", () => {
         id: aiAgent.id,
         name: "AI Agent",
       },
-      affectedItemCount: 2,
+      affectedItemCount: 4,
     });
   });
 
@@ -435,7 +447,7 @@ describe("/api/admin/settings/tags", () => {
 
     const { GET } = await import("@/app/api/admin/settings/tags/suggestions/route");
     const startedAt = performance.now();
-    const response = await GET(new Request("http://localhost/api/admin/settings/tags/suggestions?sort=confidence_desc&page=1&pageSize=10"));
+    const response = await GET(new Request("http://localhost/api/admin/settings/tags/suggestions?search=Agent&sort=confidence_desc&page=1&pageSize=10"));
     const elapsedMs = performance.now() - startedAt;
     const json = await response.json();
 

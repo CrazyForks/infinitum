@@ -1,7 +1,6 @@
 import { FEED_FILTER_OPTIONS_CACHE_TTL_MS, FEED_LIST_CACHE_TTL_MS, FEED_STATUS_CACHE_TTL_MS } from "@/config/constants";
 import {
   getLatestFeedItemUpdate,
-  listTrendingEntries,
   getLatestFeedSourceConfigUpdate,
   listFeedFilterOptions,
   listFeedItems,
@@ -107,19 +106,5 @@ export async function getCachedLatestFetchRunSnapshot() {
       })
       : null,
     FEED_STATUS_CACHE_TTL_MS,
-  );
-}
-
-export async function getCachedTrendingEntries(now: Date = new Date()) {
-  const [latestRun, latestItemUpdate] = await Promise.all([
-    getLatestFetchRun(),
-    getLatestFeedItemUpdate(),
-  ]);
-  const cacheVersion = `${serializeFetchRunCacheVersion(latestRun)}:${serializeFeedDataCacheVersion(latestItemUpdate)}`;
-
-  return withFeedCache(
-    `feed:trending:${cacheVersion}`,
-    () => listTrendingEntries(now),
-    FEED_LIST_CACHE_TTL_MS,
   );
 }

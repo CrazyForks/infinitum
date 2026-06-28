@@ -1693,6 +1693,113 @@ describe("runIngestion", () => {
     expect(storedItem.errorMessage).toContain("Upstream ai timeout");
   });
 
+  it("does not store fetched full text as summary when item summarization fails", async () => {
+    const parser = {
+      parseURL: vi.fn().mockResolvedValue({
+        items: [
+          {
+            title: "OpenAI publishes a research update",
+            link: "https://example.com/posts/research-update",
+            isoDate: "2026-04-10T09:00:00.000Z",
+            content: "",
+          },
+        ],
+      }),
+    };
+    const fullText = "Fetched article body that should not be displayed as the item summary. ".repeat(40).trim();
+    const articleFetcher = vi.fn().mockResolvedValue(fullText);
+    const aiProvider = buildAiProviderMock({
+      summarizeItem: vi.fn().mockRejectedValue(new Error("Invalid item summary response: expected JSON")),
+      enrichContent: vi.fn().mockRejectedValue(new Error("Upstream ai timeout")),
+      summarizeCluster: vi.fn().mockResolvedValue("不会被使用"),
+      matchClusterCandidate: vi.fn().mockResolvedValue(null),
+    });
+
+    const result = await runIngestion({
+      trigger: "manual",
+      parser,
+      articleFetcher,
+      aiProvider,
+      sourceConfigs: [
+        {
+          name: "Example Feed",
+          rssUrl: "https://example.com/feed.xml",
+          siteUrl: "https://example.com",
+          enabled: true,
+          aiParsingEnabled: true,
+        },
+      ],
+      blacklist: [],
+      now: new Date("2026-04-10T10:00:00.000Z"),
+    });
+
+    expect(result.status).toBe("succeeded");
+    const storedItem = await prisma.item.findFirstOrThrow();
+    expect(storedItem.summaryStatus).toBe("failed");
+    expect(storedItem.summaryText).toBeNull();
+    expect(storedItem.fullText).toBe(fullText);
+    expect(storedItem.errorMessage).toContain("Invalid item summary response");
+  });
+
+  it("uses source body for enrichment when item summarization fails", async () => {
+    const parser = {
+      parseURL: vi.fn().mockResolvedValue({
+        items: [
+          {
+            title: "OpenAI publishes another research update",
+            link: "https://example.com/posts/research-update-body",
+            isoDate: "2026-04-10T09:00:00.000Z",
+            content: "",
+          },
+        ],
+      }),
+    };
+    const fullText = "Detailed fetched article body for downstream enrichment and clustering signals.";
+    const enrichContent = vi.fn().mockResolvedValue({
+      translatedTitle: "OpenAI 发布研究更新",
+      moderationStatus: "allowed",
+      moderationReason: null,
+      moderationDetail: null,
+      qualityScore: 82,
+      qualityRationale: "正文可用于分析",
+      eventSignature: buildEventSignature({
+        eventType: "research",
+        eventSubject: "OpenAI",
+        eventAction: "publishes",
+        eventObject: "research update",
+      }),
+      tags: [],
+    });
+    const aiProvider = buildAiProviderMock({
+      summarizeItem: vi.fn().mockRejectedValue(new Error("Invalid item summary response: expected JSON")),
+      enrichContent,
+      summarizeCluster: vi.fn().mockResolvedValue("不会被使用"),
+      matchClusterCandidate: vi.fn().mockResolvedValue(null),
+    });
+
+    await runIngestion({
+      trigger: "manual",
+      parser,
+      articleFetcher: vi.fn().mockResolvedValue(fullText),
+      aiProvider,
+      sourceConfigs: [
+        {
+          name: "Example Feed",
+          rssUrl: "https://example.com/feed.xml",
+          siteUrl: "https://example.com",
+          enabled: true,
+          aiParsingEnabled: true,
+        },
+      ],
+      blacklist: [],
+      now: new Date("2026-04-10T10:00:00.000Z"),
+    });
+
+    expect(enrichContent).toHaveBeenCalledTimes(1);
+    expect(enrichContent.mock.calls[0]?.[0]).toContain(fullText);
+    expect(enrichContent.mock.calls[0]?.[0]).not.toBe("OpenAI publishes another research update");
+  });
+
   it("limits concurrent item processing to the configured concurrency", async () => {
     let activeCalls = 0;
     let maxConcurrentCalls = 0;
