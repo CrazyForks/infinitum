@@ -22,6 +22,10 @@ const DAILY_REPORT_CANDIDATE_POOL_MULTIPLIER = 4;
 const DAILY_REPORT_CANDIDATE_POOL_MAX = 2000;
 
 export type RecentDailyReportSourceSnapshot = {
+  date: string;
+  sourceNumber: number | null;
+  sectionName: string | null;
+  topic: string | null;
   sourceKey: string | null;
   itemId: string | null;
   clusterId: string | null;
@@ -282,7 +286,7 @@ export async function listRecentDailyReportSourceSnapshots(
   const { date: normalizedDate } = getDailyReportDateRange(date);
   const startDate = addUtcDays(normalizedDate, -lookbackDays);
 
-  return prisma.dailyReportSource.findMany({
+  const rows = await prisma.dailyReportSource.findMany({
     where: {
       dailyReport: {
         date: {
@@ -295,7 +299,15 @@ export async function listRecentDailyReportSourceSnapshots(
         },
       },
     },
+    orderBy: [
+      { dailyReport: { date: "desc" } },
+      { sourceNumber: "asc" },
+      { title: "asc" },
+    ],
     select: {
+      sourceNumber: true,
+      sectionName: true,
+      topic: true,
       sourceKey: true,
       itemId: true,
       clusterId: true,
@@ -307,8 +319,31 @@ export async function listRecentDailyReportSourceSnapshots(
       eventDate: true,
       title: true,
       sourceSummary: true,
+      dailyReport: {
+        select: {
+          date: true,
+        },
+      },
     },
   });
+
+  return rows.map((row) => ({
+    date: row.dailyReport.date,
+    sourceNumber: row.sourceNumber,
+    sectionName: row.sectionName,
+    topic: row.topic,
+    sourceKey: row.sourceKey,
+    itemId: row.itemId,
+    clusterId: row.clusterId,
+    url: row.url,
+    eventType: row.eventType,
+    eventSubject: row.eventSubject,
+    eventAction: row.eventAction,
+    eventObject: row.eventObject,
+    eventDate: row.eventDate,
+    title: row.title,
+    sourceSummary: row.sourceSummary,
+  }));
 }
 
 function parseContent(summaryJson: string): DailyReportContent {

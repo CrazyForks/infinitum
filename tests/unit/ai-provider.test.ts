@@ -1246,4 +1246,49 @@ ${JSON.stringify({
       }),
     ).rejects.toThrow("聚合拆分模型返回了无法解析的 JSON");
   });
+
+  it("appends recent daily report topics when custom daily prompt lacks the placeholder", async () => {
+    const create = vi.fn().mockResolvedValue({
+      choices: [
+        {
+          message: {
+            content: "{}",
+          },
+        },
+      ],
+    });
+    const provider = createAiProvider(
+      {
+        apiKey: "sk-test",
+        baseURL: "https://example.com/v1",
+        model: "test-model",
+      },
+      {
+        dailyReport: {
+          systemPrompt: "生成日报。",
+          promptTemplate: "日期：{{date}}\n候选内容 JSON：{{articlesJson}}",
+        },
+      },
+      {
+        chat: {
+          completions: {
+            create,
+          },
+        },
+      },
+    );
+
+    await provider.generateDailyReport({
+      date: "2026-04-24",
+      timezone: "Asia/Shanghai",
+      articles: [{ id: 1, title: "今日候选" }],
+      recentTopics: [{ date: "2026-04-23", title: "昨日已写主题" }],
+    });
+
+    const userContent = create.mock.calls[0]?.[0]?.messages?.[1]?.content;
+    expect(userContent).toContain("候选内容 JSON");
+    expect(userContent).toContain("最近 7 天已写主题 JSON");
+    expect(userContent).toContain("昨日已写主题");
+    expect(userContent).toContain("历史主题使用规则");
+  });
 });

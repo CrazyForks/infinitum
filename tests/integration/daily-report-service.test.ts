@@ -93,7 +93,11 @@ function buildDailyReportOutputWithRepeatedSources() {
 }
 
 function getLastGeneratedDailyReportArticles() {
-  const input = generateDailyReportMock.mock.calls.at(-1)?.[0] as {
+  return getLastGeneratedDailyReportInput()?.articles ?? [];
+}
+
+function getLastGeneratedDailyReportInput() {
+  return generateDailyReportMock.mock.calls.at(-1)?.[0] as {
     articles: Array<{
       id: number;
       itemId: string;
@@ -109,9 +113,16 @@ function getLastGeneratedDailyReportArticles() {
       sourceCount: number;
       itemCount: number;
     }>;
+    recentTopics: Array<{
+      date: string;
+      sourceNumber: number | null;
+      sectionName: string | null;
+      topic: string | null;
+      title: string;
+      eventSubject: string | null;
+      eventObject: string | null;
+    }>;
   } | undefined;
-
-  return input?.articles ?? [];
 }
 
 async function createReportCandidates() {
@@ -384,6 +395,139 @@ async function createClusteredReportCandidates() {
   });
 
   return { cluster };
+}
+
+async function createLargeClusteredReportCandidates() {
+  const sources = await Promise.all(
+    Array.from({ length: 7 }, (_, index) =>
+      prisma.source.create({
+        data: {
+          name: `Large Cluster Source ${index + 1}`,
+          rssUrl: `https://large-${index + 1}.example.com/feed.xml`,
+          siteUrl: `https://large-${index + 1}.example.com`,
+        },
+      }),
+    ),
+  );
+  const cluster = await prisma.contentCluster.create({
+    data: {
+      title: "大型聚合模型发布",
+      summary: "很多来源报道同一个模型发布事件。",
+      score: 91,
+      itemCount: sources.length,
+      latestPublishedAt: new Date("2026-04-24T08:00:00.000Z"),
+      fingerprint: "large-daily-report-cluster",
+      eventType: "launch",
+    },
+  });
+
+  await prisma.item.createMany({
+    data: sources.map((source, index) => ({
+      sourceId: source.id,
+      clusterId: cluster.id,
+      originalUrl: `https://large-${index + 1}.example.com/model-launch`,
+      canonicalUrl: `https://large-${index + 1}.example.com/model-launch`,
+      urlHash: `large-clustered-item-${index + 1}`,
+      dedupeSignature: `large-clustered-item-${index + 1}`,
+      originalTitle: `大型模型发布 来源 ${index + 1}`,
+      publishedAt: new Date(`2026-04-24T0${index + 1}:00:00.000Z`),
+      createdAt: new Date(`2026-04-24T0${index + 1}:00:00.000Z`),
+      status: "processed",
+      moderationStatus: "allowed",
+      summaryText: `来源 ${index + 1} 模型发布摘要`,
+      qualityScore: 95 - index,
+    })),
+  });
+  await prisma.item.create({
+    data: {
+      sourceId: sources[0]!.id,
+      originalUrl: "https://large-1.example.com/standalone-tool",
+      canonicalUrl: "https://large-1.example.com/standalone-tool",
+      urlHash: "large-clustered-standalone-tool",
+      dedupeSignature: "large-clustered-standalone-tool",
+      originalTitle: "独立工具更新",
+      publishedAt: new Date("2026-04-24T08:00:00.000Z"),
+      createdAt: new Date("2026-04-24T08:00:00.000Z"),
+      status: "processed",
+      moderationStatus: "allowed",
+      summaryText: "独立工具更新摘要",
+      qualityScore: 70,
+    },
+  });
+
+  return { cluster };
+}
+
+async function createSoftDuplicateReportCandidates() {
+  const source = await prisma.source.create({
+    data: {
+      name: "Soft Duplicate Source",
+      rssUrl: "https://soft-duplicate.example.com/feed.xml",
+      siteUrl: "https://soft-duplicate.example.com",
+    },
+  });
+
+  await prisma.item.createMany({
+    data: [
+      {
+        sourceId: source.id,
+        originalUrl: "https://soft-duplicate.example.com/openai-broadcom-chip",
+        canonicalUrl: "https://soft-duplicate.example.com/openai-broadcom-chip",
+        urlHash: "soft-duplicate-openai-chip",
+        dedupeSignature: "soft-duplicate-openai-chip",
+        originalTitle: "OpenAI联合Broadcom发布自研推理芯片Jalapeño",
+        publishedAt: new Date("2026-04-24T01:00:00.000Z"),
+        createdAt: new Date("2026-04-24T01:00:00.000Z"),
+        status: "processed",
+        moderationStatus: "allowed",
+        summaryText: "OpenAI 和 Broadcom 推出 Jalapeño 推理芯片。",
+        qualityScore: 99,
+        eventType: "partnership",
+        eventSubject: "OpenAI",
+        eventAction: "合作",
+        eventObject: "自研 AI 芯片 Jalapeño",
+        eventDate: REPORT_DATE,
+      },
+      {
+        sourceId: source.id,
+        originalUrl: "https://soft-duplicate.example.com/new-agent-runtime",
+        canonicalUrl: "https://soft-duplicate.example.com/new-agent-runtime",
+        urlHash: "soft-duplicate-new-agent-runtime",
+        dedupeSignature: "soft-duplicate-new-agent-runtime",
+        originalTitle: "新 Agent 运行时发布",
+        publishedAt: new Date("2026-04-24T02:00:00.000Z"),
+        createdAt: new Date("2026-04-24T02:00:00.000Z"),
+        status: "processed",
+        moderationStatus: "allowed",
+        summaryText: "新 Agent 运行时摘要",
+        qualityScore: 90,
+        eventType: "release",
+        eventSubject: "Agent Runtime",
+        eventAction: "发布",
+        eventObject: "运行时",
+        eventDate: REPORT_DATE,
+      },
+      {
+        sourceId: source.id,
+        originalUrl: "https://soft-duplicate.example.com/new-eval",
+        canonicalUrl: "https://soft-duplicate.example.com/new-eval",
+        urlHash: "soft-duplicate-new-eval",
+        dedupeSignature: "soft-duplicate-new-eval",
+        originalTitle: "新评测基准发布",
+        publishedAt: new Date("2026-04-24T03:00:00.000Z"),
+        createdAt: new Date("2026-04-24T03:00:00.000Z"),
+        status: "processed",
+        moderationStatus: "allowed",
+        summaryText: "新评测基准摘要",
+        qualityScore: 85,
+        eventType: "release",
+        eventSubject: "Eval Lab",
+        eventAction: "发布",
+        eventObject: "评测基准",
+        eventDate: REPORT_DATE,
+      },
+    ],
+  });
 }
 
 async function createCreatedAtBoundaryCandidates() {
@@ -707,6 +851,45 @@ describe("daily report service", () => {
     expect(result.report?.renderedMarkdown).toContain("[模型发布 来源 C](https://source-c.example.com/model-launch)");
   });
 
+  it("limits expanded clustered source links per selected candidate", async () => {
+    const { cluster } = await createLargeClusteredReportCandidates();
+    generateDailyReportMock.mockResolvedValue(JSON.stringify({
+      blocks: [
+        { type: "text", title: "摘要", body: "今天多来源模型发布事件集中出现，日报只展示代表性来源，避免相似引用过多影响阅读。" },
+        {
+          type: "section",
+          title: "今日大事",
+          items: [{
+            title: "大型聚合模型发布",
+            body: "多家来源报道同一模型发布事件，保存和渲染时应限制代表性来源数量。",
+            notes: [{ label: "重点", text: "限制引用展开" }],
+            sourceIds: [1],
+          }],
+        },
+        {
+          type: "text",
+          title: "趋势观察",
+          body: "聚合来源需要代表性展示，而不是把所有相似来源全部铺开；这样既能保留多源确认的可信度，也能避免读者在同一主题下反复看到高度相似的标题。",
+        },
+      ],
+    }));
+
+    const result = await generateDailyReport({ date: REPORT_DATE, force: true });
+    const clusteredSources = await prisma.dailyReportSource.findMany({
+      where: {
+        dailyReportId: result.report?.id,
+        sourceNumber: 1,
+      },
+      orderBy: { title: "asc" },
+    });
+
+    expect(new Set(clusteredSources.map((source) => source.clusterId))).toEqual(new Set([cluster.id]));
+    expect(clusteredSources).toHaveLength(5);
+    expect(result.report?.renderedMarkdown).toContain("[大型模型发布 来源 1](https://large-1.example.com/model-launch)");
+    expect(result.report?.renderedMarkdown).toContain("[大型模型发布 来源 5](https://large-5.example.com/model-launch)");
+    expect(result.report?.renderedMarkdown).not.toContain("[大型模型发布 来源 6](https://large-6.example.com/model-launch)");
+  });
+
   it("uses created date for daily report candidate boundaries", async () => {
     await createCreatedAtBoundaryCandidates();
 
@@ -872,6 +1055,70 @@ describe("daily report service", () => {
       "Anthropic 更新 Claude 4",
       "独立工具发布",
     ]));
+  });
+
+  it("passes recent report topics to the model without failed or out-of-window reports", async () => {
+    await createReportCandidates();
+    await createHistoricalDailyReportSource({
+      date: "2026-04-20",
+      title: "历史日报已写主题",
+      eventType: "release",
+      eventSubject: "OpenAI",
+      eventAction: "发布",
+      eventObject: "GPT-5",
+      eventDate: "2026-04-20",
+    });
+    await createHistoricalDailyReportSource({
+      date: "2026-04-19",
+      status: "failed",
+      title: "失败日报主题",
+      eventSubject: "Failed",
+      eventObject: "Topic",
+    });
+    await createHistoricalDailyReportSource({
+      date: "2026-04-16",
+      title: "七天外主题",
+      eventSubject: "Old",
+      eventObject: "Topic",
+    });
+    generateDailyReportMock.mockResolvedValue(buildDailyReportOutput());
+
+    await generateDailyReport({ date: REPORT_DATE, force: true });
+
+    const recentTopics = getLastGeneratedDailyReportInput()?.recentTopics ?? [];
+    expect(recentTopics).toEqual([
+      expect.objectContaining({
+        date: "2026-04-20",
+        title: "历史日报已写主题",
+        eventSubject: "OpenAI",
+        eventObject: "GPT-5",
+      }),
+    ]);
+    expect(recentTopics.map((topic) => topic.title)).not.toContain("失败日报主题");
+    expect(recentTopics.map((topic) => topic.title)).not.toContain("七天外主题");
+  });
+
+  it("filters soft duplicate candidates with similar recent event core", async () => {
+    await createSoftDuplicateReportCandidates();
+    await createHistoricalDailyReportSource({
+      date: "2026-04-20",
+      title: "OpenAI 与 Broadcom 发布 Jalapeño 推理芯片",
+      eventType: "release",
+      eventSubject: "OpenAI",
+      eventAction: "发布",
+      eventObject: "Jalapeño推理芯片",
+      eventDate: "2026-04-20",
+    });
+    generateDailyReportMock.mockResolvedValue(buildDailyReportOutput());
+
+    await generateDailyReport({ date: REPORT_DATE, force: true });
+
+    const articles = getLastGeneratedDailyReportArticles();
+    expect(articles.map((article) => article.title)).not.toContain("OpenAI联合Broadcom发布自研推理芯片Jalapeño");
+    expect(articles.map((article) => article.title)).toEqual([
+      "新 Agent 运行时发布",
+      "新评测基准发布",
+    ]);
   });
 
   it("keeps same-subject follow-ups when event date or action changed", async () => {

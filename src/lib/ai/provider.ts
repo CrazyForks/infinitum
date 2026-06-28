@@ -110,7 +110,7 @@ export type AiProvider = {
   ): Promise<string | null>;
   mergeClusters(clustersJson: string): Promise<MergeGroup[]>;
   generateDailyReport(
-    input: { date: string; timezone: string; articles: unknown[] },
+    input: { date: string; timezone: string; articles: unknown[]; recentTopics?: unknown[] },
   ): Promise<string | null>;
   repairDailyReportJson(rawContent: string): Promise<string | null>;
 };
@@ -297,6 +297,37 @@ function getClientForConfig(
 
 function renderPromptTemplate(template: string, values: Record<string, string | number>): string {
   return template.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, key: string) => String(values[key] ?? ""));
+}
+
+function buildDailyReportUserPrompt(promptTemplate: string, input: {
+  date: string;
+  timezone: string;
+  articles: unknown[];
+  recentTopics?: unknown[];
+}) {
+  const recentTopicsJson = JSON.stringify(input.recentTopics ?? []);
+  const rendered = renderPromptTemplate(promptTemplate, {
+    date: input.date,
+    timezone: input.timezone,
+    articlesJson: JSON.stringify(input.articles),
+    recentTopicsJson,
+  });
+
+  if (/\{\{\s*recentTopicsJson\s*\}\}/.test(promptTemplate)) {
+    return rendered;
+  }
+
+  return [
+    rendered,
+    "",
+    "最近 7 天已写主题 JSON：",
+    recentTopicsJson,
+    "",
+    "历史主题使用规则：",
+    "1. 如果候选内容与最近 7 天已写主题只是同一事件的重复报道，不要再次写入。",
+    "2. 如果确有新动作、新数据、新影响或状态变化，可以写入，但必须写成后续进展，避免重复介绍背景。",
+    "3. 不要因为同一公司、同一模型或同一抽象主题相似就机械过滤；判断重点是是否有新的事实增量。",
+  ].join("\n");
 }
 
 function getFallbackEnrichment(
@@ -1344,11 +1375,7 @@ export function createAiProvider(
     async generateDailyReport(input) {
       return completeTextWithCircuitBreaker(
         dailyReportConfig,
-        renderPromptTemplate(dailyReportConfig.promptTemplate, {
-          date: input.date,
-          timezone: input.timezone,
-          articlesJson: JSON.stringify(input.articles),
-        }),
+        buildDailyReportUserPrompt(dailyReportConfig.promptTemplate, input),
         {
           responseFormat: { type: "json_object" },
         },

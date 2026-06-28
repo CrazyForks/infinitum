@@ -23,6 +23,7 @@ import {
   type DailyReportContent,
   type DailyReportItem,
   type DailyReportSourceRegistryEntry,
+  type RecentDailyReportTopic,
 } from "@/lib/daily-report/types";
 import { parseDailyReportContent } from "@/lib/daily-report/validator";
 import { normalizeEventSignatureForStorage } from "@/lib/clusters/normalization";
@@ -35,16 +36,24 @@ import { createTaskAiUsageTracker } from "@/lib/tasks/ai-usage";
 
 const MIN_CANDIDATE_COUNT = 2;
 const DAILY_REPORT_RECENT_SOURCE_LOOKBACK_DAYS = 7;
+const DAILY_REPORT_RECENT_TOPIC_CONTEXT_LIMIT = 120;
+const MAX_DAILY_REPORT_EXPANDED_SOURCES_PER_CANDIDATE = 5;
 const DISPLAYABLE_DAILY_REPORT_SOURCE_STATUSES = ["allowed", "restored"] as const;
 
 function buildDailyReportTitle(date: string) {
   return `${date} AI 日报`;
 }
 
-function buildInputHash(date: string, candidates: DailyReportCandidate[], groupIds: string[] = []) {
+function buildInputHash(
+  date: string,
+  candidates: DailyReportCandidate[],
+  groupIds: string[] = [],
+  recentTopics: RecentDailyReportTopic[] = [],
+) {
   const hash = createHash("sha256");
   hash.update(date);
   hash.update(JSON.stringify([...groupIds].sort()));
+  hash.update(JSON.stringify(recentTopics));
   for (const candidate of candidates) {
     hash.update(JSON.stringify({
       sourceKey: candidate.sourceKey,
@@ -114,6 +123,42 @@ function normalizeOptionalDailyReportText(value: string | null | undefined) {
   return normalized || null;
 }
 
+function normalizeDailyReportComparableText(value: string | null | undefined) {
+  return value
+    ?.normalize("NFKC")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s·・,，.。:：;；'"“”‘’()[\]（）【】{}<>《》_\-—–/\\|]+/g, "") || null;
+}
+
+function buildCharacterBigrams(value: string) {
+  if (value.length <= 1) return new Set([value]);
+  const grams = new Set<string>();
+  for (let index = 0; index < value.length - 1; index += 1) {
+    grams.add(value.slice(index, index + 2));
+  }
+  return grams;
+}
+
+function calculateDailyReportTitleSimilarity(left: string, right: string) {
+  const normalizedLeft = normalizeDailyReportComparableText(left);
+  const normalizedRight = normalizeDailyReportComparableText(right);
+  if (!normalizedLeft || !normalizedRight) return 0;
+  if (normalizedLeft.includes(normalizedRight) || normalizedRight.includes(normalizedLeft)) {
+    return 1;
+  }
+
+  const leftGrams = buildCharacterBigrams(normalizedLeft);
+  const rightGrams = buildCharacterBigrams(normalizedRight);
+  const intersectionSize = [...leftGrams].filter((gram) => rightGrams.has(gram)).length;
+  const unionSize = new Set([...leftGrams, ...rightGrams]).size;
+  return unionSize > 0 ? intersectionSize / unionSize : 0;
+}
+
+function isDailyReportFollowUpTitle(title: string) {
+  return /后续|新进展|进展|更新|恢复|解除|回归|重新|修复|回应|澄清|正式/.test(title);
+}
+
 function getDailyReportEventIdentity(input: {
   eventType: string | null;
   eventSubject: string | null;
@@ -173,6 +218,71 @@ function matchesRecentDailyReportEvent(
   );
 }
 
+function hasSimilarDailyReportEventCore(
+  candidate: DailyReportCandidate,
+  recentSource: RecentDailyReportSourceSnapshot,
+) {
+  const candidateSubject = normalizeDailyReportComparableText(candidate.eventSubject);
+  const recentSubject = normalizeDailyReportComparableText(recentSource.eventSubject);
+  const candidateObject = normalizeDailyReportComparableText(candidate.eventObject);
+  const recentObject = normalizeDailyReportComparableText(recentSource.eventObject);
+  const titleSimilarity = calculateDailyReportTitleSimilarity(candidate.title, recentSource.title);
+
+  if (candidateSubject && recentSubject && candidateSubject === recentSubject) {
+    if (candidateObject && recentObject) {
+      return (
+        candidateObject === recentObject ||
+        candidateObject.includes(recentObject) ||
+        recentObject.includes(candidateObject) ||
+        titleSimilarity >= 0.52
+      );
+    }
+
+    return titleSimilarity >= 0.68;
+  }
+
+  if (candidateObject && recentObject) {
+    return (
+      (candidateObject === recentObject ||
+        candidateObject.includes(recentObject) ||
+        recentObject.includes(candidateObject)) &&
+      titleSimilarity >= 0.5
+    );
+  }
+
+  return titleSimilarity >= 0.72;
+}
+
+function matchesRecentDailyReportSoftDuplicate(
+  candidate: DailyReportCandidate,
+  recentSource: RecentDailyReportSourceSnapshot,
+) {
+  if (!hasSimilarDailyReportEventCore(candidate, recentSource)) {
+    return false;
+  }
+
+  const candidateEvent = getDailyReportEventIdentity(candidate);
+  const recentEvent = getDailyReportEventIdentity(recentSource);
+  const sameAction = Boolean(
+    candidateEvent.eventAction &&
+      recentEvent.eventAction &&
+      candidateEvent.eventAction === recentEvent.eventAction,
+  );
+  const sameDate = Boolean(
+    candidateEvent.eventDate &&
+      recentEvent.eventDate &&
+      candidateEvent.eventDate === recentEvent.eventDate,
+  );
+  const missingDate = !candidateEvent.eventDate || !recentEvent.eventDate;
+  const titleSimilarity = calculateDailyReportTitleSimilarity(candidate.title, recentSource.title);
+
+  if (isDailyReportFollowUpTitle(candidate.title) && (!sameDate || !sameAction)) {
+    return false;
+  }
+
+  return sameAction || sameDate || missingDate || titleSimilarity >= 0.62;
+}
+
 function matchesRecentDailyReportSource(
   candidate: DailyReportCandidate,
   recentSource: RecentDailyReportSourceSnapshot,
@@ -191,13 +301,15 @@ function matchesRecentDailyReportSource(
     (recentSourceKey && candidateSourceKey === recentSourceKey) ||
       hasSameItemSourceKey ||
       (candidate.clusterId && recentSource.clusterId && candidate.clusterId === recentSource.clusterId) ||
-      matchesRecentDailyReportEvent(candidate, recentSource),
+      matchesRecentDailyReportEvent(candidate, recentSource) ||
+      matchesRecentDailyReportSoftDuplicate(candidate, recentSource),
   );
 }
 
-async function filterRecentDailyReportDuplicates(date: string, candidates: DailyReportCandidate[]) {
-  const recentSources = await listRecentDailyReportSourceSnapshots(date, DAILY_REPORT_RECENT_SOURCE_LOOKBACK_DAYS);
-
+function filterRecentDailyReportDuplicates(
+  candidates: DailyReportCandidate[],
+  recentSources: RecentDailyReportSourceSnapshot[],
+) {
   if (recentSources.length === 0) {
     return candidates;
   }
@@ -205,6 +317,44 @@ async function filterRecentDailyReportDuplicates(date: string, candidates: Daily
   return compactDailyReportCandidates(candidates.filter(
     (candidate) => !recentSources.some((recentSource) => matchesRecentDailyReportSource(candidate, recentSource)),
   ));
+}
+
+function buildRecentDailyReportTopics(recentSources: RecentDailyReportSourceSnapshot[]): RecentDailyReportTopic[] {
+  const topics = new Map<string, RecentDailyReportTopic>();
+
+  for (const source of recentSources) {
+    const key = [
+      source.date,
+      source.sourceNumber ?? "",
+      source.sectionName ?? "",
+      source.topic ?? source.title,
+      normalizeDailyReportComparableText(source.eventSubject) ?? "",
+      normalizeDailyReportComparableText(source.eventObject) ?? "",
+    ].join("\u0000");
+
+    if (topics.has(key)) {
+      continue;
+    }
+
+    topics.set(key, {
+      date: source.date,
+      sourceNumber: source.sourceNumber,
+      sectionName: source.sectionName,
+      topic: source.topic,
+      title: source.title,
+      eventType: source.eventType,
+      eventSubject: source.eventSubject,
+      eventAction: source.eventAction,
+      eventObject: source.eventObject,
+      eventDate: source.eventDate,
+    });
+
+    if (topics.size >= DAILY_REPORT_RECENT_TOPIC_CONTEXT_LIMIT) {
+      break;
+    }
+  }
+
+  return Array.from(topics.values());
 }
 
 function candidateToDailyReportSourceRegistryEntry(
@@ -303,6 +453,10 @@ async function listExpandedClusterSourceRegistryEntries(candidates: DailyReportC
       eventDate: candidate.eventDate ?? row.eventDate,
     });
     entriesByClusterId.set(row.clusterId, entries);
+  }
+
+  for (const [clusterId, entries] of entriesByClusterId) {
+    entriesByClusterId.set(clusterId, entries.slice(0, MAX_DAILY_REPORT_EXPANDED_SOURCES_PER_CANDIDATE));
   }
 
   return entriesByClusterId;
@@ -536,12 +690,14 @@ export async function generateDailyReport(input: {
   const { date } = getDailyReportDateRange(input.date);
   const schedule = await ensureDefaultDailyReportSchedule();
   const dailyReportGroupIds = parseDailyReportGroupIdsJson(schedule.dailyReportGroupIdsJson);
-  const candidates = await filterRecentDailyReportDuplicates(
-    date,
+  const recentSources = await listRecentDailyReportSourceSnapshots(date, DAILY_REPORT_RECENT_SOURCE_LOOKBACK_DAYS);
+  const recentTopics = buildRecentDailyReportTopics(recentSources);
+  const candidates = filterRecentDailyReportDuplicates(
     await listDailyReportCandidates(date, schedule.dailyReportCandidateLimit, dailyReportGroupIds),
+    recentSources,
   );
   await input.onCandidatesLoaded?.(candidates.length);
-  const inputHash = buildInputHash(date, candidates, dailyReportGroupIds);
+  const inputHash = buildInputHash(date, candidates, dailyReportGroupIds, recentTopics);
   const existing = await prisma.dailyReport.findUnique({
     where: {
       date_timezone: {
@@ -583,6 +739,7 @@ export async function generateDailyReport(input: {
     date,
     timezone: DAILY_REPORT_TIMEZONE,
     articles: candidates,
+    recentTopics,
   });
 
   if (!rawOutput) {

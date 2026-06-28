@@ -30,6 +30,19 @@ export type DailyReportCandidate = {
   eventDate: string | null;
 };
 
+export type RecentDailyReportTopic = {
+  date: string;
+  sourceNumber: number | null;
+  sectionName: string | null;
+  topic: string | null;
+  title: string;
+  eventType: string | null;
+  eventSubject: string | null;
+  eventAction: string | null;
+  eventObject: string | null;
+  eventDate: string | null;
+};
+
 export type DailyReportTextBlock = {
   type: "text";
   title: string;
