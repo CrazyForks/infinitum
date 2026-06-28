@@ -22,6 +22,8 @@ const MAX_TAG_SUGGESTION_LIMIT = 100;
 const AUTO_CANONICAL_CONFIDENCE_THRESHOLD = 0.95;
 const DEFAULT_AUTO_MERGE_SUGGESTION_LIMIT = 30;
 const SUGGESTION_CONFIDENCE_THRESHOLD = 0.82;
+const TAG_SUGGESTION_CANDIDATE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const TAG_SUGGESTION_CANDIDATE_CREATE_BATCH_SIZE = 500;
 const MAX_TAG_SUGGESTION_CANDIDATE_PAIRS = 20_000;
 const MAX_TAG_SUGGESTION_TOKEN_BUCKET_SIZE = 200;
 const MAX_TAG_SUGGESTION_EDIT_BUCKET_SIZE = 80;
@@ -68,12 +70,22 @@ export type AdminTagSuggestionList = {
   pageSize: number;
 };
 
+export type AdminTagSuggestionSort = "confidence_desc" | "affected_desc";
+
 export type AdminTagAutoMergeResult = {
   scannedCount: number;
   mergedCount: number;
   affectedClusterCount: number;
   skippedCount: number;
   failedCount: number;
+};
+
+export type TagSuggestionPrecomputeResult = {
+  tagCount: number;
+  scannedPairs: number;
+  candidateCount: number;
+  storedCandidates: number;
+  durationMs: number;
 };
 
 type TagCandidate = {
@@ -102,6 +114,20 @@ type TagSuggestionDraft = {
   targetTag: TagCandidate;
   baseConfidence: number;
   reason: TagSimilarityReason;
+};
+
+type TagSuggestionCandidateRecord = {
+  pairKey: string;
+  sourceTagId: string;
+  targetTagId: string;
+  sourceTagNormalized: string;
+  targetTagNormalized: string;
+  confidence: number;
+  affectedItemCount: number;
+  sharedItemCount: number;
+  reason: TagSimilarityReason;
+  status: string;
+  expiresAt: Date;
 };
 
 function normalizePage(value: number | null | undefined) {
@@ -158,6 +184,10 @@ function normalizeSuggestionLimit(value: number | null | undefined) {
   }
 
   return Math.min(value, MAX_TAG_SUGGESTION_LIMIT);
+}
+
+function normalizeSuggestionSort(value: string | null | undefined): AdminTagSuggestionSort {
+  return value === "affected_desc" ? "affected_desc" : "confidence_desc";
 }
 
 function serializeTagSummary(tag: TagCandidate): AdminTagSuggestion["sourceTag"] {
@@ -693,15 +723,72 @@ async function loadSuppressedTagSuggestionPairs() {
   );
 }
 
-export async function listAdminTagSuggestions(input?: {
-  limit?: number | null;
-  search?: string | null;
-  page?: number | null;
-  pageSize?: number | null;
-}): Promise<AdminTagSuggestionList> {
-  const page = normalizePage(input?.page);
-  const pageSize = normalizeSuggestionLimit(input?.pageSize ?? input?.limit);
-  const search = normalizeTagSimilarityText(input?.search ?? "");
+function buildTagSuggestionSearchWhere(rawSearch: string, normalizedSearch: string): Prisma.TagWhereInput {
+  return {
+    OR: [
+      { name: { contains: rawSearch } },
+      { normalized: { contains: normalizedSearch } },
+      {
+        aliases: {
+          some: {
+            OR: [
+              { aliasName: { contains: rawSearch } },
+              { aliasNormalized: { contains: normalizedSearch } },
+            ],
+          },
+        },
+      },
+    ],
+  };
+}
+
+function serializeTagSuggestionCandidate(candidate: {
+  id: string;
+  confidence: number;
+  reason: string;
+  affectedItemCount: number;
+  sharedItemCount: number;
+  sourceTag: TagCandidate;
+  targetTag: TagCandidate;
+}): AdminTagSuggestion {
+  const reasons = [getSimilarityReasonLabel(candidate.reason as TagSimilarityReason)];
+
+  if (candidate.sharedItemCount > 0) {
+    reasons.push(`已有 ${candidate.sharedItemCount} 条内容同时带有两个标签`);
+  }
+
+  if (candidate.affectedItemCount <= 2) {
+    reasons.push("来源标签使用量较低，适合优先治理");
+  }
+
+  return {
+    id: candidate.id,
+    sourceTag: serializeTagSummary(candidate.sourceTag),
+    targetTag: serializeTagSummary(candidate.targetTag),
+    confidence: candidate.confidence,
+    reasons,
+    affectedItemCount: candidate.affectedItemCount,
+  };
+}
+
+async function deleteTagSuggestionCandidatesForTagIds(tx: PrismaTransaction, tagIds: string[]) {
+  const uniqueTagIds = [...new Set(tagIds.filter(Boolean))];
+
+  if (uniqueTagIds.length === 0) {
+    return;
+  }
+
+  await tx.tagSuggestionCandidate.deleteMany({
+    where: {
+      OR: [
+        { sourceTagId: { in: uniqueTagIds } },
+        { targetTagId: { in: uniqueTagIds } },
+      ],
+    },
+  });
+}
+
+async function loadTagSuggestionPrecomputeInputs() {
   const tags: TagCandidate[] = await prisma.tag.findMany({
     include: {
       aliases: {
@@ -719,20 +806,21 @@ export async function listAdminTagSuggestions(input?: {
     },
   });
 
-  if (tags.length < 2) {
-    return {
-      suggestions: [],
-      totalCount: 0,
-      page,
-      pageSize,
-    };
-  }
+  return tags;
+}
 
+async function buildTagSuggestionCandidateRecords(now: Date): Promise<{
+  tags: TagCandidate[];
+  scannedPairs: number;
+  records: TagSuggestionCandidateRecord[];
+}> {
+  const tags = await loadTagSuggestionPrecomputeInputs();
   const suppressedPairs = await loadSuppressedTagSuggestionPairs();
   const suggestionDrafts: TagSuggestionDraft[] = [];
   const seenPairs = new Set<string>();
+  const pairs = buildTagSuggestionCandidatePairs(tags, "");
 
-  for (const { left, right } of buildTagSuggestionCandidatePairs(tags, search)) {
+  for (const { left, right } of pairs) {
     const similarity = getBestTagSimilarity(left, right);
     if (!similarity || similarity.confidence < SUGGESTION_CONFIDENCE_THRESHOLD) {
       continue;
@@ -755,29 +843,15 @@ export async function listAdminTagSuggestions(input?: {
     });
   }
 
-  suggestionDrafts.sort((left, right) => {
-    if (left.baseConfidence !== right.baseConfidence) {
-      return right.baseConfidence - left.baseConfidence;
-    }
-
-    if (left.sourceTag._count.items !== right.sourceTag._count.items) {
-      return right.sourceTag._count.items - left.sourceTag._count.items;
-    }
-
-    return left.sourceTag.name.localeCompare(right.sourceTag.name, "zh-CN");
-  });
-
-  const skip = (page - 1) * pageSize;
-  const pageDrafts = suggestionDrafts.slice(skip, skip + pageSize);
-  const pageTagIds = [...new Set(pageDrafts.flatMap((suggestion) => [
+  const tagIds = [...new Set(suggestionDrafts.flatMap((suggestion) => [
     suggestion.sourceTag.id,
     suggestion.targetTag.id,
   ]))];
-  const itemTags = pageTagIds.length > 0
+  const itemTags = tagIds.length > 0
     ? await prisma.itemTag.findMany({
         where: {
           tagId: {
-            in: pageTagIds,
+            in: tagIds,
           },
         },
         select: {
@@ -787,7 +861,8 @@ export async function listAdminTagSuggestions(input?: {
       })
     : [];
   const itemIdsByTagId = buildItemTagSets(itemTags);
-  const suggestions = pageDrafts.map((suggestion) => {
+  const expiresAt = new Date(now.getTime() + TAG_SUGGESTION_CANDIDATE_TTL_MS);
+  const records = suggestionDrafts.map((suggestion) => {
     const sharedItemCount = countSharedItems(
       itemIdsByTagId.get(suggestion.sourceTag.id),
       itemIdsByTagId.get(suggestion.targetTag.id),
@@ -798,29 +873,123 @@ export async function listAdminTagSuggestions(input?: {
       suggestion.baseConfidence,
       sharedItemCount,
     );
-    const reasons = [getSimilarityReasonLabel(suggestion.reason)];
-
-    if (sharedItemCount > 0) {
-      reasons.push(`已有 ${sharedItemCount} 条内容同时带有两个标签`);
-    }
-
-    if (suggestion.sourceTag._count.items <= 2) {
-      reasons.push("来源标签使用量较低，适合优先治理");
-    }
 
     return {
-      id: buildSuggestionId(suggestion.sourceTag, suggestion.targetTag),
-      sourceTag: serializeTagSummary(suggestion.sourceTag),
-      targetTag: serializeTagSummary(suggestion.targetTag),
+      pairKey: buildSuggestionId(suggestion.sourceTag, suggestion.targetTag),
+      sourceTagId: suggestion.sourceTag.id,
+      targetTagId: suggestion.targetTag.id,
+      sourceTagNormalized: suggestion.sourceTag.normalized,
+      targetTagNormalized: suggestion.targetTag.normalized,
       confidence,
-      reasons,
       affectedItemCount: suggestion.sourceTag._count.items,
+      sharedItemCount,
+      reason: suggestion.reason,
+      status: "active",
+      expiresAt,
     };
   });
 
   return {
-    suggestions,
-    totalCount: suggestionDrafts.length,
+    tags,
+    scannedPairs: pairs.length,
+    records,
+  };
+}
+
+export async function precomputeTagSuggestionCandidates(now = new Date()): Promise<TagSuggestionPrecomputeResult> {
+  const startedAt = Date.now();
+  const { tags, scannedPairs, records } = await buildTagSuggestionCandidateRecords(now);
+
+  await prisma.$transaction(async (tx) => {
+    await tx.tagSuggestionCandidate.deleteMany({});
+
+    for (let start = 0; start < records.length; start += TAG_SUGGESTION_CANDIDATE_CREATE_BATCH_SIZE) {
+      await tx.tagSuggestionCandidate.createMany({
+        data: records.slice(start, start + TAG_SUGGESTION_CANDIDATE_CREATE_BATCH_SIZE),
+      });
+    }
+  });
+
+  return {
+    tagCount: tags.length,
+    scannedPairs,
+    candidateCount: records.length,
+    storedCandidates: records.length,
+    durationMs: Date.now() - startedAt,
+  };
+}
+
+export async function listAdminTagSuggestions(input?: {
+  limit?: number | null;
+  search?: string | null;
+  page?: number | null;
+  pageSize?: number | null;
+  sort?: string | null;
+}): Promise<AdminTagSuggestionList> {
+  const page = normalizePage(input?.page);
+  const pageSize = normalizeSuggestionLimit(input?.pageSize ?? input?.limit);
+  const sort = normalizeSuggestionSort(input?.sort);
+  const rawSearch = input?.search?.trim() ?? "";
+  const search = normalizeTagSimilarityText(rawSearch);
+  const tagSearchWhere = search ? buildTagSuggestionSearchWhere(rawSearch, search) : null;
+  const where: Prisma.TagSuggestionCandidateWhereInput = {
+    status: "active",
+    ...(tagSearchWhere
+      ? {
+          OR: [
+            { sourceTag: { is: tagSearchWhere } },
+            { targetTag: { is: tagSearchWhere } },
+          ],
+        }
+      : {}),
+  };
+  const orderBy: Prisma.TagSuggestionCandidateOrderByWithRelationInput[] = sort === "affected_desc"
+    ? [
+        { affectedItemCount: "desc" },
+        { confidence: "desc" },
+        { sourceTagNormalized: "asc" },
+      ]
+    : [
+        { confidence: "desc" },
+        { affectedItemCount: "desc" },
+        { sourceTagNormalized: "asc" },
+      ];
+  const skip = (page - 1) * pageSize;
+  const [totalCount, candidates] = await Promise.all([
+    prisma.tagSuggestionCandidate.count({ where }),
+    prisma.tagSuggestionCandidate.findMany({
+      where,
+      include: {
+        sourceTag: {
+          include: {
+            _count: {
+              select: {
+                items: true,
+                aliases: true,
+              },
+            },
+          },
+        },
+        targetTag: {
+          include: {
+            _count: {
+              select: {
+                items: true,
+                aliases: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy,
+      skip,
+      take: pageSize,
+    }),
+  ]);
+
+  return {
+    suggestions: candidates.map(serializeTagSuggestionCandidate),
+    totalCount,
     page,
     pageSize,
   };
@@ -830,50 +999,31 @@ export async function autoMergeHighConfidenceTagSuggestions(input?: {
   limit?: number | null;
 }): Promise<AdminTagAutoMergeResult> {
   const limit = normalizeSuggestionLimit(input?.limit ?? DEFAULT_AUTO_MERGE_SUGGESTION_LIMIT);
-  const tags: TagCandidate[] = await prisma.tag.findMany({
-    include: {
-      aliases: {
-        select: {
-          aliasName: true,
-          aliasNormalized: true,
-        },
-      },
-      _count: {
-        select: {
-          items: true,
-          aliases: true,
-        },
+  const activeCandidateCount = await prisma.tagSuggestionCandidate.count({
+    where: { status: "active" },
+  });
+
+  if (activeCandidateCount === 0) {
+    await precomputeTagSuggestionCandidates();
+  }
+  const plans = await prisma.tagSuggestionCandidate.findMany({
+    where: {
+      status: "active",
+      confidence: {
+        gte: AUTO_CANONICAL_CONFIDENCE_THRESHOLD,
       },
     },
+    orderBy: [
+      { confidence: "desc" },
+      { affectedItemCount: "desc" },
+      { sourceTagNormalized: "asc" },
+    ],
+    take: limit,
+    select: {
+      sourceTagId: true,
+      targetTagId: true,
+    },
   });
-  const suppressedPairs = await loadSuppressedTagSuggestionPairs();
-  const plans: Array<{ sourceTagId: string; targetTagId: string }> = [];
-  const seenPairs = new Set<string>();
-
-  for (const { left, right } of buildTagSuggestionCandidatePairs(tags, "")) {
-    if (plans.length >= limit) {
-      break;
-    }
-
-    const similarity = getBestTagSimilarity(left, right);
-    if (!similarity || similarity.confidence < AUTO_CANONICAL_CONFIDENCE_THRESHOLD) {
-      continue;
-    }
-
-    const { sourceTag, targetTag } = resolveSuggestionDirection(left, right);
-    const pairKey = buildSuggestionId(sourceTag, targetTag);
-    const suppressedPairKey = buildSuppressedPairKey(sourceTag.normalized, targetTag.normalized);
-
-    if (seenPairs.has(pairKey) || suppressedPairs.has(suppressedPairKey)) {
-      continue;
-    }
-
-    seenPairs.add(pairKey);
-    plans.push({
-      sourceTagId: sourceTag.id,
-      targetTagId: targetTag.id,
-    });
-  }
 
   let mergedCount = 0;
   let affectedClusterCount = 0;
@@ -960,6 +1110,12 @@ export async function dismissTagSuggestion(input: {
       decidedBy: input.decidedBy ?? "admin",
     },
   });
+  await prisma.tagSuggestionCandidate.deleteMany({
+    where: {
+      sourceTagNormalized: sourceTag.normalized,
+      targetTagNormalized: targetTag.normalized,
+    },
+  });
 
   return { ok: true };
 }
@@ -1036,6 +1192,14 @@ export async function addTagAlias(input: {
       createdBy: input.createdBy,
     });
   });
+  await prisma.tagSuggestionCandidate.deleteMany({
+    where: {
+      OR: [
+        { sourceTagId: input.tagId },
+        { targetTagId: input.tagId },
+      ],
+    },
+  });
 
   return {
     id: created.id,
@@ -1047,8 +1211,16 @@ export async function addTagAlias(input: {
 }
 
 export async function deleteTagAlias(aliasId: string): Promise<void> {
-  await prisma.tagAlias.delete({
+  const deleted = await prisma.tagAlias.delete({
     where: { id: aliasId },
+  });
+  await prisma.tagSuggestionCandidate.deleteMany({
+    where: {
+      OR: [
+        { sourceTagId: deleted.tagId },
+        { targetTagId: deleted.tagId },
+      ],
+    },
   });
 }
 
@@ -1141,6 +1313,7 @@ export async function mergeTags(input: {
         where: { id: sourceTag.id },
       });
     }
+    await deleteTagSuggestionCandidatesForTagIds(tx, [targetTag.id, ...sourceTagIds]);
 
     return [...new Set(
       affectedItems

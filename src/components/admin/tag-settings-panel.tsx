@@ -9,13 +9,16 @@ import {
   dismissAdminTagSuggestion,
   type AdminTag,
   type AdminTagSuggestion,
+  type AdminTagSuggestionSort,
   listAdminTags,
   listAdminTagSuggestions,
   mergeAdminTags,
+  precomputeAdminTagSuggestions,
 } from "@/components/admin/admin-settings-panel.api";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FilterInput } from "@/components/ui/filter-input";
+import { FilterSelect } from "@/components/ui/filter-select";
 import { IconButton } from "@/components/ui/icon-button";
 import { IconCheck, IconMerge, IconPlus, IconRotateCw, IconTrash, IconX } from "@/components/ui/icons";
 import { ModalShell } from "@/components/ui/modal-shell";
@@ -29,6 +32,10 @@ const DEFAULT_PAGE_SIZE = 10;
 const MERGE_CANDIDATE_PAGE_SIZE = 100;
 const DEFAULT_SUGGESTION_PAGE_SIZE = 10;
 const SUGGESTION_LOAD_DEBOUNCE_MS = 250;
+const SUGGESTION_SORT_OPTIONS: Array<{ value: AdminTagSuggestionSort; label: string }> = [
+  { value: "confidence_desc", label: "置信度倒序" },
+  { value: "affected_desc", label: "影响条数倒序" },
+];
 
 function formatTagCount(count: number) {
   return `${count} 条`;
@@ -53,11 +60,13 @@ type TagSuggestionPanelProps = {
   page: number;
   pageSize: number;
   search: string;
+  sort: AdminTagSuggestionSort;
   isOpen: boolean;
   isBusy: boolean;
   error: string | null;
   onClose: () => void;
   onSearchChange: (value: string) => void;
+  onSortChange: (value: AdminTagSuggestionSort) => void;
   onPageChange: (page: number) => void;
   onPageSizeChange: (pageSize: number) => void;
   onOpenMergeChoice: (suggestion: AdminTagSuggestion) => void;
@@ -72,11 +81,13 @@ function TagSuggestionModal({
   page,
   pageSize,
   search,
+  sort,
   isOpen,
   isBusy,
   error,
   onClose,
   onSearchChange,
+  onSortChange,
   onPageChange,
   onPageSizeChange,
   onOpenMergeChoice,
@@ -117,7 +128,7 @@ function TagSuggestionModal({
           <div className="max-w-2xl text-sm leading-6 text-[var(--muted)]">
             系统按名称相似度、别名和内容共现识别可合并标签。合并前需要选择方向；不合并和临时忽略会隐藏当前建议对。
           </div>
-          <div className="w-full md:w-72">
+          <div className="grid w-full grid-cols-1 gap-3 md:w-[34rem] md:grid-cols-2">
             <FilterInput
               id="tag-suggestion-keyword"
               label="筛选标签"
@@ -125,6 +136,15 @@ function TagSuggestionModal({
               placeholder="搜索来源或目标标签"
               value={search}
               onChange={onSearchChange}
+            />
+            <FilterSelect
+              id="tag-suggestion-sort"
+              label="排序"
+              ariaLabel="治理建议排序"
+              value={sort}
+              onChange={(value) => onSortChange(value as AdminTagSuggestionSort)}
+              options={SUGGESTION_SORT_OPTIONS}
+              showSearch={false}
             />
           </div>
         </div>
@@ -696,6 +716,7 @@ export function TagSettingsPanel() {
   const [suggestions, setSuggestions] = useState<AdminTagSuggestion[]>([]);
   const [suggestionTotalCount, setSuggestionTotalCount] = useState(0);
   const [suggestionSearch, setSuggestionSearch] = useState("");
+  const [suggestionSort, setSuggestionSort] = useState<AdminTagSuggestionSort>("confidence_desc");
   const [suggestionPage, setSuggestionPage] = useState(1);
   const [suggestionPageSize, setSuggestionPageSize] = useState(DEFAULT_SUGGESTION_PAGE_SIZE);
   const [search, setSearch] = useState("");
@@ -740,6 +761,7 @@ export function TagSettingsPanel() {
     try {
       const payload = await listAdminTagSuggestions({
         search: suggestionSearch,
+        sort: suggestionSort,
         page: suggestionPage,
         pageSize: suggestionPageSize,
       });
@@ -749,7 +771,7 @@ export function TagSettingsPanel() {
     } catch (loadError) {
       setSuggestionError(loadError instanceof Error ? loadError.message : "标签治理建议加载失败。");
     }
-  }, [suggestionPage, suggestionPageSize, suggestionSearch]);
+  }, [suggestionPage, suggestionPageSize, suggestionSearch, suggestionSort]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -855,6 +877,12 @@ export function TagSettingsPanel() {
     const skippedText = result.skippedCount > 0 ? `，${result.skippedCount} 条已跳过` : "";
     showToast(`已自动合并 ${result.mergedCount} 个高置信标签${skippedText}${failedText}。`);
     await reloadAfterTagMutation();
+  }
+
+  async function handleRefreshSuggestions() {
+    const result = await precomputeAdminTagSuggestions();
+    showToast(`已刷新 ${result.storedCandidates} 条治理建议。`);
+    await loadSuggestions();
   }
 
   function runModalAction(action: () => Promise<void>) {
@@ -1018,12 +1046,17 @@ export function TagSettingsPanel() {
         page={suggestionPage}
         pageSize={suggestionPageSize}
         search={suggestionSearch}
+        sort={suggestionSort}
         isOpen={isSuggestionModalOpen}
         isBusy={isPending}
         error={suggestionError}
         onClose={closeSuggestionModal}
         onSearchChange={(value) => {
           setSuggestionSearch(value);
+          setSuggestionPage(1);
+        }}
+        onSortChange={(value) => {
+          setSuggestionSort(value);
           setSuggestionPage(1);
         }}
         onPageChange={setSuggestionPage}
@@ -1034,11 +1067,7 @@ export function TagSettingsPanel() {
         onOpenMergeChoice={setMergeChoiceSuggestion}
         onOpenDismissChoice={setDismissChoiceSuggestion}
         onAutoMergeHighConfidence={() => runModalAction(handleAutoMergeHighConfidenceSuggestions)}
-        onRefresh={() => {
-          startTransition(async () => {
-            await loadSuggestions();
-          });
-        }}
+        onRefresh={() => runModalAction(handleRefreshSuggestions)}
       />
 
       <SuggestionMergeChoiceModal

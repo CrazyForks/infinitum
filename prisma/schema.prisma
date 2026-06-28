@@ -51,6 +51,7 @@ enum IngestionTrigger {
 
 enum BackgroundTaskKind {
   ingestion
+  precompute
   item_regenerate_translation
   item_regenerate_summary
   item_reanalyze
@@ -453,13 +454,15 @@ model DailyReportSource {
 }
 
 model Tag {
-  id         String     @id @default(cuid())
-  name       String
-  normalized String     @unique
-  createdAt  DateTime   @default(now())
-  updatedAt  DateTime   @updatedAt
-  items      ItemTag[]
-  aliases    TagAlias[]
+  id                         String                   @id @default(cuid())
+  name                       String
+  normalized                 String                   @unique
+  createdAt                  DateTime                 @default(now())
+  updatedAt                  DateTime                 @updatedAt
+  items                      ItemTag[]
+  aliases                    TagAlias[]
+  sourceSuggestionCandidates TagSuggestionCandidate[] @relation("TagSuggestionCandidateSource")
+  targetSuggestionCandidates TagSuggestionCandidate[] @relation("TagSuggestionCandidateTarget")
 
   @@index([name])
   @@map("tags")
@@ -481,17 +484,44 @@ model TagAlias {
 }
 
 model TagSuggestionDecision {
-  id                       String   @id @default(cuid())
-  sourceTagNormalized      String
-  targetTagNormalized      String
-  decision                 String
-  decidedBy                String   @default("admin")
-  createdAt                DateTime @default(now())
-  updatedAt                DateTime @updatedAt
+  id                  String   @id @default(cuid())
+  sourceTagNormalized String
+  targetTagNormalized String
+  decision            String
+  decidedBy           String   @default("admin")
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
   @@unique([sourceTagNormalized, targetTagNormalized])
   @@index([decision])
   @@map("tag_suggestion_decisions")
+}
+
+model TagSuggestionCandidate {
+  id                  String   @id @default(cuid())
+  pairKey             String   @unique
+  sourceTagId         String
+  targetTagId         String
+  sourceTagNormalized String
+  targetTagNormalized String
+  confidence          Float
+  affectedItemCount   Int
+  sharedItemCount     Int      @default(0)
+  reason              String
+  status              String   @default("active")
+  expiresAt           DateTime
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  sourceTag           Tag      @relation("TagSuggestionCandidateSource", fields: [sourceTagId], references: [id], onDelete: Cascade)
+  targetTag           Tag      @relation("TagSuggestionCandidateTarget", fields: [targetTagId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceTagNormalized, targetTagNormalized])
+  @@index([status, confidence])
+  @@index([status, affectedItemCount])
+  @@index([expiresAt])
+  @@index([sourceTagId])
+  @@index([targetTagId])
+  @@map("tag_suggestion_candidates")
 }
 
 model ItemTag {

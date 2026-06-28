@@ -58,6 +58,7 @@ const taskKindLabels = {
   cluster_regenerate_summary: "聚合摘要重生成",
   daily_report_generate: "AI 日报生成",
   ingestion: "抓取任务",
+  precompute: "预计算",
   item_reanalyze: "内容重分析",
   item_regenerate_summary: "摘要重生成",
   item_regenerate_translation: "译文重生成",

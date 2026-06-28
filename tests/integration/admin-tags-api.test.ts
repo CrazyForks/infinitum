@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { prisma } from "@/lib/db";
+import { executePrecomputeTask } from "@/lib/precompute/service";
+import { precomputeTagSuggestionCandidates } from "@/lib/tags/service";
 
 const requireAdmin = vi.fn();
 
@@ -57,12 +59,36 @@ async function createSourceAndItems() {
       },
     ],
   });
+
+  return source;
+}
+
+async function createAdminTagItem(sourceId: string, id: string) {
+  await prisma.item.create({
+    data: {
+      id,
+      sourceId,
+      originalUrl: `https://admin-tags.example.com/${id}`,
+      canonicalUrl: `https://admin-tags.example.com/${id}`,
+      urlHash: id,
+      dedupeSignature: id,
+      originalTitle: id,
+      publishedAt: new Date("2026-04-10T10:00:00.000Z"),
+      status: "processed",
+      moderationStatus: "allowed",
+      qualityScore: 80,
+      qualityRationale: "ok",
+      language: "en",
+    },
+  });
 }
 
 describe("/api/admin/settings/tags", () => {
   beforeEach(async () => {
     requireAdmin.mockResolvedValue(undefined);
     await prisma.item.deleteMany();
+    await prisma.backgroundTaskRun.deleteMany();
+    await prisma.tagSuggestionCandidate.deleteMany();
     await prisma.tagSuggestionDecision.deleteMany();
     await prisma.tag.deleteMany();
     await prisma.source.deleteMany();
@@ -153,6 +179,7 @@ describe("/api/admin/settings/tags", () => {
         },
       ],
     });
+    await precomputeTagSuggestionCandidates();
 
     const { GET, POST } = await import("@/app/api/admin/settings/tags/suggestions/route");
     const response = await GET(new Request("http://localhost/api/admin/settings/tags/suggestions?search=open&page=1&pageSize=10"));
@@ -197,6 +224,70 @@ describe("/api/admin/settings/tags", () => {
     const suppressedResponse = await GET(new Request("http://localhost/api/admin/settings/tags/suggestions?search=open&page=1&pageSize=10"));
     const suppressedJson = await suppressedResponse.json();
     expect(suppressedJson.totalCount).toBe(0);
+  });
+
+  it("sorts tag governance suggestions by affected item count before pagination", async () => {
+    const source = await createSourceAndItems();
+    await Promise.all([
+      createAdminTagItem(source.id, "admin-tag-c"),
+      createAdminTagItem(source.id, "admin-tag-d"),
+      createAdminTagItem(source.id, "admin-tag-e"),
+    ]);
+    const openAi = await prisma.tag.create({
+      data: {
+        name: "OpenAI",
+        normalized: "openai",
+      },
+    });
+    const openAiVariant = await prisma.tag.create({
+      data: {
+        name: "Open AI",
+        normalized: "open ai",
+      },
+    });
+    const aiAgent = await prisma.tag.create({
+      data: {
+        name: "AI Agent",
+        normalized: "ai agent",
+      },
+    });
+    const aiAgents = await prisma.tag.create({
+      data: {
+        name: "AI Agents",
+        normalized: "ai agents",
+      },
+    });
+    await prisma.itemTag.createMany({
+      data: [
+        { itemId: "admin-tag-a", tagId: openAi.id },
+        { itemId: "admin-tag-b", tagId: openAiVariant.id },
+        { itemId: "admin-tag-a", tagId: aiAgent.id },
+        { itemId: "admin-tag-c", tagId: aiAgent.id },
+        { itemId: "admin-tag-d", tagId: aiAgent.id },
+        { itemId: "admin-tag-b", tagId: aiAgents.id },
+        { itemId: "admin-tag-e", tagId: aiAgents.id },
+      ],
+    });
+    await precomputeTagSuggestionCandidates();
+
+    const { GET } = await import("@/app/api/admin/settings/tags/suggestions/route");
+    const response = await GET(new Request("http://localhost/api/admin/settings/tags/suggestions?sort=affected_desc&page=1&pageSize=1"));
+    const json = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(json.totalCount).toBe(2);
+    expect(json.suggestions).toHaveLength(1);
+    expect(json.suggestions[0]).toMatchObject({
+      sourceTag: {
+        id: aiAgents.id,
+        name: "AI Agents",
+      },
+      targetTag: {
+        id: aiAgent.id,
+        name: "AI Agent",
+      },
+      affectedItemCount: 2,
+    });
   });
 
   it("auto-merges high-confidence existing tag suggestions for admins", async () => {
@@ -264,6 +355,60 @@ describe("/api/admin/settings/tags", () => {
     ]);
   });
 
+  it("runs generic precompute tasks and stores tag governance candidates", async () => {
+    await createSourceAndItems();
+    const canonical = await prisma.tag.create({
+      data: {
+        name: "OpenAI",
+        normalized: "openai",
+      },
+    });
+    const variant = await prisma.tag.create({
+      data: {
+        name: "Open AI",
+        normalized: "open ai",
+      },
+    });
+    await prisma.itemTag.createMany({
+      data: [
+        {
+          itemId: "admin-tag-a",
+          tagId: canonical.id,
+        },
+        {
+          itemId: "admin-tag-b",
+          tagId: variant.id,
+        },
+      ],
+    });
+    const taskRun = await prisma.backgroundTaskRun.create({
+      data: {
+        kind: "precompute",
+        triggerType: "manual",
+        status: "queued",
+        label: "预计算",
+      },
+    });
+
+    await executePrecomputeTask(taskRun);
+
+    await expect(prisma.tagSuggestionCandidate.findMany()).resolves.toEqual([
+      expect.objectContaining({
+        sourceTagId: variant.id,
+        targetTagId: canonical.id,
+        confidence: expect.any(Number),
+        affectedItemCount: 1,
+      }),
+    ]);
+    await expect(prisma.backgroundTaskRun.findUnique({
+      where: { id: taskRun.id },
+    })).resolves.toMatchObject({
+      status: "succeeded",
+      progressCurrent: 2,
+      progressTotal: 2,
+    });
+  });
+
   it("keeps tag governance suggestion scans bounded for large tag sets", async () => {
     await prisma.tag.createMany({
       data: [
@@ -282,9 +427,15 @@ describe("/api/admin/settings/tags", () => {
       ],
     });
 
+    const precomputeStartedAt = performance.now();
+    const precomputeResult = await precomputeTagSuggestionCandidates();
+    const precomputeElapsedMs = performance.now() - precomputeStartedAt;
+    expect(precomputeElapsedMs).toBeLessThan(1_500);
+    expect(precomputeResult.storedCandidates).toBeGreaterThanOrEqual(1);
+
     const { GET } = await import("@/app/api/admin/settings/tags/suggestions/route");
     const startedAt = performance.now();
-    const response = await GET(new Request("http://localhost/api/admin/settings/tags/suggestions?page=1&pageSize=10"));
+    const response = await GET(new Request("http://localhost/api/admin/settings/tags/suggestions?sort=confidence_desc&page=1&pageSize=10"));
     const elapsedMs = performance.now() - startedAt;
     const json = await response.json();
 

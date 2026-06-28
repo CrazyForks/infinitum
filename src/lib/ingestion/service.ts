@@ -6,7 +6,6 @@ import { INGESTION_PROGRESS_FLUSH_INTERVAL_MS } from "@/config/constants";
 import type { RuntimeConfig } from "@/config/runtime";
 import { createAiProvider } from "@/lib/ai/provider";
 import {
-  enqueueClusterMergeCleanPairPrecomputeTask,
   executeClusterMerge,
   recomputeCluster,
   type ClusterRecomputeResult,
@@ -24,6 +23,7 @@ import {
 } from "@/lib/feed/repository";
 import { invalidateFeedCache } from "@/lib/feed/cache";
 import { scheduleDefaultFeedCacheWarm } from "@/lib/feed/warmup";
+import { enqueuePrecomputeTask } from "@/lib/precompute/service";
 import { createConfiguredArticleFetcher, fetchArticleContent } from "@/lib/ingestion/article";
 import {
   deriveSourceConcurrency,
@@ -1103,7 +1103,7 @@ export async function runIngestionTask(taskRun: BackgroundTaskRun, options?: Par
   });
 
   if (completedRun.errorSummary !== TASK_RUN_CANCELLED_MESSAGE) {
-    await enqueueClusterMergeCleanPairPrecomputeTask({ triggerType });
+    await enqueuePrecomputeTask({ triggerType });
   }
 
   return completedRun;

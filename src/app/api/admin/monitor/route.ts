@@ -9,6 +9,7 @@ import type {
 const TASK_STATUSES = new Set(["queued", "running", "succeeded", "failed", "partial", "cancelled"]);
 const TASK_KINDS = new Set([
   "ingestion",
+  "precompute",
   "item_regenerate_translation",
   "item_regenerate_summary",
   "item_reanalyze",

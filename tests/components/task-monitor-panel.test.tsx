@@ -561,6 +561,7 @@ describe("TaskMonitorPanel", () => {
     const baseTask = buildMonitorSnapshot().runningTasks[0];
     const recentTasks: BackgroundTaskMonitorSnapshot["recentTasks"] = [
       { ...baseTask, id: "task-ingestion", kind: "ingestion", label: "默认抓取任务", status: "succeeded" },
+      { ...baseTask, id: "task-generic-precompute", kind: "precompute", label: "预计算", status: "succeeded" },
       { ...baseTask, id: "task-reanalyze", kind: "item_reanalyze", label: "内容重分析", status: "succeeded" },
       { ...baseTask, id: "task-summary", kind: "item_regenerate_summary", label: "摘要重生成", status: "succeeded" },
       { ...baseTask, id: "task-translation", kind: "item_regenerate_translation", label: "译文重生成", status: "succeeded" },
@@ -594,6 +595,7 @@ describe("TaskMonitorPanel", () => {
     expect(Array.from(kindSelect.options).map((option) => option.textContent)).toEqual([
       "全部",
       "抓取任务",
+      "预计算",
       "内容重分析",
       "摘要重生成",
       "译文重生成",

@@ -51,6 +51,7 @@ const statusLabels: Record<BackgroundTaskRunStatus, string> = {
 
 const kindLabels: Record<TaskRunSnapshot["kind"], string> = {
   ingestion: "抓取任务",
+  precompute: "预计算",
   item_reanalyze: "内容重分析",
   item_regenerate_summary: "摘要重生成",
   item_regenerate_translation: "译文重生成",

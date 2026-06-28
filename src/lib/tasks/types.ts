@@ -11,6 +11,7 @@ export type DefaultItemCleanupScheduleKey = typeof DEFAULT_ITEM_CLEANUP_SCHEDULE
 
 export type BackgroundTaskRunKind =
   | "ingestion"
+  | "precompute"
   | "item_regenerate_translation"
   | "item_regenerate_summary"
   | "item_reanalyze"

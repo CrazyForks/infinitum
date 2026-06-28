@@ -98,6 +98,8 @@ export type AdminTagSuggestionListPayload = {
   pageSize: number;
 };
 
+export type AdminTagSuggestionSort = "confidence_desc" | "affected_desc";
+
 type TagAliasPayload = {
   error?: string;
   alias?: AdminTagAlias;
@@ -121,6 +123,15 @@ type TagSuggestionAutoMergePayload = {
   affectedClusterCount: number;
   skippedCount: number;
   failedCount: number;
+};
+
+type TagSuggestionPrecomputePayload = {
+  error?: string;
+  tagCount: number;
+  scannedPairs: number;
+  candidateCount: number;
+  storedCandidates: number;
+  durationMs: number;
 };
 
 async function requestAdminSettingsJson<T extends { error?: string }>(
@@ -411,10 +422,14 @@ export async function listAdminTagSuggestions(input?: {
   page?: number;
   pageSize?: number;
   limit?: number;
+  sort?: AdminTagSuggestionSort;
 }) {
   const search = new URLSearchParams();
   if (input?.search?.trim()) {
     search.set("search", input.search.trim());
+  }
+  if (input?.sort) {
+    search.set("sort", input.sort);
   }
   if (input?.page) {
     search.set("page", String(input.page));
@@ -459,5 +474,16 @@ export async function autoMergeHighConfidenceAdminTagSuggestions(input?: {
       limit: input?.limit,
     },
     "高置信标签自动合并失败。",
+  );
+}
+
+export async function precomputeAdminTagSuggestions() {
+  return requestAdminSettingsJson<TagSuggestionPrecomputePayload>(
+    "/api/admin/settings/tags/suggestions",
+    "POST",
+    {
+      action: "precompute",
+    },
+    "标签治理建议预计算失败。",
   );
 }

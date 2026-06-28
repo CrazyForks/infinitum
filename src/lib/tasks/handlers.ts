@@ -4,11 +4,15 @@ import { executeClusterMergeCleanPairPrecomputeTask, executeClusterSummaryTask }
 import { executeDailyReportTask } from "@/lib/daily-report/service";
 import { runIngestionTask } from "@/lib/ingestion/service";
 import { executeItemCleanupTask, executeItemReanalyzeTask, executeItemRegenerationTask, executeItemReparseAggregationsTask } from "@/lib/items/service";
+import { executePrecomputeTask } from "@/lib/precompute/service";
 
 export async function executeTaskRun(taskRun: BackgroundTaskRun) {
   switch (taskRun.kind) {
     case "ingestion":
       await runIngestionTask(taskRun);
+      return;
+    case "precompute":
+      await executePrecomputeTask(taskRun);
       return;
     case "item_regenerate_translation":
       await executeItemRegenerationTask(taskRun, "translation");
