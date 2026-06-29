@@ -782,6 +782,33 @@ describe("daily report service", () => {
       sourceSummary: "OpenAI 发布新模型摘要",
       sourceQualityScore: 90,
     });
+
+    const storedReport = await prisma.dailyReport.findUniqueOrThrow({
+      where: {
+        date_timezone: {
+          date: REPORT_DATE,
+          timezone: "Asia/Shanghai",
+        },
+      },
+    });
+    const candidateSnapshot = JSON.parse(storedReport.candidateSnapshot ?? "{}") as {
+      candidateCount?: number;
+      candidates?: Array<{ title: string; candidateScore: number }>;
+      excludedRecentDuplicates?: unknown[];
+    };
+    const detail = await getDailyReportByDate(REPORT_DATE, true);
+
+    expect(candidateSnapshot.candidateCount).toBe(4);
+    expect(candidateSnapshot.candidates?.[0]).toMatchObject({
+      title: "OpenAI 发布新模型",
+      candidateScore: expect.any(Number),
+    });
+    expect(candidateSnapshot.excludedRecentDuplicates).toEqual([]);
+    expect(detail?.candidateReview).toMatchObject({
+      candidateCount: 4,
+      selectedCount: 2,
+      excludedRecentDuplicates: [],
+    });
   });
 
   it("reports sourceCount as distinct referenced items", async () => {

@@ -283,9 +283,9 @@ describe("TaskMonitorPanel", () => {
     ).toBeInTheDocument();
     expect(within(dialog).getByText("抓取 1 个源 · 10 篇内容 · 正文补抓 2 篇")).toBeInTheDocument();
     expect(within(dialog).getByText("规则过滤 2 · 复用 1")).toBeInTheDocument();
-    expect(within(dialog).getByText("完成 5 · 失败 1")).toBeInTheDocument();
-    expect(within(dialog).getByText("成功 1 · 失败 0 · 子事件 12")).toBeInTheDocument();
-    expect(within(dialog).getByText("完成 4 · 过滤 2 · 更新/重处理 1")).toBeInTheDocument();
+    expect(within(dialog).getByText("完成 5 · 失败 1 · 空响应 0 · 近似原文 0 · 格式无效 0")).toBeInTheDocument();
+    expect(within(dialog).getByText("成功 1 · 失败 0 · 无子事件 0 · 格式无效 0 · 子事件 12")).toBeInTheDocument();
+    expect(within(dialog).getByText("完成 4 · 失败 0 · 供应商错误 0 · 过滤 2 · 更新/重处理 1")).toBeInTheDocument();
     expect(within(dialog).getByText("指纹命中 1 · 本地直连 2 · AI归组 1 · 跳过 0 · 新建 1")).toBeInTheDocument();
     expect(within(dialog).getByText("候选 12/18 · Dirty 5 · Hash跳过 4 · AI返回 2 · 移动 6 · 失败 1 · 已合并 · 合并后 9 组")).toBeInTheDocument();
     expect(within(dialog).getByText("参与重算 2 · 完成更新 2 · 摘要完成 1 · 摘要失败 0 · 已删除 0")).toBeInTheDocument();

@@ -16,6 +16,7 @@ export type DailyReportCandidate = {
   itemId: string;
   clusterId: string | null;
   title: string;
+  itemTitle: string;
   sourceName: string;
   url: string;
   summary: string;
@@ -113,6 +114,39 @@ export type DailyReportSourceRegistryEntry = {
   eventDate: string | null;
 };
 
+export type DailyReportCandidateSnapshotEntry = Pick<
+  DailyReportCandidate,
+  | "id"
+  | "sourceKey"
+  | "itemId"
+  | "clusterId"
+  | "title"
+  | "itemTitle"
+  | "sourceName"
+  | "url"
+  | "candidateScore"
+  | "sourceCount"
+  | "itemCount"
+  | "eventType"
+  | "eventSubject"
+  | "eventAction"
+  | "eventObject"
+  | "eventDate"
+>;
+
+export type DailyReportExcludedCandidateSnapshotEntry = DailyReportCandidateSnapshotEntry & {
+  excludedReason: string;
+  matchedRecentDate: string | null;
+  matchedRecentTitle: string | null;
+};
+
+export type DailyReportCandidateReviewDTO = {
+  candidateCount: number;
+  selectedCount: number;
+  candidates: DailyReportCandidateSnapshotEntry[];
+  excludedRecentDuplicates: DailyReportExcludedCandidateSnapshotEntry[];
+};
+
 export type DailyReportListItemDTO = {
   id: string;
   date: string;
@@ -133,6 +167,7 @@ export type DailyReportDetailDTO = DailyReportListItemDTO & {
   sources: DailyReportSourceDTO[];
   previous: { date: string; title: string } | null;
   next: { date: string; title: string } | null;
+  candidateReview?: DailyReportCandidateReviewDTO | null;
 };
 
 export type DailyReportArchiveWeekDTO = {

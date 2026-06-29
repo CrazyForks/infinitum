@@ -101,7 +101,12 @@ describe("source monitor service", () => {
       weekStaleSource.id,
       staleSource.id,
     ]);
-    expect(snapshot.health.attentionSources).toEqual([]);
+    expect(snapshot.health.attentionSources?.map((source) => source.id)).toEqual([
+      failedSource.id,
+      weekStaleSource.id,
+    ]);
+    expect(snapshot.health.attentionSources?.[0]?.attentionReasons).toContain("抓取异常：RSS fetch failed with status 500");
+    expect(snapshot.health.attentionSources?.[1]?.attentionReasons).toContain("10 天无新增内容");
     expect(dayBucket).toMatchObject({ count: 1 });
     expect(dayBucket).not.toHaveProperty("sources");
     expect(weekBucket).toMatchObject({ count: 1 });

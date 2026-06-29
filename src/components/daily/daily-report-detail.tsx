@@ -24,6 +24,7 @@ import {
   IconTrash,
 } from "@/components/ui/icons";
 import { ModalShell } from "@/components/ui/modal-shell";
+import { PaginationControls } from "@/components/ui/pagination-controls";
 import { formatDailyReportDateTime } from "@/lib/daily-report/date";
 import { buildDailyReportDetailMarkdown } from "@/lib/daily-report/export";
 import type { DailyReportDetailDTO } from "@/lib/daily-report/types";
@@ -52,6 +53,11 @@ type TocItem = {
   text: string;
   level: number;
 };
+
+type CandidateReview = NonNullable<DailyReportDetailDTO["candidateReview"]>;
+type CandidateReviewMode = "candidates" | "excluded";
+
+const candidateReviewPageSize = 8;
 
 function statusLabel(status: DailyReportDetailDTO["status"]) {
   if (status === "published") return "已发布";
@@ -122,6 +128,151 @@ function DailyReportUnavailable({ isAdmin, isLoading }: { isAdmin: boolean; isLo
   );
 }
 
+function isExcludedCandidate(
+  candidate: CandidateReview["candidates"][number] | CandidateReview["excludedRecentDuplicates"][number],
+): candidate is CandidateReview["excludedRecentDuplicates"][number] {
+  return "excludedReason" in candidate;
+}
+
+function formatCandidateEventAnchor(candidate: CandidateReview["candidates"][number]) {
+  return [
+    candidate.eventSubject,
+    candidate.eventAction,
+    candidate.eventObject,
+    candidate.eventDate,
+  ].filter(Boolean).join(" / ");
+}
+
+function CandidateReviewModal({
+  isOpen,
+  onClose,
+  review,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  review: CandidateReview;
+}) {
+  const [mode, setMode] = useState<CandidateReviewMode>("candidates");
+  const [page, setPage] = useState(1);
+  const items = mode === "candidates" ? review.candidates : review.excludedRecentDuplicates;
+  const totalPages = Math.max(1, Math.ceil(items.length / candidateReviewPageSize));
+  const currentPage = Math.min(page, totalPages);
+  const visibleItems = items.slice(
+    (currentPage - 1) * candidateReviewPageSize,
+    currentPage * candidateReviewPageSize,
+  );
+
+  useEffect(() => {
+    setPage(1);
+  }, [isOpen, mode, review]);
+
+  return (
+    <ModalShell
+      isOpen={isOpen}
+      onClose={onClose}
+      title="候选与去重"
+      widthClassName="max-w-3xl"
+      panelClassName="flex max-h-[calc(100vh-2rem)] flex-col"
+      bodyClassName="min-h-0 flex-1 space-y-4 overflow-y-auto p-4"
+      footerClassName="shrink-0 border-t border-[color:var(--line)] bg-[var(--surface-muted)] p-4"
+      footer={
+        items.length > 0 ? (
+          <PaginationControls
+            totalItems={items.length}
+            page={currentPage}
+            totalPages={totalPages}
+            pageSize={candidateReviewPageSize}
+            pageSizeOptions={[candidateReviewPageSize]}
+            onPageChange={setPage}
+            onPageSizeChange={() => setPage(1)}
+          />
+        ) : null
+      }
+    >
+      <div className="grid grid-cols-3 gap-2 rounded-sm border border-[color:var(--line)] bg-[var(--bg-muted)] p-2 text-center text-xs text-[var(--text-2)]">
+        <div>
+          <div className="text-lg font-semibold text-[var(--foreground)]">{review.candidateCount}</div>
+          <div>候选</div>
+        </div>
+        <div>
+          <div className="text-lg font-semibold text-[var(--foreground)]">{review.selectedCount}</div>
+          <div>入选</div>
+        </div>
+        <div>
+          <div className="text-lg font-semibold text-[var(--foreground)]">{review.excludedRecentDuplicates.length}</div>
+          <div>近期重复</div>
+        </div>
+      </div>
+
+      <div className="inline-flex rounded-sm border border-[color:var(--line)] bg-[var(--surface)] p-1">
+        <button
+          type="button"
+          onClick={() => setMode("candidates")}
+          className={cx(
+            "rounded-sm px-3 py-1.5 text-sm transition",
+            mode === "candidates"
+              ? "bg-[var(--accent)] text-white"
+              : "text-[var(--text-2)] hover:bg-[var(--bg-muted)] hover:text-[var(--text-1)]",
+          )}
+        >
+          全部候选
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode("excluded")}
+          className={cx(
+            "rounded-sm px-3 py-1.5 text-sm transition",
+            mode === "excluded"
+              ? "bg-[var(--accent)] text-white"
+              : "text-[var(--text-2)] hover:bg-[var(--bg-muted)] hover:text-[var(--text-1)]",
+          )}
+        >
+          重复排除
+        </button>
+      </div>
+
+      <div className="min-h-72 space-y-2">
+        {visibleItems.length === 0 ? (
+          <div className="rounded-sm border border-[color:var(--line)] bg-[var(--bg-muted)] p-5 text-sm text-[var(--text-3)]">
+            {mode === "candidates" ? "暂无候选" : "无重复排除"}
+          </div>
+        ) : visibleItems.map((candidate) => (
+          <div
+            key={`${candidate.sourceKey}-${isExcludedCandidate(candidate) ? candidate.matchedRecentDate ?? "" : ""}`}
+            className="rounded-sm border border-[color:var(--line)] bg-[var(--surface)] p-3"
+          >
+            <div className="line-clamp-2 text-sm font-medium leading-6 text-[var(--text-1)]">
+              {candidate.itemTitle}
+            </div>
+            {candidate.title !== candidate.itemTitle ? (
+              <div className="mt-1 text-xs text-[var(--text-3)]">
+                事件：{candidate.title}
+              </div>
+            ) : formatCandidateEventAnchor(candidate) ? (
+              <div className="mt-1 text-xs text-[var(--text-3)]">
+                事件：{formatCandidateEventAnchor(candidate)}
+              </div>
+            ) : null}
+            <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-[var(--text-3)]">
+              <span>{candidate.sourceName}</span>
+              <span>分数 {candidate.candidateScore}</span>
+              <span>来源 {candidate.sourceCount}</span>
+              <span>内容 {candidate.itemCount}</span>
+            </div>
+            {isExcludedCandidate(candidate) ? (
+              <div className="mt-2 rounded-sm bg-[var(--bg-muted)] px-2 py-1 text-xs leading-5 text-[var(--text-2)]">
+                {candidate.excludedReason}
+                {candidate.matchedRecentDate ? `：${candidate.matchedRecentDate}` : ""}
+                {candidate.matchedRecentTitle ? ` · ${candidate.matchedRecentTitle}` : ""}
+              </div>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    </ModalShell>
+  );
+}
+
 export function DailyReportDetail({
   report: initialReport,
   date,
@@ -186,6 +337,7 @@ function DailyReportDetailContent({ report, isAdmin }: DailyReportDetailContentP
   const sourceListContentHtmlRef = useRef("");
   const [feedback, setFeedback] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [candidateReviewOpen, setCandidateReviewOpen] = useState(false);
   const [activeTocId, setActiveTocId] = useState("top");
   const [tocItems, setTocItems] = useState<TocItem[]>([]);
   const [isPending, startTransition] = useTransition();
@@ -390,6 +542,17 @@ function DailyReportDetailContent({ report, isAdmin }: DailyReportDetailContentP
               </h2>
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              {isAdmin && report.candidateReview ? (
+                <IconButton
+                  onClick={() => setCandidateReviewOpen(true)}
+                  variant="ghost"
+                  size="md"
+                  title="查看候选与去重"
+                  className="rounded-sm"
+                >
+                  <IconList className="h-4 w-4" />
+                </IconButton>
+              ) : null}
               <IconButton onClick={exportMarkdown} variant="ghost" size="md" title="导出 Markdown" className="rounded-sm">
                 <IconArrowDown className="h-4 w-4" />
               </IconButton>
@@ -498,6 +661,14 @@ function DailyReportDetailContent({ report, isAdmin }: DailyReportDetailContentP
           </div>
         </aside>
       </div>
+
+      {isAdmin && report.candidateReview ? (
+        <CandidateReviewModal
+          isOpen={candidateReviewOpen}
+          onClose={() => setCandidateReviewOpen(false)}
+          review={report.candidateReview}
+        />
+      ) : null}
 
       <ModalShell
         isOpen={deleteDialogOpen}

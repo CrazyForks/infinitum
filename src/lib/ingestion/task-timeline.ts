@@ -37,16 +37,27 @@ export type IngestionTimelineCounters = {
   itemSummary: {
     completed: number;
     failed: number;
+    failedEmptyResponse: number;
+    failedSourceLike: number;
+    failedInvalidResponse: number;
+    failedOther: number;
     durationMs: number;
   };
   aggregationParsing: {
     parsed: number;
     failed: number;
+    failedNoEvents: number;
+    failedInvalidResponse: number;
+    failedOther: number;
     events: number;
     durationMs: number;
   };
   itemAnalysis: {
     completed: number;
+    failed: number;
+    failedInvalidResponse: number;
+    failedProviderError: number;
+    failedOther: number;
     filtered: number;
     updatedExisting: number;
     durationMs: number;
@@ -184,16 +195,27 @@ export function createIngestionTimelineCounters(): IngestionTimelineCounters {
     itemSummary: {
       completed: 0,
       failed: 0,
+      failedEmptyResponse: 0,
+      failedSourceLike: 0,
+      failedInvalidResponse: 0,
+      failedOther: 0,
       durationMs: 0,
     },
     aggregationParsing: {
       parsed: 0,
       failed: 0,
+      failedNoEvents: 0,
+      failedInvalidResponse: 0,
+      failedOther: 0,
       events: 0,
       durationMs: 0,
     },
     itemAnalysis: {
       completed: 0,
+      failed: 0,
+      failedInvalidResponse: 0,
+      failedProviderError: 0,
+      failedOther: 0,
       filtered: 0,
       updatedExisting: 0,
       durationMs: 0,
@@ -380,6 +402,10 @@ export function buildIngestionTaskTimeline(input: {
       metrics: [
         { label: "完成", value: counters.itemSummary.completed },
         { label: "失败", value: counters.itemSummary.failed },
+        { label: "空响应", value: counters.itemSummary.failedEmptyResponse },
+        { label: "近似原文", value: counters.itemSummary.failedSourceLike },
+        { label: "格式无效", value: counters.itemSummary.failedInvalidResponse },
+        { label: "其他失败", value: counters.itemSummary.failedOther },
         { label: "累计耗时ms", value: counters.itemSummary.durationMs },
       ],
     },
@@ -396,6 +422,9 @@ export function buildIngestionTaskTimeline(input: {
       metrics: [
         { label: "拆分成功", value: counters.aggregationParsing.parsed },
         { label: "拆分失败", value: counters.aggregationParsing.failed },
+        { label: "无子事件", value: counters.aggregationParsing.failedNoEvents },
+        { label: "格式无效", value: counters.aggregationParsing.failedInvalidResponse },
+        { label: "其他失败", value: counters.aggregationParsing.failedOther },
         { label: "子事件", value: counters.aggregationParsing.events },
         { label: "累计耗时ms", value: counters.aggregationParsing.durationMs },
       ],
@@ -406,11 +435,16 @@ export function buildIngestionTaskTimeline(input: {
       status: resolveNodeStatusFromCounts({
         stageTiming: stages.itemProcessing,
         successCount: counters.itemAnalysis.completed,
+        failureCount: counters.itemAnalysis.failed,
       }),
       ...toNodeTiming(stages.itemProcessing),
       modelName: modelNames.itemAnalysis,
       metrics: [
         { label: "完成", value: counters.itemAnalysis.completed },
+        { label: "失败", value: counters.itemAnalysis.failed },
+        { label: "格式无效", value: counters.itemAnalysis.failedInvalidResponse },
+        { label: "供应商错误", value: counters.itemAnalysis.failedProviderError },
+        { label: "其他失败", value: counters.itemAnalysis.failedOther },
         { label: "过滤", value: counters.itemAnalysis.filtered },
         { label: "更新/重处理", value: counters.itemAnalysis.updatedExisting },
         { label: "累计耗时ms", value: counters.itemAnalysis.durationMs },

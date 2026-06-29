@@ -7,6 +7,7 @@ import type {
 } from "@/lib/source-monitor/types";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const STALE_ATTENTION_DAYS = 7;
 
 const INACTIVITY_BUCKETS: Array<{
   key: SourceInactivityBucketKey;
@@ -56,6 +57,34 @@ function sortByOldestUpdateFirst(left: SourceMonitorEntry, right: SourceMonitorE
   }
 
   return left.lastItemCreatedAt.localeCompare(right.lastItemCreatedAt);
+}
+
+function getAttentionReasons(source: SourceMonitorEntry) {
+  const reasons: string[] = [];
+
+  if (source.healthStatus === "failed") {
+    reasons.push(source.healthMessage ? `抓取异常：${source.healthMessage}` : "抓取异常");
+  }
+
+  if (source.healthStatus === "unknown") {
+    reasons.push("尚未完成首次巡检");
+  }
+
+  if (source.itemCount === 0) {
+    reasons.push("尚无入库内容");
+  } else if (source.inactiveDays !== null && source.inactiveDays >= STALE_ATTENTION_DAYS) {
+    reasons.push(`${source.inactiveDays} 天无新增内容`);
+  }
+
+  return reasons;
+}
+
+function getAttentionRank(source: SourceMonitorEntry) {
+  if (source.healthStatus === "failed") return 0;
+  if (source.healthStatus === "unknown") return 1;
+  if (source.itemCount === 0) return 2;
+  if (source.inactiveDays !== null && source.inactiveDays >= STALE_ATTENTION_DAYS) return 3;
+  return 4;
 }
 
 function isSourceInInactivityBucket(
@@ -176,7 +205,7 @@ export async function getSourceMonitorSnapshot(
     .map((source): SourceMonitorEntry => {
       const lastItemCreatedAt = latestItemCreatedAtBySourceId.get(source.id) ?? null;
 
-      return {
+      const entry: SourceMonitorEntry = {
         id: source.id,
         name: source.name,
         rssUrl: source.rssUrl,
@@ -190,6 +219,11 @@ export async function getSourceMonitorSnapshot(
         inactiveDays: getInactiveDays(lastItemCreatedAt, now),
         itemCount: itemCountBySourceId.get(source.id) ?? 0,
       };
+
+      return {
+        ...entry,
+        attentionReasons: getAttentionReasons(entry),
+      };
     })
     .sort(sortByOldestUpdateFirst);
 
@@ -198,6 +232,16 @@ export async function getSourceMonitorSnapshot(
   const unknownCount = entries.filter((source) => source.healthStatus === "unknown").length;
 
   const filteredEntries = opts ? applyFilters(entries, opts) : entries;
+  const attentionSources = entries
+    .filter((source) => (source.attentionReasons?.length ?? 0) > 0)
+    .sort((left, right) => {
+      const rankDiff = getAttentionRank(left) - getAttentionRank(right);
+      if (rankDiff !== 0) return rankDiff;
+      if ((right.inactiveDays ?? -1) !== (left.inactiveDays ?? -1)) {
+        return (right.inactiveDays ?? -1) - (left.inactiveDays ?? -1);
+      }
+      return left.name.localeCompare(right.name, "zh-CN");
+    });
   const pageSize = normalizePageSize(opts?.pageSize);
   const totalItems = filteredEntries.length;
   const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
@@ -219,7 +263,7 @@ export async function getSourceMonitorSnapshot(
       healthyCount,
       failedCount,
       unknownCount,
-      attentionSources: [],
+      attentionSources,
     },
     inactivityBuckets: INACTIVITY_BUCKETS.map((bucket) => {
       const cutoff = new Date(now.getTime() - bucket.minDays * DAY_MS);

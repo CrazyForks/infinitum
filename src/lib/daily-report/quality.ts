@@ -7,6 +7,7 @@ export type CandidateSnapshotEntry = {
   itemId: string | null;
   clusterId: string | null;
   title: string;
+  itemTitle: string;
   sourceName: string;
   url: string;
   candidateScore: number;
@@ -14,6 +15,9 @@ export type CandidateSnapshotEntry = {
   itemCount: number;
   eventType: string | null;
   eventSubject: string | null;
+  eventAction: string | null;
+  eventObject: string | null;
+  eventDate: string | null;
 };
 
 export type SectionFillRateBucket = {
@@ -98,8 +102,13 @@ function parseContentSafely(json: string, label: string): DailyReportContent | n
 function parseSnapshotSafely(json: string | null, label: string): CandidateSnapshotEntry[] {
   if (!json) return [];
   try {
-    const parsed = JSON.parse(json);
-    return Array.isArray(parsed) ? parsed as CandidateSnapshotEntry[] : [];
+    const parsed = JSON.parse(json) as unknown;
+    if (!parsed || typeof parsed !== "object" || !("candidates" in parsed)) {
+      return [];
+    }
+
+    const candidates = (parsed as { candidates?: unknown }).candidates;
+    return Array.isArray(candidates) ? candidates as CandidateSnapshotEntry[] : [];
   } catch (error) {
     console.warn(`[daily-report-quality] failed to parse candidateSnapshot for ${label}:`, error);
     return [];

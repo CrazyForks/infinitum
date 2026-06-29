@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FilterSelect } from "@/components/ui/filter-select";
 import { IconExternalLink } from "@/components/ui/icons";
+import { ModalShell } from "@/components/ui/modal-shell";
 import { PaginationControls } from "@/components/ui/pagination-controls";
 import { StatusTag } from "@/components/ui/status-tag";
 import { useToast } from "@/components/ui/toast";
@@ -24,6 +25,8 @@ type SourceMonitorPanelProps = {
 type InactivityFilter = "all" | SourceInactivityBucketKey;
 type HealthStatusFilter = "all" | SourceMonitorEntry["healthStatus"];
 type GroupFilter = "all" | string;
+
+const attentionSummaryPageSize = 8;
 
 const healthLabels: Record<SourceMonitorEntry["healthStatus"], string> = {
   failed: "异常",
@@ -119,6 +122,131 @@ function StatCard({
   );
 }
 
+function buildMockAttentionSources(snapshot: SourceMonitorSnapshot) {
+  const now = new Date();
+  const tenDaysAgo = new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000).toISOString();
+  const baseSources = snapshot.sources;
+
+  return Array.from({ length: 12 }).map((_, index): SourceMonitorEntry => {
+    const baseSource = baseSources[index % Math.max(baseSources.length, 1)];
+    const isFailed = index % 3 === 0;
+    const isUnknown = index % 3 === 2;
+    const inactiveDays = 7 + index;
+
+    return {
+      ...(baseSource ?? {
+        rssUrl: "https://example.com/rss.xml",
+        siteUrl: "https://example.com",
+        groupName: "Mock",
+      }),
+      id: `mock-attention-source-${index + 1}`,
+      name: isFailed
+        ? `模拟异常源 ${index + 1}`
+        : isUnknown
+          ? `模拟新接入源 ${index + 1}`
+          : `模拟停更源 ${index + 1}`,
+      healthStatus: isFailed ? "failed" : isUnknown ? "unknown" : "healthy",
+      healthMessage: isFailed ? "RSS fetch failed with status 500" : null,
+      healthCheckedAt: isUnknown ? null : now.toISOString(),
+      lastFetchedAt: isUnknown ? null : now.toISOString(),
+      lastItemCreatedAt: isUnknown ? null : tenDaysAgo,
+      inactiveDays: isUnknown ? null : inactiveDays,
+      itemCount: isUnknown ? 0 : 12 + index,
+      attentionReasons: isFailed
+        ? ["抓取异常：RSS fetch failed with status 500", `${inactiveDays} 天无新增内容`]
+        : isUnknown
+          ? ["尚未完成首次巡检", "尚无入库内容"]
+          : [`${inactiveDays} 天无新增内容`],
+    };
+  });
+}
+
+function AttentionSummaryModal({
+  isOpen,
+  onClose,
+  sources,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  sources: SourceMonitorEntry[];
+}) {
+  const [page, setPage] = useState(1);
+  const totalPages = Math.max(1, Math.ceil(sources.length / attentionSummaryPageSize));
+  const currentPage = Math.min(page, totalPages);
+  const visibleSources = sources.slice(
+    (currentPage - 1) * attentionSummaryPageSize,
+    currentPage * attentionSummaryPageSize,
+  );
+
+  useEffect(() => {
+    setPage(1);
+  }, [isOpen, sources]);
+
+  return (
+    <ModalShell
+      isOpen={isOpen}
+      onClose={onClose}
+      title="异常摘要"
+      widthClassName="max-w-2xl"
+      panelClassName="flex max-h-[calc(100vh-2rem)] flex-col"
+      bodyClassName="min-h-0 flex-1 space-y-3 overflow-y-auto p-4"
+      footerClassName="shrink-0 border-t border-[color:var(--line)] bg-[var(--surface-muted)] p-4"
+      footer={
+        sources.length > attentionSummaryPageSize ? (
+          <PaginationControls
+            totalItems={sources.length}
+            page={currentPage}
+            totalPages={totalPages}
+            pageSize={attentionSummaryPageSize}
+            pageSizeOptions={[attentionSummaryPageSize]}
+            onPageChange={setPage}
+            onPageSizeChange={() => setPage(1)}
+          />
+        ) : null
+      }
+    >
+      <div className="grid grid-cols-3 gap-2 rounded-sm border border-[color:var(--line)] bg-[var(--bg-muted)] p-2 text-center text-xs text-[var(--text-2)]">
+        <div>
+          <div className="text-lg font-semibold text-[var(--foreground)]">{sources.length}</div>
+          <div>需关注</div>
+        </div>
+        <div>
+          <div className="text-lg font-semibold text-[var(--foreground)]">
+            {sources.filter((source) => source.healthStatus === "failed").length}
+          </div>
+          <div>异常</div>
+        </div>
+        <div>
+          <div className="text-lg font-semibold text-[var(--foreground)]">
+            {sources.filter((source) => source.healthStatus === "unknown").length}
+          </div>
+          <div>未巡检</div>
+        </div>
+      </div>
+      <div className="space-y-2">
+        {visibleSources.map((source) => (
+          <div key={source.id} className="rounded-sm border border-[color:var(--line)] bg-[var(--surface)] p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="min-w-0">
+                <div className="truncate text-sm font-medium text-[var(--text-1)]">{source.name}</div>
+                <div className="mt-1 text-xs text-[var(--text-3)]">
+                  最后入库：{formatDateTime(source.lastItemCreatedAt)} · 文章 {source.itemCount}
+                </div>
+              </div>
+              <StatusTag tone={healthTone[source.healthStatus]}>
+                {healthLabels[source.healthStatus]}
+              </StatusTag>
+            </div>
+            <div className="mt-2 text-xs leading-5 text-[var(--danger-ink)]">
+              {(source.attentionReasons ?? []).join("；")}
+            </div>
+          </div>
+        ))}
+      </div>
+    </ModalShell>
+  );
+}
+
 function SourceTable({
   emptyText,
   sources,
@@ -194,7 +322,9 @@ function SourceTable({
                     {source.itemCount}
                   </td>
                   <td className="break-words px-3 py-3 text-xs leading-5 text-[var(--danger-ink)]">
-                    {source.healthMessage ?? (source.healthStatus === "unknown" ? "尚未完成首次巡检" : "-")}
+                    {source.attentionReasons?.length
+                      ? source.attentionReasons.join("；")
+                      : source.healthMessage ?? (source.healthStatus === "unknown" ? "尚未完成首次巡检" : "-")}
                   </td>
                 </tr>
               );
@@ -215,6 +345,8 @@ export function SourceMonitorPanel({ initialSnapshot, hideStats = false }: Sourc
   const [page, setPage] = useState(initialSnapshot?.pagination.page ?? 1);
   const [pageSize, setPageSize] = useState(initialSnapshot?.pagination.pageSize ?? 10);
   const [isRefreshing, setIsRefreshing] = useState(!initialSnapshot);
+  const [isLocalPreviewAvailable, setIsLocalPreviewAvailable] = useState(false);
+  const [attentionSummaryOpen, setAttentionSummaryOpen] = useState(false);
 
   const inactivityFilterOptions = useMemo(
     () => [
@@ -246,6 +378,18 @@ export function SourceMonitorPanel({ initialSnapshot, hideStats = false }: Sourc
     inactivityFilter !== "all" ||
     healthStatusFilter !== "all" ||
     groupFilter !== "all";
+
+  const attentionSummarySources = useMemo(
+    () => {
+      const realAttentionSources = snapshot?.health.attentionSources ?? [];
+      if (realAttentionSources.length > 0) {
+        return realAttentionSources;
+      }
+
+      return snapshot && isLocalPreviewAvailable ? buildMockAttentionSources(snapshot) : [];
+    },
+    [isLocalPreviewAvailable, snapshot],
+  );
 
   const fetchSources = useCallback(async () => {
     setIsRefreshing(true);
@@ -293,6 +437,12 @@ export function SourceMonitorPanel({ initialSnapshot, hideStats = false }: Sourc
   // Fetch on mount when no initial data was provided via SSR
   const didInitialFetch = useRef(!!initialSnapshot);
   const shouldSkipInitialEffect = useRef(!!initialSnapshot);
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setIsLocalPreviewAvailable(["localhost", "127.0.0.1"].includes(window.location.hostname));
+    }
+  }, []);
+
   useEffect(() => {
     if (!didInitialFetch.current) {
       didInitialFetch.current = true;
@@ -364,6 +514,14 @@ export function SourceMonitorPanel({ initialSnapshot, hideStats = false }: Sourc
           </h2>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {attentionSummarySources.length > 0 ? (
+            <Button
+              onClick={() => setAttentionSummaryOpen(true)}
+              variant="secondary"
+            >
+              异常摘要
+            </Button>
+          ) : null}
           <Button
             onClick={clearFilters}
             variant="secondary"
@@ -436,6 +594,11 @@ export function SourceMonitorPanel({ initialSnapshot, hideStats = false }: Sourc
           />
         ) : null}
       </section>
+      <AttentionSummaryModal
+        isOpen={attentionSummaryOpen}
+        onClose={() => setAttentionSummaryOpen(false)}
+        sources={attentionSummarySources}
+      />
     </div>
   );
 }

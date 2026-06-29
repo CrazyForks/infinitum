@@ -21,6 +21,7 @@ export type SourceMonitorEntry = {
   lastItemCreatedAt: string | null;
   inactiveDays: number | null;
   itemCount: number;
+  attentionReasons?: string[];
 };
 
 export type SourceInactivityBucketSnapshot = {

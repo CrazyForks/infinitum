@@ -67,8 +67,24 @@ export type FeedClusterPreviewItemDTO = {
   summary: string;
   group?: GroupBadge | null;
   score: number;
+  eventType?: string | null;
+  eventSubject?: string | null;
+  eventAction?: string | null;
+  eventObject?: string | null;
+  eventDate?: string | null;
   canRegenerateTranslation?: boolean;
   aggregationParent?: FeedAggregationParentDTO | null;
+};
+
+export type ClusterAssignmentExplanationDTO = {
+  eventType: string | null;
+  eventSubject: string | null;
+  eventAction: string | null;
+  eventObject: string | null;
+  eventDate: string | null;
+  sourceCount: number;
+  itemCount: number;
+  reasons: string[];
 };
 
 export type FeedClusterEntryDTO = {
@@ -116,6 +132,7 @@ export type ClusterDTO = {
   latestItemUpdatedAt?: string;
   status: "active" | "hidden";
   items: FeedClusterPreviewItemDTO[];
+  assignmentExplanation?: ClusterAssignmentExplanationDTO;
 };
 
 export type AggregationSplitChildDTO = {

@@ -231,11 +231,11 @@ function formatTaskTimelineDetail(task: TaskRunSnapshot, node: NonNullable<TaskR
     case "rule_filter":
       return `规则过滤 ${getValue(["命中规则过滤", "命中黑名单"])} · 复用 ${getValue("复用已有处理")}`;
     case "item_summary":
-      return `完成 ${getValue("完成")} · 失败 ${getValue("失败")}`;
+      return `完成 ${getValue("完成")} · 失败 ${getValue("失败")} · 空响应 ${getValue("空响应")} · 近似原文 ${getValue("近似原文")} · 格式无效 ${getValue("格式无效")}`;
     case "item_aggregation":
-      return `成功 ${getValue("拆分成功")} · 失败 ${getValue("拆分失败")} · 子事件 ${getValue("子事件")}`;
+      return `成功 ${getValue("拆分成功")} · 失败 ${getValue("拆分失败")} · 无子事件 ${getValue("无子事件")} · 格式无效 ${getValue("格式无效")} · 子事件 ${getValue("子事件")}`;
     case "item_analysis":
-      return `完成 ${getValue("完成")} · 过滤 ${getValue("过滤")} · 更新/重处理 ${getValue("更新/重处理")}`;
+      return `完成 ${getValue("完成")} · 失败 ${getValue("失败")} · 供应商错误 ${getValue("供应商错误")} · 过滤 ${getValue("过滤")} · 更新/重处理 ${getValue("更新/重处理")}`;
     case "cluster_assignment":
       return `指纹命中 ${getValue("指纹命中")} · 本地直连 ${getValue("本地直连")} · AI归组 ${getValue("AI归组")} · 跳过 ${getValue("跳过")} · 新建 ${getValue("新建")}`;
     case "cluster_merge": {

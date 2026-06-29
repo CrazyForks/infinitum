@@ -91,12 +91,16 @@ async function createReportWithItems(opts: {
       itemId: isUsed ? usedItem!.id : missedItem.id,
       clusterId: null,
       title: isUsed ? `Used Candidate ${i + 1}` : `Missed Candidate ${i + 1}`,
+      itemTitle: isUsed ? `Used Candidate ${i + 1}` : `Missed Candidate ${i + 1}`,
       sourceName: isUsed ? "Source A" : "Source B",
       candidateScore: 100 - i,
       sourceCount: Math.max(1, 5 - i),
       itemCount: 1,
       eventType: "release",
       eventSubject: `Subject ${i + 1}`,
+      eventAction: null,
+      eventObject: null,
+      eventDate: null,
     };
   });
 
@@ -111,7 +115,11 @@ async function createReportWithItems(opts: {
       summaryJson: buildContent(opts.contentOverrides),
       renderedMarkdown: `# ${opts.date} AI 日报`,
       inputHash: `hash-${opts.date}-${Math.random()}`,
-      candidateSnapshot: JSON.stringify(snapshotEntries),
+      candidateSnapshot: JSON.stringify({
+        candidates: snapshotEntries,
+        excludedRecentDuplicates: [],
+        candidateCount: snapshotEntries.length,
+      }),
       sources: {
         create: opts.usedItems.map((s, i) => ({
           sourceNumber: i + 1,
@@ -278,8 +286,8 @@ describe("URL fallback for miss-rate matching", () => {
     const sharedUrl = "https://shared.example/unique-story";
 
     const snapshot = [
-      { id: 1, itemId: null, clusterId: null, url: sharedUrl, title: "Top 1", sourceName: "Source A", candidateScore: 99, sourceCount: 1, itemCount: 1, eventType: null, eventSubject: null },
-      { id: 2, itemId: null, clusterId: null, url: "https://other.example/different", title: "Top 2", sourceName: "Source A", candidateScore: 90, sourceCount: 1, itemCount: 1, eventType: null, eventSubject: null },
+      { id: 1, itemId: null, clusterId: null, url: sharedUrl, title: "Top 1", itemTitle: "Top 1", sourceName: "Source A", candidateScore: 99, sourceCount: 1, itemCount: 1, eventType: null, eventSubject: null, eventAction: null, eventObject: null, eventDate: null },
+      { id: 2, itemId: null, clusterId: null, url: "https://other.example/different", title: "Top 2", itemTitle: "Top 2", sourceName: "Source A", candidateScore: 90, sourceCount: 1, itemCount: 1, eventType: null, eventSubject: null, eventAction: null, eventObject: null, eventDate: null },
     ];
 
     await prisma.dailyReport.create({
@@ -293,7 +301,11 @@ describe("URL fallback for miss-rate matching", () => {
         summaryJson: buildContent({ topCount: 1, changeCount: 1 }),
         renderedMarkdown: `# ${REPORT_DATE_A} AI 日报`,
         inputHash: `hash-url-fallback`,
-        candidateSnapshot: JSON.stringify(snapshot),
+        candidateSnapshot: JSON.stringify({
+          candidates: snapshot,
+          excludedRecentDuplicates: [],
+          candidateCount: snapshot.length,
+        }),
         sources: {
           create: [{
             sourceNumber: 1,

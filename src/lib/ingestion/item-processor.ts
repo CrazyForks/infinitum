@@ -123,6 +123,32 @@ function appendIssue(issues: string[], error: unknown, fallbackMessage: string) 
   issues.push(error instanceof Error ? error.message : fallbackMessage);
 }
 
+function getErrorMessage(error: unknown, fallbackMessage: string) {
+  return error instanceof Error ? error.message : fallbackMessage;
+}
+
+function classifySummaryFailure(error: unknown): NonNullable<NonNullable<ProcessedItemRecord["metrics"]>["summaryFailureReason"]> {
+  const message = getErrorMessage(error, "").toLowerCase();
+  if (message.includes("empty")) return "empty_response";
+  if (message.includes("source text") || message.includes("source-like") || message.includes("resembles source")) return "source_like";
+  if (message.includes("json") || message.includes("invalid") || message.includes("expected")) return "invalid_response";
+  return "other";
+}
+
+function classifyAggregationFailure(error: unknown): NonNullable<NonNullable<ProcessedItemRecord["metrics"]>["aggregationFailureReason"]> {
+  const message = getErrorMessage(error, "").toLowerCase();
+  if (message.includes("no events")) return "no_events";
+  if (message.includes("json") || message.includes("invalid") || message.includes("expected")) return "invalid_response";
+  return "other";
+}
+
+function classifyAnalysisFailure(error: unknown): NonNullable<NonNullable<ProcessedItemRecord["metrics"]>["analysisFailureReason"]> {
+  const message = getErrorMessage(error, "").toLowerCase();
+  if (message.includes("json") || message.includes("invalid") || message.includes("expected")) return "invalid_response";
+  if (message.includes("timeout") || message.includes("rate") || message.includes("429") || message.includes("503") || message.includes("upstream")) return "provider_error";
+  return "other";
+}
+
 async function replaceItemTagsSafely(itemId: string, tags: unknown, issues: string[]) {
   try {
     await replaceItemTags(itemId, tags);
@@ -427,10 +453,13 @@ export async function processFeedItem({
   let fullTextFetched = false;
   let summaryCompleted = false;
   let summaryFailed = false;
+  let summaryFailureReason: NonNullable<NonNullable<ProcessedItemRecord["metrics"]>["summaryFailureReason"]> | undefined;
   let analysisCompleted = false;
   let analysisFailed = false;
+  let analysisFailureReason: NonNullable<NonNullable<ProcessedItemRecord["metrics"]>["analysisFailureReason"]> | undefined;
   let aggregationParsed = false;
   let aggregationParseFailed = false;
+  let aggregationFailureReason: NonNullable<NonNullable<ProcessedItemRecord["metrics"]>["aggregationFailureReason"]> | undefined;
   let aggregationEventCount = 0;
   // If a previous run detected this item as aggregation but the parse then
   // failed (or never finished), the DB isAggregation flag was reset to false on
@@ -629,6 +658,7 @@ export async function processFeedItem({
         addElapsed(timings, "summaryMs", summaryStartedAt);
         appendIssue(issues, error, "Unknown item summary error");
         summaryFailed = true;
+        summaryFailureReason = classifySummaryFailure(error);
         summaryStatus = "failed";
         summaryText = buildFallbackSummary(rssExcerpt);
       }
@@ -770,6 +800,7 @@ export async function processFeedItem({
         appendIssue(issues, aggregationError, "Unknown aggregation parsing error");
         aggregationParseStatus = AGGREGATION_PARSE_STATUS.failed;
         aggregationParseFailed = true;
+        aggregationFailureReason = classifyAggregationFailure(aggregationError);
         // Degrade parent to a regular item so the feed can still surface it.
         isAggregation = false;
       }
@@ -811,6 +842,7 @@ export async function processFeedItem({
         itemTags = [];
         analysisStatus = "failed";
         analysisFailed = true;
+        analysisFailureReason = classifyAnalysisFailure(enrichError);
       }
     } else if (canReuseExistingCompletedAnalysis) {
       analysisStatus = "succeeded";
@@ -849,6 +881,7 @@ export async function processFeedItem({
         itemTags = [];
         analysisStatus = "failed";
         analysisFailed = true;
+        analysisFailureReason = classifyAnalysisFailure(error);
       }
     }
 
@@ -989,11 +1022,14 @@ export async function processFeedItem({
       blacklistFiltered: ruleFilter.filtered,
       summaryCompleted,
       summaryFailed,
+      summaryFailureReason,
       aggregationParsed,
       aggregationParseFailed,
+      aggregationFailureReason,
       aggregationEventCount,
       analysisCompleted,
       analysisFailed,
+      analysisFailureReason,
       analysisFiltered: analysisCompleted && moderationStatus === "filtered",
       updatedExisting: !isNew && moderationStatus !== "filtered",
       fullTextFetchAttempted,

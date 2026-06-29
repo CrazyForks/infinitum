@@ -1800,6 +1800,64 @@ describe("runIngestion", () => {
     expect(enrichContent.mock.calls[0]?.[0]).not.toBe("OpenAI publishes another research update");
   });
 
+  it("records AI failure categories while still committing successful feed metadata", async () => {
+    const parser = {
+      parseURL: vi.fn().mockResolvedValue({
+        etag: "etag-ai-failure",
+        lastModified: "Tue, 21 Apr 2026 10:00:00 GMT",
+        items: [
+          {
+            title: "OpenAI publishes an unreliable model update",
+            link: "https://example.com/posts/unreliable-model-update",
+            isoDate: "2026-04-21T09:00:00.000Z",
+            content: "Model output quality is being evaluated.",
+          },
+        ],
+      }),
+    };
+    const taskRun = await startIngestionTask({ triggerType: "manual" });
+
+    await runIngestionTask(taskRun, {
+      parser,
+      articleFetcher: vi.fn(),
+      aiProvider: buildAiProviderMock({
+        summarizeItem: vi.fn().mockRejectedValue(new Error("Invalid item summary response: expected JSON")),
+        enrichContent: vi.fn().mockRejectedValue(new Error("Upstream ai timeout")),
+      }),
+      sourceConfigs: [
+        {
+          name: "Example Feed",
+          rssUrl: "https://example.com/feed.xml",
+          siteUrl: "https://example.com",
+          enabled: true,
+          aiParsingEnabled: true,
+        },
+      ],
+      blacklist: [],
+      now: new Date("2026-04-21T10:00:00.000Z"),
+    });
+
+    const [storedSource, storedTaskRun] = await Promise.all([
+      prisma.source.findFirstOrThrow(),
+      prisma.backgroundTaskRun.findUniqueOrThrow({ where: { id: taskRun.id } }),
+    ]);
+    const taskTimeline = JSON.parse(
+      storedTaskRun.taskTimelineJson ?? "[]",
+    ) as Array<{ key: string; metrics: Array<{ label: string; value: number }> }>;
+
+    expect(storedSource.feedEtag).toBe("etag-ai-failure");
+    expect(storedSource.feedLastModified).toBe("Tue, 21 Apr 2026 10:00:00 GMT");
+    expect(storedSource.feedContentHash).toEqual(expect.any(String));
+    expect(taskTimeline.find((node) => node.key === "item_summary")?.metrics).toEqual(expect.arrayContaining([
+      { label: "失败", value: 1 },
+      { label: "格式无效", value: 1 },
+    ]));
+    expect(taskTimeline.find((node) => node.key === "item_analysis")?.metrics).toEqual(expect.arrayContaining([
+      { label: "失败", value: 1 },
+      { label: "供应商错误", value: 1 },
+    ]));
+  });
+
   it("limits concurrent item processing to the configured concurrency", async () => {
     let activeCalls = 0;
     let maxConcurrentCalls = 0;

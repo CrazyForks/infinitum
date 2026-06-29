@@ -24,6 +24,7 @@ import {
 import {
   DAILY_REPORT_TIMEZONE,
   type DailyReportCandidate,
+  type DailyReportCandidateSnapshotEntry,
   type DailyReportContent,
   type DailyReportItem,
   type DailyReportSourceRegistryEntry,
@@ -332,6 +333,46 @@ function filterRecentDailyReportDuplicates(
   return compactDailyReportCandidates(candidates.filter(
     (candidate) => !recentSources.some((recentSource) => matchesRecentDailyReportSource(candidate, recentSource)),
   ));
+}
+
+function toCandidateSnapshotEntry(candidate: DailyReportCandidate): DailyReportCandidateSnapshotEntry {
+  return {
+    id: candidate.id,
+    sourceKey: candidate.sourceKey,
+    itemId: candidate.itemId,
+    clusterId: candidate.clusterId,
+    title: candidate.title,
+    itemTitle: candidate.itemTitle,
+    sourceName: candidate.sourceName,
+    url: candidate.url,
+    candidateScore: candidate.candidateScore,
+    sourceCount: candidate.sourceCount,
+    itemCount: candidate.itemCount,
+    eventType: candidate.eventType,
+    eventSubject: candidate.eventSubject,
+    eventAction: candidate.eventAction,
+    eventObject: candidate.eventObject,
+    eventDate: candidate.eventDate,
+  };
+}
+
+function buildDailyReportExcludedRecentDuplicateSnapshots(
+  candidates: DailyReportCandidate[],
+  recentSources: RecentDailyReportSourceSnapshot[],
+) {
+  return candidates.flatMap((candidate) => {
+    const matchedRecentSource = recentSources.find((recentSource) => matchesRecentDailyReportSource(candidate, recentSource));
+    if (!matchedRecentSource) {
+      return [];
+    }
+
+    return [{
+      ...toCandidateSnapshotEntry(candidate),
+      excludedReason: "近 7 天日报已覆盖相同或高度相似事件",
+      matchedRecentDate: matchedRecentSource.date,
+      matchedRecentTitle: matchedRecentSource.topic ?? matchedRecentSource.title,
+    }];
+  });
 }
 
 function buildRecentDailyReportTopics(recentSources: RecentDailyReportSourceSnapshot[]): RecentDailyReportTopic[] {
@@ -707,10 +748,9 @@ export async function generateDailyReport(input: {
   const dailyReportGroupIds = parseDailyReportGroupIdsJson(schedule.dailyReportGroupIdsJson);
   const recentSources = await listRecentDailyReportSourceSnapshots(date, DAILY_REPORT_RECENT_SOURCE_LOOKBACK_DAYS);
   const recentTopics = buildRecentDailyReportTopics(recentSources);
-  const candidates = filterRecentDailyReportDuplicates(
-    await listDailyReportCandidates(date, schedule.dailyReportCandidateLimit, dailyReportGroupIds),
-    recentSources,
-  );
+  const rawCandidates = await listDailyReportCandidates(date, schedule.dailyReportCandidateLimit, dailyReportGroupIds);
+  const excludedRecentDuplicates = buildDailyReportExcludedRecentDuplicateSnapshots(rawCandidates, recentSources);
+  const candidates = filterRecentDailyReportDuplicates(rawCandidates, recentSources);
   await input.onCandidatesLoaded?.(candidates.length);
   const inputHash = buildInputHash(date, candidates, dailyReportGroupIds, recentTopics);
   const existing = await prisma.dailyReport.findUnique({
@@ -803,22 +843,11 @@ export async function generateDailyReport(input: {
     title,
     Array.from(expandedSourcesByNumber.values()).flat(),
   );
-  const candidateSnapshot = JSON.stringify(
-    candidates.map((candidate) => ({
-      id: candidate.id,
-      sourceKey: candidate.sourceKey,
-      itemId: candidate.itemId,
-      clusterId: candidate.clusterId,
-      title: candidate.title,
-      sourceName: candidate.sourceName,
-      url: candidate.url,
-      candidateScore: candidate.candidateScore,
-      sourceCount: candidate.sourceCount,
-      itemCount: candidate.itemCount,
-      eventType: candidate.eventType,
-      eventSubject: candidate.eventSubject,
-    })),
-  );
+  const candidateSnapshot = JSON.stringify({
+    candidates: candidates.map(toCandidateSnapshotEntry),
+    excludedRecentDuplicates,
+    candidateCount: candidates.length,
+  });
   const shouldAutoPublish = schedule.dailyReportAutoPublish;
   const publishedAt = shouldAutoPublish ? new Date() : null;
 

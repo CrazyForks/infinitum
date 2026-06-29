@@ -6,6 +6,7 @@ import { withDailyReportCache } from "@/lib/daily-report/cache";
 import { getDailyReportDateRange } from "@/lib/daily-report/date";
 import {
   DAILY_REPORT_TIMEZONE,
+  type DailyReportCandidateReviewDTO,
   type DailyReportCandidate,
   type DailyReportContent,
   type DailyReportDetailDTO,
@@ -259,6 +260,7 @@ export async function listDailyReportCandidates(date: string, limit = 120, group
       itemId: item.itemId,
       clusterId: item.clusterId,
       title: shouldUseClusterDisplay && cluster ? cluster.title : getDisplayTitle(item.originalTitle, item.translatedTitle),
+      itemTitle: getDisplayTitle(item.originalTitle, item.translatedTitle),
       sourceName: item.source.name,
       url: item.originalUrl,
       summary: shouldUseClusterDisplay && cluster
@@ -348,6 +350,44 @@ export async function listRecentDailyReportSourceSnapshots(
 
 function parseContent(summaryJson: string): DailyReportContent {
   return normalizeDailyReportContent(JSON.parse(summaryJson));
+}
+
+function parseDailyReportCandidateReview(
+  candidateSnapshot: string | null,
+  selectedCount: number,
+): DailyReportCandidateReviewDTO | null {
+  if (!candidateSnapshot) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(candidateSnapshot) as unknown;
+    const snapshot = parsed && typeof parsed === "object"
+      ? parsed as Record<string, unknown>
+      : null;
+
+    if (!snapshot || !Array.isArray(snapshot.candidates)) {
+      return null;
+    }
+
+    const candidates = snapshot.candidates.filter((candidate): candidate is DailyReportCandidateReviewDTO["candidates"][number] =>
+      Boolean(candidate && typeof candidate === "object" && "title" in candidate && "itemTitle" in candidate),
+    );
+    const excludedRecentDuplicates = Array.isArray(snapshot.excludedRecentDuplicates)
+      ? snapshot.excludedRecentDuplicates.filter((candidate): candidate is DailyReportCandidateReviewDTO["excludedRecentDuplicates"][number] =>
+          Boolean(candidate && typeof candidate === "object" && "title" in candidate && "itemTitle" in candidate && "excludedReason" in candidate),
+        )
+      : [];
+
+    return {
+      candidateCount: typeof snapshot.candidateCount === "number" ? snapshot.candidateCount : candidates.length,
+      selectedCount,
+      candidates,
+      excludedRecentDuplicates,
+    };
+  } catch {
+    return null;
+  }
 }
 
 function countDailyReportSourceItems(sources?: Array<{
@@ -658,5 +698,8 @@ async function getDailyReportByDateUncached(date: string, isAdmin: boolean): Pro
     })),
     previous,
     next,
+    candidateReview: isAdmin
+      ? parseDailyReportCandidateReview(report.candidateSnapshot, countDailyReportSourceItems(report.sources, report._count.sources))
+      : null,
   };
 }

@@ -436,6 +436,11 @@ function mapItemToClusterPreview(item: ItemWithSource): FeedClusterPreviewItemDT
     summary: getDisplaySummary(item.summaryText, item.rssExcerpt, item.fullText ?? item.rssContent),
     group: toGroupBadge(item.source.group),
     score: item.qualityScore,
+    eventType: item.eventType,
+    eventSubject: item.eventSubject,
+    eventAction: item.eventAction,
+    eventObject: item.eventObject,
+    eventDate: item.eventDate,
     canRegenerateTranslation: shouldTranslateTitle(item.originalTitle),
     ...(item.parent
       ? {
@@ -447,6 +452,37 @@ function mapItemToClusterPreview(item: ItemWithSource): FeedClusterPreviewItemDT
         }
       : {}),
   };
+}
+
+function buildClusterAssignmentExplanation(
+  cluster: Pick<ClusterWithPreviewItems, "eventType" | "eventSubject" | "eventAction" | "eventObject" | "eventDate" | "items">,
+  sourceCount: number,
+  itemCount: number,
+) {
+  const reasons: string[] = [];
+
+  if (sourceCount > 1) {
+    reasons.push(`${sourceCount} 个来源共同指向该事件`);
+  }
+
+  if (itemCount > 1) {
+    reasons.push(`${itemCount} 条内容被归入同一聚合组`);
+  }
+
+  if (reasons.length === 0) {
+    reasons.push("当前聚合主要由标题、发布时间窗口和内容相似度形成，事件锚点不足。");
+  }
+
+  return {
+    eventType: cluster.eventType,
+    eventSubject: cluster.eventSubject,
+    eventAction: cluster.eventAction,
+    eventObject: cluster.eventObject,
+    eventDate: cluster.eventDate,
+    sourceCount,
+    itemCount,
+    reasons,
+  } satisfies ClusterDTO["assignmentExplanation"];
 }
 
 function mapItemToFeedItem(item: ItemWithSource): FeedItemDTO {
@@ -765,6 +801,7 @@ function mapClusterToAdminDto(
     latestItemUpdatedAt: (latestItemUpdatedAt ?? cluster.updatedAt).toISOString(),
     status: cluster.status,
     items: cluster.items.slice(0, 5).map(mapItemToClusterPreview),
+    assignmentExplanation: buildClusterAssignmentExplanation(cluster, sourceCount, itemCount),
   } satisfies ClusterDTO;
 }
 

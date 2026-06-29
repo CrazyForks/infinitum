@@ -349,7 +349,6 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
   });
   const preparedItems: PreparedFeedItem[] = [];
   const sourceMetadataCommitCandidates = new Map<string, SourceFetchMetadataUpdate>();
-  const sourceProcessingFailures = new Map<string, number>();
   const errors: string[] = [];
   let processableItemCount = 0;
   let successCount = 0;
@@ -625,6 +624,20 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
 
       if (result?.metrics?.summaryFailed) {
         timelineCounters.itemSummary.failed += 1;
+        switch (result.metrics.summaryFailureReason) {
+          case "empty_response":
+            timelineCounters.itemSummary.failedEmptyResponse += 1;
+            break;
+          case "source_like":
+            timelineCounters.itemSummary.failedSourceLike += 1;
+            break;
+          case "invalid_response":
+            timelineCounters.itemSummary.failedInvalidResponse += 1;
+            break;
+          default:
+            timelineCounters.itemSummary.failedOther += 1;
+            break;
+        }
       }
 
       if (result?.metrics?.aggregationParsed) {
@@ -633,6 +646,17 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
 
       if (result?.metrics?.aggregationParseFailed) {
         timelineCounters.aggregationParsing.failed += 1;
+        switch (result.metrics.aggregationFailureReason) {
+          case "no_events":
+            timelineCounters.aggregationParsing.failedNoEvents += 1;
+            break;
+          case "invalid_response":
+            timelineCounters.aggregationParsing.failedInvalidResponse += 1;
+            break;
+          default:
+            timelineCounters.aggregationParsing.failedOther += 1;
+            break;
+        }
       }
 
       if (result?.metrics?.aggregationEventCount) {
@@ -641,6 +665,21 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
 
       if (result?.metrics?.analysisCompleted) {
         timelineCounters.itemAnalysis.completed += 1;
+      }
+
+      if (result?.metrics?.analysisFailed) {
+        timelineCounters.itemAnalysis.failed += 1;
+        switch (result.metrics.analysisFailureReason) {
+          case "invalid_response":
+            timelineCounters.itemAnalysis.failedInvalidResponse += 1;
+            break;
+          case "provider_error":
+            timelineCounters.itemAnalysis.failedProviderError += 1;
+            break;
+          default:
+            timelineCounters.itemAnalysis.failedOther += 1;
+            break;
+        }
       }
 
       if (result?.metrics?.analysisFiltered) {
@@ -710,26 +749,8 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
             now,
           });
 
-          if (result?.status === "failed") {
-            sourceProcessingFailures.set(
-              preparedItem.sourceId,
-              (sourceProcessingFailures.get(preparedItem.sourceId) ?? 0) + 1,
-            );
-          }
-
-          if (result?.metrics?.summaryFailed || result?.metrics?.analysisFailed) {
-            sourceProcessingFailures.set(
-              preparedItem.sourceId,
-              (sourceProcessingFailures.get(preparedItem.sourceId) ?? 0) + 1,
-            );
-          }
-
           await enqueueProgressUpdate(result);
         } catch (error) {
-          sourceProcessingFailures.set(
-            preparedItem.sourceId,
-            (sourceProcessingFailures.get(preparedItem.sourceId) ?? 0) + 1,
-          );
           const message =
             error instanceof Error
               ? `${preparedItem.sourceName}: ${preparedItem.item.title ?? "Untitled item"}: ${error.message}`
@@ -843,7 +864,6 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
 
   await Promise.all(
     [...sourceMetadataCommitCandidates.entries()]
-      .filter(([sourceId]) => (sourceProcessingFailures.get(sourceId) ?? 0) === 0)
       .map(([sourceId, metadata]) => updateSourceMetadataIfChanged(sourceId, metadata)),
   );
 

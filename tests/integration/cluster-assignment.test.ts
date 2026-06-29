@@ -436,6 +436,11 @@ describe("cluster assignment", () => {
     });
     await expect(getAdminCluster("cluster-target")).resolves.toMatchObject({
       itemCount: 3,
+      assignmentExplanation: {
+        itemCount: 3,
+        sourceCount: 1,
+        reasons: expect.arrayContaining(["3 条内容被归入同一聚合组"]),
+      },
     });
   });
 

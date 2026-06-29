@@ -249,4 +249,35 @@ describe("SourceMonitorPanel", () => {
     expect(screen.getByText("Relative RSS")).toBeInTheDocument();
     expect(screen.getByText("Unsafe RSS")).toBeInTheDocument();
   });
+
+  it("renders attention sources with actionable reasons in the summary modal", async () => {
+    const user = userEvent.setup();
+
+    renderWithProviders(
+      <SourceMonitorPanel
+        initialSnapshot={buildSnapshot({
+          health: {
+            healthyCount: 9,
+            failedCount: 2,
+            unknownCount: 1,
+            attentionSources: [
+              buildSource({
+                id: "failed-source",
+                name: "Failed Source",
+                healthStatus: "failed",
+                healthMessage: "RSS fetch failed with status 500",
+                attentionReasons: ["抓取异常：RSS fetch failed with status 500"],
+              }),
+            ],
+          },
+        })}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "异常摘要" }));
+
+    expect(screen.getByRole("dialog", { name: "异常摘要" })).toBeInTheDocument();
+    expect(screen.getByText("Failed Source")).toBeInTheDocument();
+    expect(screen.getAllByText("抓取异常：RSS fetch failed with status 500").length).toBeGreaterThan(0);
+  });
 });
