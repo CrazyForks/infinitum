@@ -34,6 +34,9 @@ function getFetchUrl(input: RequestInfo | URL) {
   return input.toString();
 }
 
+const CLUSTER_REVIEW_COUNT_URL = "/api/admin/clusters/review-candidates?page=1&pageSize=1";
+const CLUSTER_REVIEW_LIST_URL = "/api/admin/clusters/review-candidates?page=1&pageSize=10";
+
 async function waitForLoaded() {
   await waitFor(() => {
     expect(screen.queryByText("加载中...")).not.toBeInTheDocument();
@@ -93,6 +96,38 @@ function createCluster(overrides: Partial<Record<string, unknown>> = {}) {
     latestPublishedAt: "2026-04-10T09:00:00.000Z",
     latestItemUpdatedAt: "2026-04-10T11:00:00.000Z",
     items: [createClusterItem()],
+    ...overrides,
+  };
+}
+
+function createClusterReviewCandidate(overrides: Partial<Record<string, unknown>> = {}) {
+  const leftCluster = createCluster({
+    id: "cluster-1",
+    title: "AI 融资动态",
+    itemCount: 2,
+  });
+  const rightCluster = createCluster({
+    id: "cluster-2",
+    title: "AI 融资补充",
+    summary: "另一组摘要",
+    itemCount: 1,
+  });
+
+  return {
+    id: "decision-1",
+    verdict: "ambiguous",
+    source: "llm",
+    reasonCode: "llm_ambiguous",
+    reasonText: "主体一致但对象证据不足",
+    localScore: 86,
+    confidence: 62,
+    attemptCount: 0,
+    expiresAt: null,
+    createdAt: "2026-04-10T12:00:00.000Z",
+    leftCluster,
+    rightCluster,
+    targetClusterId: "cluster-1",
+    sourceClusterId: "cluster-2",
     ...overrides,
   };
 }
@@ -281,6 +316,10 @@ describe("ContentReviewPanel", () => {
         return new Response(JSON.stringify({ clusters: [cluster], total: 1 }));
       }
 
+      if (url === CLUSTER_REVIEW_COUNT_URL) {
+        return new Response(JSON.stringify({ candidates: [], total: 0 }));
+      }
+
       if (url === "/api/admin/clusters/cluster-1") {
         return new Response(JSON.stringify({ cluster }));
       }
@@ -340,6 +379,10 @@ describe("ContentReviewPanel", () => {
         return new Response(JSON.stringify({ clusters: [], total: 0 }));
       }
 
+      if (url === CLUSTER_REVIEW_COUNT_URL) {
+        return new Response(JSON.stringify({ candidates: [], total: 0 }));
+      }
+
       throw new Error(`Unexpected fetch URL: ${url}`);
     });
 
@@ -356,6 +399,160 @@ describe("ContentReviewPanel", () => {
       },
       { timeout: 2_000 },
     );
+  });
+
+  it("loads cluster review candidates and merges one from the review queue", async () => {
+    const user = userEvent.setup();
+    let reviewCandidateMerged = false;
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
+      const url = getFetchUrl(input);
+
+      if (url === "/api/admin/clusters?page=1&pageSize=10&minItemCount=2") {
+        return new Response(JSON.stringify({ clusters: [createCluster({ itemCount: 2 })], total: 1 }));
+      }
+
+      if (url === CLUSTER_REVIEW_COUNT_URL) {
+        return new Response(
+          JSON.stringify({
+            total: reviewCandidateMerged ? 0 : 1,
+          }),
+        );
+      }
+
+      if (url === CLUSTER_REVIEW_LIST_URL) {
+        return new Response(
+          JSON.stringify({
+            candidates: reviewCandidateMerged ? [] : [createClusterReviewCandidate()],
+            total: reviewCandidateMerged ? 0 : 1,
+          }),
+        );
+      }
+
+      if (url === "/api/admin/clusters/cluster-2") {
+        return new Response(
+          JSON.stringify({
+            cluster: createCluster({
+              id: "cluster-2",
+              title: "AI 融资补充",
+              summary: "另一组摘要",
+              itemCount: 1,
+              items: [createClusterItem({ id: "item-2", title: "融资补充条目" })],
+            }),
+          }),
+        );
+      }
+
+      if (url === "/api/admin/clusters/review-candidates/decision-1/merge") {
+        expect(init?.method).toBe("POST");
+        reviewCandidateMerged = true;
+        return new Response(
+          JSON.stringify({
+            result: {
+              targetClusterId: "cluster-1",
+              mergedClusterIds: ["cluster-2"],
+              itemsMoved: 1,
+              taskId: "task-review-merge",
+            },
+          }),
+        );
+      }
+
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderWithProviders(<ContentReviewPanel activeTab="clusters" />);
+    await waitForLoaded();
+
+    await user.click(screen.getByRole("button", { name: "聚合待定（1）" }));
+    const reviewDialog = await screen.findByRole("dialog", { name: "聚合待定" });
+    expect(within(reviewDialog).getByText("AI 融资补充")).toBeInTheDocument();
+    expect(within(reviewDialog).getByText("置信分")).toBeInTheDocument();
+    expect(within(reviewDialog).getByText("62")).toBeInTheDocument();
+    expect(within(reviewDialog).queryByText("另一组摘要")).not.toBeInTheDocument();
+    expect(within(reviewDialog).queryByText("本地 86")).not.toBeInTheDocument();
+    expect(within(reviewDialog).queryByText("置信 62")).not.toBeInTheDocument();
+
+    await user.click(within(reviewDialog).getByRole("button", { name: "AI 融资补充" }));
+    const detailDialog = await screen.findByRole("dialog", { name: "聚合详情" });
+    expect(within(detailDialog).getByText("另一组摘要")).toBeInTheDocument();
+    expect(within(detailDialog).getByText("包含内容 (1)")).toBeInTheDocument();
+    expect(within(detailDialog).getByText("融资补充条目")).toBeInTheDocument();
+    await user.click(within(detailDialog).getAllByRole("button", { name: "关闭" }).at(-1)!);
+
+    await user.click(within(reviewDialog).getByRole("button", { name: /合并待定/ }));
+    expect(await screen.findByRole("dialog", { name: "确认合并待定" })).toBeInTheDocument();
+    await confirmAction(user, "合并");
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/admin/clusters/review-candidates/decision-1/merge", {
+        method: "POST",
+      });
+    });
+    await waitFor(() => {
+      expect(screen.queryByText("AI 融资补充")).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole("status")).toHaveTextContent("待定合并完成，移动 1 个条目。");
+  });
+
+  it("ignores a cluster review candidate from the review queue", async () => {
+    const user = userEvent.setup();
+    let reviewCandidateIgnored = false;
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
+      const url = getFetchUrl(input);
+
+      if (url === "/api/admin/clusters?page=1&pageSize=10&minItemCount=2") {
+        return new Response(JSON.stringify({ clusters: [createCluster({ itemCount: 2 })], total: 1 }));
+      }
+
+      if (url === CLUSTER_REVIEW_COUNT_URL) {
+        return new Response(
+          JSON.stringify({
+            total: reviewCandidateIgnored ? 0 : 1,
+          }),
+        );
+      }
+
+      if (url === CLUSTER_REVIEW_LIST_URL) {
+        return new Response(
+          JSON.stringify({
+            candidates: reviewCandidateIgnored ? [] : [createClusterReviewCandidate()],
+            total: reviewCandidateIgnored ? 0 : 1,
+          }),
+        );
+      }
+
+      if (url === "/api/admin/clusters/review-candidates/decision-1/ignore") {
+        expect(init?.method).toBe("POST");
+        reviewCandidateIgnored = true;
+        return new Response(JSON.stringify({ success: true }));
+      }
+
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderWithProviders(<ContentReviewPanel activeTab="clusters" />);
+    await waitForLoaded();
+
+    await user.click(screen.getByRole("button", { name: "聚合待定（1）" }));
+    const reviewDialog = await screen.findByRole("dialog", { name: "聚合待定" });
+    expect(within(reviewDialog).getByText("主体一致但对象证据不足")).toBeInTheDocument();
+    await user.click(within(reviewDialog).getByRole("button", { name: /忽略待定/ }));
+    expect(await screen.findByRole("dialog", { name: "确认忽略待定" })).toBeInTheDocument();
+    await confirmAction(user, "忽略");
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/admin/clusters/review-candidates/decision-1/ignore", {
+        method: "POST",
+      });
+    });
+    await waitFor(() => {
+      expect(screen.queryByText("主体一致但对象证据不足")).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole("status")).toHaveTextContent("已忽略并写入不可合并约束。");
   });
 
   it("queues reanalyze as a background task", async () => {
@@ -484,6 +681,10 @@ describe("ContentReviewPanel", () => {
         );
       }
 
+      if (url === CLUSTER_REVIEW_COUNT_URL) {
+        return new Response(JSON.stringify({ candidates: [], total: 0 }));
+      }
+
       if (url === "/api/admin/clusters/cluster-1/items/item-1/detach") {
         expect(init?.method).toBe("POST");
 
@@ -551,6 +752,10 @@ describe("ContentReviewPanel", () => {
         );
       }
 
+      if (url === CLUSTER_REVIEW_COUNT_URL) {
+        return new Response(JSON.stringify({ candidates: [], total: 0 }));
+      }
+
       if (url === "/api/admin/clusters/cluster-1/split") {
         expect(init?.method).toBe("POST");
         splitCalled = true;
@@ -616,6 +821,10 @@ describe("ContentReviewPanel", () => {
         );
       }
 
+      if (url === CLUSTER_REVIEW_COUNT_URL) {
+        return new Response(JSON.stringify({ candidates: [], total: 0 }));
+      }
+
       if (url === "/api/admin/clusters/cluster-1/items/item-1/detach") {
         expect(init?.method).toBe("POST");
         return new Response(JSON.stringify({}), { status: 200 });
@@ -665,6 +874,10 @@ describe("ContentReviewPanel", () => {
             ],
           }),
         );
+      }
+
+      if (url === CLUSTER_REVIEW_COUNT_URL) {
+        return new Response(JSON.stringify({ candidates: [], total: 0 }));
       }
 
       if (url === "/api/admin/clusters/cluster-1/regenerate-summary") {
@@ -725,6 +938,10 @@ describe("ContentReviewPanel", () => {
         return new Response(JSON.stringify({ clusters: [cluster], total: 1 }));
       }
 
+      if (url === CLUSTER_REVIEW_COUNT_URL) {
+        return new Response(JSON.stringify({ candidates: [], total: 0 }));
+      }
+
       if (url === requestUrl) {
         expect(init?.method).toBe("POST");
         return new Response(JSON.stringify({}), { status: 200 });
@@ -781,6 +998,10 @@ describe("ContentReviewPanel", () => {
 
       if (url === okUrl) {
         return new Response(JSON.stringify(okBody));
+      }
+
+      if (url === CLUSTER_REVIEW_COUNT_URL) {
+        return new Response(JSON.stringify({ candidates: [], total: 0 }));
       }
 
       throw new Error(`Unexpected fetch URL: ${url}`);

@@ -34,6 +34,8 @@ afterEach(() => {
 
 describe("/api/admin/clusters", () => {
   beforeEach(async () => {
+    await prisma.clusterDecision.deleteMany();
+    await prisma.clusterConstraint.deleteMany();
     await prisma.item.deleteMany();
     await prisma.contentCluster.deleteMany();
     await prisma.fetchRun.deleteMany();
@@ -420,5 +422,190 @@ describe("/api/admin/clusters", () => {
     expect(response.status).toBe(400);
     expect(json.error).toBe("目标聚合组不能在待合并列表中");
     expect(mergeClusters).not.toHaveBeenCalled();
+  });
+
+  it("lists pending cluster review candidates for admins", async () => {
+    requireAdmin.mockResolvedValue(undefined);
+    await prisma.contentCluster.create({
+      data: {
+        id: "cluster-review-source",
+        kind: "topic",
+        title: "OpenAI Agent launch follow-up",
+        summary: "复核摘要",
+        score: 78,
+        itemCount: 1,
+        latestPublishedAt: new Date("2026-04-10T07:00:00.000Z"),
+        status: "active",
+        fingerprint: "openai-agent-review-source",
+      },
+    });
+    await prisma.clusterDecision.create({
+      data: {
+        id: "decision-review-1",
+        kind: "cluster_pair",
+        source: "llm",
+        verdict: "ambiguous",
+        leftClusterId: "cluster-1",
+        rightClusterId: "cluster-review-source",
+        pairKey: "cluster-1::cluster-review-source",
+        inputHash: "review-input",
+        localScore: 88,
+        confidence: 62,
+        reasonCode: "llm_ambiguous",
+        reasonText: "主体一致但对象证据不足",
+      },
+    });
+    await prisma.clusterDecision.create({
+      data: {
+        id: "decision-applied",
+        kind: "cluster_pair",
+        source: "llm",
+        verdict: "approved",
+        leftClusterId: "cluster-1",
+        rightClusterId: "cluster-review-source",
+        pairKey: "cluster-1::cluster-review-source",
+        inputHash: "applied-input",
+        appliedAt: new Date(),
+        appliedAction: "manual_review_ignore",
+      },
+    });
+
+    const { GET } = await import("@/app/api/admin/clusters/review-candidates/route");
+    const response = await GET(new Request("http://localhost/api/admin/clusters/review-candidates?page=1&pageSize=5"));
+    const json = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(json.total).toBe(1);
+    expect(json.candidates).toHaveLength(1);
+    expect(json.candidates[0]).toMatchObject({
+      id: "decision-review-1",
+      verdict: "ambiguous",
+      localScore: 88,
+      reasonText: "主体一致但对象证据不足",
+      leftCluster: {
+        id: "cluster-1",
+        title: "OpenAI Agent launch",
+      },
+      rightCluster: {
+        id: "cluster-review-source",
+        title: "OpenAI Agent launch follow-up",
+      },
+      targetClusterId: "cluster-1",
+      sourceClusterId: "cluster-review-source",
+    });
+  });
+
+  it("merges a cluster review candidate and marks the decision applied", async () => {
+    requireAdmin.mockResolvedValue(undefined);
+    mergeClusters.mockResolvedValue({
+      targetClusterId: "cluster-1",
+      mergedClusterIds: ["cluster-review-source"],
+      itemsMoved: 1,
+      taskId: "task-review-merge",
+    });
+    await prisma.contentCluster.create({
+      data: {
+        id: "cluster-review-source",
+        kind: "topic",
+        title: "OpenAI Agent launch follow-up",
+        summary: "复核摘要",
+        score: 78,
+        itemCount: 1,
+        latestPublishedAt: new Date("2026-04-10T07:00:00.000Z"),
+        status: "active",
+        fingerprint: "openai-agent-review-source",
+      },
+    });
+    await prisma.clusterDecision.create({
+      data: {
+        id: "decision-review-merge",
+        kind: "cluster_pair",
+        source: "llm",
+        verdict: "approved",
+        leftClusterId: "cluster-1",
+        rightClusterId: "cluster-review-source",
+        pairKey: "cluster-1::cluster-review-source",
+        inputHash: "review-input",
+      },
+    });
+
+    const { POST } = await import("@/app/api/admin/clusters/review-candidates/[id]/merge/route");
+    const response = await POST(
+      new Request("http://localhost/api/admin/clusters/review-candidates/decision-review-merge/merge", {
+        method: "POST",
+      }),
+      {
+        params: Promise.resolve({ id: "decision-review-merge" }),
+      },
+    );
+    const json = await response.json();
+    const decision = await prisma.clusterDecision.findUniqueOrThrow({
+      where: { id: "decision-review-merge" },
+    });
+
+    expect(response.status).toBe(200);
+    expect(mergeClusters).toHaveBeenCalledWith("cluster-1", ["cluster-review-source"]);
+    expect(json.result.taskId).toBe("task-review-merge");
+    expect(decision.appliedAction).toBe("manual_review_merge");
+    expect(decision.appliedAt).toBeInstanceOf(Date);
+  });
+
+  it("ignores a cluster review candidate by creating a cannot-link constraint", async () => {
+    requireAdmin.mockResolvedValue(undefined);
+    await prisma.contentCluster.create({
+      data: {
+        id: "cluster-review-source",
+        kind: "topic",
+        title: "OpenAI Agent launch follow-up",
+        summary: "复核摘要",
+        score: 78,
+        itemCount: 1,
+        latestPublishedAt: new Date("2026-04-10T07:00:00.000Z"),
+        status: "active",
+        fingerprint: "openai-agent-review-source",
+      },
+    });
+    await prisma.clusterDecision.create({
+      data: {
+        id: "decision-review-ignore",
+        kind: "cluster_pair",
+        source: "llm",
+        verdict: "ambiguous",
+        leftClusterId: "cluster-1",
+        rightClusterId: "cluster-review-source",
+        pairKey: "cluster-1::cluster-review-source",
+        inputHash: "review-input",
+      },
+    });
+
+    const { POST } = await import("@/app/api/admin/clusters/review-candidates/[id]/ignore/route");
+    const response = await POST(
+      new Request("http://localhost/api/admin/clusters/review-candidates/decision-review-ignore/ignore", {
+        method: "POST",
+      }),
+      {
+        params: Promise.resolve({ id: "decision-review-ignore" }),
+      },
+    );
+    const json = await response.json();
+    const [decision, constraint] = await Promise.all([
+      prisma.clusterDecision.findUniqueOrThrow({ where: { id: "decision-review-ignore" } }),
+      prisma.clusterConstraint.findFirstOrThrow({
+        where: {
+          kind: "cannot_link",
+          scope: "cluster_cluster",
+        },
+      }),
+    ]);
+
+    expect(response.status).toBe(200);
+    expect(json.success).toBe(true);
+    expect(decision.appliedAction).toBe("manual_review_ignore");
+    expect(constraint).toMatchObject({
+      leftId: "cluster-1",
+      rightId: "cluster-review-source",
+      createdBy: "manual",
+      reason: "manual review ignored",
+    });
   });
 });

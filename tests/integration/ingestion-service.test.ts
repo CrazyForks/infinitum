@@ -1678,9 +1678,10 @@ describe("runIngestion", () => {
       now: new Date("2026-04-10T10:00:00.000Z"),
     });
 
-    expect(result.status).toBe("succeeded");
-    expect(result.successCount).toBe(1);
-    expect(result.failureCount).toBe(0);
+    expect(result.status).toBe("failed");
+    expect(result.successCount).toBe(0);
+    expect(result.failureCount).toBe(1);
+    expect(result.errorSummary).toContain("Upstream ai timeout");
 
     const storedItem = await prisma.item.findFirstOrThrow();
     expect(storedItem.status).toBe("processed");
@@ -1733,7 +1734,10 @@ describe("runIngestion", () => {
       now: new Date("2026-04-10T10:00:00.000Z"),
     });
 
-    expect(result.status).toBe("succeeded");
+    expect(result.status).toBe("failed");
+    expect(result.successCount).toBe(0);
+    expect(result.failureCount).toBe(1);
+    expect(result.errorSummary).toContain("Invalid item summary response");
     const storedItem = await prisma.item.findFirstOrThrow();
     expect(storedItem.summaryStatus).toBe("failed");
     expect(storedItem.summaryText).toBeNull();
@@ -1848,6 +1852,12 @@ describe("runIngestion", () => {
     expect(storedSource.feedEtag).toBe("etag-ai-failure");
     expect(storedSource.feedLastModified).toBe("Tue, 21 Apr 2026 10:00:00 GMT");
     expect(storedSource.feedContentHash).toEqual(expect.any(String));
+    expect(storedTaskRun.status).toBe("failed");
+    expect(storedTaskRun.progressCurrent).toBe(1);
+    expect(storedTaskRun.progressTotal).toBe(1);
+    expect(storedTaskRun.progressLabel).toBe("已处理 1/1 条内容，来自 1 个源，失败 1 项，正文补抓 0 篇");
+    expect(storedTaskRun.errorSummary).toContain("Invalid item summary response");
+    expect(storedTaskRun.errorSummary).toContain("Upstream ai timeout");
     expect(taskTimeline.find((node) => node.key === "item_summary")?.metrics).toEqual(expect.arrayContaining([
       { label: "失败", value: 1 },
       { label: "格式无效", value: 1 },

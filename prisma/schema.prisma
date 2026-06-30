@@ -86,6 +86,37 @@ enum ContentClusterStatus {
   hidden
 }
 
+enum ClusterDecisionKind {
+  item_cluster
+  cluster_pair
+}
+
+enum ClusterDecisionVerdict {
+  approved
+  declined
+  ambiguous
+  failed
+}
+
+enum ClusterDecisionSource {
+  local_rule
+  llm
+  manual
+  system
+}
+
+enum ClusterConstraintKind {
+  must_link
+  cannot_link
+}
+
+enum ClusterConstraintScope {
+  item_item
+  item_cluster
+  cluster_cluster
+  event_identity
+}
+
 enum PromptConfigType {
   item_summary
   item_analysis
@@ -226,6 +257,8 @@ model ContentCluster {
   latestPublishedAt        DateTime
   status                   ContentClusterStatus             @default(active)
   fingerprint              String                           @unique
+  eventFingerprint         String?
+  eventBucket              String?
   eventType                String?
   eventSubject             String?
   eventAction              String?
@@ -249,6 +282,7 @@ model ContentCluster {
   cleanPairRightCandidates ClusterMergeCleanPairCandidate[] @relation("ClusterMergeCleanPairRight")
   dominantGroup            SourceGroup?                     @relation(fields: [dominantGroupId], references: [id], onDelete: SetNull)
 
+  @@index([eventFingerprint, eventBucket])
   @@index([status, latestPublishedAt])
   @@index([status, earliestCreatedAt])
   @@index([status, latestCreatedAt])
@@ -278,6 +312,55 @@ model ClusterMergeCleanPairCandidate {
   @@index([leftClusterId])
   @@index([rightClusterId])
   @@map("cluster_merge_clean_pair_candidates")
+}
+
+model ClusterDecision {
+  id             String                 @id @default(cuid())
+  kind           ClusterDecisionKind
+  source         ClusterDecisionSource
+  verdict        ClusterDecisionVerdict
+  leftItemId     String?
+  rightItemId    String?
+  leftClusterId  String?
+  rightClusterId String?
+  pairKey        String
+  inputHash      String
+  modelName      String?
+  promptHash     String?
+  localScore     Int?
+  confidence     Int?
+  reasonCode     String?
+  reasonText     String?
+  attemptCount   Int                    @default(0)
+  expiresAt      DateTime?
+  appliedAt      DateTime?
+  appliedAction  String?
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+
+  @@index([kind, pairKey, inputHash])
+  @@index([verdict, expiresAt])
+  @@index([leftClusterId])
+  @@index([rightClusterId])
+  @@map("cluster_decisions")
+}
+
+model ClusterConstraint {
+  id        String                 @id @default(cuid())
+  kind      ClusterConstraintKind
+  scope     ClusterConstraintScope
+  leftId    String
+  rightId   String
+  pairKey   String
+  reason    String?
+  createdBy String                 @default("system")
+  expiresAt DateTime?
+  createdAt DateTime               @default(now())
+  updatedAt DateTime               @updatedAt
+
+  @@unique([kind, scope, pairKey])
+  @@index([expiresAt])
+  @@map("cluster_constraints")
 }
 
 model FetchRun {

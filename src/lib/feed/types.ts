@@ -135,6 +135,23 @@ export type ClusterDTO = {
   assignmentExplanation?: ClusterAssignmentExplanationDTO;
 };
 
+export type ClusterReviewCandidateDTO = {
+  id: string;
+  verdict: "approved" | "declined" | "ambiguous" | "failed";
+  source: "local_rule" | "llm" | "manual" | "system";
+  reasonCode: string | null;
+  reasonText: string | null;
+  localScore: number | null;
+  confidence: number | null;
+  attemptCount: number;
+  expiresAt: string | null;
+  createdAt: string;
+  leftCluster: Pick<ClusterDTO, "id" | "title" | "summary" | "itemCount" | "score" | "latestPublishedAt" | "status">;
+  rightCluster: Pick<ClusterDTO, "id" | "title" | "summary" | "itemCount" | "score" | "latestPublishedAt" | "status">;
+  targetClusterId: string;
+  sourceClusterId: string;
+};
+
 export type AggregationSplitChildDTO = {
   id: string;
   title: string;

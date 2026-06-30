@@ -7,8 +7,11 @@ import {
   fetchAggregationSplitDetail,
   fetchAggregationSplits,
   fetchAdminCluster,
+  fetchClusterReviewCandidates,
   fetchFilteredReviewItems,
   fetchReviewClusters,
+  ignoreClusterReviewCandidate,
+  mergeClusterReviewCandidate,
   mergeReviewClusters,
   postContentReviewAction,
   type ContentReviewActionPayload,
@@ -37,7 +40,12 @@ import {
   IconMerge,
   IconSplit,
 } from "@/components/ui/icons";
-import type { AggregationSplitParentDTO, ClusterDTO, ReviewItemDTO } from "@/lib/feed/types";
+import type {
+  AggregationSplitParentDTO,
+  ClusterDTO,
+  ClusterReviewCandidateDTO,
+  ReviewItemDTO,
+} from "@/lib/feed/types";
 import { getClusterDisplayTitle } from "@/lib/feed/cluster-display";
 import { cx } from "@/lib/ui/cx";
 import { matchesFuzzySearch } from "@/lib/utils/search";
@@ -90,6 +98,25 @@ const splitStatusTone: Record<string, "success" | "warning" | "danger" | "neutra
   detected: "warning",
   failed: "danger",
 };
+
+const reviewCandidateVerdictLabels: Record<ClusterReviewCandidateDTO["verdict"], string> = {
+  approved: "建议合并",
+  ambiguous: "灰区复核",
+  declined: "已拒绝",
+  failed: "判定失败",
+};
+
+const reviewCandidateVerdictTone: Record<
+  ClusterReviewCandidateDTO["verdict"],
+  "success" | "warning" | "danger" | "neutral"
+> = {
+  approved: "success",
+  ambiguous: "warning",
+  declined: "neutral",
+  failed: "danger",
+};
+
+const CLUSTER_REVIEW_DEFAULT_PAGE_SIZE = 10;
 
 // Time range filter options
 const timeRangeOptions: Array<{ value: TimeRangeFilter; label: string }> = [
@@ -631,6 +658,172 @@ function AggregationSplitDetailModal({
   );
 }
 
+type ClusterReviewModalProps = {
+  candidates: ClusterReviewCandidateDTO[];
+  totalCount: number;
+  page: number;
+  pageSize: number;
+  isOpen: boolean;
+  isBusy: boolean;
+  pendingId: string | null;
+  onClose: () => void;
+  onPageChange: (page: number) => void;
+  onPageSizeChange: (pageSize: number) => void;
+  onRefresh: () => void;
+  onOpenCluster: (cluster: ClusterReviewCandidateDTO["leftCluster"]) => void;
+  onMerge: (candidateId: string) => void;
+  onIgnore: (candidateId: string) => void;
+};
+
+function ClusterReviewModal({
+  candidates,
+  totalCount,
+  page,
+  pageSize,
+  isOpen,
+  isBusy,
+  pendingId,
+  onClose,
+  onPageChange,
+  onPageSizeChange,
+  onRefresh,
+  onOpenCluster,
+  onMerge,
+  onIgnore,
+}: ClusterReviewModalProps) {
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+
+  return (
+    <ModalShell
+      isOpen={isOpen}
+      onClose={onClose}
+      title="聚合待定"
+      widthClassName="max-w-6xl"
+      headerClassName="border-b border-[color:var(--line)] p-4"
+      bodyClassName="space-y-4 p-4 max-h-[76vh] overflow-y-auto"
+      footerClassName="border-t border-[color:var(--line)] bg-[var(--bg-muted)] p-4"
+      footer={
+        <div className="flex items-center justify-end gap-2">
+          <Button onClick={onRefresh} variant="secondary" disabled={isBusy}>
+            刷新待定
+          </Button>
+          <Button onClick={onClose} variant="secondary" disabled={isBusy}>
+            关闭
+          </Button>
+        </div>
+      }
+    >
+      <div className="space-y-4">
+        {candidates.length === 0 ? (
+          <EmptyState className="border-0 bg-[var(--bg-muted)]">
+            暂无待处理复核
+          </EmptyState>
+        ) : (
+          <div className="w-full overflow-x-auto">
+            <table className="w-full table-auto text-sm">
+              <thead className="bg-[var(--bg-muted)] text-[var(--muted)]">
+                <tr>
+                  <th className="w-[12%] whitespace-nowrap px-3 py-2 text-left">判定</th>
+                  <th className="w-[24%] px-3 py-2 text-left">左聚合</th>
+                  <th className="w-[24%] px-3 py-2 text-left">右聚合</th>
+                  <th className="w-[12%] whitespace-nowrap px-3 py-2 text-left">置信分</th>
+                  <th className="w-[18%] px-3 py-2 text-left">原因</th>
+                  <th className="w-[10%] whitespace-nowrap px-3 py-2 text-right">操作</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[color:var(--line)]">
+                {candidates.map((candidate) => {
+                  const isCandidateBusy = pendingId === candidate.id;
+                  const reason = candidate.reasonText || candidate.reasonCode || "模型或本地证据认为可能属于同一事件";
+
+                  return (
+                    <tr key={candidate.id} className="align-top transition-colors hover:bg-[var(--bg-muted)]">
+                      <td className="px-3 py-3">
+                        <StatusTag tone={reviewCandidateVerdictTone[candidate.verdict]}>
+                          {reviewCandidateVerdictLabels[candidate.verdict]}
+                        </StatusTag>
+                        <div className="mt-1 text-xs text-[var(--text-3)]">
+                          {formatDate(candidate.createdAt)}
+                        </div>
+                      </td>
+                      <td className="px-3 py-3">
+                        <button
+                          type="button"
+                          className="block max-w-full truncate text-left font-medium text-[var(--accent)] hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg)]"
+                          onClick={() => onOpenCluster(candidate.leftCluster)}
+                        >
+                          {candidate.leftCluster.title}
+                        </button>
+                        <div className="mt-1 text-xs text-[var(--text-3)]">
+                          {candidate.leftCluster.itemCount} 条 · {formatDate(candidate.leftCluster.latestPublishedAt)}
+                        </div>
+                      </td>
+                      <td className="px-3 py-3">
+                        <button
+                          type="button"
+                          className="block max-w-full truncate text-left font-medium text-[var(--accent)] hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg)]"
+                          onClick={() => onOpenCluster(candidate.rightCluster)}
+                        >
+                          {candidate.rightCluster.title}
+                        </button>
+                        <div className="mt-1 text-xs text-[var(--text-3)]">
+                          {candidate.rightCluster.itemCount} 条 · {formatDate(candidate.rightCluster.latestPublishedAt)}
+                        </div>
+                      </td>
+                      <td className="px-3 py-3 text-[var(--text-2)]">
+                        {candidate.confidence != null ? candidate.confidence : "-"}
+                      </td>
+                      <td className="px-3 py-3 text-xs leading-5 text-[var(--text-2)]">
+                        {reason}
+                      </td>
+                      <td className="px-3 py-3 text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <IconButton
+                            aria-label={`合并待定：${candidate.leftCluster.title}`}
+                            title="合并"
+                            size="sm"
+                            variant="ghost"
+                            disabled={isBusy || isCandidateBusy}
+                            onClick={() => onMerge(candidate.id)}
+                          >
+                            <IconMerge className={cx("h-4 w-4", isCandidateBusy && "animate-pulse")} />
+                          </IconButton>
+                          <IconButton
+                            aria-label={`忽略待定：${candidate.leftCluster.title}`}
+                            title="忽略"
+                            size="sm"
+                            variant="ghost"
+                            disabled={isBusy || isCandidateBusy}
+                            onClick={() => onIgnore(candidate.id)}
+                          >
+                            <IconX className={cx("h-4 w-4", isCandidateBusy && "animate-pulse")} />
+                          </IconButton>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {totalCount > 0 ? (
+          <PaginationControls
+            totalItems={totalCount}
+            page={page}
+            totalPages={totalPages}
+            pageSize={pageSize}
+            onPageChange={onPageChange}
+            onPageSizeChange={onPageSizeChange}
+            disabled={isBusy}
+          />
+        ) : null}
+      </div>
+    </ModalShell>
+  );
+}
+
 interface ContentReviewContentProps {
   initialTab?: ReviewTab;
   initialPage?: number | null;
@@ -650,6 +843,7 @@ function ContentReviewContent({
   const activeTab = initialTab;
   const [filteredItems, setFilteredItems] = useState<ReviewItemDTO[]>([]);
   const [clusters, setClusters] = useState<ClusterDTO[]>([]);
+  const [clusterReviewCandidates, setClusterReviewCandidates] = useState<ClusterReviewCandidateDTO[]>([]);
   const [aggregationSplits, setAggregationSplits] = useState<AggregationSplitParentDTO[]>([]);
   const [filteredSearch, setFilteredSearch] = useState("");
   const [debouncedFilteredSearch, setDebouncedFilteredSearch] = useState("");
@@ -667,6 +861,9 @@ function ContentReviewContent({
   const [pageSize, setPageSize] = useState(initialPageSize ?? 10);
   const [filteredTotal, setFilteredTotal] = useState(0);
   const [clusterTotal, setClusterTotal] = useState(0);
+  const [clusterReviewTotal, setClusterReviewTotal] = useState(0);
+  const [clusterReviewPage, setClusterReviewPage] = useState(1);
+  const [clusterReviewPageSize, setClusterReviewPageSize] = useState(CLUSTER_REVIEW_DEFAULT_PAGE_SIZE);
   const [splitTotal, setSplitTotal] = useState(0);
 
   // Detail modal states
@@ -676,6 +873,7 @@ function ContentReviewContent({
   const [isFilteredDetailOpen, setIsFilteredDetailOpen] = useState(false);
   const [isClusterDetailOpen, setIsClusterDetailOpen] = useState(false);
   const [isSplitDetailOpen, setIsSplitDetailOpen] = useState(false);
+  const [isClusterReviewModalOpen, setIsClusterReviewModalOpen] = useState(false);
 
   // Action states
   const [restoringItemId, setRestoringItemId] = useState<string | null>(null);
@@ -683,6 +881,7 @@ function ContentReviewContent({
   const [regeneratingClusterId, setRegeneratingClusterId] = useState<string | null>(null);
   const [togglingClusterId, setTogglingClusterId] = useState<string | null>(null);
   const [mergingClusterId, setMergingClusterId] = useState<string | null>(null);
+  const [reviewCandidatePendingId, setReviewCandidatePendingId] = useState<string | null>(null);
   const [splittingClusterId, setSplittingClusterId] = useState<string | null>(null);
   const [cancellingSplitId, setCancellingSplitId] = useState<string | null>(null);
 
@@ -709,6 +908,15 @@ function ContentReviewContent({
     onConfirm: () => {},
   });
 
+  const loadClusterReviewCandidates = useCallback(
+    async (nextPage = clusterReviewPage, nextPageSize = clusterReviewPageSize) => {
+      const result = await fetchClusterReviewCandidates(nextPage, nextPageSize);
+      setClusterReviewCandidates(result.candidates);
+      setClusterReviewTotal(result.total);
+    },
+    [clusterReviewPage, clusterReviewPageSize],
+  );
+
   const fetchData = useCallback(() => {
     let cancelled = false;
 
@@ -725,15 +933,19 @@ function ContentReviewContent({
           setFilteredItems(result.items);
           setFilteredTotal(result.total);
         } else if (activeTab === "clusters") {
-          const result = await fetchReviewClusters(page, pageSize, debouncedClusterSearch, {
-            minItemCount: 2,
-            status: clusterStatus,
-            timeRange: clusterTimeRange,
-          });
+          const [result, reviewResult] = await Promise.all([
+            fetchReviewClusters(page, pageSize, debouncedClusterSearch, {
+              minItemCount: 2,
+              status: clusterStatus,
+              timeRange: clusterTimeRange,
+            }),
+            fetchClusterReviewCandidates(1, 1),
+          ]);
 
           if (cancelled) return;
           setClusters(result.clusters);
           setClusterTotal(result.total);
+          setClusterReviewTotal(reviewResult.total);
         } else {
           const result = await fetchAggregationSplits(page, pageSize, debouncedSplitSearch, splitStatus);
 
@@ -770,6 +982,32 @@ function ContentReviewContent({
     const cleanup = fetchData();
     return cleanup;
   }, [fetchData]);
+
+  useEffect(() => {
+    if (!isClusterReviewModalOpen) {
+      return;
+    }
+
+    let cancelled = false;
+
+    startTransition(async () => {
+      try {
+        const result = await fetchClusterReviewCandidates(clusterReviewPage, clusterReviewPageSize);
+        if (!cancelled) {
+          setClusterReviewCandidates(result.candidates);
+          setClusterReviewTotal(result.total);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          showToast(error instanceof Error ? error.message : "聚合待定加载失败。", "error");
+        }
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [clusterReviewPage, clusterReviewPageSize, isClusterReviewModalOpen, showToast]);
 
   useEffect(() => {
     if (activeTab !== "clusters") {
@@ -1011,6 +1249,20 @@ function ContentReviewContent({
     setIsClusterDetailOpen(true);
   };
 
+  const handleOpenClusterReviewDetail = async (cluster: ClusterReviewCandidateDTO["leftCluster"]) => {
+    const fallbackCluster: ClusterDTO = {
+      ...cluster,
+      items: [],
+    };
+
+    try {
+      setSelectedCluster((await fetchAdminCluster(cluster.id)) ?? fallbackCluster);
+    } catch {
+      setSelectedCluster(fallbackCluster);
+    }
+    setIsClusterDetailOpen(true);
+  };
+
   const handleCloseClusterDetail = () => {
     setIsClusterDetailOpen(false);
     setSelectedCluster(null);
@@ -1028,6 +1280,15 @@ function ContentReviewContent({
   const handleCloseSplitDetail = () => {
     setIsSplitDetailOpen(false);
     setSelectedSplit(null);
+  };
+
+  const handleOpenClusterReview = () => {
+    setClusterReviewPage(1);
+    setIsClusterReviewModalOpen(true);
+  };
+
+  const handleCloseClusterReview = () => {
+    setIsClusterReviewModalOpen(false);
   };
 
   const handleRestoreItem = (itemId: string) => {
@@ -1311,6 +1572,75 @@ function ContentReviewContent({
     }
   };
 
+  const handleMergeReviewCandidate = (candidateId: string) => {
+    runTransition(async () => {
+      await executeWithPendingId(candidateId, setReviewCandidatePendingId, async () => {
+        try {
+          const result = await mergeClusterReviewCandidate(candidateId);
+          showToast(`待定合并完成，移动 ${result.itemsMoved} 个条目。`, "success");
+          await loadClusterReviewCandidates();
+          fetchData();
+        } catch (error) {
+          showToast(error instanceof Error ? error.message : "待定合并失败", "error");
+        }
+      });
+    });
+  };
+
+  const handleIgnoreReviewCandidate = (candidateId: string) => {
+    runTransition(async () => {
+      await executeWithPendingId(candidateId, setReviewCandidatePendingId, async () => {
+        try {
+          await ignoreClusterReviewCandidate(candidateId);
+          showToast("已忽略并写入不可合并约束。", "success");
+          await loadClusterReviewCandidates();
+        } catch (error) {
+          showToast(error instanceof Error ? error.message : "待定忽略失败", "error");
+        }
+      });
+    });
+  };
+
+  const openConfirmMergeReviewCandidate = (candidateId: string) => {
+    const candidate = clusterReviewCandidates.find((entry) => entry.id === candidateId);
+    const sourceCluster = candidate
+      ? candidate.sourceClusterId === candidate.leftCluster.id
+        ? candidate.leftCluster
+        : candidate.rightCluster
+      : null;
+    const targetCluster = candidate
+      ? candidate.targetClusterId === candidate.leftCluster.id
+        ? candidate.leftCluster
+        : candidate.rightCluster
+      : null;
+    setConfirmModal({
+      isOpen: true,
+      title: "确认合并待定",
+      message: `确定要合并 "${sourceCluster?.title ?? ""}" 到 "${targetCluster?.title ?? ""}" 吗？确认后会移动源聚合条目。`,
+      confirmText: "合并",
+      variant: "primary",
+      onConfirm: () => {
+        handleMergeReviewCandidate(candidateId);
+        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+      },
+    });
+  };
+
+  const openConfirmIgnoreReviewCandidate = (candidateId: string) => {
+    const candidate = clusterReviewCandidates.find((entry) => entry.id === candidateId);
+    setConfirmModal({
+      isOpen: true,
+      title: "确认忽略待定",
+      message: `确定要忽略 "${candidate?.leftCluster.title ?? ""}" 与 "${candidate?.rightCluster.title ?? ""}" 的待定合并吗？确认后会写入不可合并约束。`,
+      confirmText: "忽略",
+      variant: "danger",
+      onConfirm: () => {
+        handleIgnoreReviewCandidate(candidateId);
+        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+      },
+    });
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -1332,6 +1662,11 @@ function ContentReviewContent({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {activeTab === "clusters" ? (
+            <Button onClick={handleOpenClusterReview} variant="secondary" disabled={isPending}>
+              聚合待定{clusterReviewTotal > 0 ? `（${clusterReviewTotal}）` : ""}
+            </Button>
+          ) : null}
           <Button onClick={handleClearFilters} variant="secondary" disabled={!hasFilters}>
             清空筛选
           </Button>
@@ -1736,6 +2071,34 @@ function ContentReviewContent({
           isCancelling={cancellingSplitId === selectedSplit.id}
         />
       )}
+
+      <ClusterReviewModal
+        candidates={clusterReviewCandidates}
+        totalCount={clusterReviewTotal}
+        page={clusterReviewPage}
+        pageSize={clusterReviewPageSize}
+        isOpen={isClusterReviewModalOpen}
+        isBusy={isPending}
+        pendingId={reviewCandidatePendingId}
+        onClose={handleCloseClusterReview}
+        onPageChange={setClusterReviewPage}
+        onPageSizeChange={(nextPageSize) => {
+          setClusterReviewPageSize(nextPageSize);
+          setClusterReviewPage(1);
+        }}
+        onRefresh={() => {
+          runTransition(async () => {
+            try {
+              await loadClusterReviewCandidates();
+            } catch (error) {
+              showToast(error instanceof Error ? error.message : "聚合待定加载失败。", "error");
+            }
+          });
+        }}
+        onOpenCluster={handleOpenClusterReviewDetail}
+        onMerge={openConfirmMergeReviewCandidate}
+        onIgnore={openConfirmIgnoreReviewCandidate}
+      />
 
       {/* Confirmation Modal */}
       <ModalShell

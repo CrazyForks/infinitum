@@ -147,6 +147,8 @@ export function toClusterAssignmentCandidate(cluster: {
   title: string;
   summary: string;
   fingerprint: string;
+  eventFingerprint?: string | null;
+  eventBucket?: string | null;
   eventType?: string | null;
   eventSubject?: string | null;
   eventAction?: string | null;
@@ -160,6 +162,8 @@ export function toClusterAssignmentCandidate(cluster: {
     title: cluster.title,
     summary: cluster.summary,
     fingerprint: cluster.fingerprint,
+    eventFingerprint: cluster.eventFingerprint ?? null,
+    eventBucket: cluster.eventBucket ?? null,
     eventType: cluster.eventType ?? null,
     eventSubject: cluster.eventSubject ?? null,
     eventAction: cluster.eventAction ?? null,

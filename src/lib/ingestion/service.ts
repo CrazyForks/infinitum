@@ -295,6 +295,20 @@ function getExistingItemForLookup(
   return existingByUrlHash.get(lookup.dedupeKeys.urlHash) ?? null;
 }
 
+function hasItemProcessingFailure(result: ProcessedItemRecord | null) {
+  return Boolean(
+    result?.metrics?.summaryFailed ||
+    result?.metrics?.aggregationParseFailed ||
+    result?.metrics?.analysisFailed,
+  );
+}
+
+function buildItemProcessingFailureMessage(result: ProcessedItemRecord) {
+  return result.errorMessage
+    ? `Item ${result.id}: ${result.errorMessage}`
+    : `Item ${result.id}: AI processing failed`;
+}
+
 function dedupePreparedLookupsByDedupeKey<T extends { lookup: PreparedFeedItemLookup | null }>(entries: T[]) {
   const seen = new Set<string>();
   const deduped: T[] = [];
@@ -559,6 +573,9 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
         failureCount += 1;
       } else if (result?.status === "failed") {
         failureCount += 1;
+      } else if (result && hasItemProcessingFailure(result)) {
+        failureCount += 1;
+        errors.push(buildItemProcessingFailureMessage(result));
       } else if (result && result.status !== "filtered") {
         successCount += 1;
         if (result.isNew) {
@@ -799,6 +816,12 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
     precomputedCleanPairsUsed: mergeResult.precomputedCleanPairsUsed,
     precomputedCleanPairsAttemptSkipped: mergeResult.precomputedCleanPairsAttemptSkipped,
     precomputedCleanPairsInvalidSkipped: mergeResult.precomputedCleanPairsInvalidSkipped,
+    blockedByCannotLink: mergeResult.blockedByCannotLink,
+    blockedByDeclinedDecision: mergeResult.blockedByDeclinedDecision,
+    decisionsApproved: mergeResult.decisionsApproved,
+    decisionsDeclined: mergeResult.decisionsDeclined,
+    decisionsAmbiguous: mergeResult.decisionsAmbiguous,
+    decisionsFailed: mergeResult.decisionsFailed,
     dirtyPairs: mergeResult.dirtyPairs,
     preLimitCandidates: mergeResult.preLimitCandidates,
     postLimitCandidates: mergeResult.postLimitCandidates,

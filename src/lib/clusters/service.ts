@@ -49,6 +49,17 @@ import {
   type ClusterMergeCandidateEdge,
 } from "@/lib/clusters/helpers";
 import {
+  createCannotLinkForClusters,
+  createCannotLinksBetweenItemSets,
+  createMustLinkForClusters,
+  findBlockingClusterPairConstraint,
+} from "@/lib/clusters/constraints";
+import {
+  getClusterPairDecisionBlock,
+  recordClusterDecision,
+} from "@/lib/clusters/decisions";
+import { buildEventIdentity } from "@/lib/clusters/identity";
+import {
   type ClusterAssignmentCandidate,
   createContentCluster,
   deleteCluster,
@@ -102,7 +113,15 @@ async function findClusterForItem(
   skippedIncompleteSignature: boolean;
 }> {
   const fingerprintSeed = buildClusterFingerprintSeed(options);
-  const fingerprint = fingerprintSeed ? normalizeFingerprint(fingerprintSeed) : "";
+  const identity = buildEventIdentity({
+    eventSignature: options.eventSignature,
+    publishedAt: item.publishedAt,
+  });
+  const fingerprint = identity?.eventIdentityKey
+    ? normalizeFingerprint(identity.eventIdentityKey)
+    : fingerprintSeed
+      ? normalizeFingerprint(fingerprintSeed)
+      : "";
   const { since, until } = buildCandidateRange(item, CLUSTER_LOOKBACK_MS);
   const rangeKey = buildCandidateRangeKey(since, until);
   const exactMatchKey = fingerprint ? buildExactMatchKey(fingerprint, since, until) : "";
@@ -312,11 +331,17 @@ export async function assignItemToCluster(
     }
 
     const resolvedEventSignature = normalizeEventSignatureForStorage(options.eventSignature ?? getItemEventSignature(item));
+    const eventIdentity = buildEventIdentity({
+      eventSignature: resolvedEventSignature,
+      publishedAt: item.publishedAt,
+    });
     const canAggregate = options.aggregationEnabled ?? item.source.aggregationEnabled;
     if (!canAggregate) {
       const eventDisplayTitle = buildEventDisplayTitle(resolvedEventSignature);
       const cluster = await createContentCluster({
         fingerprint: `single-${item.id}`,
+        eventFingerprint: eventIdentity?.eventFingerprint ?? null,
+        eventBucket: eventIdentity?.eventBucket ?? null,
         title: eventDisplayTitle || getDisplayTitle(item.originalTitle, item.translatedTitle),
         summary: buildItemSummary(item),
         score: item.qualityScore,
@@ -329,6 +354,17 @@ export async function assignItemToCluster(
       });
 
       await setItemCluster(item.id, cluster.id);
+      await recordClusterDecision({
+        kind: "item_cluster",
+        source: "system",
+        verdict: "approved",
+        leftItemId: item.id,
+        leftClusterId: cluster.id,
+        pairKey: buildClusterMergeEdgeKey(item.id, cluster.id),
+        inputHash: `${item.updatedAt.getTime()}:${cluster.id}`,
+        confidence: eventIdentity?.identityConfidence ?? null,
+        reasonCode: "singleton_cluster",
+      });
 
       return {
         clusterId: cluster.id,
@@ -351,6 +387,8 @@ export async function assignItemToCluster(
       matchedCluster ??
       (await createContentCluster({
         fingerprint: fingerprint || `single-${item.id}`,
+        eventFingerprint: eventIdentity?.eventFingerprint ?? null,
+        eventBucket: eventIdentity?.eventBucket ?? null,
         title: clusterTitle,
         summary: buildItemSummary(item),
         score: item.qualityScore,
@@ -374,6 +412,17 @@ export async function assignItemToCluster(
     }
 
     await setItemCluster(item.id, cluster.id);
+    await recordClusterDecision({
+      kind: "item_cluster",
+      source: matchSource === "ai_match" ? "llm" : matchSource === "cheap_rank_direct" ? "local_rule" : "system",
+      verdict: "approved",
+      leftItemId: item.id,
+      leftClusterId: cluster.id,
+      pairKey: buildClusterMergeEdgeKey(item.id, cluster.id),
+      inputHash: `${item.updatedAt.getTime()}:${cluster.id}`,
+      confidence: eventIdentity?.identityConfidence ?? null,
+      reasonCode: matchSource ?? (createdNewCluster ? "new_cluster" : "cluster_assignment"),
+    });
     // Note: Cluster summary recomputation is now handled at batch level in executeIngestion
 
     return {
@@ -426,6 +475,10 @@ export async function recomputeCluster(
   const eventSignature = buildClusterEventSignature(cluster.items);
   const score = Math.max(...cluster.items.map((item) => item.qualityScore));
   const latestPublishedAt = cluster.items[0]!.publishedAt;
+  const eventIdentity = buildEventIdentity({
+    eventSignature,
+    publishedAt: latestPublishedAt,
+  });
   const nextItemCount = cluster.items.length;
   const shouldSkipUpdate =
     cluster.title === presentation.title &&
@@ -438,6 +491,8 @@ export async function recomputeCluster(
     cluster.eventAction === (eventSignature?.eventAction ?? null) &&
     cluster.eventObject === (eventSignature?.eventObject ?? null) &&
     cluster.eventDate === (eventSignature?.eventDate ?? null) &&
+    cluster.eventFingerprint === (eventIdentity?.eventFingerprint ?? null) &&
+    cluster.eventBucket === (eventIdentity?.eventBucket ?? null) &&
     cluster.summaryInputHash === summaryInputHash;
 
   if (shouldSkipUpdate) {
@@ -463,6 +518,8 @@ export async function recomputeCluster(
     eventAction: eventSignature?.eventAction ?? null,
     eventObject: eventSignature?.eventObject ?? null,
     eventDate: eventSignature?.eventDate ?? null,
+    eventFingerprint: eventIdentity?.eventFingerprint ?? null,
+    eventBucket: eventIdentity?.eventBucket ?? null,
   });
   await refreshClusterFeedStatsSafely([clusterId], "recompute cluster");
 
@@ -490,6 +547,10 @@ async function refreshClusterStats(clusterId: string) {
   const eventSignature = buildClusterEventSignature(cluster.items);
   const score = Math.max(...cluster.items.map((item) => item.qualityScore));
   const latestPublishedAt = cluster.items[0]!.publishedAt;
+  const eventIdentity = buildEventIdentity({
+    eventSignature,
+    publishedAt: latestPublishedAt,
+  });
 
   const updated = await prisma.contentCluster.update({
     where: { id: clusterId },
@@ -502,6 +563,8 @@ async function refreshClusterStats(clusterId: string) {
       eventAction: eventSignature?.eventAction ?? null,
       eventObject: eventSignature?.eventObject ?? null,
       eventDate: eventSignature?.eventDate ?? null,
+      eventFingerprint: eventIdentity?.eventFingerprint ?? null,
+      eventBucket: eventIdentity?.eventBucket ?? null,
     },
   });
   await refreshClusterFeedStatsSafely([clusterId], "refresh cluster stats");
@@ -519,6 +582,17 @@ export async function detachItemFromCluster(itemId: string, aiProvider?: AiProvi
   }
 
   const previousClusterId = item.clusterId;
+  const previousSiblingIds = (
+    await prisma.item.findMany({
+      where: {
+        clusterId: previousClusterId,
+        id: { not: itemId },
+        status: "processed",
+        moderationStatus: { in: ["allowed", "restored"] },
+      },
+      select: { id: true },
+    })
+  ).map((sibling) => sibling.id);
   await prisma.item.update({
     where: { id: itemId },
     data: {
@@ -535,8 +609,14 @@ export async function detachItemFromCluster(itemId: string, aiProvider?: AiProvi
   await recomputeCluster(previousClusterId, aiProvider);
 
   if (detachedAssignment.clusterId) {
+    await createCannotLinkForClusters(previousClusterId, detachedAssignment.clusterId, "manual detach");
     await recomputeCluster(detachedAssignment.clusterId, aiProvider);
   }
+  await createCannotLinksBetweenItemSets({
+    leftItemIds: [itemId],
+    rightItemIds: previousSiblingIds,
+    reason: "manual detach",
+  });
   await refreshClusterFeedStatsSafely(
     [previousClusterId, detachedAssignment.clusterId].filter((id): id is string => Boolean(id)),
     "detach item from cluster",
@@ -580,6 +660,15 @@ export async function splitClusterIntoSingletons(
   }
 
   const itemIds = cluster.items.map((item) => item.id);
+  for (let leftIndex = 0; leftIndex < itemIds.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < itemIds.length; rightIndex += 1) {
+      await createCannotLinksBetweenItemSets({
+        leftItemIds: [itemIds[leftIndex]!],
+        rightItemIds: [itemIds[rightIndex]!],
+        reason: "manual split",
+      });
+    }
+  }
   await prisma.item.updateMany({
     where: { id: { in: itemIds } },
     data: {
@@ -596,6 +685,7 @@ export async function splitClusterIntoSingletons(
     });
     if (assignment.clusterId) {
       singletonClusterIds.push(assignment.clusterId);
+      await createCannotLinkForClusters(clusterId, assignment.clusterId, "manual split");
       await recomputeCluster(assignment.clusterId, aiProvider);
     }
   }
@@ -660,6 +750,9 @@ export async function moveItemToCluster(itemId: string, clusterId: string, aiPro
       manualClusterAssignedAt: new Date(),
     },
   });
+  if (previousClusterId) {
+    await createMustLinkForClusters(clusterId, previousClusterId, "manual item move");
+  }
   await recomputeCluster(clusterId, aiProvider);
 
   if (previousClusterId) {
@@ -770,6 +863,9 @@ export async function mergeSelectedItemsToLargestCluster(
   });
 
   const affectedClusterIds = [targetCluster.id, ...previousClusterIds];
+  for (const previousClusterId of previousClusterIds) {
+    await createMustLinkForClusters(targetCluster.id, previousClusterId, "manual selected item merge");
+  }
   for (const clusterId of affectedClusterIds) {
     await recomputeCluster(clusterId, aiProvider);
   }
@@ -925,6 +1021,12 @@ export type ClusterMergePassResult = {
   precomputedCleanPairsUsed: number;
   precomputedCleanPairsAttemptSkipped: number;
   precomputedCleanPairsInvalidSkipped: number;
+  blockedByCannotLink: number;
+  blockedByDeclinedDecision: number;
+  decisionsApproved: number;
+  decisionsDeclined: number;
+  decisionsAmbiguous: number;
+  decisionsFailed: number;
   dirtyPairs: number;
   preLimitCandidates: number;
   postLimitCandidates: number;
@@ -1137,6 +1239,111 @@ async function markClusterMergeCandidatesEvaluated(candidates: EvaluatedClusterM
   );
 }
 
+function buildClusterMergePairInputHash(left: ClusterMergeCandidate, right: ClusterMergeCandidate) {
+  return [buildClusterMergeCandidateInputHash(left), buildClusterMergeCandidateInputHash(right)].sort().join(":");
+}
+
+function getClusterMergePairCandidates(
+  candidatesById: Map<string, ClusterMergeCandidate>,
+  edge: ClusterMergeCandidateEdge,
+) {
+  const left = candidatesById.get(edge.leftId);
+  const right = candidatesById.get(edge.rightId);
+
+  return left && right ? { left, right } : null;
+}
+
+async function filterBlockedClusterMergeEdges(input: {
+  candidatesById: Map<string, ClusterMergeCandidate>;
+  allowedPairs: ClusterMergeCandidateEdge[];
+  now: Date;
+}) {
+  const filteredPairs: ClusterMergeCandidateEdge[] = [];
+  let blockedByCannotLink = 0;
+  let blockedByDeclinedDecision = 0;
+
+  for (const edge of input.allowedPairs) {
+    const pair = getClusterMergePairCandidates(input.candidatesById, edge);
+    if (!pair) {
+      continue;
+    }
+
+    const constraint = await findBlockingClusterPairConstraint({
+      leftClusterId: edge.leftId,
+      rightClusterId: edge.rightId,
+      now: input.now,
+    });
+    if (constraint) {
+      blockedByCannotLink += 1;
+      continue;
+    }
+
+    const decisionBlock = await getClusterPairDecisionBlock({
+      pairKey: buildClusterMergeEdgeKey(edge.leftId, edge.rightId),
+      inputHash: buildClusterMergePairInputHash(pair.left, pair.right),
+      now: input.now,
+    });
+    if (decisionBlock) {
+      blockedByDeclinedDecision += 1;
+      continue;
+    }
+
+    filteredPairs.push(edge);
+  }
+
+  return {
+    allowedPairs: filteredPairs,
+    blockedByCannotLink,
+    blockedByDeclinedDecision,
+  };
+}
+
+async function recordClusterMergeDecisions(input: {
+  candidatesById: Map<string, ClusterMergeCandidate>;
+  allowedPairs: ClusterMergeCandidateEdge[];
+  mergeGroups: string[][];
+  verdictOnMissing: "declined" | "failed";
+  now: Date;
+}) {
+  const decisions: Array<Awaited<ReturnType<typeof recordClusterDecision>>> = [];
+
+  for (const edge of input.allowedPairs) {
+    const pair = getClusterMergePairCandidates(input.candidatesById, edge);
+    if (!pair) {
+      continue;
+    }
+
+    const approved = input.mergeGroups.some((group) => groupContainsClusterMergePair(group, edge.leftId, edge.rightId));
+    decisions.push(
+      await recordClusterDecision({
+        kind: "cluster_pair",
+        source: "llm",
+        verdict: input.verdictOnMissing === "failed" ? "failed" : approved ? "approved" : "declined",
+        leftClusterId: edge.leftId,
+        rightClusterId: edge.rightId,
+        pairKey: buildClusterMergeEdgeKey(edge.leftId, edge.rightId),
+        inputHash: buildClusterMergePairInputHash(pair.left, pair.right),
+        localScore: edge.score,
+        reasonCode: input.verdictOnMissing === "failed" ? "llm_failure" : approved ? "llm_approved" : "llm_declined",
+        now: input.now,
+      }),
+    );
+  }
+
+  return decisions;
+}
+
+function countClusterMergeDecisionVerdicts(
+  decisions: Array<Awaited<ReturnType<typeof recordClusterDecision>>>,
+) {
+  return {
+    decisionsApproved: decisions.filter((decision) => decision.verdict === "approved").length,
+    decisionsDeclined: decisions.filter((decision) => decision.verdict === "declined").length,
+    decisionsAmbiguous: decisions.filter((decision) => decision.verdict === "ambiguous").length,
+    decisionsFailed: decisions.filter((decision) => decision.verdict === "failed").length,
+  };
+}
+
 async function refreshRecentClusterItemCounts(lookbackSince: Date) {
   // Refresh itemCount for clusters in the lookback window.
   // Newly created clusters only get fully refreshed during cluster_finalize,
@@ -1222,7 +1429,13 @@ export async function executeClusterMerge(
   });
   timings.candidateSelectionMs = Date.now() - selectionStartedAt;
   const allCandidates = precomputedSelection.candidates;
-  const allowedPairs = precomputedSelection.allowedPairs;
+  const candidatesById = new Map(allCandidates.map((candidate) => [candidate.id, candidate]));
+  const blockedSelection = await filterBlockedClusterMergeEdges({
+    candidatesById,
+    allowedPairs: precomputedSelection.allowedPairs,
+    now,
+  });
+  const allowedPairs = blockedSelection.allowedPairs;
   const evaluatedCandidates = liveClusterIds
     ? [...new Map([...liveClusters, ...allCandidates].map((cluster) => [cluster.id, cluster])).values()]
     : recentClusters;
@@ -1243,6 +1456,12 @@ export async function executeClusterMerge(
     precomputedCleanPairsUsed: precomputedSelection.usedCount,
     precomputedCleanPairsAttemptSkipped: precomputedSelection.attemptSkipped,
     precomputedCleanPairsInvalidSkipped: precomputedSelection.invalidSkipped,
+    blockedByCannotLink: blockedSelection.blockedByCannotLink,
+    blockedByDeclinedDecision: blockedSelection.blockedByDeclinedDecision,
+    decisionsApproved: 0,
+    decisionsDeclined: 0,
+    decisionsAmbiguous: 0,
+    decisionsFailed: 0,
     dirtyPairs: diagnostics.dirtyPairs,
     preLimitCandidates: diagnostics.preLimitCandidates,
     postLimitCandidates: allCandidates.length,
@@ -1320,13 +1539,17 @@ export async function executeClusterMerge(
     mergeGroups = await aiProvider.mergeClusters(clustersJson);
   } catch {
     timings.aiMergeMs = Date.now() - aiMergeStartedAt;
-    // On AI failure, update hashes and return without merging
-    const markStartedAt = Date.now();
-    await markClusterMergeCandidatesEvaluated(evaluatedCandidates);
-    timings.markEvaluatedMs = Date.now() - markStartedAt;
+    const failedDecisions = await recordClusterMergeDecisions({
+      candidatesById,
+      allowedPairs,
+      mergeGroups: [],
+      verdictOnMissing: "failed",
+      now,
+    });
 
     return {
       ...baseResult,
+      ...countClusterMergeDecisionVerdicts(failedDecisions),
       ...timings,
       aiMergeGroups: 0,
       skipped: true,
@@ -1337,6 +1560,13 @@ export async function executeClusterMerge(
     };
   }
   timings.aiMergeMs = Date.now() - aiMergeStartedAt;
+  const mergeDecisions = await recordClusterMergeDecisions({
+    candidatesById,
+    allowedPairs,
+    mergeGroups,
+    verdictOnMissing: "declined",
+    now,
+  });
   await markDeclinedPrecomputedCleanMergePairs(
     precomputedSelection.usedPairIdsByEdgeKey,
     allowedPairs,
@@ -1371,10 +1601,37 @@ export async function executeClusterMerge(
     if (sources.length === 0) continue;
 
     try {
-      const mergeResult = await mergeClustersInternal(target.id, sources);
+      const stillAllowedSources: string[] = [];
+      for (const sourceId of sources) {
+        const blockingConstraint = await findBlockingClusterPairConstraint({
+          leftClusterId: target.id,
+          rightClusterId: sourceId,
+          now,
+        });
+        if (!blockingConstraint) {
+          stillAllowedSources.push(sourceId);
+        }
+      }
+      if (stillAllowedSources.length === 0) {
+        continue;
+      }
+      const mergeResult = await mergeClustersInternal(target.id, stillAllowedSources);
       affectedClusterIds.add(target.id);
-      mergedCount += sources.length;
+      mergedCount += stillAllowedSources.length;
       itemsMoved += mergeResult.itemsMoved;
+      await Promise.all(
+        mergeDecisions
+          .filter((decision) => decision.verdict === "approved" && stillAllowedSources.some((sourceId) =>
+            buildClusterMergeEdgeKey(target.id, sourceId) === decision.pairKey
+          ))
+          .map((decision) => prisma.clusterDecision.update({
+            where: { id: decision.id },
+            data: {
+              appliedAt: new Date(),
+              appliedAction: "merge_clusters_internal",
+            },
+          })),
+      );
     } catch {
       // Continue with other groups on individual merge failure
       failedGroups += 1;
@@ -1390,6 +1647,7 @@ export async function executeClusterMerge(
 
   return {
     ...baseResult,
+    ...countClusterMergeDecisionVerdicts(mergeDecisions),
     ...timings,
     aiMergeGroups: mergeGroups.filter((group) => group.length >= 2).length,
     skipped: false,
@@ -1651,6 +1909,10 @@ export async function mergeClusters(
 
   if (itemsToMove.length === 0) {
     throw new Error("选中的聚合组中没有可移动的条目");
+  }
+
+  for (const sourceClusterId of sourceClusterIds) {
+    await createMustLinkForClusters(targetClusterId, sourceClusterId, "manual cluster merge");
   }
 
   // 移动所有条目到目标聚合组

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
 
 import { cx } from "@/lib/ui/cx";
 
@@ -23,7 +23,10 @@ type ModalShellProps = {
 const focusableSelector =
   'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
+const MODAL_BASE_Z_INDEX = 50;
+
 let openModalCount = 0;
+let nextModalZIndex = MODAL_BASE_Z_INDEX;
 let previousBodyOverflow = "";
 let previousBodyPaddingRight = "";
 
@@ -42,9 +45,37 @@ export function ModalShell({
   overlayClassName,
   showCloseButton = true,
 }: ModalShellProps) {
+  const overlayRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
+  const modalZIndexRef = useRef<number | null>(null);
   const titleId = useId();
+
+  useLayoutEffect(() => {
+    if (!isOpen) {
+      modalZIndexRef.current = null;
+      return;
+    }
+
+    if (modalZIndexRef.current === null) {
+      modalZIndexRef.current = nextModalZIndex;
+      nextModalZIndex += 1;
+    }
+
+    if (overlayRef.current) {
+      overlayRef.current.style.zIndex = String(modalZIndexRef.current);
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    return () => {
+      modalZIndexRef.current = null;
+    };
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen || typeof document === "undefined") {
@@ -135,7 +166,9 @@ export function ModalShell({
 
   return (
     <div
-      className={cx("fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4", overlayClassName)}
+      ref={overlayRef}
+      className={cx("fixed inset-0 flex items-center justify-center bg-black/50 p-4", overlayClassName)}
+      style={{ zIndex: MODAL_BASE_Z_INDEX }}
       onClick={() => onClose?.()}
     >
       <div

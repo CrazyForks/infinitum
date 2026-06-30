@@ -70,6 +70,7 @@ function makeSqliteSchemaIdempotent(sql) {
     .replace(/^CREATE INDEX "content_clusters_status_earliestCreatedAt_idx".*;\n?/gm, "")
     .replace(/^CREATE INDEX "content_clusters_status_displayRecommendScore_idx".*;\n?/gm, "")
     .replace(/^CREATE INDEX "content_clusters_dominantGroupId_status_latestCreatedAt_idx".*;\n?/gm, "")
+    .replace(/^CREATE INDEX "content_clusters_eventFingerprint_eventBucket_idx".*;\n?/gm, "")
     .replace(/^CREATE TABLE /gm, "CREATE TABLE IF NOT EXISTS ")
     .replace(/^CREATE UNIQUE INDEX /gm, "CREATE UNIQUE INDEX IF NOT EXISTS ")
     .replace(/^CREATE INDEX /gm, "CREATE INDEX IF NOT EXISTS ");
@@ -467,6 +468,8 @@ function applyAdditiveSchemaUpgrades() {
   }
 
   const clusterFeedStatsColumnsAdded = [
+    addColumnIfMissing("content_clusters", "eventFingerprint", "TEXT"),
+    addColumnIfMissing("content_clusters", "eventBucket", "TEXT"),
     addColumnIfMissing("content_clusters", "displayItemCount", "INTEGER NOT NULL DEFAULT 0"),
     addColumnIfMissing("content_clusters", "displaySourceCount", "INTEGER NOT NULL DEFAULT 0"),
     addColumnIfMissing("content_clusters", "displayAverageScore", "INTEGER NOT NULL DEFAULT 0"),
@@ -485,6 +488,7 @@ function applyAdditiveSchemaUpgrades() {
       CREATE INDEX IF NOT EXISTS "content_clusters_status_earliestCreatedAt_idx" ON "content_clusters"("status", "earliestCreatedAt");
       CREATE INDEX IF NOT EXISTS "content_clusters_status_displayRecommendScore_idx" ON "content_clusters"("status", "displayRecommendScore");
       CREATE INDEX IF NOT EXISTS "content_clusters_dominantGroupId_status_latestCreatedAt_idx" ON "content_clusters"("dominantGroupId", "status", "latestCreatedAt");
+      CREATE INDEX IF NOT EXISTS "content_clusters_eventFingerprint_eventBucket_idx" ON "content_clusters"("eventFingerprint", "eventBucket");
       CREATE INDEX IF NOT EXISTS "items_sourceId_status_moderationStatus_isAggregation_createdAt_idx" ON "items"("sourceId", "status", "moderationStatus", "isAggregation", "createdAt");
     `,
   });

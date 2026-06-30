@@ -1,4 +1,9 @@
-import type { AggregationSplitParentDTO, ClusterDTO, ReviewItemDTO } from "@/lib/feed/types";
+import type {
+  AggregationSplitParentDTO,
+  ClusterDTO,
+  ClusterReviewCandidateDTO,
+  ReviewItemDTO,
+} from "@/lib/feed/types";
 
 export type RequiredActionField = "cluster" | "taskRun";
 
@@ -20,6 +25,7 @@ export type MergeClustersResult = {
 
 type CollectionPayload = {
   aggregationSplits?: AggregationSplitParentDTO[];
+  candidates?: ClusterReviewCandidateDTO[];
   clusters?: ClusterDTO[];
   error?: string;
   items?: ReviewItemDTO[];
@@ -129,6 +135,16 @@ export async function fetchAdminCluster(clusterId: string) {
   return payload.cluster ?? null;
 }
 
+export async function fetchClusterReviewCandidates(page = 1, pageSize = 5) {
+  const params = new URLSearchParams({
+    page: String(page),
+    pageSize: String(pageSize),
+  });
+  const response = await fetch(`/api/admin/clusters/review-candidates?${params.toString()}`);
+  const payload = await parseJsonResponse<CollectionPayload>(response, "聚合复核候选加载失败。");
+  return { candidates: payload.candidates ?? [], total: payload.total ?? 0 };
+}
+
 export async function fetchAggregationSplits(
   page = 1,
   pageSize = 10,
@@ -179,4 +195,24 @@ export async function mergeReviewClusters(input: {
   }
 
   return payload.result;
+}
+
+export async function mergeClusterReviewCandidate(candidateId: string) {
+  const response = await fetch(`/api/admin/clusters/review-candidates/${candidateId}/merge`, {
+    method: "POST",
+  });
+  const payload = await parseJsonResponse<MergeClustersPayload>(response, "复核合并失败");
+
+  if (!payload.result) {
+    throw new Error("复核合并失败");
+  }
+
+  return payload.result;
+}
+
+export async function ignoreClusterReviewCandidate(candidateId: string) {
+  const response = await fetch(`/api/admin/clusters/review-candidates/${candidateId}/ignore`, {
+    method: "POST",
+  });
+  return parseJsonResponse<{ success?: boolean; error?: string }>(response, "复核忽略失败");
 }

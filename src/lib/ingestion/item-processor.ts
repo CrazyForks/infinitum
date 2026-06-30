@@ -1016,6 +1016,7 @@ export async function processFeedItem({
     id: stored.id,
     status: stored.status,
     isNew,
+    errorMessage: stored.errorMessage,
     affectedClusterId,
     fullTextFetched,
     metrics: {

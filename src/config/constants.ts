@@ -96,7 +96,7 @@ export const CLUSTER_MERGE_PRECOMPUTED_CLEAN_PAIR_LIMIT = 20;
 export const CLUSTER_MERGE_DIRTY_NEIGHBOR_SCAN_LIMIT = 400;
 
 /** 相同 clean-clean 候选对在内容未变化时最多复判次数 */
-export const CLUSTER_MERGE_CLEAN_PAIR_MAX_ATTEMPTS = 2;
+export const CLUSTER_MERGE_CLEAN_PAIR_MAX_ATTEMPTS = 3;
 
 /** clean-clean 预计算候选有效期 */
 export const CLUSTER_MERGE_CLEAN_PAIR_TTL_MS = CLUSTER_LOOKBACK_MS;

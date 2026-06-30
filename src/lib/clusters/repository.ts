@@ -7,6 +7,8 @@ export type ClusterAssignmentCandidate = {
   title: string;
   summary: string;
   fingerprint: string;
+  eventFingerprint: string | null;
+  eventBucket: string | null;
   eventType: string | null;
   eventSubject: string | null;
   eventAction: string | null;
@@ -94,6 +96,8 @@ export async function findRecentActiveClusterCandidates(options: { since: Date; 
       title: true,
       summary: true,
       fingerprint: true,
+      eventFingerprint: true,
+      eventBucket: true,
       eventType: true,
       eventSubject: true,
       eventAction: true,
@@ -108,6 +112,8 @@ export async function findRecentActiveClusterCandidates(options: { since: Date; 
 
 export async function createContentCluster(data: {
   fingerprint: string;
+  eventFingerprint?: string | null;
+  eventBucket?: string | null;
   title: string;
   summary: string;
   summaryInputHash?: string | null;
@@ -133,6 +139,8 @@ export async function createContentCluster(data: {
       latestPublishedAt: data.latestPublishedAt,
       status: "active",
       fingerprint: data.fingerprint,
+      eventFingerprint: data.eventFingerprint ?? null,
+      eventBucket: data.eventBucket ?? null,
       eventType: data.eventType ?? null,
       eventSubject: data.eventSubject ?? null,
       eventAction: data.eventAction ?? null,
@@ -184,6 +192,8 @@ export async function updateClusterSummary(
     eventAction?: string | null;
     eventObject?: string | null;
     eventDate?: string | null;
+    eventFingerprint?: string | null;
+    eventBucket?: string | null;
   },
 ) {
   return prisma.contentCluster.update({

@@ -55,6 +55,7 @@ export type ProcessedItemRecord = {
   id: string;
   status: ItemStatus;
   isNew: boolean;
+  errorMessage?: string | null;
   affectedClusterId?: string | null;
   fullTextFetched?: boolean;
   metrics?: {
