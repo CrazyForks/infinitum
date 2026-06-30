@@ -34,6 +34,10 @@ function normalizeIds(value: unknown, maxId: number) {
   );
 }
 
+function isAuxiliarySectionTitle(title: string) {
+  return ["其他值得关注", "补充阅读", "延伸阅读"].includes(title.trim());
+}
+
 export function parseDailyReportContent(rawContent: string, maxSourceId: number): DailyReportContent {
   const parsed = JSON.parse(stripCodeFence(rawContent)) as unknown;
 
@@ -51,14 +55,6 @@ export function parseDailyReportContent(rawContent: string, maxSourceId: number)
       errors.push(`${path}.title 太短`);
     }
     return title;
-  };
-
-  const requireSourceIds = (item: Record<string, unknown>, path: string) => {
-    const sourceIds = normalizeIds(item.sourceIds, maxSourceId);
-    if (sourceIds.length < 1) {
-      errors.push(`${path}.sourceIds 至少需要 1 个合法来源`);
-    }
-    return sourceIds;
   };
 
   const parseNotes = (value: unknown, path: string): DailyReportItemNote[] | undefined => {
@@ -83,17 +79,22 @@ export function parseDailyReportContent(rawContent: string, maxSourceId: number)
     return notes.length > 0 ? notes : undefined;
   };
 
-  const parseItem = (rawItem: unknown, path: string): DailyReportItem | null => {
+  const parseItem = (rawItem: unknown, path: string, options: { discardWhenSourceIdsMissing?: boolean } = {}): DailyReportItem | null => {
     if (!rawItem || typeof rawItem !== "object") {
       errors.push(`${path} 不是对象`);
       return null;
     }
     const item = rawItem as Record<string, unknown>;
+    const sourceIds = normalizeIds(item.sourceIds, maxSourceId);
+    if (sourceIds.length < 1 && options.discardWhenSourceIdsMissing) {
+      return null;
+    }
     const title = requireTitle(item.title, path);
     const body = stripDailyReportGeneratedLabel(item.body);
-    const sourceIds = requireSourceIds(item, path);
-    if (body.length < 10) errors.push(`${path}.body 太短`);
-    if (!title || !body) return null;
+    if (sourceIds.length < 1) {
+      errors.push(`${path}.sourceIds 至少需要 1 个合法来源`);
+    }
+    if (!title) return null;
     const normalized: DailyReportItem = {
       title,
       body,
@@ -135,7 +136,9 @@ export function parseDailyReportContent(rawContent: string, maxSourceId: number)
         if (!title) errors.push(`${path}.title 不能为空`);
         const items = Array.isArray(block.items)
           ? block.items
-            .map((rawItem, itemIndex) => parseItem(rawItem, `${path}.items[${itemIndex}]`))
+            .map((rawItem, itemIndex) => parseItem(rawItem, `${path}.items[${itemIndex}]`, {
+              discardWhenSourceIdsMissing: isAuxiliarySectionTitle(title),
+            }))
             .filter((entry): entry is DailyReportItem => Boolean(entry))
           : [];
         if (!Array.isArray(block.items)) errors.push(`${path}.items 必须是数组`);

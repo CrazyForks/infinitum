@@ -161,6 +161,91 @@ describe("daily report utilities", () => {
     }), 2)).toThrow(/sourceIds/);
   });
 
+  it("allows compact section items without body and renders title with sources", () => {
+    const parsed = parseDailyReportContent(JSON.stringify({
+      blocks: [
+        {
+          type: "text",
+          title: "摘要",
+          body: "今天 AI 生态的重点变化集中在模型发布、开发者工具更新与工程实践调整，值得关注其对产品迭代和开发流程的影响。",
+        },
+        {
+          type: "section",
+          title: "其他值得关注",
+          items: [
+            {
+              title: "开发者工具更新",
+              sourceIds: [2],
+            },
+          ],
+        },
+      ],
+    }), 2);
+
+    const compactSection = parsed.blocks[1];
+    expect(compactSection.type).toBe("section");
+    if (compactSection.type === "section") {
+      expect(compactSection.items[0]).toMatchObject({
+        title: "开发者工具更新",
+        body: "",
+        sourceIds: [2],
+      });
+    }
+
+    const markdown = renderDailyReportMarkdown(parsed, candidates, "2026-04-24 AI 日报");
+
+    expect(markdown).toContain("### 开发者工具更新");
+    expect(markdown).toContain("**来源：**");
+    expect(markdown).toContain("[开发者工具更新](https://example.com/b)");
+    expect(markdown).not.toContain("undefined");
+  });
+
+  it("drops auxiliary section items without legal source ids but keeps strict source checks elsewhere", () => {
+    const parsed = parseDailyReportContent(JSON.stringify({
+      blocks: [
+        content.blocks[0],
+        {
+          type: "section",
+          title: "其他值得关注",
+          items: [
+            {
+              title: "无来源补充条目",
+              body: "缺少来源时应丢弃。",
+              sourceIds: [],
+            },
+            {
+              title: "开发者工具更新",
+              body: "",
+              sourceIds: [2],
+            },
+          ],
+        },
+      ],
+    }), 2);
+    const auxiliarySection = parsed.blocks[1];
+
+    expect(auxiliarySection.type).toBe("section");
+    if (auxiliarySection.type === "section") {
+      expect(auxiliarySection.items).toHaveLength(1);
+      expect(auxiliarySection.items[0].title).toBe("开发者工具更新");
+    }
+
+    expect(() => parseDailyReportContent(JSON.stringify({
+      blocks: [
+        content.blocks[0],
+        {
+          type: "section",
+          title: "热点事件",
+          items: [{
+            title: "无来源主栏目条目",
+            body: "",
+            sourceIds: [],
+          }],
+        },
+      ],
+    }), 2)).toThrow(/sourceIds/);
+  });
+
   it("strips generated labels from text block bodies and notes", () => {
     const parsed = parseDailyReportContent(JSON.stringify({
       blocks: [

@@ -28,7 +28,10 @@ describe("daily report template config", () => {
     expect(prompt).toContain("如果候选内容与最近 7 天已写主题只是同一事件的重复报道");
     expect(prompt).toContain("每条正文约 120-260 字");
     expect(prompt).toContain("每条正文约 80-180 字");
-    expect(prompt).toContain("每个 item 必须包含 title、body、sourceIds");
+    expect(prompt).toContain("每个 item 必须包含 title、sourceIds，建议包含 body");
+    expect(prompt).toContain("sourceIds 必须是至少包含 1 个合法候选编号的数字数组");
+    expect(prompt).toContain("body 为空字符串或缺失时会按紧凑模式只展示标题和来源");
+    expect(prompt).toContain("无法确定合法编号时不要输出该条");
     expect(prompt).toContain("notes 要求：重点 必填");
     expect(prompt).toContain("不要复述摘要或逐条回顾事件");
     expect(prompt).not.toContain("可根据管理员习惯调整");

@@ -54,7 +54,7 @@ function normalizeStructuredItem(value: unknown): DailyReportItem | null {
   const notes = normalizeNotes(item.notes);
   const sourceIds = normalizeSourceIds(item.sourceIds);
 
-  if (!title || !body) return null;
+  if (!title) return null;
   return {
     title,
     body,
