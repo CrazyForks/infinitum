@@ -178,10 +178,6 @@ function AttentionSummaryModal({
     currentPage * attentionSummaryPageSize,
   );
 
-  useEffect(() => {
-    setPage(1);
-  }, [isOpen, sources]);
-
   return (
     <ModalShell
       isOpen={isOpen}
@@ -594,11 +590,13 @@ export function SourceMonitorPanel({ initialSnapshot, hideStats = false }: Sourc
           />
         ) : null}
       </section>
-      <AttentionSummaryModal
-        isOpen={attentionSummaryOpen}
-        onClose={() => setAttentionSummaryOpen(false)}
-        sources={attentionSummarySources}
-      />
+      {attentionSummaryOpen ? (
+        <AttentionSummaryModal
+          isOpen={attentionSummaryOpen}
+          onClose={() => setAttentionSummaryOpen(false)}
+          sources={attentionSummarySources}
+        />
+      ) : null}
     </div>
   );
 }

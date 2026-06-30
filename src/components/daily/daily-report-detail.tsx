@@ -162,10 +162,6 @@ function CandidateReviewModal({
     currentPage * candidateReviewPageSize,
   );
 
-  useEffect(() => {
-    setPage(1);
-  }, [isOpen, mode, review]);
-
   return (
     <ModalShell
       isOpen={isOpen}
@@ -207,7 +203,10 @@ function CandidateReviewModal({
       <div className="inline-flex rounded-sm border border-[color:var(--line)] bg-[var(--surface)] p-1">
         <button
           type="button"
-          onClick={() => setMode("candidates")}
+          onClick={() => {
+            setMode("candidates");
+            setPage(1);
+          }}
           className={cx(
             "rounded-sm px-3 py-1.5 text-sm transition",
             mode === "candidates"
@@ -219,7 +218,10 @@ function CandidateReviewModal({
         </button>
         <button
           type="button"
-          onClick={() => setMode("excluded")}
+          onClick={() => {
+            setMode("excluded");
+            setPage(1);
+          }}
           className={cx(
             "rounded-sm px-3 py-1.5 text-sm transition",
             mode === "excluded"
@@ -662,8 +664,9 @@ function DailyReportDetailContent({ report, isAdmin }: DailyReportDetailContentP
         </aside>
       </div>
 
-      {isAdmin && report.candidateReview ? (
+      {isAdmin && candidateReviewOpen && report.candidateReview ? (
         <CandidateReviewModal
+          key={report.id}
           isOpen={candidateReviewOpen}
           onClose={() => setCandidateReviewOpen(false)}
           review={report.candidateReview}
