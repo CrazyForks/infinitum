@@ -81,6 +81,8 @@ export type AdminTagListPayload = {
   pageSize: number;
 };
 
+export type AdminTagSort = "usage_desc" | "updated_desc" | "name_asc" | "alias_desc";
+
 export type AdminTagSuggestion = {
   id: string;
   sourceTag: Pick<AdminTag, "id" | "name" | "normalized" | "itemCount" | "aliasCount">;
@@ -354,12 +356,16 @@ export async function reorderHeaderLinks(linkIds: string[]) {
 
 export async function listAdminTags(input: {
   search?: string;
+  sort?: AdminTagSort;
   page?: number;
   pageSize?: number;
 }) {
   const search = new URLSearchParams();
   if (input.search?.trim()) {
     search.set("search", input.search.trim());
+  }
+  if (input.sort) {
+    search.set("sort", input.sort);
   }
   if (input.page) {
     search.set("page", String(input.page));

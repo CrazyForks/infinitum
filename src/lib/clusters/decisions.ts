@@ -1,4 +1,4 @@
-import type { ClusterDecisionKind, ClusterDecisionSource, ClusterDecisionVerdict } from "@prisma/client";
+import { Prisma, type ClusterDecisionKind, type ClusterDecisionSource, type ClusterDecisionVerdict } from "@prisma/client";
 
 import { prisma } from "@/lib/db";
 import type { ClusterReviewCandidateDTO } from "@/lib/feed/types";
@@ -139,15 +139,16 @@ function mapReviewCluster(cluster: {
   };
 }
 
-export async function listClusterReviewCandidates(page = 1, pageSize = 20) {
+export async function listClusterReviewCandidates(page = 1, pageSize = 20, options?: { since?: Date | null }) {
   const normalizedPage = Math.max(1, page);
   const normalizedPageSize = Math.min(100, Math.max(1, pageSize));
-  const where = {
+  const where: Prisma.ClusterDecisionWhereInput = {
     kind: "cluster_pair" as const,
     verdict: { in: ["approved", "ambiguous"] as ClusterDecisionVerdict[] },
     appliedAt: null,
     leftClusterId: { not: null },
     rightClusterId: { not: null },
+    ...(options?.since ? { createdAt: { gte: options.since } } : {}),
   };
   const [decisions, total] = await Promise.all([
     prisma.clusterDecision.findMany({

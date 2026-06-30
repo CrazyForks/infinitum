@@ -47,7 +47,6 @@ export type PreparedFeedItemLookup = {
   dedupeKeys: {
     canonicalUrl: string;
     urlHash: string;
-    signature: string;
   };
 };
 
@@ -314,10 +313,7 @@ export function buildPreparedFeedItemLookup(preparedItem: PreparedFeedItem, now:
   const rssExcerpt = preparedItem.item.contentSnippet?.trim() || null;
   const canonicalUrl = normalizeUrl(originalUrl);
   const dedupeKeys = buildDedupeKeys({
-    sourceName: preparedItem.sourceName,
     canonicalUrl,
-    title: originalTitle,
-    publishedAt,
   });
 
   return {
@@ -421,7 +417,7 @@ export async function processFeedItem({
   } = lookup;
   const existing =
     existingItem === undefined
-      ? await findExistingItem(dedupeKeys.urlHash, dedupeKeys.signature)
+      ? await findExistingItem(dedupeKeys.urlHash)
       : existingItem;
   const author = getFeedItemAuthor(item);
   const isNew = !existing;
@@ -505,14 +501,12 @@ export async function processFeedItem({
       {
         id: existing?.id,
         urlHash: dedupeKeys.urlHash,
-        dedupeSignature: dedupeKeys.signature,
       },
       {
         sourceId,
         originalUrl,
         canonicalUrl: dedupeKeys.canonicalUrl,
         urlHash: dedupeKeys.urlHash,
-        dedupeSignature: dedupeKeys.signature,
         originalTitle,
         translatedTitle,
         author,
@@ -695,14 +689,12 @@ export async function processFeedItem({
           {
             id: existing?.id,
             urlHash: dedupeKeys.urlHash,
-            dedupeSignature: dedupeKeys.signature,
           },
           {
             sourceId,
             originalUrl,
             canonicalUrl: dedupeKeys.canonicalUrl,
             urlHash: dedupeKeys.urlHash,
-            dedupeSignature: dedupeKeys.signature,
             originalTitle,
             translatedTitle,
             author,
@@ -909,14 +901,12 @@ export async function processFeedItem({
     {
       id: storedItemId ?? undefined,
       urlHash: dedupeKeys.urlHash,
-      dedupeSignature: dedupeKeys.signature,
     },
     {
       sourceId,
       originalUrl,
       canonicalUrl: dedupeKeys.canonicalUrl,
       urlHash: dedupeKeys.urlHash,
-      dedupeSignature: dedupeKeys.signature,
       originalTitle,
       translatedTitle,
       author,

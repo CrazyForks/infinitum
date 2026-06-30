@@ -118,7 +118,7 @@ describe("TagSettingsPanel", () => {
     renderWithProviders(<TagSettingsPanel />);
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("/api/admin/settings/tags?page=1&pageSize=10", {
+      expect(fetchMock).toHaveBeenCalledWith("/api/admin/settings/tags?sort=usage_desc&page=1&pageSize=10", {
         method: "GET",
         headers: {
           "content-type": "application/json",
@@ -128,6 +128,7 @@ describe("TagSettingsPanel", () => {
     });
 
     expect(screen.getByRole("heading", { name: "标签管理" })).toBeInTheDocument();
+    expect(screen.getByLabelText("标签排序")).toHaveValue("usage_desc");
     expect(screen.queryByRole("dialog", { name: "治理建议" })).not.toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalledWith("/api/admin/settings/tags/suggestions?page=1&pageSize=10", expect.anything());
     expect(screen.getByRole("button", { name: "治理建议" })).toBeInTheDocument();
@@ -140,11 +141,27 @@ describe("TagSettingsPanel", () => {
     expect(screen.getByRole("button", { name: "新增别名：AI Agent" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "合并标签：AI Agent" })).toBeInTheDocument();
 
+    await user.selectOptions(screen.getByLabelText("标签排序"), "updated_desc");
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/admin/settings/tags?sort=updated_desc&page=1&pageSize=10", {
+        method: "GET",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: undefined,
+      });
+    });
+
     await user.click(screen.getByRole("button", { name: "治理建议" }));
     const suggestionDialog = await screen.findByRole("dialog", { name: "治理建议" });
     expect(within(suggestionDialog).getByText("目标标签")).toBeInTheDocument();
     expect(within(suggestionDialog).getByText("AI Agents")).toBeInTheDocument();
     expect(within(suggestionDialog).getByText("AI Agent")).toBeInTheDocument();
+    expect(
+      within(suggestionDialog).queryByText(
+        "系统按名称相似度、别名和内容共现识别可合并标签。合并前需要选择方向；不合并和临时忽略会隐藏当前建议对。",
+      ),
+    ).not.toBeInTheDocument();
     expect(within(suggestionDialog).getByLabelText("治理建议排序")).toHaveValue("affected_desc");
     expect(within(suggestionDialog).getByRole("button", { name: "选择合并方向：AI Agents" })).toBeInTheDocument();
     expect(within(suggestionDialog).getByRole("button", { name: "处理治理建议：AI Agents" })).toBeInTheDocument();
@@ -178,6 +195,21 @@ describe("TagSettingsPanel", () => {
         },
         body: undefined,
       });
+    });
+  });
+
+  it("opens governance suggestions from the initial state", async () => {
+    const fetchMock = createFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderWithProviders(<TagSettingsPanel initialOpenSuggestions />);
+
+    const suggestionDialog = await screen.findByRole("dialog", { name: "治理建议" });
+    expect(within(suggestionDialog).getByLabelText("治理建议标签筛选")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith("/api/admin/settings/tags/suggestions?sort=affected_desc&page=1&pageSize=10", {
+      body: undefined,
+      headers: { "content-type": "application/json" },
+      method: "GET",
     });
   });
 

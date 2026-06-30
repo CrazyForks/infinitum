@@ -16,6 +16,7 @@ import {
 } from "@/lib/aggregation/persist";
 import { prisma } from "@/lib/db";
 import { invalidateFeedCache } from "@/lib/feed/cache";
+import { archiveItemDedupeHistories } from "@/lib/feed/repository";
 import { shouldTranslateTitle } from "@/lib/feed/presentation";
 import { buildAggregationParsingInput } from "@/lib/ingestion/model-input";
 import { normalizeStoredEventType } from "@/lib/clusters/normalization";
@@ -916,18 +917,24 @@ export async function executeItemCleanupTask(taskRun: BackgroundTaskRun) {
       return;
     }
 
-    const batchIds = await prisma.item.findMany({
+    const batchItems = await prisma.item.findMany({
       where: { createdAt: { lt: cutoff } },
-      select: { id: true },
+      include: {
+        source: {
+          select: { name: true },
+        },
+      },
       take: CLEANUP_BATCH_SIZE,
     });
 
-    if (batchIds.length === 0) {
+    if (batchItems.length === 0) {
       break;
     }
 
+    await archiveItemDedupeHistories(batchItems, now);
+
     const deleted = await prisma.item.deleteMany({
-      where: { id: { in: batchIds.map((i) => i.id) } },
+      where: { id: { in: batchItems.map((i) => i.id) } },
     });
 
     totalDeleted += deleted.count;

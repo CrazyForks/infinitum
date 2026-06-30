@@ -48,7 +48,6 @@ async function createItem(input: {
       originalUrl: `https://tag-alias.example.com/${input.id}`,
       canonicalUrl: `https://tag-alias.example.com/${input.id}`,
       urlHash: input.id,
-      dedupeSignature: input.id,
       originalTitle: input.title,
       translatedTitle: input.title,
       publishedAt: new Date("2026-04-10T10:00:00.000Z"),

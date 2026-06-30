@@ -70,7 +70,7 @@ async function parseJsonResponse<T extends { error?: string }>(
 export async function fetchFilteredReviewItems(
   page = 1,
   pageSize = 10,
-  filters?: { search?: string; sourceName?: string; reason?: string },
+  filters?: { search?: string; sourceName?: string; reason?: string; rangeDays?: number | null },
 ) {
   const params = new URLSearchParams({
     moderationStatus: "filtered",
@@ -89,6 +89,9 @@ export async function fetchFilteredReviewItems(
   }
   if (normalizedReason) {
     params.set("reason", normalizedReason);
+  }
+  if (filters?.rangeDays) {
+    params.set("rangeDays", String(filters.rangeDays));
   }
 
   const response = await fetch(`/api/admin/items?${params.toString()}`);
@@ -135,11 +138,14 @@ export async function fetchAdminCluster(clusterId: string) {
   return payload.cluster ?? null;
 }
 
-export async function fetchClusterReviewCandidates(page = 1, pageSize = 5) {
+export async function fetchClusterReviewCandidates(page = 1, pageSize = 5, options?: { rangeDays?: number | null }) {
   const params = new URLSearchParams({
     page: String(page),
     pageSize: String(pageSize),
   });
+  if (options?.rangeDays) {
+    params.set("rangeDays", String(options.rangeDays));
+  }
   const response = await fetch(`/api/admin/clusters/review-candidates?${params.toString()}`);
   const payload = await parseJsonResponse<CollectionPayload>(response, "聚合复核候选加载失败。");
   return { candidates: payload.candidates ?? [], total: payload.total ?? 0 };
@@ -150,6 +156,7 @@ export async function fetchAggregationSplits(
   pageSize = 10,
   search = "",
   status = "",
+  rangeDays?: number | null,
 ) {
   const params = new URLSearchParams({
     page: String(page),
@@ -161,6 +168,9 @@ export async function fetchAggregationSplits(
   }
   if (status) {
     params.set("status", status);
+  }
+  if (rangeDays) {
+    params.set("rangeDays", String(rangeDays));
   }
 
   const response = await fetch(`/api/admin/items/aggregation?${params.toString()}`);

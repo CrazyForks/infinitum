@@ -167,7 +167,6 @@ model Item {
   originalUrl              String
   canonicalUrl             String
   urlHash                  String                     @unique
-  dedupeSignature          String                     @unique
   originalTitle            String
   translatedTitle          String?
   author                   String?
@@ -222,6 +221,26 @@ model Item {
   @@index([qualityScore, publishedAt])
   @@index([parentItemId])
   @@map("items")
+}
+
+model ItemDedupeHistory {
+  id              String   @id @default(cuid())
+  sourceId        String
+  sourceName      String
+  originalUrl     String
+  canonicalUrl    String
+  urlHash         String   @unique
+  originalTitle   String
+  publishedAt     DateTime
+  firstSeenAt     DateTime
+  lastSeenAt      DateTime
+  archivedAt      DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([sourceId, archivedAt])
+  @@index([publishedAt])
+  @@map("item_dedupe_history")
 }
 
 model AggregationSplitLink {

@@ -190,6 +190,24 @@ function addColumnIfMissing(tableName, columnName, definition) {
   return true;
 }
 
+function dropColumnIfPresent(tableName, columnName, options = {}) {
+  if (!ftsTableExists(tableName) || !tableColumnExists(tableName, columnName)) {
+    return false;
+  }
+
+  const dropIndexes = (options.dropIndexes ?? [])
+    .map((indexName) => `DROP INDEX IF EXISTS "${indexName}";`)
+    .join("\n");
+
+  runSqlite([dbPath], {
+    input: `
+      ${dropIndexes}
+      ALTER TABLE "${tableName}" DROP COLUMN "${columnName}";
+    `,
+  });
+  return true;
+}
+
 function querySqliteNumber(sql) {
   const result = execFileSync("sqlite3", [dbPath, sql], {
     encoding: "utf8",
@@ -387,6 +405,13 @@ function applyClusterFeedStatsBackfill() {
 }
 
 function applyAdditiveSchemaUpgrades() {
+  dropColumnIfPresent("items", "dedupeSignature", {
+    dropIndexes: ["items_dedupeSignature_key", "items_dedupeSignature_idx"],
+  });
+  dropColumnIfPresent("item_dedupe_history", "dedupeSignature", {
+    dropIndexes: ["item_dedupe_history_dedupeSignature_key", "item_dedupe_history_dedupeSignature_idx"],
+  });
+
   if (ftsTableExists("prompt_configs") && !tableColumnExists("prompt_configs", "templateJson")) {
     runSqlite([dbPath], {
       input: `ALTER TABLE "prompt_configs" ADD COLUMN "templateJson" TEXT;\n`,

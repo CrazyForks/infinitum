@@ -1,12 +1,7 @@
 import crypto from "node:crypto";
 
-import { normalizeTextLower } from "@/lib/utils/text";
-
 type BuildDedupeKeysArgs = {
-  sourceName: string;
   canonicalUrl: string;
-  title: string;
-  publishedAt: Date | null;
 };
 
 function normalizeUrl(url: string): string {
@@ -19,22 +14,13 @@ function normalizeUrl(url: string): string {
 }
 
 export function buildDedupeKeys({
-  sourceName,
   canonicalUrl,
-  title,
-  publishedAt,
-}: BuildDedupeKeysArgs): { canonicalUrl: string; urlHash: string; signature: string } {
+}: BuildDedupeKeysArgs): { canonicalUrl: string; urlHash: string } {
   const normalizedUrl = normalizeUrl(canonicalUrl);
-  const signature = [
-    normalizeTextLower(sourceName),
-    normalizeTextLower(title),
-    publishedAt?.toISOString() ?? "unknown-date",
-  ].join("|");
 
   return {
     canonicalUrl: normalizedUrl,
     urlHash: crypto.createHash("sha256").update(normalizedUrl).digest("hex"),
-    signature,
   };
 }
 

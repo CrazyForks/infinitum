@@ -51,6 +51,10 @@ vi.mock("@/components/admin/ingestion-dashboard", () => ({
   IngestionDashboard: () => <div>数据监控面板</div>,
 }));
 
+vi.mock("@/components/admin/action-items-panel", () => ({
+  ActionItemsPanel: () => <div>待办事项面板</div>,
+}));
+
 vi.mock("@/components/admin/admin-settings-panel", () => ({
   AdminSettingsPanel: ({ activeSection }: { activeSection: string }) => (
     <div>{`设置面板:${activeSection}`}</div>
@@ -206,6 +210,15 @@ describe("AdminPageClient", () => {
     renderAdminPageClient();
 
     expect(screen.getByText("内容审核:clusters:none:none")).toBeInTheDocument();
+  });
+
+  it("defaults monitoring to action items", () => {
+    searchParamsState.value = "tab=monitoring";
+
+    renderAdminPageClient();
+
+    expect(screen.getByText("待办事项面板")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "待办事项" })).toBeInTheDocument();
   });
 
   it("restores tag management as a monitoring content sub tab", async () => {
@@ -364,6 +377,22 @@ describe("AdminPageClient", () => {
     );
   });
 
+  it("updates the url when selecting action items", async () => {
+    const user = userEvent.setup();
+    searchParamsState.value = "tab=monitoring&section=dashboard";
+
+    renderAdminPageClient();
+
+    await user.click(screen.getByRole("button", { name: "待办事项" }));
+
+    expect(screen.getByText("待办事项面板")).toBeInTheDocument();
+    expect(replaceStateSpy).toHaveBeenLastCalledWith(
+      null,
+      "",
+      "/admin?tab=monitoring&section=action-items",
+    );
+  });
+
   it("updates the url when selecting tag management", async () => {
     const user = userEvent.setup();
     searchParamsState.value = "tab=monitoring&section=content";
@@ -382,11 +411,11 @@ describe("AdminPageClient", () => {
     );
   });
 
-  it("defaults to the dashboard when an unknown monitoring section is in the url", () => {
+  it("defaults to action items when an unknown monitoring section is in the url", () => {
     searchParamsState.value = "tab=monitoring&section=sources";
 
     renderAdminPageClient();
 
-    expect(screen.getByText("数据监控面板")).toBeInTheDocument();
+    expect(screen.getByText("待办事项面板")).toBeInTheDocument();
   });
 });

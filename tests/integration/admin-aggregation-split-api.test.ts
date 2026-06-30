@@ -43,7 +43,6 @@ describe("/api/admin/items/aggregation", () => {
         originalUrl: "https://split.example.com/posts/parent",
         canonicalUrl: "https://split.example.com/posts/parent",
         urlHash: "hash-parent",
-        dedupeSignature: "split|parent",
         originalTitle: "Split Parent",
         translatedTitle: "拆分父项",
         publishedAt: new Date("2026-04-10T09:00:00.000Z"),
@@ -69,7 +68,6 @@ describe("/api/admin/items/aggregation", () => {
           originalUrl: "https://split.example.com/posts/event-1",
           canonicalUrl: "https://split.example.com/posts/event-1",
           urlHash: "hash-child-1",
-          dedupeSignature: "split|child|1",
           originalTitle: "Split Child 1",
           translatedTitle: "拆分子项 1",
           publishedAt: new Date("2026-04-10T09:10:00.000Z"),
@@ -93,7 +91,6 @@ describe("/api/admin/items/aggregation", () => {
           originalUrl: "https://split.example.com/posts/parent",
           canonicalUrl: "https://split.example.com/posts/parent",
           urlHash: "hash-child-2",
-          dedupeSignature: "split|child|2",
           originalTitle: "Split Child 2",
           translatedTitle: "拆分子项 2",
           publishedAt: new Date("2026-04-10T09:20:00.000Z"),
@@ -145,7 +142,6 @@ describe("/api/admin/items/aggregation", () => {
         originalUrl: "https://split.example.com/posts/parent-newer",
         canonicalUrl: "https://split.example.com/posts/parent-newer",
         urlHash: "hash-parent-newer",
-        dedupeSignature: "split|parent|newer",
         originalTitle: "Split Parent Newer",
         translatedTitle: "较新的拆分父项",
         publishedAt: new Date("2026-04-10T08:00:00.000Z"),
@@ -170,6 +166,45 @@ describe("/api/admin/items/aggregation", () => {
       "split-parent-newer",
       "split-parent",
     ]);
+  });
+
+  it("filters split parents by recent range", async () => {
+    requireAdmin.mockResolvedValue(undefined);
+
+    const source = await prisma.source.findFirstOrThrow({
+      where: { name: "Split Feed" },
+    });
+    await prisma.item.create({
+      data: {
+        id: "split-parent-old",
+        sourceId: source.id,
+        originalUrl: "https://split.example.com/posts/parent-old",
+        canonicalUrl: "https://split.example.com/posts/parent-old",
+        urlHash: "hash-parent-old",
+        originalTitle: "Old Split Parent",
+        translatedTitle: "较早拆分父项",
+        publishedAt: new Date("2026-04-01T09:00:00.000Z"),
+        summaryText: "较早父项摘要",
+        status: "processed",
+        moderationStatus: "allowed",
+        qualityScore: 70,
+        qualityRationale: "历史数据",
+        isAggregation: true,
+        aggregationParseStatus: "parsed",
+        aggregationCheckedAt: new Date("2026-04-01T10:00:00.000Z"),
+        language: "en",
+        createdAt: new Date("2026-04-01T10:00:00.000Z"),
+        updatedAt: new Date("2026-04-01T10:00:00.000Z"),
+      },
+    });
+
+    const { GET } = await import("@/app/api/admin/items/aggregation/route");
+    const response = await GET(new Request("http://localhost/api/admin/items/aggregation?rangeDays=7"));
+    const json = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(json.aggregationSplits.map((item: { id: string }) => item.id)).toContain("split-parent");
+    expect(json.aggregationSplits.map((item: { id: string }) => item.id)).not.toContain("split-parent-old");
   });
 
   it("loads split detail with children for admins", async () => {
@@ -235,7 +270,6 @@ describe("/api/admin/items/aggregation", () => {
         originalUrl: "https://split.example.com/posts/parent-second",
         canonicalUrl: "https://split.example.com/posts/parent-second",
         urlHash: "hash-parent-second",
-        dedupeSignature: "split|parent|second",
         originalTitle: "Split Parent Second",
         translatedTitle: "第二个拆分父项",
         publishedAt: new Date("2026-04-11T09:00:00.000Z"),

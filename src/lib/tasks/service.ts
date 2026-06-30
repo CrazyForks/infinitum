@@ -793,6 +793,7 @@ export async function getBackgroundTaskMonitorSnapshot(
     status?: BackgroundTaskRunStatus | null;
     kind?: BackgroundTaskRunKind | null;
     timeRange?: "today" | "week" | "month" | null;
+    rangeDays?: 1 | 3 | 7 | null;
   },
 ): Promise<BackgroundTaskMonitorSnapshot> {
   const schedule = await ensureDefaultIngestionSchedule();
@@ -808,13 +809,13 @@ export async function getBackgroundTaskMonitorSnapshot(
       ? findTaskMonitorRuns({
           status: runningStatus,
           kind: opts?.kind ?? null,
-          startedAt: getTaskMonitorStartedAtRange(now, opts?.timeRange),
+          startedAt: getTaskMonitorStartedAtRange(now, opts?.timeRange, opts?.rangeDays),
         })
       : Promise.resolve([]),
     findTaskMonitorRuns({
       status: opts?.status ?? null,
       kind: opts?.kind ?? null,
-      startedAt: getTaskMonitorStartedAtRange(now, opts?.timeRange),
+      startedAt: getTaskMonitorStartedAtRange(now, opts?.timeRange, opts?.rangeDays),
       pageSize,
       skip,
     }),
@@ -843,7 +844,15 @@ function getLocalDayStart(value: Date) {
   return new Date(value.getFullYear(), value.getMonth(), value.getDate());
 }
 
-function getTaskMonitorStartedAtRange(now: Date, timeRange?: "today" | "week" | "month" | null) {
+function getTaskMonitorStartedAtRange(
+  now: Date,
+  timeRange?: "today" | "week" | "month" | null,
+  rangeDays?: 1 | 3 | 7 | null,
+) {
+  if (rangeDays) {
+    return { gte: new Date(now.getTime() - rangeDays * 24 * 60 * 60 * 1000) };
+  }
+
   if (!timeRange) {
     return null;
   }
@@ -864,9 +873,10 @@ function buildBackgroundTaskMonitorWhere(
     status?: BackgroundTaskRunStatus | null;
     kind?: BackgroundTaskRunKind | null;
     timeRange?: "today" | "week" | "month" | null;
+    rangeDays?: 1 | 3 | 7 | null;
   },
 ): Prisma.BackgroundTaskRunWhereInput {
-  const startedAt = getTaskMonitorStartedAtRange(now, opts?.timeRange);
+  const startedAt = getTaskMonitorStartedAtRange(now, opts?.timeRange, opts?.rangeDays);
 
   return {
     ...(opts?.status ? { status: opts.status } : {}),

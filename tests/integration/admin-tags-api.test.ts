@@ -33,7 +33,6 @@ async function createSourceAndItems() {
         originalUrl: "https://admin-tags.example.com/a",
         canonicalUrl: "https://admin-tags.example.com/a",
         urlHash: "admin-tag-a",
-        dedupeSignature: "admin-tag-a",
         originalTitle: "Admin Tag A",
         publishedAt: new Date("2026-04-10T10:00:00.000Z"),
         status: "processed",
@@ -48,7 +47,6 @@ async function createSourceAndItems() {
         originalUrl: "https://admin-tags.example.com/b",
         canonicalUrl: "https://admin-tags.example.com/b",
         urlHash: "admin-tag-b",
-        dedupeSignature: "admin-tag-b",
         originalTitle: "Admin Tag B",
         publishedAt: new Date("2026-04-10T10:00:00.000Z"),
         status: "processed",
@@ -71,7 +69,6 @@ async function createAdminTagItem(sourceId: string, id: string) {
       originalUrl: `https://admin-tags.example.com/${id}`,
       canonicalUrl: `https://admin-tags.example.com/${id}`,
       urlHash: id,
-      dedupeSignature: id,
       originalTitle: id,
       publishedAt: new Date("2026-04-10T10:00:00.000Z"),
       status: "processed",
@@ -129,6 +126,41 @@ describe("/api/admin/settings/tags", () => {
       aliasCount: 1,
     });
     expect(json.tags[0].aliases[0].aliasName).toBe("智能体");
+  });
+
+  it("sorts admin tags by the requested list order", async () => {
+    await createSourceAndItems();
+    const beta = await prisma.tag.create({
+      data: {
+        name: "Beta Tag",
+        normalized: "beta tag",
+      },
+    });
+    await prisma.tag.create({
+      data: {
+        name: "Alpha Tag",
+        normalized: "alpha tag",
+      },
+    });
+    await prisma.itemTag.createMany({
+      data: [
+        {
+          itemId: "admin-tag-a",
+          tagId: beta.id,
+        },
+        {
+          itemId: "admin-tag-b",
+          tagId: beta.id,
+        },
+      ],
+    });
+
+    const { GET } = await import("@/app/api/admin/settings/tags/route");
+    const response = await GET(new Request("http://localhost/api/admin/settings/tags?sort=name_asc&page=1&pageSize=10"));
+    const json = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(json.tags.map((tag: { name: string }) => tag.name)).toEqual(["Alpha Tag", "Beta Tag"]);
   });
 
   it("adds aliases through the admin endpoint", async () => {

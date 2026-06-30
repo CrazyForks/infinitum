@@ -171,33 +171,38 @@ export async function syncSources(sourceConfigs: SourceConfig[]) {
   });
 }
 
-export async function findExistingItem(urlHash: string, dedupeSignature: string) {
+export async function findExistingItem(urlHash: string) {
   return prisma.item.findFirst({
     where: {
-      OR: [{ urlHash }, { dedupeSignature }],
+      urlHash,
     },
   });
 }
 
-export async function findExistingItemsForDedupeKeys(keys: Array<{ urlHash: string; dedupeSignature: string }>) {
-  if (keys.length === 0) {
+export async function findExistingItemsForUrlHashes(urlHashes: string[]) {
+  if (urlHashes.length === 0) {
     return [];
   }
 
   return prisma.item.findMany({
     where: {
-      OR: [
-        {
-          urlHash: {
-            in: [...new Set(keys.map((key) => key.urlHash))],
-          },
-        },
-        {
-          dedupeSignature: {
-            in: [...new Set(keys.map((key) => key.dedupeSignature))],
-          },
-        },
-      ],
+      urlHash: {
+        in: [...new Set(urlHashes)],
+      },
+    },
+  });
+}
+
+export async function findDedupeHistoriesForUrlHashes(urlHashes: string[]) {
+  if (urlHashes.length === 0) {
+    return [];
+  }
+
+  return prisma.itemDedupeHistory.findMany({
+    where: {
+      urlHash: {
+        in: [...new Set(urlHashes)],
+      },
     },
   });
 }
@@ -259,7 +264,7 @@ export async function updateSourceHealthStatus(
 }
 
 export async function upsertItem(
-  where: { id?: string; urlHash: string; dedupeSignature: string },
+  where: { id?: string; urlHash: string },
   data: Prisma.ItemUncheckedCreateInput,
 ) {
   if (where.id) {
@@ -273,7 +278,7 @@ export async function upsertItem(
     return await prisma.item.create({ data });
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-      const existing = await findExistingItem(where.urlHash, where.dedupeSignature);
+      const existing = await findExistingItem(where.urlHash);
 
       if (existing) {
         return prisma.item.update({
@@ -284,6 +289,66 @@ export async function upsertItem(
     }
 
     throw error;
+  }
+}
+
+type ItemDedupeHistoryInput = Pick<
+  Item,
+  | "sourceId"
+  | "originalUrl"
+  | "canonicalUrl"
+  | "urlHash"
+  | "originalTitle"
+  | "publishedAt"
+  | "createdAt"
+  | "updatedAt"
+> & {
+  source: Pick<Source, "name">;
+};
+
+async function upsertItemDedupeHistory(item: ItemDedupeHistoryInput, archivedAt: Date) {
+  const data = {
+    sourceId: item.sourceId,
+    sourceName: item.source.name,
+    originalUrl: item.originalUrl,
+    canonicalUrl: item.canonicalUrl,
+    urlHash: item.urlHash,
+    originalTitle: item.originalTitle,
+    publishedAt: item.publishedAt,
+    firstSeenAt: item.createdAt,
+    lastSeenAt: item.updatedAt,
+    archivedAt,
+  };
+
+  try {
+    return await prisma.itemDedupeHistory.upsert({
+      where: { urlHash: item.urlHash },
+      update: data,
+      create: data,
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      const existing = await prisma.itemDedupeHistory.findFirst({
+        where: {
+          urlHash: item.urlHash,
+        },
+      });
+
+      if (existing) {
+        return prisma.itemDedupeHistory.update({
+          where: { id: existing.id },
+          data,
+        });
+      }
+    }
+
+    throw error;
+  }
+}
+
+export async function archiveItemDedupeHistories(items: ItemDedupeHistoryInput[], archivedAt = new Date()) {
+  for (const item of items) {
+    await upsertItemDedupeHistory(item, archivedAt);
   }
 }
 
@@ -2053,6 +2118,7 @@ export type FilteredItemsQuery = {
   search?: string | null;
   sourceName?: string | null;
   moderationReason?: string | null;
+  updatedAtStart?: Date | null;
 };
 
 function buildFilteredItemsWhere(filters?: FilteredItemsQuery): Prisma.ItemWhereInput {
@@ -2062,6 +2128,7 @@ function buildFilteredItemsWhere(filters?: FilteredItemsQuery): Prisma.ItemWhere
     moderationStatus: "filtered",
     ...(filters?.sourceName ? { source: { is: { name: filters.sourceName } } } : {}),
     ...(filters?.moderationReason ? { moderationReason: filters.moderationReason as ModerationReason } : {}),
+    ...(filters?.updatedAtStart ? { updatedAt: { gte: filters.updatedAtStart } } : {}),
     ...(search
       ? {
           OR: [
@@ -2096,6 +2163,7 @@ export async function listFilteredItems(page = 1, pageSize = 20, filters?: Filte
 export type AggregationSplitQuery = {
   search?: string | null;
   status?: string | null;
+  updatedAtStart?: Date | null;
 };
 
 function buildAggregationSplitWhere(filters?: AggregationSplitQuery): Prisma.ItemWhereInput {
@@ -2105,6 +2173,7 @@ function buildAggregationSplitWhere(filters?: AggregationSplitQuery): Prisma.Ite
   return {
     isAggregation: true,
     ...(status ? { aggregationParseStatus: status } : {}),
+    ...(filters?.updatedAtStart ? { updatedAt: { gte: filters.updatedAtStart } } : {}),
     ...(search
       ? {
           OR: [

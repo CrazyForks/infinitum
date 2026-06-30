@@ -7,6 +7,17 @@ const AGGREGATION_SPLIT_STATUSES = new Set([
   "parsed",
   "failed",
 ]);
+const RANGE_DAYS = new Set([1, 3, 7]);
+
+function getRangeStart(value: string | null) {
+  const rangeDays = Number(value);
+  if (!RANGE_DAYS.has(rangeDays)) {
+    return null;
+  }
+
+  const now = new Date();
+  return new Date(now.getTime() - rangeDays * 24 * 60 * 60 * 1000);
+}
 
 export async function GET(request: Request) {
   try {
@@ -19,6 +30,7 @@ export async function GET(request: Request) {
     const result = await listAggregationSplitParents(page, pageSize, {
       search: searchParams.get("search")?.trim() ?? "",
       status: AGGREGATION_SPLIT_STATUSES.has(status) ? status : "",
+      updatedAtStart: getRangeStart(searchParams.get("rangeDays")),
     });
 
     return Response.json({

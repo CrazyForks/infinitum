@@ -127,6 +127,18 @@ const timeRangeOptions: Array<{ value: TimeRangeFilter; label: string }> = [
 ];
 
 type TimeRangeFilter = "" | "today" | "week" | "month";
+type ReviewRangeDays = 1 | 3 | 7;
+
+const reviewRangeOptions: Array<{ value: "" | string; label: string }> = [
+  { value: "", label: "全部时间" },
+  { value: "1", label: "最近1天" },
+  { value: "3", label: "最近3天" },
+  { value: "7", label: "最近7天" },
+];
+
+function normalizeReviewRangeDays(value: number | null | undefined): ReviewRangeDays | null {
+  return value === 1 || value === 3 || value === 7 ? value : null;
+}
 
 const subtleCardClassName =
   "rounded-[0.95rem] border border-[color:var(--line)] bg-[var(--surface-muted)]/82 shadow-[var(--shadow-sm)]";
@@ -828,6 +840,8 @@ interface ContentReviewContentProps {
   initialTab?: ReviewTab;
   initialPage?: number | null;
   initialPageSize?: number | null;
+  initialRangeDays?: ReviewRangeDays | null;
+  initialOpenClusterReview?: boolean;
   onPageStateChange?: (state: { page: number; pageSize: number }) => void;
   onTaskCreated?: (taskId: string, state: { page: number; pageSize: number }) => void;
 }
@@ -836,6 +850,8 @@ function ContentReviewContent({
   initialTab = "filtered",
   initialPage = null,
   initialPageSize = null,
+  initialRangeDays = null,
+  initialOpenClusterReview = false,
   onPageStateChange,
   onTaskCreated,
 }: ContentReviewContentProps) {
@@ -849,6 +865,9 @@ function ContentReviewContent({
   const [debouncedFilteredSearch, setDebouncedFilteredSearch] = useState("");
   const [filteredSource, setFilteredSource] = useState("");
   const [filteredReason, setFilteredReason] = useState("");
+  const [filteredRangeDays, setFilteredRangeDays] = useState<ReviewRangeDays | null>(
+    activeTab === "filtered" ? normalizeReviewRangeDays(initialRangeDays) : null,
+  );
   const [clusterSearch, setClusterSearch] = useState("");
   const [debouncedClusterSearch, setDebouncedClusterSearch] = useState("");
   const [clusterStatus, setClusterStatus] = useState<ClusterDTO["status"] | "">("");
@@ -856,6 +875,9 @@ function ContentReviewContent({
   const [splitSearch, setSplitSearch] = useState("");
   const [debouncedSplitSearch, setDebouncedSplitSearch] = useState("");
   const [splitStatus, setSplitStatus] = useState("");
+  const [splitRangeDays, setSplitRangeDays] = useState<ReviewRangeDays | null>(
+    activeTab === "splits" ? normalizeReviewRangeDays(initialRangeDays) : null,
+  );
   const [isPending, startTransition] = useTransition();
   const [page, setPage] = useState(initialPage ?? 1);
   const [pageSize, setPageSize] = useState(initialPageSize ?? 10);
@@ -873,7 +895,9 @@ function ContentReviewContent({
   const [isFilteredDetailOpen, setIsFilteredDetailOpen] = useState(false);
   const [isClusterDetailOpen, setIsClusterDetailOpen] = useState(false);
   const [isSplitDetailOpen, setIsSplitDetailOpen] = useState(false);
-  const [isClusterReviewModalOpen, setIsClusterReviewModalOpen] = useState(false);
+  const [isClusterReviewModalOpen, setIsClusterReviewModalOpen] = useState(
+    activeTab === "clusters" && initialOpenClusterReview,
+  );
 
   // Action states
   const [restoringItemId, setRestoringItemId] = useState<string | null>(null);
@@ -910,11 +934,13 @@ function ContentReviewContent({
 
   const loadClusterReviewCandidates = useCallback(
     async (nextPage = clusterReviewPage, nextPageSize = clusterReviewPageSize) => {
-      const result = await fetchClusterReviewCandidates(nextPage, nextPageSize);
+      const result = await fetchClusterReviewCandidates(nextPage, nextPageSize, {
+        rangeDays: activeTab === "clusters" ? normalizeReviewRangeDays(initialRangeDays) : null,
+      });
       setClusterReviewCandidates(result.candidates);
       setClusterReviewTotal(result.total);
     },
-    [clusterReviewPage, clusterReviewPageSize],
+    [activeTab, clusterReviewPage, clusterReviewPageSize, initialRangeDays],
   );
 
   const fetchData = useCallback(() => {
@@ -927,6 +953,7 @@ function ContentReviewContent({
             search: debouncedFilteredSearch,
             sourceName: filteredSource,
             reason: filteredReason,
+            rangeDays: filteredRangeDays,
           });
 
           if (cancelled) return;
@@ -939,7 +966,9 @@ function ContentReviewContent({
               status: clusterStatus,
               timeRange: clusterTimeRange,
             }),
-            fetchClusterReviewCandidates(1, 1),
+            fetchClusterReviewCandidates(1, 1, {
+              rangeDays: normalizeReviewRangeDays(initialRangeDays),
+            }),
           ]);
 
           if (cancelled) return;
@@ -947,7 +976,7 @@ function ContentReviewContent({
           setClusterTotal(result.total);
           setClusterReviewTotal(reviewResult.total);
         } else {
-          const result = await fetchAggregationSplits(page, pageSize, debouncedSplitSearch, splitStatus);
+          const result = await fetchAggregationSplits(page, pageSize, debouncedSplitSearch, splitStatus, splitRangeDays);
 
           if (cancelled) return;
           setAggregationSplits(result.items);
@@ -970,11 +999,14 @@ function ContentReviewContent({
     debouncedFilteredSearch,
     filteredSource,
     filteredReason,
+    filteredRangeDays,
     debouncedClusterSearch,
     clusterStatus,
     clusterTimeRange,
+    initialRangeDays,
     debouncedSplitSearch,
     splitStatus,
+    splitRangeDays,
     showToast,
   ]);
 
@@ -992,7 +1024,9 @@ function ContentReviewContent({
 
     startTransition(async () => {
       try {
-        const result = await fetchClusterReviewCandidates(clusterReviewPage, clusterReviewPageSize);
+        const result = await fetchClusterReviewCandidates(clusterReviewPage, clusterReviewPageSize, {
+          rangeDays: normalizeReviewRangeDays(initialRangeDays),
+        });
         if (!cancelled) {
           setClusterReviewCandidates(result.candidates);
           setClusterReviewTotal(result.total);
@@ -1007,7 +1041,7 @@ function ContentReviewContent({
     return () => {
       cancelled = true;
     };
-  }, [clusterReviewPage, clusterReviewPageSize, isClusterReviewModalOpen, showToast]);
+  }, [clusterReviewPage, clusterReviewPageSize, initialRangeDays, isClusterReviewModalOpen, showToast]);
 
   useEffect(() => {
     if (activeTab !== "clusters") {
@@ -1194,10 +1228,10 @@ function ContentReviewContent({
 
   const hasFilters =
     activeTab === "filtered"
-      ? filteredSearch || filteredSource || filteredReason
+      ? filteredSearch || filteredSource || filteredReason || filteredRangeDays
       : activeTab === "clusters"
         ? clusterSearch || clusterStatus || clusterTimeRange
-        : splitSearch || splitStatus;
+        : splitSearch || splitStatus || splitRangeDays;
 
   const updatePage = useCallback((nextPage: number) => {
     setPage(nextPage);
@@ -1216,6 +1250,7 @@ function ContentReviewContent({
       setDebouncedFilteredSearch("");
       setFilteredSource("");
       setFilteredReason("");
+      setFilteredRangeDays(null);
     } else {
       if (activeTab === "clusters") {
         setClusterSearch("");
@@ -1225,6 +1260,7 @@ function ContentReviewContent({
         setSplitSearch("");
         setDebouncedSplitSearch("");
         setSplitStatus("");
+        setSplitRangeDays(null);
       }
     }
     setPage(1);
@@ -1677,7 +1713,12 @@ function ContentReviewContent({
       </div>
 
       {/* Filters */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div
+        className={cx(
+          "grid grid-cols-1 gap-4",
+          activeTab === "filtered" ? "md:grid-cols-4" : "md:grid-cols-3",
+        )}
+      >
         <FilterInput
           id="content-review-keyword"
           label="关键词"
@@ -1735,6 +1776,19 @@ function ContentReviewContent({
               showSearch={false}
               options={reviewReasonOptions}
             />
+
+            <FilterSelect
+              id="content-review-filtered-range"
+              label="处理时间"
+              ariaLabel="过滤内容处理时间"
+              value={filteredRangeDays ? String(filteredRangeDays) : ""}
+              onChange={(value) => {
+                setFilteredRangeDays(normalizeReviewRangeDays(Number(value)));
+                setPage(1);
+              }}
+              showSearch={false}
+              options={reviewRangeOptions}
+            />
           </>
         ) : activeTab === "clusters" ? (
           <>
@@ -1783,7 +1837,18 @@ function ContentReviewContent({
               options={splitStatusOptions}
             />
 
-            <div />
+            <FilterSelect
+              id="content-review-split-range"
+              label="拆分时间"
+              ariaLabel="聚合拆分时间"
+              value={splitRangeDays ? String(splitRangeDays) : ""}
+              onChange={(value) => {
+                setSplitRangeDays(normalizeReviewRangeDays(Number(value)));
+                setPage(1);
+              }}
+              showSearch={false}
+              options={reviewRangeOptions}
+            />
           </>
         )}
       </div>
@@ -2148,6 +2213,8 @@ interface ContentReviewPanelProps {
   activeTab?: ReviewTab;
   initialPage?: number | null;
   initialPageSize?: number | null;
+  initialRangeDays?: ReviewRangeDays | null;
+  initialOpenClusterReview?: boolean;
   onPageStateChange?: (state: { page: number; pageSize: number }) => void;
   onTaskCreated?: (taskId: string, state: { page: number; pageSize: number }) => void;
 }
@@ -2157,6 +2224,8 @@ export function ContentReviewPanel({
   activeTab = "filtered",
   initialPage = null,
   initialPageSize = null,
+  initialRangeDays = null,
+  initialOpenClusterReview = false,
   onPageStateChange,
   onTaskCreated,
 }: ContentReviewPanelProps) {
@@ -2167,6 +2236,8 @@ export function ContentReviewPanel({
         initialTab={activeTab}
         initialPage={initialPage}
         initialPageSize={initialPageSize}
+        initialRangeDays={initialRangeDays}
+        initialOpenClusterReview={initialOpenClusterReview}
         onPageStateChange={onPageStateChange}
         onTaskCreated={onTaskCreated}
       />

@@ -189,6 +189,38 @@ describe("sqlite setup", () => {
     expect(runSqlite(dbPath, `SELECT COUNT(*) FROM "prompt_configs" WHERE "type" IN ('daily_report_refinement_chat', 'daily_report_refinement_generate')`)).toBe("0");
   });
 
+  it("drops legacy dedupeSignature columns during setup", () => {
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), "infinitum-sqlite-dedupe-cleanup-"));
+    const dbPath = path.join(tempDir, "dedupe-cleanup.db");
+
+    tempDirs.push(tempDir);
+
+    execFileSync("node", ["scripts/setup-sqlite.mjs", dbPath], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+    });
+
+    runSqlite(
+      dbPath,
+      `
+      ALTER TABLE "items" ADD COLUMN "dedupeSignature" TEXT;
+      CREATE INDEX "items_dedupeSignature_idx" ON "items"("dedupeSignature");
+      ALTER TABLE "item_dedupe_history" ADD COLUMN "dedupeSignature" TEXT;
+      CREATE INDEX "item_dedupe_history_dedupeSignature_idx" ON "item_dedupe_history"("dedupeSignature");
+      `,
+    );
+
+    execFileSync("node", ["scripts/setup-sqlite.mjs", dbPath], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+    });
+
+    expect(runSqlite(dbPath, `SELECT COUNT(*) FROM pragma_table_info('items') WHERE "name" = 'dedupeSignature'`)).toBe("0");
+    expect(runSqlite(dbPath, `SELECT COUNT(*) FROM pragma_table_info('item_dedupe_history') WHERE "name" = 'dedupeSignature'`)).toBe("0");
+    expect(runSqlite(dbPath, `SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='items_dedupeSignature_idx'`)).toBe("0");
+    expect(runSqlite(dbPath, `SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='item_dedupe_history_dedupeSignature_idx'`)).toBe("0");
+  }, 20_000);
+
   it("does not rerun cluster feed stats backfill or earliestCreatedAt backfill after clusters have been initialized", () => {
     const tempDir = mkdtempSync(path.join(os.tmpdir(), "infinitum-sqlite-cluster-backfill-"));
     const dbPath = path.join(tempDir, "cluster-backfill.db");
@@ -222,11 +254,11 @@ describe("sqlite setup", () => {
       );
 
       INSERT INTO "items" (
-        "id", "sourceId", "clusterId", "originalUrl", "canonicalUrl", "urlHash", "dedupeSignature", "originalTitle",
+        "id", "sourceId", "clusterId", "originalUrl", "canonicalUrl", "urlHash", "originalTitle",
         "publishedAt", "status", "moderationStatus", "qualityScore", "qualityRationale", "language", "createdAt", "updatedAt"
       ) VALUES (
         'item-backfilled', 'source-backfilled', 'cluster-backfilled', 'https://backfilled.example.com/item',
-        'https://backfilled.example.com/item', 'item-backfilled', 'item-backfilled', 'Backfilled Item',
+        'https://backfilled.example.com/item', 'item-backfilled', 'Backfilled Item',
         '2026-04-10T10:00:00.000Z', 'processed', 'allowed', 50, 'ok', 'en', '2026-04-10T10:05:00.000Z', CURRENT_TIMESTAMP
       );
       `,

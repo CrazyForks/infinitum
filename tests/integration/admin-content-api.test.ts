@@ -57,7 +57,6 @@ describe("/api/admin/items", () => {
         originalUrl: "https://review.example.com/posts/1",
         canonicalUrl: "https://review.example.com/posts/1",
         urlHash: "hash-filtered",
-        dedupeSignature: "review|1",
         originalTitle: "Sponsored AI roundup",
         translatedTitle: "赞助 AI 汇总",
         publishedAt: new Date("2026-04-10T09:00:00.000Z"),
@@ -80,7 +79,6 @@ describe("/api/admin/items", () => {
         originalUrl: "https://review.example.com/posts/2",
         canonicalUrl: "https://review.example.com/posts/2",
         urlHash: "hash-visible",
-        dedupeSignature: "review|2",
         originalTitle: "OpenAI ships a new agent tool",
         translatedTitle: "OpenAI 发布新的 agent 工具",
         publishedAt: new Date("2026-04-11T09:00:00.000Z"),
@@ -117,7 +115,6 @@ describe("/api/admin/items", () => {
         originalUrl: "https://review.example.com/posts/3",
         canonicalUrl: "https://review.example.com/posts/3",
         urlHash: "hash-singleton",
-        dedupeSignature: "review|3",
         originalTitle: "Singleton cluster item",
         translatedTitle: "单条聚合内容",
         publishedAt: new Date("2026-04-12T09:00:00.000Z"),
@@ -149,6 +146,44 @@ describe("/api/admin/items", () => {
       qualityScore: 18,
     });
     expect(json.items[0]).not.toHaveProperty("topicLabel");
+  });
+
+  it("filters filtered items by recent range", async () => {
+    requireAdmin.mockResolvedValue(undefined);
+
+    const source = await prisma.source.findFirstOrThrow({
+      where: { name: "Review Feed" },
+    });
+    await prisma.item.create({
+      data: {
+        id: "item-filtered-old",
+        sourceId: source.id,
+        originalUrl: "https://example.com/old-filtered",
+        canonicalUrl: "https://example.com/old-filtered",
+        urlHash: "hash-filtered-old",
+        originalTitle: "Old filtered item",
+        translatedTitle: "较早过滤内容",
+        publishedAt: new Date("2026-04-10T09:00:00.000Z"),
+        status: "filtered",
+        moderationStatus: "filtered",
+        moderationReason: "low_quality",
+        moderationDetail: "较早过滤",
+        qualityScore: 22,
+        qualityRationale: "低质量",
+        createdAt: new Date("2026-04-10T10:00:00.000Z"),
+        updatedAt: new Date("2026-04-10T10:00:00.000Z"),
+      },
+    });
+
+    const { GET } = await import("@/app/api/admin/items/route");
+    const response = await GET(
+      new Request("http://localhost/api/admin/items?moderationStatus=filtered&rangeDays=7"),
+    );
+    const json = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(json.items.map((item: { id: string }) => item.id)).toContain("item-filtered");
+    expect(json.items.map((item: { id: string }) => item.id)).not.toContain("item-filtered-old");
   });
 
   it("restores a filtered item for admins", async () => {

@@ -21,7 +21,7 @@ import { cx } from "@/lib/ui/cx";
 // Task status filter options
 type TaskStatusFilter = "" | BackgroundTaskRunStatus;
 type TaskKindFilter = "" | TaskRunSnapshot["kind"];
-type TimeRangeFilter = "" | "today" | "week" | "month";
+type TimeRangeFilter = "" | "day1" | "day3" | "day7" | "month";
 
 const statusOptions: Array<{ value: TaskStatusFilter; label: string }> = [
   { value: "", label: "全部" },
@@ -35,8 +35,9 @@ const statusOptions: Array<{ value: TaskStatusFilter; label: string }> = [
 
 const timeRangeOptions: Array<{ value: TimeRangeFilter; label: string }> = [
   { value: "", label: "全部时间" },
-  { value: "today", label: "今天" },
-  { value: "week", label: "最近7天" },
+  { value: "day1", label: "最近1天" },
+  { value: "day3", label: "最近3天" },
+  { value: "day7", label: "最近7天" },
   { value: "month", label: "最近30天" },
 ];
 
@@ -366,6 +367,12 @@ function filterTasks(
       const taskDate = new Date(task.startedAt);
       const now = new Date();
 
+      if (timeRangeFilter === "day1" || timeRangeFilter === "day3" || timeRangeFilter === "day7") {
+        const rangeDays = Number(timeRangeFilter.replace("day", ""));
+        if (taskDate.getTime() < now.getTime() - rangeDays * 24 * 60 * 60 * 1000) return false;
+        return true;
+      }
+
       // Get local timezone dates
       const taskLocalDate = getLocalDateString(taskDate);
       const nowLocalDate = getLocalDateString(now);
@@ -379,8 +386,6 @@ function filterTasks(
       const nowLocalTime = new Date(nowYear, nowMonth - 1, nowDay).getTime();
       const diffDays = (nowLocalTime - taskLocalTime) / (1000 * 60 * 60 * 24);
 
-      if (timeRangeFilter === "today" && diffDays !== 0) return false;
-      if (timeRangeFilter === "week" && (diffDays < 0 || diffDays > 6)) return false;
       if (timeRangeFilter === "month" && (diffDays < 0 || diffDays > 29)) return false;
     }
     return true;
@@ -576,6 +581,9 @@ interface TaskMonitorPanelProps {
   initialFocusTaskId?: string | null;
   initialPage?: number | null;
   initialPageSize?: number | null;
+  initialStatusFilter?: TaskStatusFilter | null;
+  initialKindFilter?: TaskKindFilter | null;
+  initialTimeRangeFilter?: TimeRangeFilter | null;
   onDetailRouteChange?: (taskId: string | null, state: { page: number; pageSize: number }) => void;
 }
 
@@ -593,6 +601,9 @@ export function TaskMonitorPanel({
   initialFocusTaskId = null,
   initialPage = null,
   initialPageSize = null,
+  initialStatusFilter = null,
+  initialKindFilter = null,
+  initialTimeRangeFilter = null,
   onDetailRouteChange,
 }: TaskMonitorPanelProps) {
   const { showToast } = useToast();
@@ -600,9 +611,9 @@ export function TaskMonitorPanel({
     runningTasks,
     recentTasks,
   }));
-  const [statusFilter, setStatusFilter] = useState<TaskStatusFilter>("");
-  const [kindFilter, setKindFilter] = useState<TaskKindFilter>("");
-  const [timeRangeFilter, setTimeRangeFilter] = useState<TimeRangeFilter>("");
+  const [statusFilter, setStatusFilter] = useState<TaskStatusFilter>(initialStatusFilter ?? "");
+  const [kindFilter, setKindFilter] = useState<TaskKindFilter>(initialKindFilter ?? "");
+  const [timeRangeFilter, setTimeRangeFilter] = useState<TimeRangeFilter>(initialTimeRangeFilter ?? "");
   const [page, setPage] = useState(initialPage ?? 1);
   const [pageSize, setPageSize] = useState(initialPageSize ?? 10);
   const [recentTotal, setRecentTotal] = useState(0);
@@ -707,7 +718,11 @@ export function TaskMonitorPanel({
         params.set("kind", kindFilter);
       }
       if (timeRangeFilter) {
-        params.set("timeRange", timeRangeFilter);
+        if (timeRangeFilter === "day1" || timeRangeFilter === "day3" || timeRangeFilter === "day7") {
+          params.set("rangeDays", timeRangeFilter.replace("day", ""));
+        } else {
+          params.set("timeRange", timeRangeFilter);
+        }
       }
 
       const response = await fetch(`/api/admin/monitor?${params.toString()}`);

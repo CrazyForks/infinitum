@@ -20,6 +20,7 @@ const TASK_KINDS = new Set([
   "item_reparse_aggregations",
 ]);
 const TASK_TIME_RANGES = new Set(["today", "week", "month"]);
+const TASK_RANGE_DAYS = new Set([1, 3, 7]);
 
 export async function GET(request: Request) {
   try {
@@ -30,6 +31,7 @@ export async function GET(request: Request) {
     const status = searchParams.get("status")?.trim() ?? "";
     const kind = searchParams.get("kind")?.trim() ?? "";
     const timeRange = searchParams.get("timeRange")?.trim() ?? "";
+    const rangeDays = Number(searchParams.get("rangeDays"));
 
     return Response.json(
       await getBackgroundTaskMonitorSnapshot(new Date(), {
@@ -38,6 +40,7 @@ export async function GET(request: Request) {
         status: TASK_STATUSES.has(status) ? (status as BackgroundTaskRunStatus) : null,
         kind: TASK_KINDS.has(kind) ? (kind as BackgroundTaskRunKind) : null,
         timeRange: TASK_TIME_RANGES.has(timeRange) ? (timeRange as "today" | "week" | "month") : null,
+        rangeDays: TASK_RANGE_DAYS.has(rangeDays) ? (rangeDays as 1 | 3 | 7) : null,
       }),
     );
   } catch (error) {

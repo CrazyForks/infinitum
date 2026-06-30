@@ -13,6 +13,7 @@ const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
 describe("executeItemCleanupTask", () => {
   beforeEach(async () => {
+    await prisma.itemDedupeHistory.deleteMany();
     await prisma.item.deleteMany();
     await prisma.contentCluster.deleteMany();
     await prisma.fetchRun.deleteMany();
@@ -48,7 +49,6 @@ describe("executeItemCleanupTask", () => {
         originalUrl: `https://example.com/${input.originalTitle}`,
         canonicalUrl: `https://example.com/${input.originalTitle}`,
         urlHash: `hash-${input.originalTitle}-${Date.now()}-${Math.random()}`,
-        dedupeSignature: `sig-${input.originalTitle}-${Date.now()}-${Math.random()}`,
         originalTitle: input.originalTitle,
         publishedAt: input.createdAt,
         createdAt: input.createdAt,
@@ -97,6 +97,30 @@ describe("executeItemCleanupTask", () => {
     // Recent item should still exist
     const preservedItem = await prisma.item.findUnique({ where: { id: recentItem.id } });
     expect(preservedItem).not.toBeNull();
+  });
+
+  it("archives deleted item dedupe keys so ingestion can skip them later", async () => {
+    const source = await createSource("测试源");
+    const now = new Date();
+    const oldDate = new Date(now.getTime() - 400 * ONE_DAY_MS);
+
+    const oldItem = await createItem({
+      sourceId: source.id,
+      originalTitle: "过期文章",
+      createdAt: oldDate,
+    });
+
+    const taskRun = await createTaskRun();
+
+    await executeItemCleanupTask(taskRun);
+
+    const archived = await prisma.itemDedupeHistory.findUnique({
+      where: { urlHash: oldItem.urlHash },
+    });
+
+    expect(archived).not.toBeNull();
+    expect(archived?.originalTitle).toBe(oldItem.originalTitle);
+    expect(archived?.sourceId).toBe(source.id);
   });
 
   it("marks task as succeeded with correct progress", async () => {

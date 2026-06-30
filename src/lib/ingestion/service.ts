@@ -15,7 +15,8 @@ import { prisma } from "@/lib/db";
 import {
   completeFetchRun,
   createFetchRun,
-  findExistingItemsForDedupeKeys,
+  findDedupeHistoriesForUrlHashes,
+  findExistingItemsForUrlHashes,
   syncSources,
   updateSourceFetchMetadata,
   updateSourceHealthStatus,
@@ -501,24 +502,33 @@ async function executeIngestion(run: FetchRun, options: ResolvedRunOptions) {
     timelineCounters.sourceFetch.sourcesFetched = sources.length;
   }
 
-  const preparedLookups = dedupePreparedLookupsByDedupeKey(preparedItems
+  const preparedLookupEntries = dedupePreparedLookupsByDedupeKey(preparedItems
     .map((preparedItem) => ({
       preparedItem,
       lookup: buildPreparedFeedItemLookup(preparedItem, now),
     }))
     .filter((entry) => !entry.lookup || !processingStartAt || entry.lookup.publishedAt >= processingStartAt));
-  processableItemCount = preparedLookups.length;
-  timelineCounters.sourceFetch.itemsFetched = processableItemCount;
-  const existingItems = await findExistingItemsForDedupeKeys(
-    preparedLookups
-      .map((entry) => entry.lookup)
-      .filter((lookup): lookup is PreparedFeedItemLookup => Boolean(lookup))
-      .map((lookup) => ({
-        urlHash: lookup.dedupeKeys.urlHash,
-        dedupeSignature: lookup.dedupeKeys.signature,
-      })),
+  const dedupeKeyInputs = preparedLookupEntries
+    .map((entry) => entry.lookup)
+    .filter((lookup): lookup is PreparedFeedItemLookup => Boolean(lookup))
+    .map((lookup) => lookup.dedupeKeys.urlHash);
+  const existingItems = await findExistingItemsForUrlHashes(
+    dedupeKeyInputs,
   );
   const existingByUrlHash = new Map(existingItems.map((item) => [item.urlHash, item]));
+  const dedupeHistories = await findDedupeHistoriesForUrlHashes(dedupeKeyInputs);
+  const historyByUrlHash = new Map(dedupeHistories.map((history) => [history.urlHash, history]));
+  const preparedLookups = preparedLookupEntries.filter((entry) => {
+    const existing = getExistingItemForLookup(entry.lookup, existingByUrlHash);
+
+    if (existing) {
+      return true;
+    }
+
+    return !entry.lookup || !historyByUrlHash.has(entry.lookup.dedupeKeys.urlHash);
+  });
+  processableItemCount = preparedLookups.length;
+  timelineCounters.sourceFetch.itemsFetched = processableItemCount;
   const estimatedAiWork = preparedLookups.reduce(
     (total, entry) => {
       const existing = getExistingItemForLookup(entry.lookup, existingByUrlHash);

@@ -79,19 +79,17 @@ function buildAggregationChildItemInput({
       ? normalizedSourceUrl
       : null;
   const displayUrl = independentSourceUrl ?? normalizedParentUrl;
-  const stableDedupeKey = buildStableChildDedupeKey({
+  const stableChildKey = buildStableChildDedupeKey({
     sourceId,
     eventFingerprint,
     sourceUrl: independentSourceUrl,
   });
-  const stableDedupeHash = crypto.createHash("sha256").update(stableDedupeKey).digest("hex");
+  const stableChildHash = crypto.createHash("sha256").update(stableChildKey).digest("hex");
   // Keep the user-facing URL as the best available article. Use a separate
-  // internal key derived from the dedupe key so urlHash follows the same
-  // stability rules as dedupeSignature.
-  const childUrlKey = `${displayUrl}#event-${stableDedupeHash.slice(0, 32)}`;
+  // internal key so urlHash stays stable even when a parent roundup changes.
+  const childUrlKey = `${displayUrl}#event-${stableChildHash.slice(0, 32)}`;
   const urlHash = crypto.createHash("sha256").update(childUrlKey).digest("hex");
   const canonicalUrl = displayUrl.split("#")[0] ?? displayUrl;
-  const dedupeSignature = stableDedupeKey;
   const childTitle =
     normalizeChildTitle(event.title) ||
     normalizeChildTitle(event.oneLiner) ||
@@ -108,7 +106,6 @@ function buildAggregationChildItemInput({
     originalUrl: displayUrl,
     canonicalUrl,
     urlHash,
-    dedupeSignature,
     originalTitle: childTitle,
     summaryText: event.oneLiner,
     summaryStatus: "succeeded",
@@ -198,12 +195,12 @@ async function upsertItemInTx(
   tx: PrismaTransaction,
   data: Prisma.ItemUncheckedCreateInput,
 ): Promise<{ id: string }> {
-  if (!data.urlHash || !data.dedupeSignature) {
-    throw new Error("Aggregation child item missing urlHash or dedupeSignature");
+  if (!data.urlHash) {
+    throw new Error("Aggregation child item missing urlHash");
   }
   const existing = await tx.item.findFirst({
     where: {
-      OR: [{ urlHash: data.urlHash }, { dedupeSignature: data.dedupeSignature }],
+      urlHash: data.urlHash,
     },
     select: { id: true },
   });
@@ -220,7 +217,7 @@ async function upsertItemInTx(
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
       const conflict = await tx.item.findFirst({
         where: {
-          OR: [{ urlHash: data.urlHash }, { dedupeSignature: data.dedupeSignature }],
+          urlHash: data.urlHash,
         },
         select: { id: true },
       });
@@ -243,7 +240,6 @@ function buildAggregationChildItemUpdateInput(
     originalUrl: data.originalUrl,
     canonicalUrl: data.canonicalUrl,
     urlHash: data.urlHash,
-    dedupeSignature: data.dedupeSignature,
     originalTitle: data.originalTitle,
     summaryText: data.summaryText,
     summaryStatus: data.summaryStatus,
@@ -304,7 +300,7 @@ export type PersistAggregationResult = {
 /**
  * Persist each parsed event as a full child Item inside a single transaction.
  * Idempotent: re-running with the same events produces the same child item ids
- * (dedupeSignature / urlHash collisions resolve to update).
+ * (urlHash collisions resolve to update).
  *
  * Callers are expected to assign clusters to the returned ids in a separate
  * step (assignItemToCluster acquires its own window-level lock and may invoke
@@ -326,7 +322,7 @@ export async function persistAggregationChildItems({
   }
   const childItemIds: string[] = [];
   await prisma.$transaction(async (tx) => {
-    const linkedDedupeSignatures = new Set<string>();
+    const linkedUrlHashes = new Set<string>();
     const retainedEventIndexes: number[] = [];
     for (const [eventIndex, event] of events.entries()) {
       const childInput = buildAggregationChildItemInput({
@@ -335,11 +331,11 @@ export async function persistAggregationChildItems({
         publishedAt,
         event,
       });
-      const dedupeSignature = String(childInput.dedupeSignature);
-      if (linkedDedupeSignatures.has(dedupeSignature)) {
+      const urlHash = String(childInput.urlHash);
+      if (linkedUrlHashes.has(urlHash)) {
         continue;
       }
-      linkedDedupeSignatures.add(dedupeSignature);
+      linkedUrlHashes.add(urlHash);
       const child = await upsertItemInTx(tx, childInput);
       await replaceItemTagsInTransaction(tx, child.id, event.tags);
       const fingerprint = event.fingerprint ?? buildSemanticEventFingerprint(event);

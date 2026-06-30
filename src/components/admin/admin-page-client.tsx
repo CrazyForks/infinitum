@@ -9,6 +9,7 @@ import { ContentReviewPanel } from "@/components/admin/content-review-panel";
 import { AdminSettingsPanel } from "@/components/admin/admin-settings-panel";
 import { TaskMonitorPanel } from "@/components/admin/task-monitor-panel";
 import { IngestionDashboard } from "@/components/admin/ingestion-dashboard";
+import { ActionItemsPanel } from "@/components/admin/action-items-panel";
 import { SelectableButton } from "@/components/ui/selectable-button";
 import { SectionToggleButton } from "@/components/ui/section-toggle-button";
 import {
@@ -28,9 +29,10 @@ import {
   IconMonitor,
 } from "@/components/ui/icons";
 import type { AdminHeaderLink, AdminSettingsSnapshot, PromptConfigType } from "@/lib/settings/types";
+import type { BackgroundTaskRunStatus, TaskRunSnapshot } from "@/lib/tasks/types";
 
 type PrimaryTab = "monitoring" | "settings";
-type MonitorSubSection = "dashboard" | "content" | "tasks";
+type MonitorSubSection = "action-items" | "dashboard" | "content" | "tasks";
 type ContentSubSection = "filtered" | "clusters" | "splits" | "tags";
 type SettingsSection = "groups" | "sources" | "navigation" | "ai" | "content" | "tasks";
 type AISubSection = "model-api" | "prompt";
@@ -56,11 +58,15 @@ function normalizePrimaryTab(value: string | null): PrimaryTab {
 }
 
 function normalizeMonitorSubSection(value: string | null): MonitorSubSection {
+  if (value === "dashboard") {
+    return "dashboard";
+  }
+
   if (value === "content") {
     return "content";
   }
 
-  return value === "tasks" ? "tasks" : "dashboard";
+  return value === "tasks" ? "tasks" : "action-items";
 }
 
 function normalizeContentSubSection(value: string | null): ContentSubSection {
@@ -131,6 +137,68 @@ function normalizeTaskId(value: string | null): string | null {
   return normalized ? normalized : null;
 }
 
+function normalizeTaskStatusFilter(value: string | null): BackgroundTaskRunStatus | null {
+  if (
+    value === "queued" ||
+    value === "running" ||
+    value === "succeeded" ||
+    value === "failed" ||
+    value === "partial" ||
+    value === "cancelled"
+  ) {
+    return value;
+  }
+
+  return null;
+}
+
+function normalizeTaskKindFilter(value: string | null): TaskRunSnapshot["kind"] | null {
+  if (
+    value === "ingestion" ||
+    value === "precompute" ||
+    value === "item_regenerate_translation" ||
+    value === "item_regenerate_summary" ||
+    value === "item_reanalyze" ||
+    value === "cluster_regenerate_summary" ||
+    value === "cluster_merge_precompute_clean_pairs" ||
+    value === "daily_report_generate" ||
+    value === "item_cleanup" ||
+    value === "item_reparse_aggregations"
+  ) {
+    return value;
+  }
+
+  return null;
+}
+
+function normalizeTaskTimeRangeFilter(value: string | null, rangeDays: string | null): "day1" | "day3" | "day7" | "month" | null {
+  if (rangeDays === "1" || value === "today") {
+    return "day1";
+  }
+
+  if (rangeDays === "3") {
+    return "day3";
+  }
+
+  if (rangeDays === "7" || value === "week") {
+    return "day7";
+  }
+
+  if (value === "month") {
+    return value;
+  }
+
+  return null;
+}
+
+function normalizeRangeDays(value: string | null): 1 | 3 | 7 | null {
+  if (value === "1" || value === "3" || value === "7") {
+    return Number(value) as 1 | 3 | 7;
+  }
+
+  return null;
+}
+
 function normalizePositiveInteger(value: string | null): number | null {
   if (!value) {
     return null;
@@ -160,7 +228,7 @@ function resolveRouteState(searchParams: AdminSearchParams): AdminRouteState {
   const settingsView = searchParams.get("view");
   return {
     primaryTab,
-    monitoringSubSection: "dashboard",
+    monitoringSubSection: "action-items",
     contentSubSection: "filtered",
     settingsSection,
     aiSubSection: normalizeAISubSection(settingsView),
@@ -212,8 +280,14 @@ export function AdminPageClient({ headerLinks = [] }: { headerLinks?: AdminHeade
   const focusedTaskId = normalizeTaskId(searchParams.get("task"));
   const taskPage = normalizePositiveInteger(searchParams.get("taskPage"));
   const taskPageSize = normalizePositiveInteger(searchParams.get("taskPageSize"));
+  const taskStatusFilter = normalizeTaskStatusFilter(searchParams.get("status"));
+  const taskKindFilter = normalizeTaskKindFilter(searchParams.get("kind"));
+  const rangeDaysFilter = normalizeRangeDays(searchParams.get("rangeDays"));
+  const taskTimeRangeFilter = normalizeTaskTimeRangeFilter(searchParams.get("timeRange"), searchParams.get("rangeDays"));
   const contentPage = normalizePositiveInteger(searchParams.get("contentPage"));
   const contentPageSize = normalizePositiveInteger(searchParams.get("contentPageSize"));
+  const shouldOpenClusterReview = searchParams.get("review") === "pending";
+  const shouldOpenTagSuggestions = searchParams.get("suggestions") === "open";
   const selectedPromptType = normalizePromptType(searchParams.get("promptType"));
   const [collapsedSections, setCollapsedSections] = useState(() =>
     resolveCollapsedSections(routeState),
@@ -260,6 +334,40 @@ export function AdminPageClient({ headerLinks = [] }: { headerLinks?: AdminHeade
       params.set("section", routeState.monitoringSubSection);
       if (routeState.monitoringSubSection === "content") {
         params.set("view", routeState.contentSubSection);
+        if (rangeDaysFilter && (
+          routeState.contentSubSection === "filtered" ||
+          routeState.contentSubSection === "splits" ||
+          routeState.contentSubSection === "clusters"
+        )) {
+          params.set("rangeDays", String(rangeDaysFilter));
+        }
+        if (routeState.contentSubSection === "clusters" && shouldOpenClusterReview) {
+          params.set("review", "pending");
+        }
+        if (routeState.contentSubSection === "tags" && shouldOpenTagSuggestions) {
+          params.set("suggestions", "open");
+        }
+      } else if (routeState.monitoringSubSection === "tasks") {
+        if (taskStatusFilter) {
+          params.set("status", taskStatusFilter);
+        }
+        if (taskKindFilter) {
+          params.set("kind", taskKindFilter);
+        }
+        if (taskTimeRangeFilter === "day1" || taskTimeRangeFilter === "day3" || taskTimeRangeFilter === "day7") {
+          params.set("rangeDays", taskTimeRangeFilter.replace("day", ""));
+        } else if (taskTimeRangeFilter) {
+          params.set("timeRange", taskTimeRangeFilter);
+        }
+        if (taskPage) {
+          params.set("taskPage", String(taskPage));
+        }
+        if (taskPageSize) {
+          params.set("taskPageSize", String(taskPageSize));
+        }
+        if (focusedTaskId) {
+          params.set("task", focusedTaskId);
+        }
       }
     } else {
       params.set("section", routeState.settingsSection);
@@ -273,7 +381,19 @@ export function AdminPageClient({ headerLinks = [] }: { headerLinks?: AdminHeade
     }
 
     window.history.replaceState(null, "", `${pathname}?${params.toString()}`);
-  }, [routeState, pathname]);
+  }, [
+    focusedTaskId,
+    pathname,
+    routeState,
+    rangeDaysFilter,
+    shouldOpenClusterReview,
+    shouldOpenTagSuggestions,
+    taskKindFilter,
+    taskPage,
+    taskPageSize,
+    taskStatusFilter,
+    taskTimeRangeFilter,
+  ]);
 
   const navigateTaskDetail = useCallback((taskId: string | null, state?: { page: number; pageSize: number }) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -376,6 +496,11 @@ export function AdminPageClient({ headerLinks = [] }: { headerLinks?: AdminHeade
   }, [isContentSectionCollapsed, navigateAdmin]);
 
   const renderMainContent = () => {
+    // Monitoring - Action Items
+    if (primaryTab === "monitoring" && monitoringSubSection === "action-items") {
+      return <ActionItemsPanel />;
+    }
+
     // Monitoring - Dashboard
     if (primaryTab === "monitoring" && monitoringSubSection === "dashboard") {
       return <IngestionDashboard />;
@@ -398,6 +523,7 @@ export function AdminPageClient({ headerLinks = [] }: { headerLinks?: AdminHeade
             initialSettings={settings}
             activeSection="tags"
             embedMode
+            initialOpenTagSuggestions={shouldOpenTagSuggestions}
           />
         );
       }
@@ -408,6 +534,8 @@ export function AdminPageClient({ headerLinks = [] }: { headerLinks?: AdminHeade
           activeTab={contentSubSection}
           initialPage={contentPage}
           initialPageSize={contentPageSize}
+          initialRangeDays={rangeDaysFilter}
+          initialOpenClusterReview={shouldOpenClusterReview}
           onPageStateChange={replaceContentPageState}
           onTaskCreated={navigateTaskFromContent}
         />
@@ -421,6 +549,9 @@ export function AdminPageClient({ headerLinks = [] }: { headerLinks?: AdminHeade
           initialFocusTaskId={focusedTaskId}
           initialPage={taskPage}
           initialPageSize={taskPageSize}
+          initialStatusFilter={taskStatusFilter}
+          initialKindFilter={taskKindFilter}
+          initialTimeRangeFilter={taskTimeRangeFilter}
           onDetailRouteChange={navigateTaskDetail}
         />
       );
@@ -523,7 +654,7 @@ export function AdminPageClient({ headerLinks = [] }: { headerLinks?: AdminHeade
                 }));
                 navigateAdmin({
                   primaryTab: "monitoring",
-                  monitoringSubSection: "dashboard",
+                  monitoringSubSection: "action-items",
                 });
               }}
               active={primaryTab === "monitoring"}
@@ -562,6 +693,26 @@ export function AdminPageClient({ headerLinks = [] }: { headerLinks?: AdminHeade
                 <div className="space-y-2">
                   {primaryTab === "monitoring" ? (
                     <>
+                      <SelectableButton
+                        onClick={() => {
+                          setCollapsedSections((prev) => ({
+                            ...prev,
+                            monitoringContent: true,
+                          }));
+                          navigateAdmin({
+                            primaryTab: "monitoring",
+                            monitoringSubSection: "action-items",
+                          });
+                        }}
+                        active={monitoringSubSection === "action-items"}
+                        variant="menu"
+                      >
+                        <span className="inline-flex items-center gap-2">
+                          <IconNote className="h-4 w-4" />
+                          <span>待办事项</span>
+                        </span>
+                      </SelectableButton>
+
                       <SelectableButton
                         onClick={() => {
                           setCollapsedSections((prev) => ({

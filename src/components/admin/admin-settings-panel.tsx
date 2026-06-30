@@ -76,6 +76,7 @@ type AdminSettingsPanelProps = {
   embedMode?: boolean;
   activeSection?: AdminSettingsSection;
   initialPromptType?: PromptConfigType;
+  initialOpenTagSuggestions?: boolean;
 };
 
 type AdminSettingsSection =
@@ -236,6 +237,7 @@ export function AdminSettingsPanel({
   embedMode,
   activeSection: externalActiveSection,
   initialPromptType,
+  initialOpenTagSuggestions = false,
 }: AdminSettingsPanelProps) {
   type AdminSource = AdminSettingsSnapshot["sources"][number];
   type AdminHeaderLink = NonNullable<AdminSettingsSnapshot["headerLinks"]>[number];
@@ -1259,7 +1261,7 @@ export function AdminSettingsPanel({
         ) : null}
 
         {activeSection === "tags" ? (
-          <TagSettingsPanel />
+          <TagSettingsPanel initialOpenSuggestions={initialOpenTagSuggestions} />
         ) : null}
 
         {activeSection === "blacklist" ? (

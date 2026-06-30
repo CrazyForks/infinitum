@@ -57,6 +57,7 @@ function buildAiProviderMock(
 
 describe("runIngestion", () => {
   beforeEach(async () => {
+    await prisma.itemDedupeHistory.deleteMany();
     await prisma.item.deleteMany();
     await prisma.tag.deleteMany();
     await prisma.fetchRun.deleteMany();
@@ -1200,7 +1201,6 @@ describe("runIngestion", () => {
           originalUrl: `https://existing.example.com/posts/${index + 1}`,
           canonicalUrl: `https://existing.example.com/posts/${index + 1}`,
           urlHash: `existing-hash-${index + 1}`,
-          dedupeSignature: `existing|${index + 1}`,
           originalTitle: `历史事件 ${index + 1}`,
           translatedTitle: `历史事件 ${index + 1}`,
           publishedAt: new Date(`2026-04-0${index + 4}T09:00:00.000Z`),
@@ -1256,7 +1256,6 @@ describe("runIngestion", () => {
         originalUrl: "https://existing.example.com/posts/1",
         canonicalUrl: "https://existing.example.com/posts/1",
         urlHash: "existing-hash-1",
-        dedupeSignature: "existing|1",
         originalTitle: "历史事件 1",
         translatedTitle: "历史事件 1",
         publishedAt: new Date("2026-04-08T09:00:00.000Z"),
@@ -1377,7 +1376,6 @@ describe("runIngestion", () => {
         originalUrl: "https://existing.example.com/posts/strong",
         canonicalUrl: "https://existing.example.com/posts/strong",
         urlHash: "strong-cluster-hash",
-        dedupeSignature: "existing|strong",
         originalTitle: "OpenAI toolkit launch",
         translatedTitle: "OpenAI toolkit launch",
         publishedAt: new Date("2026-04-10T08:00:00.000Z"),
@@ -1422,7 +1420,6 @@ describe("runIngestion", () => {
         originalUrl: "https://existing.example.com/posts/weak",
         canonicalUrl: "https://existing.example.com/posts/weak",
         urlHash: "weak-cluster-hash",
-        dedupeSignature: "existing|weak",
         originalTitle: "OpenAI pricing update",
         translatedTitle: "OpenAI pricing update",
         publishedAt: new Date("2026-04-10T07:00:00.000Z"),
@@ -1548,7 +1545,6 @@ describe("runIngestion", () => {
           originalUrl: `https://existing.example.com/posts/ranked-${index + 1}`,
           canonicalUrl: `https://existing.example.com/posts/ranked-${index + 1}`,
           urlHash: `ranked-hash-${index + 1}`,
-          dedupeSignature: `ranked|${index + 1}`,
           originalTitle: `历史事件 ranked ${index + 1}`,
           translatedTitle: `历史事件 ranked ${index + 1}`,
           publishedAt: candidatePublishedAt,
@@ -2290,7 +2286,6 @@ describe("runIngestion", () => {
         originalUrl: "https://existing.example.com/posts/agents-sdk",
         canonicalUrl: "https://existing.example.com/posts/agents-sdk",
         urlHash: "normalized-cluster-hash",
-        dedupeSignature: "existing|normalized",
         originalTitle: "OpenAI launches Agents SDK",
         translatedTitle: "OpenAI launches Agents SDK",
         publishedAt: new Date("2026-04-10T08:00:00.000Z"),
@@ -2397,10 +2392,7 @@ describe("runIngestion", () => {
     const rssContent = "Brief summary";
     const rssExcerpt = "Brief summary";
     const dedupeKeys = buildDedupeKeys({
-      sourceName: source.name,
       canonicalUrl: originalUrl,
-      title: originalTitle,
-      publishedAt,
     });
 
     const existingItem = await prisma.item.create({
@@ -2409,7 +2401,6 @@ describe("runIngestion", () => {
         originalUrl,
         canonicalUrl: dedupeKeys.canonicalUrl,
         urlHash: dedupeKeys.urlHash,
-        dedupeSignature: dedupeKeys.signature,
         originalTitle,
         translatedTitle: "OpenAI 发布新的 Agent 工具包",
         author: "Alex",
@@ -2482,6 +2473,89 @@ describe("runIngestion", () => {
     expect(storedItem.updatedAt.getTime()).toBe(existingItem.updatedAt.getTime());
   });
 
+  it("skips feed items whose dedupe keys were archived by item cleanup", async () => {
+    const source = await prisma.source.create({
+      data: {
+        name: "Example Feed",
+        rssUrl: "https://example.com/feed.xml",
+        siteUrl: "https://example.com",
+        enabled: true,
+        aiParsingEnabled: true,
+      },
+    });
+    const publishedAt = new Date("2026-04-10T09:00:00.000Z");
+    const originalUrl = "https://example.com/posts/old-but-still-in-rss";
+    const originalTitle = "Old story still present in RSS";
+    const dedupeKeys = buildDedupeKeys({
+      canonicalUrl: originalUrl,
+    });
+
+    await prisma.itemDedupeHistory.create({
+      data: {
+        sourceId: source.id,
+        sourceName: source.name,
+        originalUrl,
+        canonicalUrl: dedupeKeys.canonicalUrl,
+        urlHash: dedupeKeys.urlHash,
+        originalTitle,
+        publishedAt,
+        firstSeenAt: new Date("2026-04-10T09:01:00.000Z"),
+        lastSeenAt: new Date("2026-04-10T09:02:00.000Z"),
+        archivedAt: new Date("2026-06-01T00:00:00.000Z"),
+      },
+    });
+
+    const parser = {
+      parseURL: vi.fn().mockResolvedValue({
+        items: [
+          {
+            title: originalTitle,
+            link: originalUrl,
+            isoDate: "2026-04-10T09:00:00.000Z",
+            contentSnippet: "This old item is still inside the fixed RSS window.",
+            creator: "Alex",
+          },
+        ],
+      }),
+    };
+    const aiProvider = buildAiProviderMock({
+      summarizeItem: vi.fn().mockResolvedValue({summary: "不应该被调用", isAggregation: false}),
+      enrichContent: vi.fn().mockResolvedValue({
+        translatedTitle: "不应该被调用",
+        moderationStatus: "allowed",
+        moderationReason: null,
+        moderationDetail: null,
+        qualityScore: 99,
+        qualityRationale: "不应该被调用",
+        eventSignature: buildEventSignature(),
+      }),
+    });
+
+    const run = await runIngestion({
+      trigger: "manual",
+      parser,
+      articleFetcher: vi.fn(),
+      aiProvider,
+      sourceConfigs: [
+        {
+          name: "Example Feed",
+          rssUrl: "https://example.com/feed.xml",
+          siteUrl: "https://example.com",
+          enabled: true,
+          aiParsingEnabled: true,
+        },
+      ],
+      blacklist: [],
+      now: new Date("2026-06-30T10:00:00.000Z"),
+    });
+
+    expect(run.itemCount).toBe(0);
+    expect(run.itemsAdded).toBe(0);
+    expect(await prisma.item.count()).toBe(0);
+    expect(aiProvider.summarizeItem).not.toHaveBeenCalled();
+    expect(aiProvider.enrichContent).not.toHaveBeenCalled();
+  });
+
   it("reuses existing analysis when only rss content changes", async () => {
     const source = await prisma.source.create({
       data: {
@@ -2496,10 +2570,7 @@ describe("runIngestion", () => {
     const originalUrl = "https://example.com/posts/openai-toolkit";
     const originalTitle = "OpenAI ships a new agent toolkit";
     const dedupeKeys = buildDedupeKeys({
-      sourceName: source.name,
       canonicalUrl: originalUrl,
-      title: originalTitle,
-      publishedAt,
     });
 
     const existingItem = await prisma.item.create({
@@ -2508,7 +2579,6 @@ describe("runIngestion", () => {
         originalUrl,
         canonicalUrl: dedupeKeys.canonicalUrl,
         urlHash: dedupeKeys.urlHash,
-        dedupeSignature: dedupeKeys.signature,
         originalTitle,
         translatedTitle: "旧标题",
         author: "Alex",
@@ -2600,10 +2670,7 @@ describe("runIngestion", () => {
     const oldTitle = "OpenAI ships an agent toolkit";
     const newTitle = "OpenAI formally launches a new agent toolkit";
     const dedupeKeys = buildDedupeKeys({
-      sourceName: source.name,
       canonicalUrl: originalUrl,
-      title: oldTitle,
-      publishedAt,
     });
 
     const existingItem = await prisma.item.create({
@@ -2612,7 +2679,6 @@ describe("runIngestion", () => {
         originalUrl,
         canonicalUrl: dedupeKeys.canonicalUrl,
         urlHash: dedupeKeys.urlHash,
-        dedupeSignature: dedupeKeys.signature,
         originalTitle: oldTitle,
         translatedTitle: "旧标题",
         author: "Alex",
@@ -2722,10 +2788,7 @@ describe("runIngestion", () => {
     const originalTitle = "OpenAI ships a new agent toolkit";
     const rssContent = "Brief summary";
     const dedupeKeys = buildDedupeKeys({
-      sourceName: source.name,
       canonicalUrl: originalUrl,
-      title: originalTitle,
-      publishedAt,
     });
 
     await prisma.item.create({
@@ -2734,7 +2797,6 @@ describe("runIngestion", () => {
         originalUrl,
         canonicalUrl: dedupeKeys.canonicalUrl,
         urlHash: dedupeKeys.urlHash,
-        dedupeSignature: dedupeKeys.signature,
         originalTitle,
         translatedTitle: null,
         author: "Alex",
@@ -2861,10 +2923,7 @@ describe("runIngestion", () => {
     const originalUrl = "https://manual.example.com/posts/manual";
     const originalTitle = "Manually grouped story";
     const dedupeKeys = buildDedupeKeys({
-      sourceName: source.name,
       canonicalUrl: originalUrl,
-      title: originalTitle,
-      publishedAt,
     });
 
     await prisma.item.create({
@@ -2875,7 +2934,6 @@ describe("runIngestion", () => {
         originalUrl,
         canonicalUrl: dedupeKeys.canonicalUrl,
         urlHash: dedupeKeys.urlHash,
-        dedupeSignature: dedupeKeys.signature,
         originalTitle,
         translatedTitle: null,
         author: "Alex",

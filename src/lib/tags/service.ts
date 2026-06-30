@@ -55,6 +55,8 @@ export type AdminTagList = {
   pageSize: number;
 };
 
+export type AdminTagSort = "usage_desc" | "updated_desc" | "name_asc" | "alias_desc";
+
 export type AdminTagSuggestion = {
   id: string;
   sourceTag: Pick<AdminTag, "id" | "name" | "normalized" | "itemCount" | "aliasCount">;
@@ -610,10 +612,12 @@ export async function listAdminTags(input?: {
   search?: string | null;
   page?: number | null;
   pageSize?: number | null;
+  sort?: string | null;
 }): Promise<AdminTagList> {
   const page = normalizePage(input?.page);
   const pageSize = normalizePageSize(input?.pageSize);
   const search = input?.search?.trim() ?? "";
+  const sort = normalizeAdminTagSort(input?.sort);
   const where: Prisma.TagWhereInput = search
     ? {
         OR: [
@@ -640,10 +644,7 @@ export async function listAdminTags(input?: {
           },
         },
       },
-      orderBy: [
-        { items: { _count: "desc" } },
-        { name: "asc" },
-      ],
+      orderBy: getAdminTagOrderBy(sort),
       skip: (page - 1) * pageSize,
       take: pageSize,
     }),
@@ -655,6 +656,26 @@ export async function listAdminTags(input?: {
     page,
     pageSize,
   };
+}
+
+function normalizeAdminTagSort(value: string | null | undefined): AdminTagSort {
+  if (value === "updated_desc" || value === "name_asc" || value === "alias_desc") {
+    return value;
+  }
+  return "usage_desc";
+}
+
+function getAdminTagOrderBy(sort: AdminTagSort): Prisma.TagOrderByWithRelationInput[] {
+  if (sort === "updated_desc") {
+    return [{ updatedAt: "desc" }, { name: "asc" }];
+  }
+  if (sort === "name_asc") {
+    return [{ name: "asc" }];
+  }
+  if (sort === "alias_desc") {
+    return [{ aliases: { _count: "desc" } }, { name: "asc" }];
+  }
+  return [{ items: { _count: "desc" } }, { name: "asc" }];
 }
 
 function getBestTagSimilarity(left: TagCandidate, right: TagCandidate) {
@@ -926,6 +947,7 @@ export async function listAdminTagSuggestions(input?: {
   page?: number | null;
   pageSize?: number | null;
   sort?: string | null;
+  since?: Date | null;
 }): Promise<AdminTagSuggestionList> {
   const page = normalizePage(input?.page);
   const pageSize = normalizeSuggestionLimit(input?.pageSize ?? input?.limit);
@@ -950,6 +972,7 @@ export async function listAdminTagSuggestions(input?: {
           ],
         }
       : {}),
+    ...(input?.since ? { updatedAt: { gte: input.since } } : {}),
   };
   const orderBy: Prisma.TagSuggestionCandidateOrderByWithRelationInput[] = sort === "affected_desc"
     ? [

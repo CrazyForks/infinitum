@@ -46,7 +46,6 @@ async function createItem(sourceId: string, key: string, url: string) {
       originalUrl: url,
       canonicalUrl: url,
       urlHash: key,
-      dedupeSignature: key,
       originalTitle: `Title for ${key}`,
       publishedAt: new Date("2026-05-09T08:00:00.000Z"),
       createdAt: new Date("2026-05-09T08:00:00.000Z"),

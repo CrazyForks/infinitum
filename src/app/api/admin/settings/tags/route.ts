@@ -6,6 +6,7 @@ import { listAdminTags } from "@/lib/tags/service";
 
 const tagListQuerySchema = z.object({
   search: z.string().nullable().optional(),
+  sort: z.string().nullable().optional(),
   page: z.coerce.number().int().positive().optional(),
   pageSize: z.coerce.number().int().positive().optional(),
 });
@@ -16,6 +17,7 @@ export async function GET(request: Request) {
     const searchParams = new URL(request.url).searchParams;
     const query = tagListQuerySchema.parse({
       search: searchParams.get("search"),
+      sort: searchParams.get("sort"),
       page: searchParams.get("page") ?? undefined,
       pageSize: searchParams.get("pageSize") ?? undefined,
     });

@@ -8,6 +8,7 @@ import {
   deleteAdminTagAlias,
   dismissAdminTagSuggestion,
   type AdminTag,
+  type AdminTagSort,
   type AdminTagSuggestion,
   type AdminTagSuggestionSort,
   listAdminTags,
@@ -32,6 +33,12 @@ const DEFAULT_PAGE_SIZE = 10;
 const MERGE_CANDIDATE_PAGE_SIZE = 100;
 const DEFAULT_SUGGESTION_PAGE_SIZE = 10;
 const SUGGESTION_LOAD_DEBOUNCE_MS = 250;
+const TAG_SORT_OPTIONS: Array<{ value: AdminTagSort; label: string }> = [
+  { value: "usage_desc", label: "使用数倒序" },
+  { value: "updated_desc", label: "更新时间倒序" },
+  { value: "name_asc", label: "名称 A-Z" },
+  { value: "alias_desc", label: "别名数倒序" },
+];
 const SUGGESTION_SORT_OPTIONS: Array<{ value: AdminTagSuggestionSort; label: string }> = [
   { value: "confidence_desc", label: "置信度倒序" },
   { value: "affected_desc", label: "影响条数倒序" },
@@ -124,29 +131,24 @@ function TagSuggestionModal({
       }
     >
       <div className="space-y-4">
-        <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-          <div className="max-w-2xl text-sm leading-6 text-[var(--muted)]">
-            系统按名称相似度、别名和内容共现识别可合并标签。合并前需要选择方向；不合并和临时忽略会隐藏当前建议对。
-          </div>
-          <div className="grid w-full grid-cols-1 gap-3 md:w-[34rem] md:grid-cols-2">
-            <FilterInput
-              id="tag-suggestion-keyword"
-              label="筛选标签"
-              ariaLabel="治理建议标签筛选"
-              placeholder="搜索来源或目标标签"
-              value={search}
-              onChange={onSearchChange}
-            />
-            <FilterSelect
-              id="tag-suggestion-sort"
-              label="排序"
-              ariaLabel="治理建议排序"
-              value={sort}
-              onChange={(value) => onSortChange(value as AdminTagSuggestionSort)}
-              options={SUGGESTION_SORT_OPTIONS}
-              showSearch={false}
-            />
-          </div>
+        <div className="grid w-full grid-cols-1 gap-3 md:grid-cols-2">
+          <FilterInput
+            id="tag-suggestion-keyword"
+            label="筛选标签"
+            ariaLabel="治理建议标签筛选"
+            placeholder="搜索来源或目标标签"
+            value={search}
+            onChange={onSearchChange}
+          />
+          <FilterSelect
+            id="tag-suggestion-sort"
+            label="排序"
+            ariaLabel="治理建议排序"
+            value={sort}
+            onChange={(value) => onSortChange(value as AdminTagSuggestionSort)}
+            options={SUGGESTION_SORT_OPTIONS}
+            showSearch={false}
+          />
         </div>
 
         {error ? <StatusBanner tone="error">{error}</StatusBanner> : null}
@@ -709,7 +711,11 @@ function AddAliasModal({ tag, isOpen, isBusy, onClose, onAddAlias }: AddAliasMod
   );
 }
 
-export function TagSettingsPanel() {
+export function TagSettingsPanel({
+  initialOpenSuggestions = false,
+}: {
+  initialOpenSuggestions?: boolean;
+} = {}) {
   const { showToast } = useToast();
   const [isPending, startTransition] = useTransition();
   const [tags, setTags] = useState<AdminTag[]>([]);
@@ -720,6 +726,7 @@ export function TagSettingsPanel() {
   const [suggestionPage, setSuggestionPage] = useState(1);
   const [suggestionPageSize, setSuggestionPageSize] = useState(DEFAULT_SUGGESTION_PAGE_SIZE);
   const [search, setSearch] = useState("");
+  const [sort, setSort] = useState<AdminTagSort>("usage_desc");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [totalCount, setTotalCount] = useState(0);
@@ -728,7 +735,7 @@ export function TagSettingsPanel() {
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [isMergeModalOpen, setIsMergeModalOpen] = useState(false);
   const [isAliasModalOpen, setIsAliasModalOpen] = useState(false);
-  const [isSuggestionModalOpen, setIsSuggestionModalOpen] = useState(false);
+  const [isSuggestionModalOpen, setIsSuggestionModalOpen] = useState(initialOpenSuggestions);
   const [mergeChoiceSuggestion, setMergeChoiceSuggestion] = useState<AdminTagSuggestion | null>(null);
   const [dismissChoiceSuggestion, setDismissChoiceSuggestion] = useState<AdminTagSuggestion | null>(null);
   const [suggestionError, setSuggestionError] = useState<string | null>(null);
@@ -738,11 +745,12 @@ export function TagSettingsPanel() {
     () => tags.find((tag) => tag.id === managingTagId) ?? null,
     [managingTagId, tags],
   );
-  const hasFilters = Boolean(search);
+  const hasSearch = Boolean(search);
+  const hasFilters = hasSearch || sort !== "usage_desc";
 
   const loadTags = useCallback(async () => {
     try {
-      const payload = await listAdminTags({ search, page, pageSize });
+      const payload = await listAdminTags({ search, sort, page, pageSize });
       setError(null);
       setTags(payload.tags);
       setTotalCount(payload.totalCount);
@@ -755,7 +763,7 @@ export function TagSettingsPanel() {
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "标签列表加载失败。");
     }
-  }, [managingTagId, page, pageSize, search]);
+  }, [managingTagId, page, pageSize, search, sort]);
 
   const loadSuggestions = useCallback(async () => {
     try {
@@ -795,6 +803,7 @@ export function TagSettingsPanel() {
 
   function handleClearFilters() {
     setSearch("");
+    setSort("usage_desc");
     setPage(1);
   }
 
@@ -949,7 +958,7 @@ export function TagSettingsPanel() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <FilterInput
           id="tag-management-keyword"
           label="关键词"
@@ -961,6 +970,18 @@ export function TagSettingsPanel() {
             setPage(1);
           }}
         />
+        <FilterSelect
+          id="tag-management-sort"
+          label="排序"
+          ariaLabel="标签排序"
+          value={sort}
+          onChange={(value) => {
+            setSort(value as AdminTagSort);
+            setPage(1);
+          }}
+          options={TAG_SORT_OPTIONS}
+          showSearch={false}
+        />
       </div>
 
       {error ? <StatusBanner tone="error">{error}</StatusBanner> : null}
@@ -968,7 +989,7 @@ export function TagSettingsPanel() {
       {isPending && tags.length === 0 ? (
         <EmptyState>加载中...</EmptyState>
       ) : tags.length === 0 ? (
-        <EmptyState>{hasFilters ? "暂无匹配标签" : "暂无标签"}</EmptyState>
+        <EmptyState>{hasSearch ? "暂无匹配标签" : "暂无标签"}</EmptyState>
       ) : (
         <div className="w-full overflow-x-auto">
           <table className="w-full table-auto text-sm">
