@@ -160,6 +160,60 @@ describe("ai provider", () => {
     expect(groups).toEqual([]);
   });
 
+  it("retries cluster merge once when the first response is invalid json", async () => {
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce({
+        choices: [
+          {
+            message: {
+              content: "{\"approvedPairs\":[[\"cluster-a\",\"cluster-b\"]",
+            },
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                approvedPairs: [["cluster-a", "cluster-b"]],
+              }),
+            },
+          },
+        ],
+      });
+    const provider = createAiProvider(
+      {
+        apiKey: "sk-test",
+        baseURL: "https://example.com/v1",
+        model: "test-model",
+      },
+      undefined,
+      {
+        chat: {
+          completions: {
+            create,
+          },
+        },
+      },
+    );
+
+    const groups = await provider.mergeClusters(JSON.stringify({
+      pairs: [
+        {
+          left: { id: "cluster-a", title: "A", summary: "A", itemCount: 3 },
+          right: { id: "cluster-b", title: "B", summary: "B", itemCount: 2 },
+          score: 95,
+        },
+      ],
+    }));
+
+    expect(groups).toEqual([["cluster-a", "cluster-b"]]);
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(create.mock.calls[1]?.[0]?.messages?.[1]?.content).toContain("上一次输出不是合法 JSON");
+  });
+
   it("uses chat completions and returns the full analysis payload", async () => {
     const create = vi.fn().mockResolvedValue({
       choices: [
@@ -473,7 +527,7 @@ ${JSON.stringify({
     await expect(provider.summarizeItem(sourceText, {
       title: "Original title",
       sourceName: "Example Feed",
-    })).rejects.toThrow(/expected JSON/i);
+    })).rejects.toThrow(/Invalid item summary JSON/i);
   });
 
   it("uses reasoning_content when JSON-mode providers leave message content empty", async () => {
@@ -549,6 +603,53 @@ ${JSON.stringify({
       summary: "今日科技行业多条重要动态：**苹果 Siri AI 提示词文件曝光**，何小鹏亲自直管机器人业务；**影石 Luna Ultra 云台相机发布**，3999 元起；**大疆 Pocket4P 价格曝光**，预计",
       isAggregation: false,
     });
+  });
+
+  it("retries item summaries once when the first response is invalid json", async () => {
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce({
+        choices: [
+          {
+            message: {
+              content: "{\"bad\":",
+            },
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({summary: "修复后的中文摘要", isAggregation: false}),
+            },
+          },
+        ],
+      });
+    const provider = createAiProvider(
+      {
+        apiKey: "sk-test",
+        baseURL: "https://example.com/v1",
+        model: "test-model",
+      },
+      undefined,
+      {
+        chat: {
+          completions: {
+            create,
+          },
+        },
+      },
+    );
+
+    const summary = await provider.summarizeItem("Long body text", {
+      title: "早报",
+      sourceName: "爱范儿",
+    });
+
+    expect(summary).toEqual({summary: "修复后的中文摘要", isAggregation: false});
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(create.mock.calls[1]?.[0]?.messages?.[1]?.content).toContain("上一次输出不是合法 JSON");
   });
 
   it("retries item summaries with an explicit Chinese-only instruction when the first output is English", async () => {
@@ -989,6 +1090,59 @@ ${JSON.stringify({
     expect(create.mock.calls[0]?.[0]?.response_format).toEqual({ type: "json_object" });
   });
 
+  it("retries cluster matching once when the first response is invalid json", async () => {
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce({
+        choices: [
+          {
+            message: {
+              content: "{\"cluster\":",
+            },
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({clusterId: "cluster-1"}),
+            },
+          },
+        ],
+      });
+    const provider = createAiProvider(
+      {
+        apiKey: "sk-test",
+        baseURL: "https://example.com/v1",
+        model: "test-model",
+      },
+      undefined,
+      {
+        chat: {
+          completions: {
+            create,
+          },
+        },
+      },
+    );
+
+    const matchedClusterId = await provider.matchClusterCandidate("OpenAI developer toolkit for agents", {
+      title: "Another report on OpenAI's agent toolkit",
+      candidates: [
+        {
+          id: "cluster-1",
+          title: "OpenAI Agent 发布",
+          summary: "围绕 OpenAI 新 agent 工具的首发报道",
+        },
+      ],
+    });
+
+    expect(matchedClusterId).toBe("cluster-1");
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(create.mock.calls[1]?.[0]?.messages?.[1]?.content).toContain("上一次输出不是合法 JSON");
+  });
+
   it("uses item aggregation prompt overrides when parsing aggregated content", async () => {
     const create = vi.fn().mockResolvedValue({
       choices: [
@@ -1245,6 +1399,68 @@ ${JSON.stringify({
     });
 
     expect(create).toHaveBeenCalledTimes(2);
+    expect(parsed.events).toHaveLength(1);
+    expect(parsed.events[0]?.eventSubject).toBe("OpenAI");
+  });
+
+  it("retries aggregation parsing once when the first response is invalid json", async () => {
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce({
+        choices: [
+          {
+            message: {
+              content: "{\"mainEvent\":null,\"events\":[{\"eventType\":\"launch\",\"eventSubject\":\"OpenAI\"",
+            },
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                mainEvent: null,
+                events: [
+                  {
+                    eventType: "launch",
+                    eventSubject: "OpenAI",
+                    eventAction: "发布",
+                    eventObject: "Toolkit",
+                    eventDate: null,
+                    oneLiner: "OpenAI 发布 Toolkit",
+                    qualityScore: 92,
+                  },
+                ],
+              }),
+            },
+          },
+        ],
+      });
+
+    const provider = createAiProvider(
+      {
+        apiKey: "sk-test",
+        baseURL: "https://example.com/v1",
+        model: "test-model",
+      },
+      undefined,
+      {
+        chat: {
+          completions: {
+            create,
+          },
+        },
+      },
+    );
+
+    const parsed = await provider.parseAggregation("事件一。事件二。", {
+      title: "聚合简讯",
+      sourceName: "测试源",
+    });
+
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(create.mock.calls[1]?.[0]?.messages?.[1]?.content).toContain("上一次输出不是合法 JSON");
     expect(parsed.events).toHaveLength(1);
     expect(parsed.events[0]?.eventSubject).toBe("OpenAI");
   });
